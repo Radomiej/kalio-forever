@@ -226,6 +226,110 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     expect(setAgentTurns).not.toHaveBeenCalledWith(expect.anything(), 'arch-root');
   });
 
+  it('replaces stale architecture metadata with typed projection during workflow host reload', async () => {
+    const staleHostMessages: ChatMessage[] = [
+      {
+        id: 'host-user',
+        sessionId: 'host',
+        role: 'user',
+        content: 'Run architecture workflow.',
+        createdAt: 10,
+      },
+      {
+        id: 'stale-architecture-summary',
+        sessionId: 'host',
+        role: 'assistant',
+        content: '',
+        createdAt: 11,
+        architectureRun: {
+          runId: 'run-stale',
+          schemaId: 'Architecture Debate',
+          status: 'completed',
+          trace: [],
+          routeHops: [],
+        },
+      },
+    ];
+    const fetchMessages = vi.fn(async () => staleHostMessages);
+    const fetchArchitectureRunProjection = vi.fn(async () => {
+      const chat: ArchitectureChatProjection = {
+        runId: 'run-stale',
+        messages: [],
+      };
+      const events: ArchitectureExecutionEvent[] = [
+        {
+          id: 'event-router-failed',
+          runId: 'run-stale',
+          sequence: 6,
+          type: 'router_decision' as ArchitectureExecutionEvent['type'],
+          status: 'failed',
+          nodeId: 'orchestrator',
+          roleSlotId: 'orchestrator',
+          errorCode: 'CONTRACT_VIOLATION',
+          message: 'Typed structured output contract failure.',
+          createdAt: 12,
+        },
+      ];
+      const graph: ArchitectureGraphProjection = {
+        runId: 'run-stale',
+        schemaId: 'architecture_debate',
+        schemaName: 'Architecture Debate',
+        status: 'failed',
+        nodes: [
+          {
+            id: 'orchestrator',
+            sessionId: 'arch-run-stale-orchestrator',
+            roleSlotId: 'orchestrator',
+            label: 'Orchestrator',
+            kind: 'router',
+            status: 'failed',
+            eventIds: ['event-router-failed'],
+          },
+          {
+            id: 'finalizer',
+            sessionId: 'arch-run-stale-finalizer',
+            roleSlotId: 'finalizer',
+            label: 'Finalizer',
+            kind: 'artifact',
+            status: 'pending',
+            eventIds: [],
+          },
+        ],
+        edges: [],
+      };
+      return { chat, events, graph };
+    });
+    const setMessages = vi.fn();
+    const setAgentTurns = vi.fn();
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    expect(fetchArchitectureRunProjection).toHaveBeenCalledWith('run-stale');
+    expect(reloadedMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'architecture-rehydrate:host:run-stale',
+        architectureRun: expect.objectContaining({
+          runId: 'run-stale',
+          hostProjectionKind: 'workflow-envelope',
+          status: 'failed',
+          graphNodes: expect.arrayContaining([
+            expect.objectContaining({ id: 'orchestrator', status: 'failed' }),
+            expect.objectContaining({ id: 'finalizer', status: 'pending' }),
+          ]),
+        }),
+      }),
+    ]));
+    expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'host');
+  });
+
   it('hydrates a technical architecture child with synthetic node activity when the child has no persisted transcript yet', async () => {
     const technicalSession: ChatSession = {
       id: 'arch-router',

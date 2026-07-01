@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ChatMessage, ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import type { LlmActivity, ToolActivity } from '../../store/agentStore';
 
@@ -125,7 +125,33 @@ function makeToolActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
   };
 }
 
+function makePersistedRuntimeSession(id: string, title: string, updatedAt: number): ChatSession {
+  return {
+    ...makeSession(id, title),
+    kind: 'subagent',
+    updatedAt,
+  };
+}
+
+function makeRuntimeErrorMessage(
+  sessionId: string,
+  createdAt: number,
+  detail = 'Runtime error',
+): ChatMessage {
+  return {
+    id: `runtime-error-${sessionId}`,
+    sessionId,
+    role: 'tool_result',
+    content: JSON.stringify({
+      toolResultErrorCode: 'TOOL_RUNTIME_ERROR',
+      toolResultErrorMessage: detail,
+    }),
+    createdAt,
+  };
+}
+
 function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+  const now = Date.now();
   return {
     sessionId,
     active: false,
@@ -135,7 +161,7 @@ function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot 
     pendingBudgetApprovals: [],
     toolActivities: [],
     childExecutions: [],
-    updatedAt: 1,
+    updatedAt: now,
     run: {
       id: 'run-1',
       sessionId,
@@ -145,8 +171,35 @@ function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot 
       retryCount: 0,
       safeResume: true,
       startedAt: 1,
-      updatedAt: 1,
-      lastHeartbeatAt: 1,
+      updatedAt: now,
+      lastHeartbeatAt: now,
+    } as unknown as RuntimeActivitySnapshot['run'],
+  };
+}
+
+function makeInterruptedRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+  const now = Date.now();
+  return {
+    sessionId,
+    active: false,
+    turnId: 'turn-1',
+    queueLength: 0,
+    pendingConfirmations: [],
+    pendingBudgetApprovals: [],
+    toolActivities: [],
+    childExecutions: [],
+    updatedAt: now,
+    run: {
+      id: 'run-1',
+      sessionId,
+      turnId: 'turn-1',
+      phase: 'tool_running',
+      status: 'interrupted_needs_retry',
+      retryCount: 1,
+      safeResume: false,
+      startedAt: 1,
+      updatedAt: now,
+      lastHeartbeatAt: now,
     } as unknown as RuntimeActivitySnapshot['run'],
   };
 }
@@ -164,6 +217,10 @@ describe('ConversationManagerPanel', () => {
     agentState.clearInactiveActivities = vi.fn();
     sessionState.sessions = [];
     sessionState.sessionMessages = {};
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('shows the empty state and lets the user navigate back to chat', () => {
@@ -335,21 +392,24 @@ describe('ConversationManagerPanel', () => {
     expect(resumeAgentFlowRun).toHaveBeenCalledWith('flow-run-1', { input: 'Continue.' });
   });
 
-  it('surfaces timeout evidence instead of leaving the active panel empty behind a warning badge', () => {
+  it('surfaces typed timeout evidence instead of leaving the active panel empty behind a warning badge', () => {
     sessionState.sessions = [makeSession('session-1', 'Architecture Debate: Orchestrator')];
     sessionState.sessionMessages = {
       'session-1': [{
-        id: 'assistant-timeout',
+        id: 'tool-timeout',
         sessionId: 'session-1',
-        role: 'assistant',
-        content: 'Sub-agent failed: Sub-agent timed out after 300000ms.',
+        role: 'tool_result',
+        content: JSON.stringify({
+          toolResultErrorCode: 'SUBAGENT_TIMEOUT',
+          toolResultErrorMessage: 'Sub-agent timed out after 300000ms.',
+        }),
         createdAt: 2,
       }],
     };
     agentState.runtimeActivitySnapshots = {
       'session-1': {
         ...makeWaitingRuntimeSnapshot('session-1'),
-        updatedAt: 2,
+        updatedAt: Date.now(),
       },
     };
 
@@ -383,15 +443,18 @@ describe('ConversationManagerPanel', () => {
     expect(row).not.toHaveTextContent('Escalate critical events');
   });
 
-  it('keeps long runtime attention details compact while exposing the full detail in the accessible name', () => {
+  it('keeps long typed runtime attention details compact while exposing the full detail in the accessible name', () => {
     const longDetail = 'Runtime failed: ' + 'The child run exhausted the browser tool window. '.repeat(6).trim();
     sessionState.sessions = [makeSession('session-1', 'QA Guard')];
     sessionState.sessionMessages = {
       'session-1': [{
-        id: 'assistant-runtime-error',
+        id: 'tool-runtime-error',
         sessionId: 'session-1',
-        role: 'assistant',
-        content: longDetail,
+        role: 'tool_result',
+        content: JSON.stringify({
+          toolResultErrorCode: 'TOOL_RUNTIME_ERROR',
+          toolResultErrorMessage: longDetail,
+        }),
         createdAt: 2,
       }],
     };
@@ -404,6 +467,64 @@ describe('ConversationManagerPanel', () => {
     const row = screen.getByTestId('runtime-attention-session-1');
     expect(row).toHaveAttribute('aria-label', `QA Guard. ${longDetail}`);
     expect(screen.getByTestId('runtime-attention-detail-session-1')).toHaveClass('max-h-14', 'overflow-hidden');
+  });
+
+  it('renders runtime attention as a dismissible recent notice limited to the latest items', () => {
+    const now = 60 * 60 * 1000;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    sessionState.sessions = [
+      makePersistedRuntimeSession('session-newest', 'Strategic Decision Council: Analyst', now - 1_000),
+      makePersistedRuntimeSession('session-second', 'Strategic Decision Council: Shadow', now - 2_000),
+      makePersistedRuntimeSession('session-third', 'Strategic Decision Council: User Advocate', now - 3_000),
+      makePersistedRuntimeSession('session-fourth', 'Architecture Debate: Orchestrator', now - 4_000),
+      makePersistedRuntimeSession('session-old', 'Old recovered run', now - (6 * 60 * 1000)),
+    ];
+    sessionState.sessionMessages = {
+      'session-newest': [makeRuntimeErrorMessage('session-newest', now - 1_000, 'NOT_A_FILE: C:\\Project\\packages\\shared')],
+      'session-second': [makeRuntimeErrorMessage('session-second', now - 2_000, 'NOT_A_FILE: C:\\Project\\apps\\backend')],
+      'session-third': [makeRuntimeErrorMessage('session-third', now - 3_000, 'NOT_A_DIRECTORY: C:\\Project\\apps\\backend\\src')],
+      'session-fourth': [makeRuntimeErrorMessage('session-fourth', now - 4_000, 'Runtime error')],
+      'session-old': [makeRuntimeErrorMessage('session-old', now - (6 * 60 * 1000), 'Runtime error')],
+    };
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('runtime-attention-notice')).toHaveTextContent('4 runtime issues in the last 5 minutes');
+    expect(screen.getAllByTestId(/^runtime-attention-row-/)).toHaveLength(3);
+    expect(screen.getByTestId('runtime-attention-row-session-newest')).toHaveTextContent('Strategic Decision Council: Analyst');
+    expect(screen.getByTestId('runtime-attention-row-session-second')).toHaveTextContent('Strategic Decision Council: Shadow');
+    expect(screen.getByTestId('runtime-attention-row-session-third')).toHaveTextContent('Strategic Decision Council: User Advocate');
+    expect(screen.queryByTestId('runtime-attention-row-session-fourth')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runtime-attention-row-session-old')).not.toBeInTheDocument();
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss runtime attention notice' }));
+
+    expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+  });
+
+  it('auto-expires recent runtime attention notice after the recent window elapses', () => {
+    const now = 60 * 60 * 1000;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    sessionState.sessions = [
+      makePersistedRuntimeSession('session-expiring', 'Expiring runtime run', now - ((5 * 60 * 1000) - 500)),
+    ];
+    sessionState.sessionMessages = {
+      'session-expiring': [makeRuntimeErrorMessage('session-expiring', now - ((5 * 60 * 1000) - 500), 'Runtime error')],
+    };
+
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('runtime-attention-notice')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
   });
 
   it('splits running and finished tool rows and shows llm activity counts', () => {
@@ -430,6 +551,30 @@ describe('ConversationManagerPanel', () => {
     expect(screen.getByText('Generating title')).toBeInTheDocument();
     expect(screen.getByText('Summarizing results')).toBeInTheDocument();
     expect(screen.getByText('Retry failed')).toBeInTheDocument();
+  });
+
+  it('does not keep stale tool activity running after typed runtime recovery', () => {
+    sessionState.sessions = [makeSession('session-retry', 'Codex Live Tool HITL')];
+    agentState.runtimeActivitySnapshots = {
+      'session-retry': makeInterruptedRuntimeSnapshot('session-retry'),
+    };
+    agentState.toolActivities = [
+      makeToolActivity({
+        callId: 'call-retry',
+        sessionId: 'session-retry',
+        toolName: 'vfs_write',
+        status: 'running',
+      }),
+    ];
+
+    render(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('runtime-attention-session-retry')).toHaveTextContent(
+      'Backend restarted during tool execution',
+    );
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.queryByText('Agent running')).not.toBeInTheDocument();
+    expect(screen.getByTestId('tool-activity-row-mock')).toHaveTextContent('vfs_write:expired');
   });
 
   it('does not report a running agent from a stale global streaming flag alone', () => {

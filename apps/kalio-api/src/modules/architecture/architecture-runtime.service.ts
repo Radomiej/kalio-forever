@@ -17,6 +17,7 @@ import type {
   ArchitectureSchemaEdge,
   ArchitectureSchemaNode,
   CreateArchitectureRunDto,
+  WorkflowFailure,
   WorkflowReasonCode,
 } from '@kalio/types';
 import { SessionsService } from '../chat/sessions.service';
@@ -38,6 +39,7 @@ import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } f
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
 import { hydrateArchitectureRootVfs, type ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
+import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import {
   createArchitectureBranchSessionRuntimeContext,
   createArchitectureRootSessionRuntimeContext,
@@ -104,8 +106,10 @@ export class ArchitectureRuntimeService {
         return;
       }
       const now = Date.now();
-      const errorMessage = error instanceof Error ? error.message : 'Unknown architecture runtime error';
+      const failure = workflowFailureFromError(error);
       prepared.run.status = 'failed';
+      prepared.run.errorCode = failure.code;
+      prepared.run.failure = failure;
       prepared.run.updatedAt = now;
       prepared.run.completedAt = now;
       liveEvents.push({
@@ -114,14 +118,19 @@ export class ArchitectureRuntimeService {
         sequence: liveEvents.length + 1,
         type: 'router_decision',
         message: 'Architecture run failed.',
+        lifecycle: 'failed',
+        status: 'failed',
+        errorCode: failure.code,
+        failure,
         data: {
-          error: errorMessage,
+          errorCode: failure.code,
+          failure,
         },
         createdAt: now,
       });
       this.runs.set(prepared.run.id, prepared.run);
       this.eventsByRunId.set(prepared.run.id, liveEvents);
-      this.auditArchitectureFailure(prepared.schema, prepared.run, errorMessage);
+      this.auditArchitectureFailure(prepared.schema, prepared.run, failure);
       this.auditArchitectureRun(prepared.schema, prepared.run, liveEvents);
       await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
     });
@@ -806,7 +815,7 @@ export class ArchitectureRuntimeService {
   private auditArchitectureFailure(
     schema: ArchitectureSchema,
     run: ArchitectureRun,
-    errorMessage: string,
+    failure: WorkflowFailure,
   ): void {
     if (!this.audit) return;
     void this.audit.log({
@@ -823,7 +832,9 @@ export class ArchitectureRuntimeService {
         rootSessionId: run.rootSessionId,
         branchSessionIds: run.branchSessionIds,
         status: run.status,
-        errorMessage,
+        errorCode: failure.code,
+        failure,
+        errorMessage: failure.message,
       },
     });
   }
@@ -916,14 +927,26 @@ export class ArchitectureRuntimeService {
     return this.statusFromEventSummary(events.map((event) => ({
       type: event.type,
       reasonCode: this.reasonCodeForEvent(event),
+      status: event.status,
     })));
   }
 
-  private statusFromEventSummary(events: Array<{ type: string; reasonCode?: WorkflowReasonCode }>): ArchitectureRun['status'] {
+  private statusFromEventSummary(
+    events: Array<{ type: string; reasonCode?: WorkflowReasonCode; status?: ArchitectureExecutionEvent['status'] }>,
+  ): ArchitectureRun['status'] {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const event = events[index];
+      if (event?.status === 'failed' || event?.status === 'blocked') {
+        return 'failed';
+      }
+      if (event?.status === 'cancelled') {
+        return 'cancelled';
+      }
       if (event?.type === 'run_stopped') {
         return 'cancelled';
+      }
+      if (event?.type === 'node_failed') {
+        return 'failed';
       }
       if (
         event?.type === 'router_decision'
@@ -1406,7 +1429,6 @@ export class ArchitectureRuntimeService {
   }
 
   private hasValidNodeBehaviorTopology(nodes: ArchitectureSchemaNode[]): boolean {
-    const ids = new Set(nodes.map((node) => node.id));
     return nodes.every((node) => {
       if (!node.behavior) {
         return node.kind !== 'role' || Boolean(node.roleSlotId);

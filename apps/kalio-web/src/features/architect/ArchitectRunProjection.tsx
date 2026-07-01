@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, CheckCircle2, Circle, Loader2, RotateCcw } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Circle, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import type { ArchitectureRouteDecision } from '@kalio/types';
 import type { ArchitectProjectionTab, ArchitectRunResult, ArchitectSchema, ExternalQualityGateInput } from './architect.types';
 
@@ -254,6 +254,8 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
             className={`rounded-lg border p-3 ${
               node.status === 'running'
                 ? 'border-sky-400/50 bg-sky-500/10 shadow-[0_0_24px_-14px_rgba(56,189,248,0.9)]'
+                : node.status === 'failed' || node.status === 'cancelled'
+                  ? 'border-error/40 bg-error/10'
                 : 'border-base-300 bg-base-200/60'
             }`}
             data-testid={`architect-projection-node-${node.id}`}
@@ -263,6 +265,8 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
                 ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-400" />
                 : node.status === 'running'
                   ? <Loader2 size={15} className="mt-0.5 shrink-0 animate-spin text-sky-300" />
+                  : node.status === 'failed' || node.status === 'cancelled'
+                    ? <XCircle size={15} className="mt-0.5 shrink-0 text-error" />
                   : <Circle size={15} className="mt-0.5 shrink-0 text-base-content/35" />}
               <div className="min-w-0">
                 <div className="truncate text-xs font-semibold text-base-content">{node.label}</div>

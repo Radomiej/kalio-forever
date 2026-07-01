@@ -23,8 +23,9 @@ function shortNodeLabel(value: string | null | undefined): string {
     .trim();
 }
 
-function statusLabel(status: 'idle' | 'running' | 'success' | 'error'): string {
+function statusLabel(status: ExecutionGraphNode['status']): string {
   if (status === 'error') return 'error';
+  if (status === 'waiting') return 'waiting';
   if (status === 'running') return 'running';
   if (status === 'success') return 'ready';
   return 'idle';

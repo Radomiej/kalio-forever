@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage, ChatSession } from '@kalio/types';
+import type { ChatMessage, ChatSession, WorkflowFailure } from '@kalio/types';
 import {
   isCliChildDelegationTool,
   projectionFromSession,
@@ -138,6 +138,69 @@ describe('cliChildProjection.model', () => {
     });
   });
 
+  it('keeps typed CLI failure data from durable snapshot tool results', () => {
+    const failure: WorkflowFailure = {
+      code: 'TIMEOUT',
+      source: 'cli-agent-hard-timeout',
+      retryable: true,
+      message: 'display wording can change',
+    };
+
+    const projection = projectionFromToolResult(
+      'spawn_cli_agent',
+      'call-1',
+      'parent-1',
+      {
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'parent-1',
+        agentId: 'codex',
+        status: 'failed',
+        errorCode: 'TIMEOUT',
+        failure,
+        lastOutput: 'human display only',
+      },
+      'error',
+    );
+
+    expect(projection).toMatchObject({
+      childSessionId: 'cli-child-1',
+      status: 'failed',
+      errorCode: 'TIMEOUT',
+      failure,
+      lastOutput: 'human display only',
+    });
+  });
+
+  it('ignores invalid workflow failure strings from durable snapshot tool results', () => {
+    const projection = projectionFromToolResult(
+      'spawn_cli_agent',
+      'call-1',
+      'parent-1',
+      {
+        childSessionId: 'cli-child-1',
+        parentSessionId: 'parent-1',
+        agentId: 'codex',
+        status: 'failed',
+        errorCode: 'changed wording is not a code',
+        failure: {
+          code: 'changed wording is not a code',
+          retryable: true,
+          message: 'display wording only',
+        },
+        lastOutput: 'human display only',
+      },
+      'error',
+    );
+
+    expect(projection).toMatchObject({
+      childSessionId: 'cli-child-1',
+      status: 'failed',
+      lastOutput: 'human display only',
+    });
+    expect(projection?.errorCode).toBeUndefined();
+    expect(projection?.failure).toBeUndefined();
+  });
+
   it('rebuilds projections from parent history messages', () => {
     const messages: ChatMessage[] = [
       {
@@ -260,6 +323,59 @@ describe('cliChildProjection.model', () => {
       lastOutput: 'runtime tail',
       childTitle: 'codex CLI',
       toolName: 'spawn_cli_agent',
+    });
+  });
+
+  it('prefers typed runtime child execution failure over stored text output', () => {
+    const failure: WorkflowFailure = {
+      code: 'TIMEOUT',
+      source: 'cli-agent-hard-timeout',
+      retryable: true,
+      message: 'timeout display',
+    };
+    const projection = selectCLIChildProjectionFromSources({
+      runtimeActivitySnapshots: {
+        'parent-1': {
+          sessionId: 'parent-1',
+          active: false,
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [{
+            id: 'child-exec-1',
+            kind: 'cli_agent',
+            parentSessionId: 'parent-1',
+            childSessionId: 'cli-child-1',
+            parentToolCallId: 'call-1',
+            label: 'codex',
+            status: 'failed',
+            errorCode: 'TIMEOUT',
+            failure,
+            updatedAt: 1,
+          }],
+          updatedAt: 1,
+        },
+      },
+      cliChildProjections: {
+        'cli-child-1': {
+          childSessionId: 'cli-child-1',
+          parentSessionId: 'parent-1',
+          parentCallId: 'call-1',
+          agentId: 'codex',
+          status: 'running',
+          lastOutput: 'stale running output',
+          toolName: 'spawn_cli_agent',
+        },
+      },
+      parentCallId: 'call-1',
+    });
+
+    expect(projection).toMatchObject({
+      childSessionId: 'cli-child-1',
+      status: 'failed',
+      errorCode: 'TIMEOUT',
+      failure,
     });
   });
 

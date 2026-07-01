@@ -6,7 +6,7 @@ type WorkflowErrorOptions = {
   cause?: unknown;
 };
 
-const WORKFLOW_ERROR_CODES = new Set<WorkflowErrorCode>([
+const WORKFLOW_ERROR_CODE_SET = new Set<WorkflowErrorCode>([
   'RATE_LIMITED',
   'TIMEOUT',
   'PROVIDER_UNAVAILABLE',
@@ -20,13 +20,22 @@ const WORKFLOW_ERROR_CODES = new Set<WorkflowErrorCode>([
   'SUBAGENT_TIMEOUT',
   'RAAPP_RELEASE_NOT_FOUND',
   'UNKNOWN',
-]);
+] satisfies WorkflowErrorCode[]);
 
 const RETRYABLE_WORKFLOW_ERROR_CODES = new Set<WorkflowErrorCode>([
   'RATE_LIMITED',
   'TIMEOUT',
   'PROVIDER_UNAVAILABLE',
 ]);
+
+const LLM_PROVIDER_WORKFLOW_ERROR_CODES: Record<string, WorkflowErrorCode> = {
+  LLM_RATE_LIMIT: 'RATE_LIMITED',
+  LLM_TIMEOUT: 'TIMEOUT',
+  LLM_AUTH: 'PROVIDER_UNAUTHORIZED',
+  LLM_PROVIDER_DOWN: 'PROVIDER_UNAVAILABLE',
+  LLM_BAD_TOOL_ARGS: 'CONTRACT_VIOLATION',
+  LLM_BAD_STRUCTURED_OUTPUT: 'CONTRACT_VIOLATION',
+};
 
 export class WorkflowError extends Error {
   readonly code: WorkflowErrorCode;
@@ -60,11 +69,9 @@ export function isWorkflowError(error: unknown, code?: WorkflowErrorCode): boole
 }
 
 export function workflowFailureFromError(error: unknown): WorkflowFailure {
-  const code = isWorkflowError(error) && isRecord(error)
-    ? error['code'] as WorkflowErrorCode
-    : 'UNKNOWN';
+  const code = workflowErrorCodeFromError(error);
   const message = error instanceof Error ? error.message : String(error);
-  const source = isRecord(error) && typeof error['source'] === 'string' ? error['source'] : undefined;
+  const source = workflowFailureSource(error);
   const retryable = isRecord(error) && typeof error['retryable'] === 'boolean'
     ? error['retryable']
     : isRetryableWorkflowErrorCode(code);
@@ -81,7 +88,32 @@ export function isRetryableWorkflowErrorCode(code: WorkflowErrorCode): boolean {
 }
 
 export function isWorkflowErrorCode(value: unknown): value is WorkflowErrorCode {
-  return typeof value === 'string' && WORKFLOW_ERROR_CODES.has(value as WorkflowErrorCode);
+  return typeof value === 'string' && WORKFLOW_ERROR_CODE_SET.has(value as WorkflowErrorCode);
+}
+
+function workflowErrorCodeFromError(error: unknown): WorkflowErrorCode {
+  if (!isRecord(error)) {
+    return 'UNKNOWN';
+  }
+  const code = error['code'];
+  if (isWorkflowErrorCode(code)) {
+    return code;
+  }
+  return typeof code === 'string'
+    ? LLM_PROVIDER_WORKFLOW_ERROR_CODES[code] ?? 'UNKNOWN'
+    : 'UNKNOWN';
+}
+
+function workflowFailureSource(error: unknown): string | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+  if (typeof error['source'] === 'string') {
+    return error['source'];
+  }
+  return typeof error['code'] === 'string' && error['code'] in LLM_PROVIDER_WORKFLOW_ERROR_CODES
+    ? 'llm-provider'
+    : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

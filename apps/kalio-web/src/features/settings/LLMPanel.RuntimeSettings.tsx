@@ -10,6 +10,7 @@ export function LLMRuntimeSettingsSection({
   activeRuntimeConfig,
   contextWindow,
   maxToolAttempts,
+  maxToolAttemptsSaveStatus,
   toolTimeouts,
   focusModelInputSignal,
   onRuntimeConfigChange,
@@ -23,6 +24,7 @@ export function LLMRuntimeSettingsSection({
   activeRuntimeConfig: ActiveRuntimeConfig | null;
   contextWindow: number;
   maxToolAttempts: number;
+  maxToolAttemptsSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   toolTimeouts: ToolTimeoutSettings;
   focusModelInputSignal: number;
   onRuntimeConfigChange: (updated: LLMConfigWithSource) => void;
@@ -87,7 +89,7 @@ export function LLMRuntimeSettingsSection({
         <h3 className="text-sm font-semibold mb-1">Agent Loop Limit</h3>
         <p className="text-xs text-base-content/60 mb-3">
           Max tool-attempt loop iterations per turn before automatic stop.
-          Increase for complex test scenarios (for example 25).
+          Increase for complex test scenarios (for example 30).
         </p>
         <SettingsRangeField
           ariaLabel="Max tool attempts"
@@ -95,7 +97,7 @@ export function LLMRuntimeSettingsSection({
           marks={[
             { value: 1, label: '1' },
             { value: 8, label: '8' },
-            { value: 25, label: '25' },
+            { value: 30, label: '30' },
             { value: 100, label: '100' },
           ]}
           min={1}
@@ -110,6 +112,28 @@ export function LLMRuntimeSettingsSection({
           onBlur={(event) => void onMaxToolAttemptsCommit(parseInt((event.target as HTMLInputElement).value, 10))}
           testId="max-tool-attempts-slider"
         />
+        <p
+          aria-live="polite"
+          className={`mt-2 text-xs ${
+            maxToolAttemptsSaveStatus === 'error'
+              ? 'text-error'
+              : maxToolAttemptsSaveStatus === 'saved'
+                ? 'text-success'
+                : maxToolAttemptsSaveStatus === 'saving'
+                  ? 'text-warning'
+                  : 'text-base-content/50'
+          }`}
+          data-testid="max-tool-attempts-save-status"
+          role="status"
+        >
+          {maxToolAttemptsSaveStatus === 'error'
+            ? 'Save failed'
+            : maxToolAttemptsSaveStatus === 'saved'
+              ? 'Saved'
+              : maxToolAttemptsSaveStatus === 'saving'
+                ? 'Saving...'
+                : 'Stored in backend'}
+        </p>
       </div>
 
       <ToolTimeoutsSection

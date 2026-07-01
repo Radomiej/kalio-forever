@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../../common/utils/llm-provider-http.util';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 import { getReasoningContent } from '../../../common/utils/context-managed-llm-message.util';
+import { parseStructuredOutputResponse } from './structured-output.parser';
 
 export type LLMProviderErrorCode =
   | 'LLM_ERROR'
@@ -83,6 +84,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       response_format: options.structuredOutput
         ? { type: 'json_schema', json_schema: options.structuredOutput }
         : undefined,
+      provider: this.buildProviderPreferences(options),
       ...this.buildThinkingParams(),
     });
 
@@ -198,7 +200,11 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     }
 
     if (options.structuredOutput && !abortSignal?.aborted && structuredOutputRaw.trim().length > 0) {
-      options.onStructuredOutput?.(this.parseStructuredOutput(structuredOutputRaw));
+      const parsed = this.parseStructuredOutput(structuredOutputRaw, options.structuredOutput);
+      if (parsed.mode !== 'strict') {
+        this.logger.warn(`[${this.providerName}] Recovered structured output via ${parsed.mode}`);
+      }
+      options.onStructuredOutput?.(parsed.value);
     } else if (options.structuredOutput && !abortSignal?.aborted && toolCalls.length === 0) {
       throw new LLMProviderError(
         'LLM_BAD_STRUCTURED_OUTPUT',
@@ -224,6 +230,11 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     return {};
   }
 
+  protected buildProviderPreferences(options: StreamChatOptions): Record<string, unknown> | undefined {
+    void options;
+    return undefined;
+  }
+
   private parseUsage(value: unknown): { promptTokens: number; completionTokens: number; totalTokens?: number } | null {
     if (!value || typeof value !== 'object') {
       return null;
@@ -246,16 +257,19 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
   }
 
-  private parseStructuredOutput(raw: string): unknown {
-    const trimmed = raw.trim();
-    try {
-      return JSON.parse(trimmed) as unknown;
-    } catch {
-      throw new LLMProviderError(
-        'LLM_BAD_STRUCTURED_OUTPUT',
-        `[${this.providerName}] Structured output response was not valid JSON`,
-      );
+  private parseStructuredOutput(
+    raw: string,
+    structuredOutput: NonNullable<StreamChatOptions['structuredOutput']>,
+  ): { value: unknown; mode: string } {
+    const parsed = parseStructuredOutputResponse(raw, structuredOutput);
+    if ('value' in parsed) {
+      return parsed;
     }
+    const detail = parsed.details ? ` (${parsed.details})` : '';
+    throw new LLMProviderError(
+      'LLM_BAD_STRUCTURED_OUTPUT',
+      `[${this.providerName}] Structured output response failed ${parsed.reason}${detail}. Preview: ${parsed.preview}`,
+    );
   }
 
   private async fetchStreamingResponse(body: string, abortSignal?: AbortSignal): Promise<Response> {

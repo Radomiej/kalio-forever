@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentBudgetApprovalRequest, AgentFlowRunSnapshot, AgentFlowRunStatus, CLIAgentSessionStatus, RuntimeChildExecutionStatus, SocketEvents } from '@kalio/types';
+import type { AgentBudgetApprovalRequest, AgentFlowRunSnapshot, AgentFlowRunStatus, CLIAgentSessionStatus, RuntimeChildExecutionStatus, SocketEvents, WorkflowFailure } from '@kalio/types';
 import {
   buildRuntimeActivitySnapshot,
   buildRuntimeActivitySnapshotBatch,
@@ -333,6 +333,73 @@ describe('buildRuntimeActivitySnapshot', () => {
       ]);
     },
   );
+
+  it('projects typed CLI failure data into child executions', async () => {
+    const failure: WorkflowFailure = {
+      code: 'TIMEOUT',
+      message: 'provider timeout text is display-only',
+      retryable: true,
+      source: 'cli-agent-hard-timeout',
+    };
+    const listChildren = vi.fn().mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'session-1') {
+        return [{
+          id: 'cli-child-1',
+          parentSessionId: 'session-1',
+          parentToolCallId: 'call-cli-1',
+          kind: 'cli-agent',
+          updatedAt: 2,
+        }];
+      }
+      return [];
+    });
+
+    const result = await buildRuntimeActivitySnapshot({
+      sessionId: 'session-1',
+      status: makeStatus('session-1'),
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockResolvedValue(makeStatus('session-1')),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([]),
+      },
+      sessionsService: {
+        listChildren,
+        get: vi.fn().mockResolvedValue({
+          id: 'session-1',
+          personaId: 'default',
+          kind: 'chat',
+        }),
+        getMessages: vi.fn().mockResolvedValue([]),
+      },
+      cliAgentSessionRuntime: {
+        getStatus: vi.fn().mockResolvedValue({
+          parentSessionId: 'session-1',
+          childSessionId: 'cli-child-1',
+          agentId: 'codex',
+          status: 'failed',
+          lastOutput: 'latest output',
+          errorCode: 'TIMEOUT',
+          failure,
+          updatedAt: 3,
+        }),
+        stopSession: vi.fn(),
+      },
+    });
+
+    expect(result.childExecutions).toEqual([
+      expect.objectContaining({
+        kind: 'cli_agent',
+        childSessionId: 'cli-child-1',
+        status: 'failed',
+        errorCode: 'TIMEOUT',
+        failure,
+      }),
+    ]);
+  });
 
   it('silently skips legacy CLI children with missing session metadata', async () => {
     const logger = { warn: vi.fn() };

@@ -65,12 +65,12 @@ describe('LLMController', () => {
         source: 'env',
       });
       mockCredentials.getContextWindowSize.mockResolvedValue(8192);
-      mockCredentials.getMaxToolAttempts.mockResolvedValue(8);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(30);
 
       const result = await controller.getConfig();
       expect(result.source).toBe('env');
       expect(result.contextWindowSize).toBe(8192);
-      expect(result.maxToolAttempts).toBe(8);
+      expect(result.maxToolAttempts).toBe(30);
     });
   });
 
@@ -94,7 +94,7 @@ describe('LLMController', () => {
         source: 'env',
       });
       mockCredentials.getContextWindowSize.mockResolvedValue(32000);
-      mockCredentials.getMaxToolAttempts.mockResolvedValue(8);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(30);
 
       await expect(controller.updateActiveModel({ model: 'mimo-v2-thinking' })).resolves.toEqual({
         provider: 'xiaomimimo',
@@ -103,7 +103,7 @@ describe('LLMController', () => {
         model: 'mimo-v2-thinking',
         source: 'env',
         contextWindowSize: 32000,
-        maxToolAttempts: 8,
+        maxToolAttempts: 30,
       });
       expect(mockLLMService.updateActiveModel).toHaveBeenCalledWith('mimo-v2-thinking');
     });
@@ -117,7 +117,7 @@ describe('LLMController', () => {
         source: 'env',
       });
       mockCredentials.getContextWindowSize.mockResolvedValue(32000);
-      mockCredentials.getMaxToolAttempts.mockResolvedValue(8);
+      mockCredentials.getMaxToolAttempts.mockResolvedValue(30);
 
       await controller.updateActiveModel({ model: '  mimo-v2-thinking  ' });
 

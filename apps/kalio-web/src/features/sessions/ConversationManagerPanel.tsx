@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { AlertTriangle, BotMessageSquare, Zap, Brain, StopCircle, Play } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, BotMessageSquare, Zap, Brain, StopCircle, Play, X } from 'lucide-react';
+import type { RuntimeActivitySnapshot } from '@kalio/types';
 import { useAgentStore } from '../../store/agentStore';
-import type { LlmActivity } from '../../store/agentStore';
+import type { LlmActivity, ToolActivity } from '../../store/agentStore';
 import { ToolActivityRow } from '../chat/ToolActivityRow';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
@@ -13,6 +14,26 @@ import {
   selectRunningLoops,
   selectRuntimeAttentionItems,
 } from '../../store/agentRuntimeSelectors';
+import { selectRuntimeAttentionNotice } from '../../store/agentRuntimeAttentionNotice';
+
+function projectToolActivityForRuntimeState(
+  activity: ToolActivity,
+  runtimeActivitySnapshots: Record<string, RuntimeActivitySnapshot>,
+): ToolActivity {
+  const snapshot = activity.sessionId ? runtimeActivitySnapshots[activity.sessionId] : undefined;
+  if (
+    snapshot?.run?.status === 'interrupted_needs_retry'
+    && (activity.status === 'running' || activity.status === 'awaiting_confirmation')
+  ) {
+    return {
+      ...activity,
+      status: 'expired',
+      finishedAt: activity.finishedAt ?? snapshot.updatedAt,
+    };
+  }
+
+  return activity;
+}
 
 export function ConversationManagerPanel({
   onNavigate,
@@ -28,6 +49,8 @@ export function ConversationManagerPanel({
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
   const [resumingFlowRunId, setResumingFlowRunId] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [runtimeAttentionNowMs, setRuntimeAttentionNowMs] = useState(() => Date.now());
+  const [dismissedRuntimeAttentionThrough, setDismissedRuntimeAttentionThrough] = useState<number | null>(null);
 
   const runningLoops = selectRunningLoops({ runtimeActivitySnapshots });
   const toolBudgetProgresses = Object.values(runtimeActivitySnapshots)
@@ -48,14 +71,25 @@ export function ConversationManagerPanel({
   const continuationSessionIds = new Set(continuationActions.map((action) => action.sessionId));
   const runtimeAttentionItems = attentionItems
     .filter((item) => !item.actionable && !continuationSessionIds.has(item.sessionId));
+  const runtimeAttentionNotice = selectRuntimeAttentionNotice({
+    items: runtimeAttentionItems,
+    runtimeActivitySnapshots,
+    sessions,
+    sessionMessages,
+    nowMs: Math.max(runtimeAttentionNowMs, Date.now()),
+    dismissedThroughUpdatedAt: dismissedRuntimeAttentionThrough,
+  });
   const pendingConfirmationCount = selectPendingApprovalCount({
     pendingConfirmations,
     pendingBudgetApprovals,
   });
-  const active = toolActivities.filter(
+  const projectedToolActivities = toolActivities.map((activity) => (
+    projectToolActivityForRuntimeState(activity, runtimeActivitySnapshots)
+  ));
+  const active = projectedToolActivities.filter(
     (a) => a.status === 'running' || a.status === 'awaiting_confirmation',
   );
-  const done = toolActivities.filter(
+  const done = projectedToolActivities.filter(
     (a) => a.status !== 'running' && a.status !== 'awaiting_confirmation',
   );
   const hasRunningLlmActivity = llmActivities.some((activity) => activity.status === 'running');
@@ -86,6 +120,18 @@ export function ConversationManagerPanel({
         setResumingFlowRunId((current) => (current === flowRunId ? null : current));
       });
   };
+
+  useEffect(() => {
+    if (!runtimeAttentionNotice) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRuntimeAttentionNowMs(Date.now());
+    }, runtimeAttentionNotice.nextExpiresInMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [runtimeAttentionNotice?.maxUpdatedAt, runtimeAttentionNotice?.nextExpiresInMs]);
 
   const isEmpty = runningLoops.length === 0
     && !hasRunningLlmActivity
@@ -151,35 +197,66 @@ export function ConversationManagerPanel({
         </div>
       )}
 
-      {runtimeAttentionItems.length > 0 && (
-        <div className="shrink-0 px-2 pt-2 pb-1 flex flex-col gap-1">
-          <p className="text-[10px] uppercase tracking-wider text-base-content/30 px-2 pb-0.5">Runtime attention</p>
-          {runtimeAttentionItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/8 px-2.5 py-2 text-left transition-colors hover:border-warning/40 hover:bg-warning/12"
-              data-testid={`runtime-attention-${item.sessionId}`}
-              aria-label={`${item.label}. ${item.detail}`}
-              onClick={() => openAttentionSession(item.sessionId)}
-            >
-              <AlertTriangle
-                size={12}
-                className={`mt-0.5 shrink-0 ${
-                  item.kind === 'runtime_waiting' ? 'text-warning' : 'text-error'
-                }`}
-              />
+      {runtimeAttentionNotice && (
+        <div
+          className="shrink-0 px-2 pt-2 pb-1"
+          data-testid="runtime-attention-notice"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="rounded-lg border border-warning/25 bg-warning/8">
+            <div className="flex items-start gap-2 px-2.5 py-2">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0 text-warning" />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-medium text-base-content/85">{item.label}</div>
-                <p
-                  data-testid={`runtime-attention-detail-${item.sessionId}`}
-                  className="mt-0.5 max-h-14 overflow-hidden text-[11px] leading-relaxed text-base-content/55 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]"
-                >
-                  {item.detail}
+                <p className="text-[10px] uppercase tracking-wider text-base-content/35">Runtime attention</p>
+                <p className="text-xs font-medium text-base-content/85">
+                  {runtimeAttentionNotice.totalRecentCount} runtime issue{runtimeAttentionNotice.totalRecentCount === 1 ? '' : 's'} in the last 5 minutes
                 </p>
               </div>
-            </button>
-          ))}
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs h-6 min-h-0 w-6 shrink-0 p-0 text-base-content/45 hover:text-base-content"
+                aria-label="Dismiss runtime attention notice"
+                title="Dismiss runtime attention notice"
+                onClick={() => setDismissedRuntimeAttentionThrough(runtimeAttentionNotice.maxUpdatedAt)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="border-t border-warning/15">
+              {runtimeAttentionNotice.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors hover:bg-warning/10"
+                  data-testid={`runtime-attention-${item.sessionId}`}
+                  aria-label={`${item.label}. ${item.detail}`}
+                  onClick={() => openAttentionSession(item.sessionId)}
+                >
+                  <AlertTriangle
+                    size={12}
+                    className={`mt-0.5 shrink-0 ${
+                      item.kind === 'runtime_waiting' ? 'text-warning' : 'text-error'
+                    }`}
+                  />
+                  <div className="min-w-0 flex-1" data-testid={`runtime-attention-row-${item.sessionId}`}>
+                    <div className="truncate text-xs font-medium text-base-content/85">{item.label}</div>
+                    <p
+                      data-testid={`runtime-attention-detail-${item.sessionId}`}
+                      className="mt-0.5 max-h-14 overflow-hidden text-[11px] leading-relaxed text-base-content/55 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]"
+                    >
+                      {item.detail}
+                    </p>
+                  </div>
+                </button>
+              ))}
+              {runtimeAttentionNotice.hiddenRecentCount > 0 && (
+                <p className="border-t border-warning/10 px-2.5 py-1.5 text-[11px] text-base-content/45">
+                  +{runtimeAttentionNotice.hiddenRecentCount} more in Needs attention
+                </p>
+              )}
+            </div>
+          </div>
           {(runningLoops.length > 0 || active.length > 0 || done.length > 0 || llmActivities.length > 0) && (
             <div className="border-t border-base-300/40 mt-1" />
           )}

@@ -30,11 +30,22 @@ import {
   type ToolTimeoutKey,
   type ToolTimeoutSettings,
 } from './tool-timeout-settings';
+
+type MaxToolAttemptsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+const MIN_MAX_TOOL_ATTEMPTS = 1;
+const MAX_MAX_TOOL_ATTEMPTS = 100;
+const MAX_TOOL_ATTEMPTS_SAVED_RESET_MS = 2_000;
+
+function normalizeMaxToolAttempts(size: number): number {
+  return Math.max(MIN_MAX_TOOL_ATTEMPTS, Math.min(MAX_MAX_TOOL_ATTEMPTS, Math.round(size)));
+}
+
 export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
-  const [maxToolAttempts, setMaxToolAttempts] = useState(8);
+  const [maxToolAttempts, setMaxToolAttempts] = useState(30);
   const [toolTimeouts, setToolTimeouts] = useState<ToolTimeoutSettings>(DEFAULT_TOOL_TIMEOUT_SETTINGS);
   const [runtimeConfig, setRuntimeConfig] = useState<LLMConfigWithSource | null>(null);
   const [lastEnvRuntimeConfig, setLastEnvRuntimeConfig] = useState<LLMConfigWithSource | null>(null);
@@ -45,10 +56,13 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
   const [syncing, setSyncing] = useState<string | null>(null);
   const [testState, setTestState] = useState<ProviderTestState>('idle');
   const [testError, setTestError] = useState<string | null>(null);
+  const [maxToolAttemptsSaveStatus, setMaxToolAttemptsSaveStatus] = useState<MaxToolAttemptsSaveStatus>('idle');
   const persistedContextWindow = useRef(32000);
   const contextWindowSaveInFlight = useRef(false);
-  const persistedMaxToolAttempts = useRef(8);
+  const persistedMaxToolAttempts = useRef(30);
   const maxToolAttemptsSaveInFlight = useRef(false);
+  const pendingMaxToolAttemptsSave = useRef<number | null>(null);
+  const maxToolAttemptsSavedResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistedToolTimeouts = useRef<ToolTimeoutSettings>({ ...DEFAULT_TOOL_TIMEOUT_SETTINGS });
   const pendingToolTimeoutCommits = useRef<Partial<Record<ToolTimeoutKey, boolean>>>({});
 
@@ -63,7 +77,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
   const applyRuntimeConfig = useCallback((config: LLMConfigWithSource) => {
     setRuntimeConfig(config);
     setBackendConfig(config);
-    setMaxToolAttempts(config.maxToolAttempts ?? 8);
+    setMaxToolAttempts(config.maxToolAttempts ?? 30);
     if (config.source === 'env') {
       setLastEnvRuntimeConfig(config);
     }
@@ -125,7 +139,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
       setToolTimeouts(normalizedToolTimeouts);
       persistedToolTimeouts.current = normalizedToolTimeouts;
       applyRuntimeConfig(llmCfg);
-      persistedMaxToolAttempts.current = llmCfg.maxToolAttempts ?? 8;
+      persistedMaxToolAttempts.current = llmCfg.maxToolAttempts ?? 30;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
@@ -134,6 +148,12 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
   }, [applyRuntimeConfig]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => () => {
+    if (maxToolAttemptsSavedResetTimer.current) {
+      clearTimeout(maxToolAttemptsSavedResetTimer.current);
+    }
+  }, []);
 
   const handleProviderChange = (provider: string) => {
     setForm((f) => ({
@@ -301,19 +321,34 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
     }
   };
 
-  const handleMaxToolAttemptsInputChange = (size: number) => {
-    if (!Number.isFinite(size)) return;
-    setMaxToolAttempts(Math.max(1, Math.min(100, Math.round(size))));
-  };
-
   const handleMaxToolAttemptsCommit = async (size: number) => {
-    if (!Number.isFinite(size) || maxToolAttemptsSaveInFlight.current) return;
+    if (!Number.isFinite(size)) return;
 
-    const normalized = Math.max(1, Math.min(100, Math.round(size)));
+    const normalized = normalizeMaxToolAttempts(size);
+    if (maxToolAttemptsSaveInFlight.current) {
+      pendingMaxToolAttemptsSave.current = normalized;
+      setMaxToolAttemptsSaveStatus('saving');
+      return;
+    }
+
     const previousValue = persistedMaxToolAttempts.current;
-    if (normalized === previousValue) return;
+    if (normalized === previousValue) {
+      setMaxToolAttemptsSaveStatus('saved');
+      if (maxToolAttemptsSavedResetTimer.current) {
+        clearTimeout(maxToolAttemptsSavedResetTimer.current);
+      }
+      maxToolAttemptsSavedResetTimer.current = setTimeout(() => {
+        setMaxToolAttemptsSaveStatus('idle');
+      }, MAX_TOOL_ATTEMPTS_SAVED_RESET_MS);
+      return;
+    }
 
     maxToolAttemptsSaveInFlight.current = true;
+    setMaxToolAttemptsSaveStatus('saving');
+    if (maxToolAttemptsSavedResetTimer.current) {
+      clearTimeout(maxToolAttemptsSavedResetTimer.current);
+      maxToolAttemptsSavedResetTimer.current = null;
+    }
     try {
       await apiFetch('/credentials/settings/max-tool-attempts', {
         method: 'PUT',
@@ -321,13 +356,31 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
       });
       persistedMaxToolAttempts.current = normalized;
       await refreshBackendConfig();
+      setMaxToolAttempts(normalized);
+      setMaxToolAttemptsSaveStatus('saved');
+      maxToolAttemptsSavedResetTimer.current = setTimeout(() => {
+        setMaxToolAttemptsSaveStatus('idle');
+      }, MAX_TOOL_ATTEMPTS_SAVED_RESET_MS);
     } catch (err) {
       reportUpdateError('Failed to update max tool attempts', err);
       persistedMaxToolAttempts.current = previousValue;
       setMaxToolAttempts(previousValue);
+      setMaxToolAttemptsSaveStatus('error');
     } finally {
       maxToolAttemptsSaveInFlight.current = false;
+      const pendingValue = pendingMaxToolAttemptsSave.current;
+      pendingMaxToolAttemptsSave.current = null;
+      if (pendingValue !== null && pendingValue !== persistedMaxToolAttempts.current) {
+        void handleMaxToolAttemptsCommit(pendingValue);
+      }
     }
+  };
+
+  const handleMaxToolAttemptsInputChange = (size: number) => {
+    if (!Number.isFinite(size)) return;
+    const normalized = normalizeMaxToolAttempts(size);
+    setMaxToolAttempts(normalized);
+    void handleMaxToolAttemptsCommit(normalized);
   };
 
   const handleToolTimeoutInputChange = (key: ToolTimeoutKey, value: number) => {
@@ -414,6 +467,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
         activeRuntimeConfig={activeRuntimeConfig}
         contextWindow={contextWindow}
         maxToolAttempts={maxToolAttempts}
+        maxToolAttemptsSaveStatus={maxToolAttemptsSaveStatus}
         toolTimeouts={toolTimeouts}
         focusModelInputSignal={runtimeModelFocusRequest}
         onRuntimeConfigChange={handleRuntimeConfigChange}

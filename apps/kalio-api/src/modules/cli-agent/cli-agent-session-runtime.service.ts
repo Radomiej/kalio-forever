@@ -7,6 +7,7 @@ import type {
   ToolCallRequest,
   ToolResult,
   WorkflowErrorCode,
+  WorkflowFailure,
 } from '@kalio/types';
 import { nanoid } from 'nanoid';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
@@ -44,9 +45,25 @@ function cliAgentRunErrorCode(result: CLIAgentRunResult, accepted: boolean): Wor
   return result.exitCode === 0 ? 'CONTRACT_VIOLATION' : 'CLI_AGENT_ERROR';
 }
 
-function cliAgentErrorCodeFromError(error: unknown): WorkflowErrorCode {
-  const failure = workflowFailureFromError(error);
-  return failure.code === 'UNKNOWN' ? 'CLI_AGENT_ERROR' : failure.code;
+function parseWorkflowFailure(value: unknown): WorkflowFailure | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    !isWorkflowErrorCode(record['code'])
+    || typeof record['retryable'] !== 'boolean'
+    || typeof record['message'] !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    code: record['code'],
+    retryable: record['retryable'],
+    message: record['message'],
+    source: typeof record['source'] === 'string' ? record['source'] : undefined,
+  };
 }
 
 interface SpawnSessionParams {
@@ -396,12 +413,21 @@ export class CLIAgentSessionRuntimeService {
       && result.exitCode === 0
       && !hasMissingAcceptanceEvidence(worktreeStatus);
     const errorCode = cliAgentRunErrorCode(result, accepted);
+    const failure: WorkflowFailure | undefined = errorCode
+      ? {
+          code: errorCode,
+          source: 'cli-agent',
+          retryable: false,
+          message: outputWithStatus.trim().length > 0 ? outputWithStatus : errorCode,
+        }
+      : undefined;
     const persistedExitCode = accepted ? result.exitCode : 1;
     const persistedResult: CLIAgentResult & {
       rawExitCode?: number;
       failureCode?: string;
       toolResultStatus?: 'success' | 'error';
       toolResultErrorCode?: WorkflowErrorCode;
+      failure?: WorkflowFailure;
       toolResultErrorMessage?: string;
     } = {
       output: outputWithStatus,
@@ -415,6 +441,7 @@ export class CLIAgentSessionRuntimeService {
       ...(errorCode
         ? {
             toolResultErrorCode: errorCode,
+            failure,
             toolResultErrorMessage: outputWithStatus,
           }
         : {}),
@@ -430,6 +457,7 @@ export class CLIAgentSessionRuntimeService {
       startedAt: current?.startedAt,
       completedAt: Date.now(),
       ...(errorCode ? { errorCode } : {}),
+      ...(failure ? { failure } : {}),
       lastOutput: outputWithStatus,
       lastExitCode: persistedExitCode,
       recoveryAttempts: current?.recoveryAttempts,
@@ -466,6 +494,7 @@ export class CLIAgentSessionRuntimeService {
           ...(errorCode
             ? {
                 errorCode,
+                failure,
                 errorMessage: outputWithStatus,
               }
             : {}),
@@ -491,7 +520,12 @@ export class CLIAgentSessionRuntimeService {
       const activeEmit = this.runtimeEntries.get(childSessionId)?.emit ?? emit;
       return this.finalizeStopped(childSessionId, callId, turnId, activeEmit);
     }
-    const errorCode = cliAgentErrorCodeFromError(err);
+    const failure = workflowFailureFromError(err);
+    const errorCode = failure.code === 'UNKNOWN' ? 'CLI_AGENT_ERROR' : failure.code;
+    const normalizedFailure = {
+      ...failure,
+      code: errorCode,
+    };
 
     const nextSnapshot: CLIAgentSessionSnapshot = {
       childSessionId,
@@ -504,6 +538,7 @@ export class CLIAgentSessionRuntimeService {
       startedAt: current?.startedAt,
       completedAt: Date.now(),
       errorCode,
+      failure: normalizedFailure,
       lastOutput: error.message,
       lastExitCode: 1,
       recoveryAttempts: current?.recoveryAttempts,
@@ -516,6 +551,7 @@ export class CLIAgentSessionRuntimeService {
         ...nextSnapshot,
         toolResultStatus: 'error',
         toolResultErrorCode: errorCode,
+        failure: normalizedFailure,
         toolResultErrorMessage: error.message,
       }),
     );
@@ -527,6 +563,7 @@ export class CLIAgentSessionRuntimeService {
       sessionId: childSessionId,
       status: 'error',
       errorCode,
+      failure: normalizedFailure,
       errorMessage: error.message,
       data: nextSnapshot,
     });
@@ -656,6 +693,7 @@ export class CLIAgentSessionRuntimeService {
         completedAt: typeof parsed['completedAt'] === 'number' ? parsed['completedAt'] : undefined,
         activeCallId: typeof parsed['activeCallId'] === 'string' ? parsed['activeCallId'] : undefined,
         errorCode: isWorkflowErrorCode(parsed['errorCode']) ? parsed['errorCode'] : undefined,
+        failure: parseWorkflowFailure(parsed['failure']),
         lastOutput: typeof parsed['lastOutput'] === 'string' ? parsed['lastOutput'] : typeof parsed['output'] === 'string' ? parsed['output'] : undefined,
         lastExitCode: typeof parsed['lastExitCode'] === 'number' ? parsed['lastExitCode'] : typeof parsed['exitCode'] === 'number' ? parsed['exitCode'] : undefined,
         recoveryAttempts: typeof parsed['recoveryAttempts'] === 'number' ? parsed['recoveryAttempts'] : undefined,

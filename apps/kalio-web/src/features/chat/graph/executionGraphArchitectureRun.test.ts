@@ -214,7 +214,61 @@ describe('renderArchitectureRunProjection', () => {
     });
 
     expect(nodes.find((node) => node.id === 'architecture-route:typed-route-status:0')?.status).toBe('success');
-    expect(nodes.find((node) => node.id === 'architecture-route:typed-route-status:1')?.status).toBe('running');
+    expect(nodes.find((node) => node.id === 'architecture-route:typed-route-status:1')?.status).toBe('waiting');
+  });
+
+  it('lets terminal run status override stale live trace and stream route status', () => {
+    const nodes: ExecutionGraphNode[] = [];
+
+    renderArchitectureRunProjection({
+      addNode: (node) => {
+        const stored = { ...node, x: 0, y: 0, width: 240, height: 120 };
+        nodes.push(stored);
+        return stored;
+      },
+      addEdge: () => undefined,
+      architectureRun: null,
+      branchMaxColumn: 1,
+      finalMessage: makeMessage({
+        id: 'terminal-stale-live',
+        architectureRun: {
+          runId: 'run-terminal-stale-live',
+          schemaId: 'architecture-debate',
+          status: 'failed',
+          trace: [
+            {
+              speaker: 'participant',
+              content: 'This branch was running before the workflow failed.',
+              eventId: 'event-stale-running',
+              nodeId: 'analyst',
+              nextNodeId: 'router',
+              status: 'running',
+              stream: {
+                streamGroupId: 'group-terminal',
+                branchSessionId: 'arch-run-terminal-analyst',
+                status: 'streaming',
+                chunkCount: 4,
+                text: 'Still streaming stale text.',
+              },
+            },
+          ],
+          routeHops: [
+            { eventId: 'event-stale-running', source: 'parallel', fromNodeId: 'parallel', toNodeId: 'analyst' },
+          ],
+        },
+      }),
+      startRow: 0,
+      turn: {
+        id: 'turn-1',
+        sessionId: 'session-1',
+        promptMessageId: 'prompt-1',
+        done: true,
+        items: [],
+      },
+      turnNodeId: 'turn:turn-1',
+    });
+
+    expect(nodes.find((node) => node.id === 'architecture-route:terminal-stale-live:0')?.status).toBe('error');
   });
 
   it('uses stable workflow activity summaries for route node details', () => {

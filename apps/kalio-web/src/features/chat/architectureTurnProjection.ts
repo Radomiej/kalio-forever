@@ -41,6 +41,7 @@ interface ReplaceArchitectureRunTurnOptions {
   promptMessageId: string;
   runId: string;
   nextTurn: AgentTurn;
+  replaceMessageIds?: Set<string>;
 }
 
 interface ResolveArchitectureRunTurnUpdateOptions {
@@ -64,18 +65,44 @@ function isArchitectureRunProjectionMessage(message: ChatMessage, runId: string)
     || message.toolCalls?.some((toolCall) => toolCall.args['architectureRunId'] === runId) === true;
 }
 
+function workflowEnvelopeMessageIdsForPrompt(currentTurns: AgentTurn[], promptMessageId: string): Set<string> {
+  const messageIds = new Set<string>();
+  for (const turn of currentTurns) {
+    if (turn.promptMessageId !== promptMessageId || turn.turnKind !== 'workflow-envelope') {
+      continue;
+    }
+    for (const item of turn.items) {
+      if (item.kind === 'text') {
+        messageIds.add(item.messageId);
+      }
+    }
+  }
+  return messageIds;
+}
+
+function turnContainsMessageId(turn: AgentTurn, messageIds: Set<string>): boolean {
+  return turn.items.some((item) => {
+    if (item.kind === 'text' || item.kind === 'thinking') {
+      return messageIds.has(item.messageId);
+    }
+    return false;
+  });
+}
+
 export function replaceArchitectureRunTurn({
   currentMessages,
   currentTurns,
   promptMessageId,
   runId,
   nextTurn,
+  replaceMessageIds = new Set<string>(),
 }: ReplaceArchitectureRunTurnOptions): AgentTurn[] {
   const runIdsByReference = architectureRunIdsByReference(currentMessages);
   return [
     ...currentTurns.filter((turn) => (
       turn.id !== nextTurn.id
       && turn.promptMessageId !== promptMessageId
+      && !turnContainsMessageId(turn, replaceMessageIds)
       && !turnContainsArchitectureRun(turn, runId, runIdsByReference)
     )),
     nextTurn,
@@ -93,9 +120,11 @@ export function resolveArchitectureRunTurnUpdate({
 }: ResolveArchitectureRunTurnUpdateOptions): ResolvedArchitectureRunTurnUpdate {
   const projectionDone = (result.run.status !== 'queued' && result.run.status !== 'running')
     || result.agentFlowStatus === 'waiting_on_orchestrator';
+  const staleWorkflowEnvelopeMessageIds = workflowEnvelopeMessageIdsForPrompt(currentTurns, promptMessageId);
+  staleWorkflowEnvelopeMessageIds.add(pendingAssistantMessageId);
   const messages = [
     ...currentMessages
-      .filter((message) => message.id !== pendingAssistantMessageId)
+      .filter((message) => !staleWorkflowEnvelopeMessageIds.has(message.id))
       .filter((message) => !isArchitectureRunProjectionMessage(message, result.run.id)),
     ...projection.messages,
   ];
@@ -117,6 +146,7 @@ export function resolveArchitectureRunTurnUpdate({
       promptMessageId,
       runId: result.run.id,
       nextTurn,
+      replaceMessageIds: staleWorkflowEnvelopeMessageIds,
     }),
   };
 }

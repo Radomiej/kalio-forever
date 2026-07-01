@@ -29,6 +29,10 @@ async function* streamFrom(chunks: InternalLLMChunk[]): AsyncIterable<InternalLL
   for (const chunk of chunks) yield chunk;
 }
 
+async function* throwingStream(error: Error): AsyncIterable<InternalLLMChunk> {
+  throw error;
+}
+
 function neverStream(): AsyncIterable<InternalLLMChunk> {
   return {
     [Symbol.asyncIterator](): AsyncIterator<InternalLLMChunk> {
@@ -402,6 +406,13 @@ describe('SubagentRuntimeService nested subagents', () => {
           childSessionId,
           parentSessionId: 'master',
           parentToolCallId: 'call-timeout',
+          errorCode: 'SUBAGENT_TIMEOUT',
+          failure: expect.objectContaining({
+            code: 'SUBAGENT_TIMEOUT',
+            source: 'subagent-runtime',
+            retryable: false,
+            message: 'Sub-agent timed out after 50ms',
+          }),
           errorMessage: 'Sub-agent timed out after 50ms',
         }),
       }));
@@ -1796,6 +1807,57 @@ describe('SubagentRuntimeService nested subagents', () => {
     expect(toolDispatch.dispatch).toHaveBeenCalledOnce();
   });
 
+  it('uses 30 as the fallback max tool iteration budget when no override exists', async () => {
+    let iteration = 0;
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => {
+        iteration += 1;
+        return streamFrom([
+          { type: 'text_delta', delta: `Inspecting path ${iteration}.` },
+          { type: 'tool_call', callId: `tool-${iteration}`, name: 'vfs_read', args: { filePath: `file-${iteration}.md` } },
+          { type: 'done' },
+        ]);
+      }),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue(undefined),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [{ role: 'user', content: 'read' }], unboundedHistoryCount: 1 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const toolDispatch = {
+      dispatch: vi.fn(async (callId: string): Promise<ToolResult> => ({
+        callId,
+        status: 'success',
+        data: { content: 'ok' },
+      })),
+      getToolMetas: vi.fn(),
+    };
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      toolDispatch as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-default-iterations',
+      objective: 'keep reading files',
+      availableTools: tools.filter((tool) => tool.name === 'vfs_read'),
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+    });
+
+    expect(toolDispatch.dispatch).toHaveBeenCalledTimes(30);
+    expect(result.result).toContain('Sub-agent stopped after 30 tool iterations without producing a final answer.');
+  });
+
   it('persists a terminal assistant fallback message when max iterations are exhausted', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([
@@ -1905,6 +1967,66 @@ describe('SubagentRuntimeService nested subagents', () => {
       code: 'LLM_ERROR',
       message: 'stream exploded',
       hadContent: true,
+    }));
+  });
+
+  it('persists a structured-output fallback when the repair retry also fails', async () => {
+    const structuredOutputError = Object.assign(
+      new Error('Structured output response failed schema_mismatch. Preview: prose before bad JSON'),
+      { code: 'LLM_BAD_STRUCTURED_OUTPUT' },
+    );
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => throwingStream(structuredOutputError)),
+    };
+    const sessionManager = {
+      persistUserMessage: vi.fn().mockResolvedValue({ id: 'prompt-1' }),
+      persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+    const emit = vi.fn();
+    const runtime = buildSubagentRuntime(
+      llmSource,
+      makeProcessor(sessionManager) as StreamProcessorService,
+      { dispatch: vi.fn(), getToolMetas: vi.fn() } as unknown as ToolDispatchService,
+      sessionManager as unknown as SessionManagerService,
+      { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+      { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+      { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+    );
+
+    await expect(runtime.runSubagent({
+      parentSessionId: 'master',
+      parentToolCallId: 'call-structured-error-fallback',
+      objective: 'Return malformed structured output',
+      availableTools: [],
+      structuredOutput: {
+        name: 'architecture_router_output',
+        schema: { type: 'object', properties: { nextAction: { const: 'finalize' } }, required: ['nextAction'] },
+        strict: true,
+      },
+      timeoutMs: 60000,
+      vfsMode: 'shared',
+      copyOutputs: false,
+      emit,
+    })).rejects.toThrow('Structured output response failed schema_mismatch');
+
+    expect(llmSource.stream).toHaveBeenCalledTimes(2);
+    expect(sessionManager.persistAssistantMessage).toHaveBeenCalledTimes(1);
+    const fallbackCall = sessionManager.persistAssistantMessage.mock.calls[0];
+    const startCall = emit.mock.calls.find((call: unknown[]) => call[0] === 'agent:start');
+    const childSessionId = (startCall?.[1] as { sessionId: string } | undefined)?.sessionId;
+
+    expect(fallbackCall?.[0]).toBe(childSessionId);
+    expect((fallbackCall?.[2] as TurnState).text).toContain(
+      'Sub-agent failed: Structured output response failed schema_mismatch. Preview: prose before bad JSON.',
+    );
+    expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
+      sessionId: childSessionId,
+      code: 'LLM_BAD_STRUCTURED_OUTPUT',
+      message: 'Structured output response failed schema_mismatch. Preview: prose before bad JSON',
+      hadContent: false,
     }));
   });
 

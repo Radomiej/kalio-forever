@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ArchitectureGraphProjection, ChatMessage, ChatSession } from '@kalio/types';
 import { filterRenderableSessions } from './sessionRenderableFilter';
+import { buildArchitectureSessionRuntimeStates } from './sessionTreeDisplay';
 
 type ArchitectureRunWithGraphNodes = NonNullable<ChatMessage['architectureRun']> & {
   graphNodes: ArchitectureGraphProjection['nodes'];
@@ -377,5 +378,52 @@ describe('filterRenderableSessions', () => {
       'arch-router',
       'arch-finalizer',
     ]);
+  });
+
+  it('keeps roleSlotId graph node status as source of truth after reload', () => {
+    const sessions: ChatSession[] = [
+      makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),
+      makeSession({
+        id: 'arch-finalizer',
+        title: 'Architecture Debate: Finalizer',
+        kind: 'subagent',
+        parentSessionId: 'host',
+        createdAt: 12,
+        updatedAt: 12,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          architectureSlotId: 'finalizer',
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'finalizer',
+            roleSlotType: 'finalizer',
+            displayLabel: 'Finalizer',
+            sessionSurface: 'technical-node',
+            conversationVisibility: 'visible',
+          },
+        },
+      }),
+    ];
+    const message = makeArchitectureSummaryMessage([{
+      speaker: 'finalizer',
+      content: 'legacy trace fallback should not mark this done',
+      stream: {
+        streamGroupId: 'run-live',
+        branchSessionId: 'arch-finalizer',
+        status: 'completed',
+        chunkCount: 1,
+        text: 'legacy trace fallback should not mark this done',
+      },
+    }]);
+    const hostArchitectureRun = message.architectureRun as ArchitectureRunWithGraphNodes;
+    hostArchitectureRun.status = 'failed';
+    hostArchitectureRun.graphNodes = [
+      { id: 'orchestrator', roleSlotId: 'orchestrator', label: 'Orchestrator', kind: 'router', status: 'failed', eventIds: ['event-failed'] },
+      { id: 'final-artifact', roleSlotId: 'finalizer', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+    ];
+
+    const states = buildArchitectureSessionRuntimeStates(sessions, { host: [message] });
+
+    expect(states.get('arch-finalizer')).toBe('pending');
   });
 });

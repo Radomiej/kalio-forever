@@ -245,6 +245,102 @@ describe('ChatWelcomeScreen', () => {
     expect(screen.getByText('fs_read -> src/App.tsx')).toBeInTheDocument();
   });
 
+  it('shows waiting child-session activity when a tool confirmation is pending', () => {
+    useAgentStore.setState((state) => ({
+      ...state,
+      sessionStatusSnapshots: {
+        'branch-1': {
+          sessionId: 'branch-1',
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          run: {
+            id: 'run-1',
+            sessionId: 'branch-1',
+            turnId: 'turn-1',
+            phase: 'tool_running',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 2,
+            lastHeartbeatAt: 2,
+          },
+        },
+      },
+      runtimeActivitySnapshots: {
+        'branch-1': {
+          sessionId: 'branch-1',
+          active: true,
+          turnId: 'turn-1',
+          queueLength: 0,
+          run: {
+            id: 'run-1',
+            sessionId: 'branch-1',
+            turnId: 'turn-1',
+            phase: 'tool_running',
+            status: 'active',
+            retryCount: 0,
+            safeResume: true,
+            startedAt: 1,
+            updatedAt: 2,
+            lastHeartbeatAt: 2,
+          },
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [{
+            callId: 'call-delete-1',
+            requestId: 'req-delete-1',
+            sessionId: 'branch-1',
+            toolName: 'vfs_delete',
+            args: { path: 'draft.txt' },
+            status: 'pending_confirmation',
+            startedAt: 2,
+          }],
+          childExecutions: [],
+          updatedAt: 2,
+        },
+      },
+    }));
+    useSessionStore.setState((state) => ({
+      ...state,
+      sessionMessages: {},
+    }));
+
+    render(
+      <ChatWelcomeScreen
+        activeSession={{
+          ...session(),
+          id: 'branch-1',
+          title: 'Strategic Decision Council: Analyst',
+          kind: 'subagent',
+          parentSessionId: 'arch-root',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: {
+              displayLabel: 'Analyst',
+            },
+          },
+        }}
+        activeSessionId="branch-1"
+        architectures={[schema()]}
+        isStreaming={false}
+        onArchitectureChange={vi.fn()}
+        onArchitectureRun={vi.fn()}
+        onDraftChange={vi.fn()}
+        onPersonaChange={vi.fn()}
+        onProjectPathChange={vi.fn()}
+        onSend={vi.fn()}
+        personas={[persona()]}
+        projectPath=""
+        selectedPersonaId="default"
+        selectedArchitectureId="single-chat"
+      />,
+    );
+
+    expect(screen.getByText('Waiting before the first persisted message')).toBeInTheDocument();
+  });
+
   it('runs the prompt through the selected architecture instead of direct chat', () => {
     const onArchitectureRun = vi.fn();
     const onSend = vi.fn();

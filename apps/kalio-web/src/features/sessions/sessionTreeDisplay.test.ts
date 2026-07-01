@@ -324,6 +324,102 @@ describe('buildArchitectureSessionRuntimeStates', () => {
 
     expect(buildArchitectureSessionRuntimeStates([], messages).get('branch-session')).toBe('waiting');
   });
+
+  it('maps typed cancelled graph nodes to stopped child sessions', () => {
+    const finalizer = createSession({
+      id: 'arch-run-live-finalizer',
+      title: 'Strategic Decision Council: Finalizer',
+      kind: 'subagent',
+      parentSessionId: 'host',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'finalizer',
+          roleSlotType: 'finalizer',
+        },
+      },
+    });
+    const messages: Record<string, ChatMessage[]> = {
+      host: [{
+        id: 'message-1',
+        sessionId: 'host',
+        role: 'assistant',
+        content: 'Architecture summary',
+        architectureRun: {
+          runId: 'run-live',
+          schemaId: 'strategic-decision-council',
+          status: 'failed',
+          trace: [],
+          routeHops: [],
+          graphNodes: [{
+            id: 'final-artifact',
+            sessionId: finalizer.id,
+            roleSlotId: 'finalizer',
+            label: 'Final Artifact',
+            kind: 'artifact',
+            status: 'cancelled',
+            action: 'node_failed',
+            detail: 'Skipped because an upstream workflow node failed before this node started.',
+            visitCount: 0,
+            eventIds: ['event-3'],
+          }],
+          graphEdges: [],
+          graphChildAgents: [],
+        },
+        createdAt: 10,
+      }],
+    };
+
+    expect(buildArchitectureSessionRuntimeStates([finalizer], messages).get(finalizer.id)).toBe('stopped');
+  });
+
+  it('does not project stale pending graph nodes as live after run failure', () => {
+    const finalizer = createSession({
+      id: 'arch-run-live-finalizer',
+      title: 'Strategic Decision Council: Finalizer',
+      kind: 'subagent',
+      parentSessionId: 'host',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'finalizer',
+          roleSlotType: 'finalizer',
+        },
+      },
+    });
+    const messages: Record<string, ChatMessage[]> = {
+      host: [{
+        id: 'message-1',
+        sessionId: 'host',
+        role: 'assistant',
+        content: 'Architecture summary',
+        architectureRun: {
+          runId: 'run-live',
+          schemaId: 'strategic-decision-council',
+          status: 'failed',
+          trace: [],
+          routeHops: [],
+          graphNodes: [{
+            id: 'final-artifact',
+            sessionId: finalizer.id,
+            roleSlotId: 'finalizer',
+            label: 'Final Artifact',
+            kind: 'artifact',
+            status: 'pending',
+            visitCount: 0,
+            eventIds: [],
+          }],
+          graphEdges: [],
+          graphChildAgents: [],
+        },
+        createdAt: 10,
+      }],
+    };
+
+    expect(buildArchitectureSessionRuntimeStates([finalizer], messages).get(finalizer.id)).toBe('stopped');
+  });
 });
 
 describe('architectureRunIdForSession', () => {
@@ -348,6 +444,35 @@ describe('architectureRunIdForSession', () => {
 });
 
 describe('sessionStatusSnapshotToRuntimeState', () => {
+  it('prefers pending tool confirmation over active tool-running phase', () => {
+    expect(sessionStatusSnapshotToRuntimeState({
+      sessionId: 'session-hitl',
+      active: true,
+      queueLength: 0,
+      run: {
+        id: 'run-hitl',
+        sessionId: 'session-hitl',
+        turnId: 'turn-hitl',
+        phase: 'tool_running',
+        status: 'active',
+        retryCount: 0,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      },
+      toolActivities: [{
+        callId: 'call-delete-1',
+        requestId: 'request-delete-1',
+        sessionId: 'session-hitl',
+        toolName: 'vfs_delete',
+        args: { path: 'draft.txt' },
+        status: 'pending_confirmation',
+        startedAt: 2,
+      }],
+    })).toBe('waiting');
+  });
+
   it('prefers terminal completion over stale queued work', () => {
     expect(sessionStatusSnapshotToRuntimeState({
       sessionId: 'session-done',

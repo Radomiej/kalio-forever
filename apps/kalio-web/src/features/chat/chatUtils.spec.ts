@@ -416,6 +416,58 @@ describe('buildTurnsFromHistory', () => {
 
     expect(timeline).toEqual(['user:u1', 'user:u2', 'turn:turn-2']);
   });
+
+  it('REGRESSION: timeline hides raw architecture host turns when a typed workflow envelope covers the same run', () => {
+    const messages = [
+      makeMsg({ id: 'u1', role: 'user', content: 'run workflow' }),
+      makeMsg({
+        id: 'architecture-run-1-summary',
+        role: 'assistant',
+        content: 'Typed workflow summary',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+        },
+      }),
+      makeMsg({
+        id: 'raw-tool-host',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc-arch-1', name: 'run_subagent', args: { architectureRunId: 'run-1' } }],
+      }),
+      makeMsg({ id: 'raw-finalizer', role: 'assistant', content: '### Finalizer\n\nRaw persisted workflow transcript.' }),
+    ];
+    const turns: AgentTurn[] = [
+      {
+        id: 'workflow-envelope-run-1',
+        sessionId: 's1',
+        promptMessageId: 'u1',
+        turnKind: 'workflow-envelope',
+        items: [{ kind: 'text', messageId: 'architecture-run-1-summary' }],
+        done: true,
+      },
+      {
+        id: 'raw-history-run-1',
+        sessionId: 's1',
+        promptMessageId: 'u1',
+        items: [
+          { kind: 'tool', callId: 'tc-arch-1' },
+          { kind: 'text', messageId: 'raw-finalizer' },
+        ],
+        done: true,
+      },
+    ];
+
+    const timeline = buildConversationTimeline(messages, turns).map((entry) =>
+      entry.kind === 'user_message' ? `user:${entry.message.id}` : `turn:${entry.turn.id}`,
+    );
+
+    expect(timeline).toEqual(['user:u1', 'turn:workflow-envelope-run-1']);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

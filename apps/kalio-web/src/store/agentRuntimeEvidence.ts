@@ -8,6 +8,7 @@ export interface RuntimeEvidence {
   source: RuntimeEvidenceSource;
   text: string;
   code: string;
+  updatedAt?: number;
 }
 
 export interface RuntimeEvidenceClassification {
@@ -25,7 +26,10 @@ export function compactRuntimeAttentionText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-function extractArchitectureEvidence(run: ChatMessage['architectureRun'] | undefined): RuntimeEvidence | null {
+function extractArchitectureEvidence(
+  run: ChatMessage['architectureRun'] | undefined,
+  updatedAt: number | undefined,
+): RuntimeEvidence | null {
   if (!run) {
     return null;
   }
@@ -39,6 +43,7 @@ function extractArchitectureEvidence(run: ChatMessage['architectureRun'] | undef
         source: 'architecture',
         code: 'ARCHITECTURE_STREAM_FAILED',
         text: compactRuntimeAttentionText(step.detail ?? step.content ?? 'Architecture stream failed'),
+        updatedAt,
       };
     }
   }
@@ -55,7 +60,7 @@ function firstStringField(record: Record<string, unknown>, fields: string[]): st
   return undefined;
 }
 
-function extractToolResultEvidence(content: unknown): RuntimeEvidence | null {
+function extractToolResultEvidence(content: unknown, updatedAt: number | undefined): RuntimeEvidence | null {
   if (typeof content !== 'string' || content.trim().length === 0) {
     return null;
   }
@@ -74,6 +79,7 @@ function extractToolResultEvidence(content: unknown): RuntimeEvidence | null {
       source: 'tool_result',
       code,
       text: compactRuntimeAttentionText(message ?? code),
+      updatedAt,
     };
   } catch {
     return null;
@@ -93,12 +99,12 @@ export function extractLatestVisibleRuntimeEvidence(
       continue;
     }
     if (message.role === 'tool_result') {
-      const evidence = extractToolResultEvidence(message.content);
+      const evidence = extractToolResultEvidence(message.content, message.createdAt);
       if (evidence) {
         return evidence;
       }
     }
-    const architectureEvidence = extractArchitectureEvidence(message.architectureRun);
+    const architectureEvidence = extractArchitectureEvidence(message.architectureRun, message.createdAt);
     if (architectureEvidence) {
       return architectureEvidence;
     }

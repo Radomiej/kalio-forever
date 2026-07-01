@@ -663,7 +663,7 @@ describe('buildArchitectureRunMetadata', () => {
           { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
           { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
           { id: 'synthesizer', label: 'Synthesizer', kind: 'router', status: 'pending', eventIds: [] },
-          { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+          { id: 'final-artifact', roleSlotId: 'finalizer', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
         ],
         edges: [
           { id: 'edge-1', fromNodeId: 'orchestrator', toNodeId: 'pragmatist' },
@@ -1232,7 +1232,7 @@ describe('buildArchitectureRunTurnProjection', () => {
           { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
           { id: 'innovator', label: 'Innovator', kind: 'role', status: 'pending', eventIds: [] },
           { id: 'router', label: 'Router', kind: 'router', status: 'pending', eventIds: [] },
-          { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+          { id: 'final-artifact', roleSlotId: 'finalizer', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
         ],
         edges: [
           { id: 'edge-1', fromNodeId: 'parallel-deliberation', toNodeId: 'pragmatist' },
@@ -1276,7 +1276,10 @@ describe('buildArchitectureRunTurnProjection', () => {
 
     const reloaded = findArchitectureRunInMessages(projection.messages) as ArchitectureMetadataWithGraph | null;
     expect(reloaded?.runId).toBe('run-live');
-    expect(reloaded?.graphNodes?.find((node) => node.id === 'final-artifact')?.status).toBe('pending');
+    expect(reloaded?.graphNodes?.find((node) => node.id === 'final-artifact')).toMatchObject({
+      roleSlotId: 'finalizer',
+      status: 'pending',
+    });
   });
 
   it('projects deterministic branch tool results when a branch has no live stream metadata but the role slot is known', () => {

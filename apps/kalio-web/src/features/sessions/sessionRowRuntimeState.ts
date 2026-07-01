@@ -1,8 +1,9 @@
-import type { ChatMessage, ChatSession, SocketEvents } from '@kalio/types';
+import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
 import {
   visibleConversationTreeChildren,
   sessionStatusSnapshotToRuntimeState,
+  type RuntimeSessionStatusSnapshot,
   type SessionRuntimeState,
 } from './sessionTreeDisplay';
 import { workflowEnvelopeRuntimeStateForSession } from './sessionWorkflowRuntimeState';
@@ -24,7 +25,7 @@ export function sessionRuntimeState(
   pendingBudgetApprovals: Record<string, unknown>,
   activeLoopSessionIds: Set<string>,
   queuedDepthBySession: Record<string, number>,
-  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
+  sessionStatusSnapshots: Record<string, RuntimeSessionStatusSnapshot>,
   sessionAgentTurns: Record<string, AgentTurn[]>,
   sessionMessages: Record<string, ChatMessage[]>,
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,
@@ -86,7 +87,7 @@ export function countDescendantRuntimeStates(
   pendingBudgetApprovals: Record<string, unknown>,
   activeLoopSessionIds: Set<string>,
   queuedDepthBySession: Record<string, number>,
-  sessionStatusSnapshots: Record<string, SocketEvents['session:status']>,
+  sessionStatusSnapshots: Record<string, RuntimeSessionStatusSnapshot>,
   sessionAgentTurns: Record<string, AgentTurn[]>,
   sessionMessages: Record<string, ChatMessage[]>,
   architectureSessionRuntimeStates: Map<string, SessionRuntimeState>,

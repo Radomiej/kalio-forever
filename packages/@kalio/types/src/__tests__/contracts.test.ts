@@ -666,6 +666,7 @@ describe('@kalio/types contract shape', () => {
         | 'artifact_created'
         | 'memory_persisted'
         | 'final_artifact'
+        | 'node_failed'
         | 'node_completed'
         | 'run_stopped';
       message: string;
@@ -674,6 +675,7 @@ describe('@kalio/types contract shape', () => {
     expectTypeOf<ArchitectureExecutionEvent['action']>().toEqualTypeOf<
       | 'run_created'
       | 'run_stopped'
+      | 'node_failed'
       | 'participant_completed'
       | 'participant_incomplete'
       | 'router_selected'
@@ -745,10 +747,11 @@ describe('@kalio/types contract shape', () => {
       nodes: Array<{
         id: string;
         sessionId?: ID;
+        roleSlotId?: string;
         label: string;
         kind: 'parallel' | 'role' | 'router' | 'artifact';
         behavior?: ArchitectureSchema['nodes'][number]['behavior'];
-        status: 'pending' | 'running' | 'completed';
+        status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
         actionSummary?: string;
         action?: ArchitectureExecutionEvent['action'];
         detail?: string;

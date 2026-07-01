@@ -250,14 +250,79 @@ export function buildCallIdToNameFromMessages(
   return mapping;
 }
 
+function architectureRunIdByToolCall(messages: ChatMessage[]): Map<string, string> {
+  const runIdByCallId = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !message.toolCalls) {
+      continue;
+    }
+    for (const toolCall of message.toolCalls) {
+      const runId = toolCall.args['architectureRunId'];
+      if (typeof runId === 'string' && runId.length > 0) {
+        runIdByCallId.set(toolCall.id, runId);
+      }
+    }
+  }
+  return runIdByCallId;
+}
+
+function architectureRunIdForTurn(
+  turn: AgentTurn,
+  messageById: Map<string, ChatMessage>,
+  runIdByCallId: Map<string, string>,
+): string | null {
+  for (const item of turn.items) {
+    if (item.kind === 'text' || item.kind === 'thinking') {
+      const runId = messageById.get(item.messageId)?.architectureRun?.runId;
+      if (runId) {
+        return runId;
+      }
+      continue;
+    }
+
+    const runId = runIdByCallId.get(item.callId);
+    if (runId) {
+      return runId;
+    }
+  }
+  return null;
+}
+
+function suppressRawArchitectureTurnsCoveredByWorkflowEnvelope(
+  messages: ChatMessage[],
+  turns: AgentTurn[],
+): AgentTurn[] {
+  const messageById = new Map(messages.map((message) => [message.id, message] as const));
+  const runIdByCallId = architectureRunIdByToolCall(messages);
+  const workflowEnvelopeRunIds = new Set(
+    turns
+      .filter((turn) => turn.turnKind === 'workflow-envelope')
+      .map((turn) => architectureRunIdForTurn(turn, messageById, runIdByCallId))
+      .filter((runId): runId is string => Boolean(runId)),
+  );
+
+  if (workflowEnvelopeRunIds.size === 0) {
+    return turns;
+  }
+
+  return turns.filter((turn) => {
+    if (turn.turnKind === 'workflow-envelope') {
+      return true;
+    }
+    const runId = architectureRunIdForTurn(turn, messageById, runIdByCallId);
+    return !runId || !workflowEnvelopeRunIds.has(runId);
+  });
+}
+
 export function buildConversationTimeline(messages: ChatMessage[], agentTurns: AgentTurn[]): ChatTimelineEntry[] {
   const userMessages = messages.filter((message) => message.role === 'user');
+  const renderableAgentTurns = suppressRawArchitectureTurnsCoveredByWorkflowEnvelope(messages, agentTurns);
   const turnsByPromptMessageId = new Map<string, AgentTurn[]>();
   const leadingTurns: AgentTurn[] = [];
   const trailingTurns: AgentTurn[] = [];
   const knownUserIds = new Set(userMessages.map((message) => message.id));
 
-  agentTurns.forEach((turn) => {
+  renderableAgentTurns.forEach((turn) => {
     if (!turn.promptMessageId) {
       leadingTurns.push(turn);
       return;

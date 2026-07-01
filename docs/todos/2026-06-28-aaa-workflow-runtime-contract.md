@@ -1988,3 +1988,250 @@ Residual evidence gap:
 
 - `App.test.tsx` still has an unrelated failing test, `preserves pending host sessions when the bootstrap response arrives late`; the failure predates this selector branch in the current dirty worktree and needs a separate slice before claiming full FE app gate.
 - No Playwright hot-reload/manual QA was completed in this slice.
+
+## 2026-07-01 Continuation: Runtime Attention Tool Projection Fix
+
+Current gap found through MCP Playwright Orchestrator:
+
+```mermaid
+flowchart LR
+  Snapshot["RuntimeActivitySnapshot"]
+  Run["run.status = interrupted_needs_retry"]
+  Tool["global ToolActivity status = running"]
+  Panel["Runs panel"]
+
+  Snapshot --> Run
+  Tool --> Panel
+  Run -.attention only.-> Panel
+```
+
+Target behavior:
+
+```mermaid
+flowchart LR
+  Snapshot["RuntimeActivitySnapshot"]
+  RunStatus["run.status"]
+  Tool["ToolActivity"]
+  Projector["ConversationManagerPanel projection"]
+  Attention["Runtime attention"]
+  Row["Tool row status = expired"]
+
+  Snapshot --> RunStatus
+  RunStatus --> Projector
+  Tool --> Projector
+  Projector --> Attention
+  Projector --> Row
+```
+
+Affected model relation:
+
+```mermaid
+classDiagram
+  RuntimeActivitySnapshot --> ChatRunSnapshot
+  RuntimeActivitySnapshot --> RuntimeToolActivity
+  ToolActivity --> ChatRunSnapshot
+
+  class ChatRunSnapshot {
+    status interrupted_needs_retry
+    safeResume
+    updatedAt
+  }
+  class ToolActivity {
+    sessionId
+    status
+    finishedAt
+  }
+```
+
+Implemented:
+
+- `ConversationManagerPanel` now projects active `ToolActivity` rows through typed `RuntimeActivitySnapshot.run.status`.
+- If the owning session has `run.status === 'interrupted_needs_retry'`, stale `running` or `awaiting_confirmation` tool rows become non-active `expired` rows with `finishedAt` from the snapshot.
+- Updated stale assistant-prose tests to structured `tool_result` evidence with typed error codes.
+
+Verification:
+
+- Red: `corepack pnpm --filter kalio-web test -- src/features/sessions/ConversationManagerPanel.test.tsx` exposed stale assistant-prose runtime tests.
+- Green: `corepack pnpm --filter kalio-web test -- src/features/sessions/ConversationManagerPanel.test.tsx` passed with 13 tests.
+- Green: `corepack pnpm --filter kalio-web test -- src/store/agentRuntimeSelectors.test.ts src/features/sessions/sessionRowRuntimeState.test.ts src/features/sessions/sessionTreeDisplay.test.ts src/features/sessions/ConversationManagerPanel.test.tsx src/App.test.tsx src/features/sessions/mergeSessionsPreservingLocal.test.ts` passed with 89 tests.
+- Green: `corepack pnpm --filter kalio-web typecheck`.
+- MCP Playwright Orchestrator clean run on rebuilt QA stack `http://127.0.0.1:54996/`: Runtime Attention still shows the recovered `j15mKdQIGxR24TK4Wblu_` run, but `vfs_write` renders as `confirmation expired` instead of `running`; `collect_runtime_signals` passed with zero findings in fresh session `39192f01-bb81-44de-a7b0-842981dbd59e`.
+
+## 2026-07-01 Continuation: CLI Child Typed Failure Propagation
+
+Current gap:
+
+```mermaid
+flowchart LR
+  CLI["CLI child runtime"]
+  ToolResult["tool:result"]
+  Snapshot["CLIAgentSessionSnapshot"]
+  Child["RuntimeChildExecution"]
+  FE["CLI child projection"]
+  Text["lastOutput / errorMessage"]
+
+  CLI --> ToolResult
+  CLI --> Snapshot
+  ToolResult --> Text
+  Snapshot --> Text
+  Text -.display and weak fallback.-> Child
+  Child --> FE
+```
+
+Target behavior:
+
+```mermaid
+flowchart LR
+  CLI["CLI child runtime"]
+  Failure["WorkflowFailure"]
+  Code["WorkflowErrorCode"]
+  ToolResult["tool:result.failure"]
+  Snapshot["CLIAgentSessionSnapshot.failure"]
+  Child["RuntimeChildExecution.failure"]
+  FE["CLI child projection"]
+
+  CLI --> Failure
+  Failure --> Code
+  Failure --> ToolResult
+  Failure --> Snapshot
+  Snapshot --> Child
+  Child --> FE
+```
+
+Affected model relation:
+
+```mermaid
+classDiagram
+  ToolResult --> WorkflowFailure
+  CLIAgentSessionSnapshot --> WorkflowFailure
+  RuntimeChildExecution --> WorkflowFailure
+  CLIChildProjection --> WorkflowFailure
+
+  class WorkflowFailure {
+    WorkflowErrorCode code
+    retryable
+    source
+    message
+  }
+  class CLIAgentSessionSnapshot {
+    status
+    errorCode
+    failure
+  }
+  class RuntimeChildExecution {
+    status
+    errorCode
+    failure
+  }
+```
+
+Implemented:
+
+- Added shared `WORKFLOW_ERROR_CODES` runtime contract and derived `WorkflowErrorCode` from that list.
+- Extended `ToolResult`, `CLIAgentSessionSnapshot`, and `RuntimeChildExecution` with typed `WorkflowFailure`.
+- `CLIAgentSessionRuntimeService` now persists and emits `WorkflowFailure` for terminal CLI process failures and contract/acceptance failures.
+- Backend runtime snapshot projection copies CLI `errorCode/failure` into `RuntimeChildExecution`.
+- FE CLI child projection carries typed `errorCode/failure` from durable snapshots and runtime child executions; invalid free-form error strings are ignored instead of cast to typed failure.
+
+Verification:
+
+- Red: `corepack pnpm --filter kalio-api test -- src/modules/cli-agent/cli-agent-session-runtime.service.spec.ts -t "typed workflow error code"` failed because persisted CLI failure lacked `failure`.
+- Red: `corepack pnpm --filter kalio-web test -- src/features/chat/cliChildProjection.model.test.ts -t "typed CLI failure|typed runtime child"` failed because FE CLI projection dropped `errorCode/failure`.
+- Green: `corepack pnpm --filter @kalio/types build` updated runtime exports used by API/web tests.
+- Green: `corepack pnpm --filter kalio-api test -- src/modules/cli-agent/cli-agent-session-runtime.service.spec.ts src/modules/chat/chat.runtime-snapshot.spec.ts` passed with 48 tests.
+- Green: `corepack pnpm --filter kalio-web test -- src/features/chat/cliChildProjection.model.test.ts src/features/sessions/ConversationManagerPanel.test.tsx` passed with 28 tests.
+- Green: `corepack pnpm --filter @kalio/types typecheck`.
+- Green: `corepack pnpm --filter kalio-api typecheck`.
+- Green: `corepack pnpm --filter kalio-web typecheck`.
+- Green: `node --test scripts/code-audit/audit-scripts.test.mjs` passed with 11 tests.
+
+## 2026-07-01 Continuation: Default Tool Budget, HITL Snapshot, And Workflow Terminal Proof
+
+Current affected flow:
+
+```mermaid
+flowchart LR
+  FE["Talk / Architect launch"]
+  Context["ArchitectureRuntimeContext"]
+  Executor["ArchitectureRoleExecutor"]
+  Subagent["SubagentRuntime"]
+  Snapshot["RuntimeActivitySnapshot"]
+  UI["Session Panel / Chat / Graph"]
+
+  FE -->|old default 8| Context
+  Context --> Executor
+  Executor -->|old tool_executor fallback 2| Subagent
+  Subagent --> Snapshot
+  Snapshot --> UI
+```
+
+Target flow:
+
+```mermaid
+flowchart LR
+  Settings["Global runtime maxToolAttempts"]
+  FE["Talk / Architect launch default 30"]
+  Context["Typed run context"]
+  Executor["Role executor typed budget resolver"]
+  Evidence["Typed evidence / failure"]
+  Snapshot["RuntimeActivitySnapshot"]
+  UI["Status projection"]
+
+  Settings --> Executor
+  FE --> Context
+  Context --> Executor
+  Executor --> Evidence
+  Evidence --> Snapshot
+  Snapshot --> UI
+```
+
+Model relation:
+
+```mermaid
+classDiagram
+  ArchitectureRuntimeContext --> ArchitectureRoleExecutionInput
+  ArchitectureRoleExecutionInput --> SubagentRunRequest
+  RuntimeActivitySnapshot --> RuntimeToolActivity
+  RuntimeToolActivity --> ToolConfirmationRequest
+
+  class ArchitectureRuntimeContext {
+    maxArchitectureSubagentIterations
+    maxArchitectureSubagentIterationsBySlot
+  }
+  class SubagentRunRequest {
+    maxIterations
+    timeoutMs
+  }
+  class RuntimeToolActivity {
+    status pending_confirmation
+  }
+```
+
+Implemented:
+
+- Raised the shared default tool-call budget to `30` across backend global runtime settings, normal chat subagent fallback, architecture role executor fallback, and FE runtime settings fallback.
+- Removed the special `tool_executor` fallback of `2`; all architecture slots now fall back to `30` unless node/persona/context/global settings override it.
+- Raised architecture subagent default timeout to `300_000ms` to avoid participant nodes failing after only a small evidence batch.
+- Updated Talk/Architect launch context default from `8` to `30`, removing the FE override that could silently defeat the backend default.
+- Added browser reconnect watchdog logic that resets the socket when browser/network state returns but the typed UI connection state is still non-connected.
+- Verified HITL through backend runtime watchlist and Socket.IO `session:runtime_snapshot` with `pendingConfirmations: 1` and tool activity `pending_confirmation`.
+- Updated runtime documentation so `maxToolAttempts` precedence and TOML defaults match the implementation.
+
+Verification:
+
+- Green: `corepack pnpm --filter kalio-api test -- src/modules/architecture/architecture-role-executor.spec.ts --reporter verbose` passed with 56 tests.
+- Green: `corepack pnpm --filter kalio-web test -- src/features/settings/LLMPanel.test.tsx src/features/architect/useArchitectRunOptions.test.ts --reporter verbose` passed with 54 tests.
+- Green: `corepack pnpm --filter kalio-web test -- src/features/chat/hooks/useChatSocketEvents.lifecycle.test.ts src/features/chat/hooks/useChatSocketEvents.helpers.test.ts --reporter verbose` passed with 13 tests.
+- Green: `corepack pnpm --filter kalio-web typecheck`.
+- Green: `corepack pnpm --filter kalio-api build`.
+- Green: `corepack pnpm --filter kalio-web build`.
+- QA stack `3316/5288`: `/api/llm/config` returned `maxToolAttempts: 30`.
+- Live API `lab_solo` run `vV16-Tnjijuf5M9rvGQV8` ended terminally as `failed` with typed `CONTRACT_VIOLATION`; downstream final artifact was `cancelled`, with no pending nodes.
+- Live API `strategic-decision-council` run `AwEm6MZ3Vyd6jG3AatTNB` ended `completed`; all graph nodes including `final-artifact` were `completed`, with no pending nodes.
+- HITL socket proof session `XrMEGtCmtll2fIkDxImt_` emitted `session:runtime_snapshot` with `pendingConfirmations: 1` and `toolActivities[0].status === 'pending_confirmation'`.
+
+Residual risks:
+
+- `tests/chat-reconnect-hydration.spec.ts` still fails on the rebuilt QA stack: the UI reconnect banner can remain visible after Playwright `context.setOffline(false)`. This is now isolated as a Socket.IO/browser offline-recovery regression, not a HITL/runtime-snapshot failure.
+- `tests/hitl-tool-confirmation-runtime.spec.ts` timed out in the Settings modal cleanup path on this QA run. Backend/socket HITL proof passed, but the full UI confirm-click flow still needs a stable E2E pass.
+- The completed strategic QA run used runtime events labelled `Mock structured routing decision` / `Mock structured final artifact`; it proves terminal projection and graph status, not full live-provider reasoning quality.

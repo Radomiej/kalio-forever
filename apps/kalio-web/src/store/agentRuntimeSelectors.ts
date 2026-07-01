@@ -10,6 +10,7 @@ import type {
 import {
   buildArchitectureSessionRuntimeStates,
   sessionStatusSnapshotToRuntimeState,
+  type RuntimeSessionStatusSnapshot,
 } from '../features/sessions/sessionTreeDisplay';
 import {
   classifyRuntimeEvidence,
@@ -75,13 +76,14 @@ export interface RuntimeContinuationAction {
 
 function runtimeSnapshotToSessionStatus(
   snapshot: RuntimeActivitySnapshot,
-): SocketEvents['session:status'] {
+): RuntimeSessionStatusSnapshot {
   return {
     sessionId: snapshot.sessionId,
     active: snapshot.active,
     turnId: snapshot.turnId,
     queueLength: snapshot.queueLength,
     run: snapshot.run,
+    toolActivities: snapshot.toolActivities,
   };
 }
 
@@ -111,8 +113,8 @@ function recoveredRunDetail(snapshot: RuntimeActivitySnapshot): string | null {
 export function mergeRuntimeSessionStatusSnapshots(
   sessionStatusSnapshots: Record<string, SocketEvents['session:status']> | null | undefined,
   runtimeActivitySnapshots: Record<string, RuntimeActivitySnapshot> | null | undefined,
-): Record<string, SocketEvents['session:status']> {
-  const merged: Record<string, SocketEvents['session:status']> = {
+): Record<string, RuntimeSessionStatusSnapshot> {
+  const merged: Record<string, RuntimeSessionStatusSnapshot> = {
     ...(sessionStatusSnapshots ?? {}),
   };
 

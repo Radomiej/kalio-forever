@@ -142,6 +142,8 @@ export function runtimeChildExecutionFromCliProjection(
     cliRunId: projection.parentCallId,
     label: projection.agentId,
     status: cliProjectionStatusToRuntimeChildStatus(projection.status),
+    errorCode: projection.errorCode,
+    failure: projection.failure,
     lastOutput: projection.lastOutput,
     updatedAt: now,
   };

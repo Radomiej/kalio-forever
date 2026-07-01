@@ -32,4 +32,17 @@ describe('workflow error utilities', () => {
       message: '429 rate limit timeout',
     });
   });
+
+  it('maps provider error codes to workflow error codes without parsing messages', () => {
+    const err = Object.assign(new Error('provider may change this wording'), {
+      code: 'LLM_BAD_STRUCTURED_OUTPUT',
+    });
+
+    expect(workflowFailureFromError(err)).toEqual({
+      code: 'CONTRACT_VIOLATION',
+      source: 'llm-provider',
+      retryable: false,
+      message: 'provider may change this wording',
+    });
+  });
 });

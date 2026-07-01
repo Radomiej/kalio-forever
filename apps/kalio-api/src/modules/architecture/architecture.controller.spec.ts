@@ -278,11 +278,10 @@ describe('Architecture controllers', () => {
       nodes: expect.arrayContaining([
         expect.objectContaining({ id: 'pragmatist', status: 'completed' }),
         expect.objectContaining({ id: 'synthesizer', status: 'completed' }),
-        expect.objectContaining({ id: 'final-artifact', status: 'completed' }),
+        expect.objectContaining({ id: 'final-artifact', status: 'pending' }),
       ]),
       routeHops: expect.arrayContaining([
         expect.objectContaining({ fromNodeId: 'pragmatist', toNodeId: 'synthesizer' }),
-        expect.objectContaining({ fromNodeId: 'synthesizer', toNodeId: 'final-artifact' }),
       ]),
     });
   });

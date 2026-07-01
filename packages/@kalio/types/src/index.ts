@@ -458,20 +458,22 @@ export type WorkflowReasonCode =
   | 'final_artifact_accepted'
   | 'external_quality_gate_passed'
   | 'external_quality_gate_failed';
-export type WorkflowErrorCode =
-  | 'RATE_LIMITED'
-  | 'TIMEOUT'
-  | 'PROVIDER_UNAVAILABLE'
-  | 'PROVIDER_UNAUTHORIZED'
-  | 'INVALID_ARGUMENT'
-  | 'CONTRACT_VIOLATION'
-  | 'CLI_AGENT_AUTH_REQUIRED'
-  | 'CLI_AGENT_ERROR'
-  | 'CLI_AGENT_SESSION_METADATA_MISSING'
-  | 'CLI_AGENT_STOPPED'
-  | 'SUBAGENT_TIMEOUT'
-  | 'RAAPP_RELEASE_NOT_FOUND'
-  | 'UNKNOWN';
+export const WORKFLOW_ERROR_CODES = [
+  'RATE_LIMITED',
+  'TIMEOUT',
+  'PROVIDER_UNAVAILABLE',
+  'PROVIDER_UNAUTHORIZED',
+  'INVALID_ARGUMENT',
+  'CONTRACT_VIOLATION',
+  'CLI_AGENT_AUTH_REQUIRED',
+  'CLI_AGENT_ERROR',
+  'CLI_AGENT_SESSION_METADATA_MISSING',
+  'CLI_AGENT_STOPPED',
+  'SUBAGENT_TIMEOUT',
+  'RAAPP_RELEASE_NOT_FOUND',
+  'UNKNOWN',
+] as const;
+export type WorkflowErrorCode = (typeof WORKFLOW_ERROR_CODES)[number];
 export type WorkflowEvidenceKind =
   | 'BUILD_RESULT'
   | 'GIT_STATUS'
@@ -753,7 +755,8 @@ export interface ToolResult {
   toolName?: string;
   agentRun?: AgentRunContext;
   data?: unknown;
-  errorCode?: string;
+  errorCode?: WorkflowErrorCode | string;
+  failure?: WorkflowFailure;
   errorMessage?: string;
 }
 
@@ -1117,6 +1120,8 @@ export interface RuntimeChildExecution {
   cliRunId?: ID;
   label?: string;
   status: RuntimeChildExecutionStatus;
+  errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
   lastOutput?: string;
   updatedAt: Timestamp;
 }
@@ -1297,6 +1302,7 @@ export interface CLIAgentSessionSnapshot {
   completedAt?: Timestamp;
   activeCallId?: ID;
   errorCode?: WorkflowErrorCode;
+  failure?: WorkflowFailure;
   lastOutput?: string;
   lastExitCode?: number;
   recoveryAttempts?: number;
@@ -1649,6 +1655,7 @@ export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime
 export type ArchitectureEventAction =
   | 'run_created'
   | 'run_stopped'
+  | 'node_failed'
   | 'participant_completed'
   | 'participant_incomplete'
   | 'router_selected'
@@ -1668,6 +1675,7 @@ export type ArchitectureExecutionEventType =
   | 'artifact_created'
   | 'memory_persisted'
   | 'final_artifact'
+  | 'node_failed'
   | 'node_completed'
   | 'run_stopped';
 
@@ -1875,10 +1883,11 @@ export interface ArchitectureGraphProjection {
   nodes: Array<{
     id: string;
     sessionId?: ID;
+    roleSlotId?: string;
     label: string;
     kind: ArchitectureNodeKind;
     behavior?: ArchitectureSchemaNode['behavior'];
-    status: 'pending' | 'running' | 'completed';
+    status: ArchitectureGraphNodeStatus;
     actionSummary?: string;
     action?: ArchitectureEventAction;
     detail?: string;
@@ -1922,3 +1931,5 @@ export interface ArchitectureChatProjection {
     createdAt: Timestamp;
   }>;
 }
+
+export type ArchitectureGraphNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';

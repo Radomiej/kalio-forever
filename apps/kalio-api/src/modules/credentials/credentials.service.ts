@@ -290,9 +290,9 @@ export class CredentialsService {
       .from(appSettings)
       .where(eq(appSettings.key, 'max_tool_attempts'))
       .then((r) => r[0]);
-    if (!row) return 8;
+    if (!row) return 30;
     const parsed = parseInt(row.value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
   }
 
   private encryptApiKey(apiKey: string): string {

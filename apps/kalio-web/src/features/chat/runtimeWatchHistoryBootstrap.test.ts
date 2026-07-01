@@ -41,6 +41,7 @@ vi.mock('../../store/agentStore', () => ({
 describe('runtimeWatchHistoryBootstrap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hydrateSessionHistoryIntoStore.mockResolvedValue(undefined);
     fetchSessionHistoryWindow.mockResolvedValue({
       messages: [],
       meta: {
@@ -146,6 +147,69 @@ describe('runtimeWatchHistoryBootstrap', () => {
     expect(hydrateSessionHistoryIntoStore).toHaveBeenNthCalledWith(2, expect.objectContaining({
       sessionId: 'child-1',
     }));
+  });
+
+  it('does not rebuild architecture projections during background history preload', async () => {
+    const now = Date.now();
+    const sessions = [
+      { id: 'child', personaId: 'default', title: 'Child', kind: 'subagent', createdAt: now, updatedAt: now, parentSessionId: 'root' },
+    ] satisfies ChatSession[];
+
+    await preloadRuntimeWatchSessionHistory({
+      sessions,
+      runtimeWatchTargets: [],
+    });
+
+    const hydrateArgs = hydrateSessionHistoryIntoStore.mock.calls[0]?.[0];
+    expect(hydrateArgs?.getSessions()).toEqual([]);
+    expect(hydrateArgs?.fetchArchitectureRunProjection).toEqual(expect.any(Function));
+    if (!hydrateArgs?.fetchArchitectureRunProjection) {
+      throw new Error('Missing background architecture projection guard');
+    }
+    await expect(hydrateArgs.fetchArchitectureRunProjection('run-id')).rejects.toThrow('Background history preload skips architecture projection fetch');
+  });
+
+  it('limits background history preload concurrency so active workflow requests are not starved', async () => {
+    const now = Date.now();
+    const sessions = Array.from({ length: 8 }, (_, index) => ({
+      id: `child-${index}`,
+      personaId: 'default',
+      title: `Child ${index}`,
+      kind: 'subagent',
+      createdAt: now - index,
+      updatedAt: now - index,
+      parentSessionId: 'root',
+    })) satisfies ChatSession[];
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    hydrateSessionHistoryIntoStore.mockImplementation(() => new Promise<void>((resolve) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      releases.push(() => {
+        active -= 1;
+        resolve();
+      });
+    }));
+
+    const preload = preloadRuntimeWatchSessionHistory({
+      sessions,
+      runtimeWatchTargets: [],
+    });
+    await Promise.resolve();
+
+    expect(hydrateSessionHistoryIntoStore).toHaveBeenCalledTimes(4);
+    expect(maxActive).toBeLessThanOrEqual(4);
+
+    while (hydrateSessionHistoryIntoStore.mock.calls.length < sessions.length) {
+      releases.splice(0).forEach((release) => release());
+      await Promise.resolve();
+    }
+    releases.splice(0).forEach((release) => release());
+    await preload;
+
+    expect(hydrateSessionHistoryIntoStore).toHaveBeenCalledTimes(sessions.length);
+    expect(maxActive).toBeLessThanOrEqual(4);
   });
 
   it('skips already hydrated sessions unless force is requested', async () => {

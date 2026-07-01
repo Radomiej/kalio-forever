@@ -1,3 +1,4 @@
+import { WORKFLOW_ERROR_CODES } from '@kalio/types';
 import type {
   ChatMessage,
   CLIAgentResult,
@@ -6,9 +7,13 @@ import type {
   RaAppNativeResult,
   RaAppPendingApproval,
   SubagentToolResult,
+  WorkflowErrorCode,
+  WorkflowFailure,
 } from '@kalio/types';
 import type { ImageResultData } from './ImageResultRenderer';
 export { extractSubAgentFlowResult } from './subAgentFlowResult.parser';
+
+const WORKFLOW_ERROR_CODE_SET = new Set<string>(WORKFLOW_ERROR_CODES);
 
 export interface WebSearchResultChunk {
   content: string;
@@ -74,6 +79,31 @@ export function extractCLIAgentResult(data: unknown): CLIAgentResult | null {
   return null;
 }
 
+function isWorkflowErrorCode(value: unknown): value is WorkflowErrorCode {
+  return typeof value === 'string' && WORKFLOW_ERROR_CODE_SET.has(value);
+}
+
+function extractWorkflowFailure(data: unknown): WorkflowFailure | undefined {
+  if (!data || typeof data !== 'object') {
+    return undefined;
+  }
+  const record = data as Record<string, unknown>;
+  if (
+    !isWorkflowErrorCode(record['code'])
+    || typeof record['retryable'] !== 'boolean'
+    || typeof record['message'] !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    code: record['code'],
+    retryable: record['retryable'],
+    message: record['message'],
+    source: typeof record['source'] === 'string' ? record['source'] : undefined,
+  };
+}
+
 export function extractCLIAgentSessionSnapshot(data: unknown): CLIAgentSessionSnapshot | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
@@ -100,6 +130,8 @@ export function extractCLIAgentSessionSnapshot(data: unknown): CLIAgentSessionSn
     startedAt: typeof d['startedAt'] === 'number' ? d['startedAt'] : undefined,
     completedAt: typeof d['completedAt'] === 'number' ? d['completedAt'] : undefined,
     activeCallId: typeof d['activeCallId'] === 'string' ? d['activeCallId'] : undefined,
+    errorCode: isWorkflowErrorCode(d['errorCode']) ? d['errorCode'] : undefined,
+    failure: extractWorkflowFailure(d['failure']),
     lastOutput: typeof d['lastOutput'] === 'string'
       ? d['lastOutput']
       : typeof d['output'] === 'string'

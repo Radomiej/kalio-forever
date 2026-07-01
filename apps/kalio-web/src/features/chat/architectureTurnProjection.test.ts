@@ -14,6 +14,7 @@ function makeTurn(overrides: Partial<AgentTurn> = {}): AgentTurn {
     promptMessageId: overrides.promptMessageId,
     items: overrides.items ?? [],
     done: overrides.done ?? true,
+    turnKind: overrides.turnKind,
     agentRun: overrides.agentRun,
     error: overrides.error,
   };
@@ -279,6 +280,123 @@ describe('resolveArchitectureRunTurnUpdate', () => {
     });
 
     expect(resolved.nextTurn.done).toBe(true);
+    expect(resolved.turns).toEqual([resolved.nextTurn]);
+  });
+
+  it('removes stale workflow-start placeholders for the same prompt when typed projection arrives', () => {
+    const currentMessages: ChatMessage[] = [
+      {
+        id: 'architecture:user-2:pending-original',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Architecture run is starting.',
+        createdAt: 2,
+      },
+      {
+        id: 'architecture:user-2:pending-duplicate',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Architecture run is starting.',
+        createdAt: 3,
+      },
+    ];
+    const currentTurns: AgentTurn[] = [
+      makeTurn({
+        id: 'architecture-turn-pending',
+        promptMessageId: 'user-2',
+        turnKind: 'workflow-envelope',
+        items: [
+          { kind: 'text', messageId: 'architecture:user-2:pending-original' },
+          { kind: 'text', messageId: 'architecture:user-2:pending-duplicate' },
+        ],
+        done: false,
+      }),
+    ];
+
+    const resolved = resolveArchitectureRunTurnUpdate({
+      currentMessages,
+      currentTurns,
+      pendingAssistantMessageId: 'architecture:user-2:pending-original',
+      promptMessageId: 'user-2',
+      projection: {
+        turnKind: 'workflow-envelope',
+        turnItems: [{ kind: 'text', messageId: 'architecture:run-done:text:event-1' }],
+        messages: [
+          {
+            id: 'architecture:run-done:text:event-1',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: 'Workflow completed',
+            architectureRun: {
+              runId: 'run-done',
+              schemaId: 'strategic-decision-council',
+              status: 'completed',
+              trace: [],
+              routeHops: [],
+            },
+            createdAt: 4,
+          },
+        ],
+      },
+      result: makeResult('run-done', 'completed'),
+      sessionId: 'session-1',
+    });
+
+    expect(resolved.messages.map((message) => message.content)).toEqual(['Workflow completed']);
+    expect(resolved.nextTurn.items).toEqual([{ kind: 'text', messageId: 'architecture:run-done:text:event-1' }]);
+    expect(resolved.turns).toEqual([resolved.nextTurn]);
+  });
+
+  it('removes a stale workflow-start turn by pending assistant id when local prompt linkage drifted', () => {
+    const currentMessages: ChatMessage[] = [
+      {
+        id: 'architecture:user-2:pending-original',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: 'Architecture run is starting.',
+        createdAt: 2,
+      },
+    ];
+    const currentTurns: AgentTurn[] = [
+      makeTurn({
+        id: 'architecture-turn-pending',
+        promptMessageId: 'user-stale',
+        turnKind: 'workflow-envelope',
+        items: [{ kind: 'text', messageId: 'architecture:user-2:pending-original' }],
+        done: false,
+      }),
+    ];
+
+    const resolved = resolveArchitectureRunTurnUpdate({
+      currentMessages,
+      currentTurns,
+      pendingAssistantMessageId: 'architecture:user-2:pending-original',
+      promptMessageId: 'user-2',
+      projection: {
+        turnKind: 'workflow-envelope',
+        turnItems: [{ kind: 'text', messageId: 'architecture:run-done:text:event-1' }],
+        messages: [
+          {
+            id: 'architecture:run-done:text:event-1',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: 'Workflow completed',
+            architectureRun: {
+              runId: 'run-done',
+              schemaId: 'strategic-decision-council',
+              status: 'completed',
+              trace: [],
+              routeHops: [],
+            },
+            createdAt: 4,
+          },
+        ],
+      },
+      result: makeResult('run-done', 'completed'),
+      sessionId: 'session-1',
+    });
+
+    expect(resolved.messages.map((message) => message.id)).toEqual(['architecture:run-done:text:event-1']);
     expect(resolved.turns).toEqual([resolved.nextTurn]);
   });
 

@@ -287,8 +287,8 @@ describe('buildExecutionGraphModel', () => {
     const architectureNodes = model.nodes.filter((node) => node.kind === 'architecture-run');
     expect(architectureNodes.map((node) => node.subtitle)).toEqual([
       'strategic-decision-council / completed',
-      'agent-1 -> router-1',
-      'router-1 -> artifact',
+      'Agent 1 -> Router 1',
+      'Router 1 -> Artifact',
     ]);
     expect(architectureNodes.map((node) => ({ id: node.id, column: node.column, row: node.row }))).toEqual([
       { id: 'architecture-run:a1', column: 2, row: 0 },
@@ -423,11 +423,11 @@ describe('buildExecutionGraphModel', () => {
         id: 'architecture-run:a2',
         kind: 'architecture-run',
         title: 'Architecture run',
-        status: 'success',
+        status: 'running',
       }),
       expect.objectContaining({
         id: 'architecture-route:a2:0',
-        subtitle: 'strategist -> router',
+        subtitle: 'Strategist -> Router',
       }),
       expect.objectContaining({
         id: 'tool:architecture:run-1:event-strategist',
@@ -647,9 +647,9 @@ describe('buildExecutionGraphModel', () => {
     expect(model.nodes
       .filter((node) => node.id.startsWith('architecture-route:'))
       .map((node) => node.subtitle)).toEqual([
-      'agent-1 #1 -> router-1',
-      'router-2 #1 -> agent-1',
-      'agent-1 #2 -> router-1',
+      'Agent 1 #1 -> Router 1',
+      'Router 2 #1 -> Agent 1',
+      'Agent 1 #2 -> Router 1',
     ]);
   });
 
@@ -764,8 +764,8 @@ describe('buildExecutionGraphModel', () => {
 
     const routeNodes = model.nodes.filter((node) => node.id.startsWith('architecture-route:'));
     expect(routeNodes.map((node) => node.subtitle)).toEqual([
-      'router -> pragmatist',
-      'pragmatist -> router',
+      'Router -> Pragmatist',
+      'Pragmatist -> Router',
     ]);
     expect(routeNodes.map((node) => node.title)).toEqual(['Router', 'Pragmatist']);
     expect(model.edges).toEqual(expect.arrayContaining([
@@ -1534,7 +1534,7 @@ describe('buildExecutionGraphModel', () => {
       expect.objectContaining({
         id: 'agent-flow:flow-run-1',
         kind: 'agent-flow',
-        status: 'running',
+        status: 'waiting',
         payload: expect.objectContaining({ result: null, childExecutionKind: 'sub_agentflow' }),
       }),
     ]));
@@ -1648,6 +1648,7 @@ describe('buildExecutionGraphModel', () => {
     const toolNode = model.nodes.find((node) => node.id === 'tool:call-delete-1');
 
     expect(toolNode?.subtitle).toBe('Awaiting confirmation');
+    expect(toolNode?.status).toBe('waiting');
     expect(toolNode?.payload.kind).toBe('tool');
     expect(toolNode?.payload.kind === 'tool' ? toolNode.payload.confirmationRequired : false).toBe(true);
   });

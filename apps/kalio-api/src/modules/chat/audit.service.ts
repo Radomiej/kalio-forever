@@ -9,7 +9,6 @@ import {
   type AuditLogEntry,
   type AuditLogInput,
   type AuditLogQuery,
-  type AuditLogSource,
   type RawAuditLogEntry,
   buildAuditWhereClause,
   defaultRetentionPolicy,

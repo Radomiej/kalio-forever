@@ -290,6 +290,12 @@ describe('SessionPanel', () => {
     ).toBe(false);
   }
 
+  function architectureRunRequestUrls(): string[] {
+    return mockApiGet.mock.calls
+      .map(([url]) => url)
+      .filter((url): url is string => typeof url === 'string' && url.includes('/api/architecture-runs/'));
+  }
+
   it('renders session titles', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
@@ -424,6 +430,413 @@ describe('SessionPanel', () => {
 
     expect(screen.getByText('Sub-agent: Landing page')).toBeTruthy();
     expect(screen.getByTestId('subagent-session-badge-sub-1')).toBeTruthy();
+  });
+
+  it('does not auto-fetch full architecture projections for inactive workflow hosts in the sidebar', async () => {
+    const now = Date.now();
+    const activeChat: ChatSession = {
+      id: 'active-chat',
+      personaId: 'default',
+      title: 'Active chat',
+      createdAt: now - 1_000,
+      updatedAt: now,
+    };
+    const historicalHost: ChatSession = {
+      id: 'history-host',
+      personaId: 'default',
+      title: 'Historical workflow',
+      createdAt: now - 10_000,
+      updatedAt: now - 9_000,
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Strategic Decision Council',
+        },
+      },
+    };
+    const historicalRoot: ChatSession = {
+      id: 'history-root',
+      personaId: 'default',
+      title: 'Strategic Decision Council',
+      parentSessionId: 'history-host',
+      kind: 'chat',
+      createdAt: now - 9_000,
+      updatedAt: now - 8_000,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root',
+        architectureContext: {
+          architectureRunId: 'run-history',
+          schemaId: 'strategic-decision-council',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Strategic Decision Council',
+          conversationVisibility: 'hidden',
+        },
+      },
+    };
+    const historicalBranch: ChatSession = {
+      id: 'history-analyst',
+      personaId: 'agent-analyst',
+      title: 'Strategic Decision Council: Analyst',
+      parentSessionId: 'history-root',
+      kind: 'subagent',
+      createdAt: now - 8_000,
+      updatedAt: now - 7_000,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'analyst',
+        architectureContext: {
+          architectureRunId: 'run-history',
+          roleSlotId: 'analyst',
+          roleSlotType: 'participant',
+          displayLabel: 'Analyst',
+          conversationVisibility: 'visible',
+        },
+      },
+    };
+    const sessions = [activeChat, historicalHost, historicalRoot, historicalBranch];
+    mockState.sessions = sessions;
+    mockState.activeSessionId = 'active-chat';
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: sessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url.endsWith('/messages')) return Promise.resolve({ data: [] });
+      if (url.includes('/api/architecture-runs/')) {
+        return Promise.resolve({
+          data: {
+            runId: 'run-history',
+            status: 'completed',
+            nodes: [],
+            edges: [],
+            messages: [],
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(sessions));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    expect(architectureRunRequestUrls()).toEqual([]);
+  });
+
+  it('hydrates typed architecture projection for visible workflow hosts after reload', async () => {
+    const now = Date.now();
+    const host: ChatSession = {
+      id: 'host',
+      personaId: 'default',
+      title: 'Structured Output JSON Failure',
+      createdAt: now - 5_000,
+      updatedAt: now - 1_000,
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          schemaId: 'architecture_debate',
+          schemaName: 'Architecture Debate',
+          displayLabel: 'Architecture Debate',
+        },
+      },
+    };
+    const root: ChatSession = {
+      id: 'arch-run-root',
+      personaId: 'default',
+      title: 'Architecture root',
+      parentSessionId: 'host',
+      createdAt: now - 4_000,
+      updatedAt: now - 4_000,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          schemaId: 'architecture_debate',
+          schemaName: 'Architecture Debate',
+          displayLabel: 'Architecture Debate',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'hidden',
+        },
+      },
+    };
+    const finalizer: ChatSession = {
+      id: 'arch-run-finalizer',
+      personaId: 'agent-synthesizer',
+      title: 'Architecture Debate: Finalizer',
+      kind: 'subagent',
+      parentSessionId: 'arch-run-root',
+      createdAt: now - 3_000,
+      updatedAt: now - 3_000,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'finalizer',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'finalizer',
+          roleSlotType: 'finalizer',
+          displayLabel: 'Finalizer',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+    };
+    const sessions = [host, root, finalizer];
+    mockState.sessions = sessions;
+    mockState.activeSessionId = 'host';
+    mockState.sessionMessages = {
+      host: [],
+      'arch-run-root': [],
+      'arch-run-finalizer': [
+        { id: 'done', sessionId: 'arch-run-finalizer', role: 'assistant', content: 'stale done turn', createdAt: now - 2_000 },
+      ],
+    };
+    mockState.sessionAgentTurns = {
+      'arch-run-finalizer': [{ id: 'turn-finalizer', sessionId: 'arch-run-finalizer', items: [], done: true } as AgentTurn],
+    };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: sessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/host/messages') {
+        return Promise.resolve({
+          data: [{ id: 'user-1', sessionId: 'host', role: 'user', content: 'Run workflow.', createdAt: now - 4_500 }],
+        });
+      }
+      if (url === '/api/sessions/arch-run-root/messages') return Promise.resolve({ data: [] });
+      if (url === '/api/architecture-runs/run-live/events') {
+        return Promise.resolve({
+          data: [{
+            id: 'event-failed',
+            runId: 'run-live',
+            sequence: 1,
+            type: 'node_failed',
+            nodeId: 'orchestrator',
+            roleSlotId: 'orchestrator',
+            status: 'failed',
+            errorCode: 'CONTRACT_VIOLATION',
+            createdAt: now - 1_500,
+          }],
+        });
+      }
+      if (url === '/api/architecture-runs/run-live/graph') {
+        return Promise.resolve({
+          data: {
+            runId: 'run-live',
+            schemaId: 'architecture_debate',
+            schemaName: 'Architecture Debate',
+            status: 'failed',
+            nodes: [
+              { id: 'orchestrator', roleSlotId: 'orchestrator', label: 'Orchestrator', kind: 'router', status: 'failed', eventIds: ['event-failed'] },
+              { id: 'final-artifact', roleSlotId: 'finalizer', sessionId: 'arch-run-finalizer', label: 'Final Artifact', kind: 'artifact', status: 'pending', eventIds: [] },
+            ],
+            edges: [],
+            routeHops: [],
+            childAgents: [],
+          },
+        });
+      }
+      if (url === '/api/architecture-runs/run-live/chat') {
+        return Promise.resolve({ data: { runId: 'run-live', messages: [] } });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(sessions));
+
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/architecture-runs/run-live/graph'));
+    expect(mockSetMessages).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'architecture-rehydrate:host:run-live',
+          architectureRun: expect.objectContaining({
+            runId: 'run-live',
+            status: 'failed',
+            graphNodes: expect.arrayContaining([
+              expect.objectContaining({ id: 'final-artifact', roleSlotId: 'finalizer', status: 'pending' }),
+            ]),
+          }),
+        }),
+      ]),
+      'host',
+    );
+  });
+
+  it('does not let terminal stale architecture metadata block typed projection reload after workflow reload', async () => {
+    const now = Date.now();
+    const host: ChatSession = {
+      id: 'host',
+      personaId: 'default',
+      title: 'Structured Output JSON Failure',
+      createdAt: now - 5_000,
+      updatedAt: now - 1_000,
+      runtimeContext: {
+        runtimeKind: 'chat',
+        architectureContext: {
+          schemaId: 'architecture_debate',
+          schemaName: 'Architecture Debate',
+          displayLabel: 'Architecture Debate',
+        },
+      },
+    };
+    const root: ChatSession = {
+      id: 'arch-run-root',
+      personaId: 'default',
+      title: 'Architecture root',
+      parentSessionId: 'host',
+      createdAt: now - 4_000,
+      updatedAt: now - 4_000,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          schemaId: 'architecture_debate',
+          schemaName: 'Architecture Debate',
+          displayLabel: 'Architecture Debate',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'hidden',
+        },
+      },
+    };
+    const orchestrator: ChatSession = {
+      id: 'arch-run-orchestrator',
+      personaId: 'agent-orchestrator',
+      title: 'Architecture Debate: Orchestrator',
+      kind: 'subagent',
+      parentSessionId: 'arch-run-root',
+      createdAt: now - 3_000,
+      updatedAt: now - 3_000,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'orchestrator',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'orchestrator',
+          roleSlotType: 'orchestrator',
+          displayLabel: 'Orchestrator',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+    };
+    const finalizer: ChatSession = {
+      id: 'arch-run-finalizer',
+      personaId: 'agent-synthesizer',
+      title: 'Architecture Debate: Finalizer',
+      kind: 'subagent',
+      parentSessionId: 'arch-run-root',
+      createdAt: now - 2_500,
+      updatedAt: now - 2_500,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'finalizer',
+        architectureContext: {
+          architectureRunId: 'run-live',
+          roleSlotId: 'finalizer',
+          roleSlotType: 'finalizer',
+          displayLabel: 'Finalizer',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+    };
+    const staleHostMessages: ChatMessage[] = [{
+      id: 'stale-summary',
+      sessionId: 'host',
+      role: 'assistant',
+      content: 'legacy stale summary',
+      createdAt: now - 2_000,
+      architectureRun: {
+        runId: 'run-live',
+        schemaId: 'architecture_debate',
+        status: 'completed',
+        trace: [],
+        routeHops: [],
+      },
+    }];
+    const sessions = [host, root, orchestrator, finalizer];
+    mockState.sessions = sessions;
+    mockState.activeSessionId = 'host';
+    mockState.sessionMessages = {
+      host: staleHostMessages,
+      'arch-run-root': [],
+      'arch-run-orchestrator': [
+        { id: 'orchestrator-done', sessionId: 'arch-run-orchestrator', role: 'assistant', content: 'stale done turn', createdAt: now - 1_900 },
+      ],
+      'arch-run-finalizer': [
+        { id: 'finalizer-done', sessionId: 'arch-run-finalizer', role: 'assistant', content: 'stale done turn', createdAt: now - 1_800 },
+      ],
+    };
+    mockState.sessionAgentTurns = {
+      host: [{ id: 'turn-host', sessionId: 'host', items: [], done: true } as AgentTurn],
+      'arch-run-orchestrator': [{ id: 'turn-orchestrator', sessionId: 'arch-run-orchestrator', items: [], done: true } as AgentTurn],
+      'arch-run-finalizer': [{ id: 'turn-finalizer', sessionId: 'arch-run-finalizer', items: [], done: true } as AgentTurn],
+    };
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === '/api/sessions') return Promise.resolve({ data: sessions });
+      if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
+      if (url === '/api/sessions/host/messages') return Promise.resolve({ data: staleHostMessages });
+      if (url === '/api/sessions/arch-run-root/messages') return Promise.resolve({ data: [] });
+      if (url === '/api/architecture-runs/run-live/events') {
+        return Promise.resolve({
+          data: [{
+            id: 'event-failed',
+            runId: 'run-live',
+            sequence: 1,
+            type: 'node_failed',
+            nodeId: 'orchestrator',
+            roleSlotId: 'orchestrator',
+            status: 'failed',
+            errorCode: 'CONTRACT_VIOLATION',
+            createdAt: now - 1_500,
+          }],
+        });
+      }
+      if (url === '/api/architecture-runs/run-live/graph') {
+        return Promise.resolve({
+          data: {
+            runId: 'run-live',
+            schemaId: 'architecture_debate',
+            schemaName: 'Architecture Debate',
+            status: 'failed',
+            nodes: [
+              { id: 'orchestrator', roleSlotId: 'orchestrator', sessionId: 'arch-run-orchestrator', label: 'Orchestrator', kind: 'router', status: 'failed', eventIds: ['event-failed'] },
+              { id: 'finalizer', roleSlotId: 'finalizer', sessionId: 'arch-run-finalizer', label: 'Finalizer', kind: 'artifact', status: 'pending', eventIds: [] },
+            ],
+            edges: [],
+            routeHops: [],
+            childAgents: [],
+          },
+        });
+      }
+      if (url === '/api/architecture-runs/run-live/chat') {
+        return Promise.resolve({ data: { runId: 'run-live', messages: [] } });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(sessions));
+
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/architecture-runs/run-live/graph'));
+    expect(mockSetMessages).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'architecture-rehydrate:host:run-live',
+          architectureRun: expect.objectContaining({
+            runId: 'run-live',
+            hostProjectionKind: 'workflow-envelope',
+            status: 'failed',
+            graphNodes: expect.arrayContaining([
+              expect.objectContaining({ id: 'orchestrator', roleSlotId: 'orchestrator', status: 'failed' }),
+              expect.objectContaining({ id: 'finalizer', roleSlotId: 'finalizer', status: 'pending' }),
+            ]),
+          }),
+        }),
+      ]),
+      'host',
+    );
   });
 
   it('does not show a child toggle when a workflow host only has technical descendants', async () => {
@@ -616,7 +1029,13 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:pragmatist',
           architectureSlotId: 'pragmatist',
-          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'pragmatist',
+            displayLabel: 'Pragmatist',
+            sessionSurface: 'conversation-branch',
+            conversationVisibility: 'visible',
+          },
         },
         createdAt: now - 4000,
         updatedAt: now - 4000,
@@ -714,7 +1133,7 @@ describe('SessionPanel', () => {
               { id: 'pragmatist', label: 'Pragmatist', kind: 'role', status: 'completed', eventIds: ['event-pragmatist'] },
               { id: 'innovator', label: 'Innovator', kind: 'role', status: 'running', eventIds: ['event-innovator'] },
               { id: 'analyst', label: 'Analyst', kind: 'role', status: 'pending', eventIds: [] },
-              { id: 'shadow', label: 'Shadow', kind: 'role', status: 'completed', eventIds: ['event-shadow'] },
+              { id: 'shadow', label: 'Shadow', kind: 'role', status: 'failed', eventIds: ['event-shadow'] },
             ],
             graphEdges: [],
           } as ChatMessage['architectureRun'],
@@ -1263,7 +1682,13 @@ describe('SessionPanel', () => {
           runtimeKind: 'agent-flow-branch',
           parentToolCallId: 'architecture:run-live:pragmatist',
           architectureSlotId: 'pragmatist',
-          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'pragmatist',
+            displayLabel: 'Pragmatist',
+            sessionSurface: 'conversation-branch',
+            conversationVisibility: 'visible',
+          },
         },
         createdAt: now - 1000,
         updatedAt: now - 1000,
@@ -1819,7 +2244,13 @@ describe('SessionPanel', () => {
         runtimeContext: {
           runtimeKind: 'agent-flow-branch',
           architectureSlotId: 'pragmatist',
-          architectureContext: { architectureRunId: 'run-live', roleSlotId: 'pragmatist', displayLabel: 'Pragmatist' },
+          architectureContext: {
+            architectureRunId: 'run-live',
+            roleSlotId: 'pragmatist',
+            displayLabel: 'Pragmatist',
+            sessionSurface: 'conversation-branch',
+            conversationVisibility: 'visible',
+          },
         },
         createdAt: now - 2_000,
         updatedAt: now - 2_000,

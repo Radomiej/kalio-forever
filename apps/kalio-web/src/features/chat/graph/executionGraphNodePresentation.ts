@@ -390,8 +390,8 @@ export function getGraphNodeMetadata(node: GraphNodePresentationInput): GraphNod
       return [
         {
           label: 'Status',
-          value: node.payload.result?.status ?? (node.status === 'running' ? 'running' : node.status === 'success' ? 'done' : 'live runtime'),
-          tone: node.payload.result?.status === 'running' || node.status === 'running' ? 'warning' : 'accent',
+          value: node.payload.result?.status ?? (node.status === 'waiting' ? 'waiting' : node.status === 'running' ? 'running' : node.status === 'success' ? 'done' : 'live runtime'),
+          tone: node.payload.result?.status === 'waiting_on_orchestrator' || node.payload.result?.status === 'running' || node.status === 'waiting' || node.status === 'running' ? 'warning' : 'accent',
         },
         { label: 'Graph', value: node.payload.graphRunId, tone: 'accent' },
         { label: 'Events', value: String(node.payload.result?.tracePreview?.length ?? 0), tone: 'default' },

@@ -13,13 +13,16 @@ export const ROW_GAP = 44;
 export const BOARD_PADDING_X = 28;
 export const BOARD_PADDING_Y = 28;
 
-export type ExecutionGraphNodeStatus = 'idle' | 'running' | 'success' | 'error';
+export type ExecutionGraphNodeStatus = 'idle' | 'running' | 'waiting' | 'success' | 'error';
 
 export function statusFromRuntimeChildExecution(
   status: RuntimeChildExecution['status'],
 ): ExecutionGraphNodeStatus {
-  if (status === 'running' || status === 'waiting') {
+  if (status === 'running') {
     return 'running';
+  }
+  if (status === 'waiting') {
+    return 'waiting';
   }
   if (status === 'completed') {
     return 'success';
@@ -235,8 +238,11 @@ export function statusFromActivity(
   if (activity?.status === 'error' || activity?.status === 'cancelled' || activity?.status === 'expired') {
     return 'error';
   }
-  if (activity?.status === 'running' || activity?.status === 'awaiting_confirmation') {
+  if (activity?.status === 'running') {
     return 'running';
+  }
+  if (activity?.status === 'awaiting_confirmation') {
+    return 'waiting';
   }
   if (activity?.status === 'success' || hasResult) {
     return 'success';
@@ -351,6 +357,7 @@ export function getTurnStatus(turn: AgentTurn, toolSnapshots: Map<string, ToolSn
     });
 
   if (toolStatuses.includes('error')) return 'error';
+  if (toolStatuses.includes('waiting')) return 'waiting';
   if (toolStatuses.includes('running')) return 'running';
   return 'success';
 }

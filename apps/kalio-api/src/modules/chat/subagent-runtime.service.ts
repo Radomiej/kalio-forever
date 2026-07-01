@@ -16,10 +16,10 @@ import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
-import { createWorkflowError, isWorkflowError } from '../../common/utils/workflow-error.util';
+import { createWorkflowError, isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import { RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME } from './raw-tool-call.parser';
 
-const DEFAULT_MAX_ITERATIONS = 8;
+const DEFAULT_MAX_ITERATIONS = 30;
 
 type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
 type ChatErrorCode = SocketEvents['chat:error']['code'];
@@ -456,6 +456,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       };
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      const failure = workflowFailureFromError(error);
       const fallbackState = new TurnState();
       fallbackState.replaceText(this.failedRunResultText(error.message, streamedText.trim()));
       await this.persistTerminalAssistantMessage(
@@ -486,6 +487,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           vfsMode: request.vfsMode,
           vfsSessionId,
           objective: request.objective,
+          errorCode: failure.code,
+          failure,
           errorMessage: error.message,
           ...(request.auditContext ?? {}),
         },

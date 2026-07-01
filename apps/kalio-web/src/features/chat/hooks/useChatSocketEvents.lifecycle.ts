@@ -20,6 +20,21 @@ type AgentStoreState = ReturnType<typeof useAgentStore.getState>;
 type SessionStoreState = ReturnType<typeof useSessionStore.getState>;
 type CliChildDeps = Parameters<typeof handleCliChildSessionCreated>[0];
 
+export function reconnectSocketWhenBrowserOnline({
+  isConnected,
+  connect,
+  isBrowserOnline = () => globalThis.navigator?.onLine !== false,
+}: {
+  isConnected: () => boolean;
+  connect: () => void;
+  isBrowserOnline?: () => boolean;
+}): void {
+  if (!isBrowserOnline() || isConnected()) {
+    return;
+  }
+  connect();
+}
+
 export function registerSessionLifecycleHandlers({
   cliChildDeps,
   addSession,
@@ -179,9 +194,21 @@ export function registerConnectionRecoveryHandlers({
       onContextInvalidated,
     });
   });
+  const handleBrowserOnline = () => {
+    reconnectSocketWhenBrowserOnline({
+      isConnected: () => eventBus.connected,
+      connect: () => eventBus.connect(),
+    });
+  };
+  globalThis.addEventListener?.('online', handleBrowserOnline);
+  const reconnectInterval = globalThis.setInterval?.(handleBrowserOnline, 2_000);
 
   return () => {
     offConnectionState();
     offReconnect();
+    globalThis.removeEventListener?.('online', handleBrowserOnline);
+    if (reconnectInterval !== undefined) {
+      globalThis.clearInterval?.(reconnectInterval);
+    }
   };
 }

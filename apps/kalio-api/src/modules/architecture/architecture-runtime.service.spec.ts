@@ -862,7 +862,21 @@ describe('ArchitectureRuntimeService', () => {
     expect(service.getEvents(run.id).at(-1)).toMatchObject({
       type: 'router_decision',
       message: 'Architecture run failed.',
-      data: { error: 'provider rejected credentials' },
+      status: 'failed',
+      errorCode: 'UNKNOWN',
+      failure: {
+        code: 'UNKNOWN',
+        retryable: false,
+        message: 'provider rejected credentials',
+      },
+      data: {
+        errorCode: 'UNKNOWN',
+        failure: {
+          code: 'UNKNOWN',
+          retryable: false,
+          message: 'provider rejected credentials',
+        },
+      },
     });
     expect(service.getChat(run.id)?.messages.at(-1)).toMatchObject({
       speaker: 'router',
@@ -880,6 +894,12 @@ describe('ArchitectureRuntimeService', () => {
       data: expect.objectContaining({
         kind: 'architecture_error',
         architectureRunId: run.id,
+        errorCode: 'UNKNOWN',
+        failure: expect.objectContaining({
+          code: 'UNKNOWN',
+          retryable: false,
+          message: 'provider rejected credentials',
+        }),
         errorMessage: 'provider rejected credentials',
       }),
     }));
@@ -1063,16 +1083,79 @@ describe('ArchitectureRuntimeService', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(service.findRun(run.id)?.status).toBe('failed');
+    expect(service.findRun(run.id)).toMatchObject({
+      errorCode: 'UNKNOWN',
+      failure: {
+        code: 'UNKNOWN',
+        retryable: false,
+        message: 'provider rejected credentials',
+      },
+    });
     expect(service.getEvents(run.id).at(-1)).toMatchObject({
       type: 'router_decision',
       message: 'Architecture run failed.',
-      data: { error: 'provider rejected credentials' },
+      status: 'failed',
+      errorCode: 'UNKNOWN',
+      failure: {
+        code: 'UNKNOWN',
+        retryable: false,
+        message: 'provider rejected credentials',
+      },
+      data: {
+        errorCode: 'UNKNOWN',
+        failure: {
+          code: 'UNKNOWN',
+          retryable: false,
+          message: 'provider rejected credentials',
+        },
+      },
     });
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'parent-chat',
       type: 'error',
       label: expect.stringContaining(`architecture:error:strategic-decision-council:${run.id}`),
     }));
+  });
+
+  it('persists typed node and run failures for provider structured-output errors', async () => {
+    const { service, executor } = createService();
+    vi.mocked(executor.execute).mockRejectedValue(Object.assign(new Error('provider wording changed'), {
+      code: 'LLM_BAD_STRUCTURED_OUTPUT',
+    }));
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Verify structured output failures are typed.',
+      context: { parentSessionId: 'parent-chat' },
+    });
+
+    await waitUntil(() => service.findRun(run.id)?.status === 'failed');
+
+    expect(service.findRun(run.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: {
+        code: 'CONTRACT_VIOLATION',
+        source: 'llm-provider',
+        retryable: false,
+        message: 'provider wording changed',
+      },
+    });
+    expect(service.getEvents(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'node_failed',
+        nodeId: expect.any(String),
+        status: 'failed',
+        errorCode: 'CONTRACT_VIOLATION',
+      }),
+      expect.objectContaining({
+        type: 'router_decision',
+        message: 'Architecture run failed.',
+        status: 'failed',
+        errorCode: 'CONTRACT_VIOLATION',
+      }),
+    ]));
+    expect(service.getGraph(run.id)?.nodes.some((node) => node.status === 'failed')).toBe(true);
   });
 
   it('does not reclassify a completed async run when parent chat persistence fails', async () => {
@@ -1136,8 +1219,15 @@ describe('ArchitectureRuntimeService', () => {
     expect(service.getEvents(run.id).at(-1)).toMatchObject({
       type: 'router_decision',
       message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'UNKNOWN',
       data: {
-        error: expect.stringContaining('Architecture finalization blocked: CLI child implementation is incomplete'),
+        errorCode: 'UNKNOWN',
+        failure: expect.objectContaining({
+          code: 'UNKNOWN',
+          retryable: false,
+          message: expect.stringContaining('Architecture finalization blocked: CLI child implementation is incomplete'),
+        }),
       },
     });
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
