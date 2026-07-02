@@ -9,6 +9,7 @@ import { getRAApps, getRAAppGroups } from '../../services/apiClient';
 import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 import { bucketCatalogApps } from '../raapp/catalog.utils';
 import { buildRAAppLaunchRuntimeContext } from '../raapp/raappLaunchRuntimeContext';
+import { usePendingRaAppApprovals } from '../raapp/usePendingRaAppApprovals';
 
 interface TileItem {
   id: string;
@@ -45,6 +46,8 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
   const setMessages = useSessionStore((s) => s.setMessages);
   const setAgentTurns = useSessionStore((s) => s.setAgentTurns);
   const setPendingRAAppLaunchIntent = useSessionStore((s) => s.setPendingRAAppLaunchIntent);
+  const sessionMessages = useSessionStore((s) => s.sessionMessages);
+  const pendingRaAppApprovals = usePendingRaAppApprovals(sessionMessages);
 
   useEffect(() => {
     Promise.all([
@@ -139,7 +142,11 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
         <span className="text-base-content/40 text-sm">Your apps at a glance</span>
       </div>
 
-      <HomeHitlInbox onOpenSession={onOpenSessionInChat ?? (() => onNavigateToChat())} />
+      <HomeHitlInbox
+        onOpenSession={onOpenSessionInChat ?? (() => onNavigateToChat())}
+        raAppApprovals={pendingRaAppApprovals.approvals}
+        onRaAppApprovalSettled={pendingRaAppApprovals.markSettled}
+      />
 
       {/* Grid: quick-chat widget + app tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pb-8">

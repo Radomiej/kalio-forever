@@ -23,6 +23,7 @@ import {
   hasTool,
   isFastMockMode,
   mockScriptDelay,
+  MOCK_ARCHITECTURE_ROUTER_MALFORMED_OUTPUT_TRIGGER,
   MOCK_ERROR_429_MESSAGE,
   MOCK_ERROR_429_TRIGGER,
   MOCK_FS_WRITE_TRIGGER,
@@ -53,6 +54,14 @@ export class MockLLMProvider implements ILLMProvider {
     const { sessionId, messageId, onChunk, abortSignal } = options;
     const lastMessage = getLastUserMessageText(messages);
     if (options.structuredOutput?.name === 'architecture_router_output') {
+      if (lastMessage.includes(MOCK_ARCHITECTURE_ROUTER_MALFORMED_OUTPUT_TRIGGER)) {
+        options.onStructuredOutput?.({
+          nextAction: 'route_to',
+          targetNodeId: 123,
+          response: 'Mock malformed router structured output.',
+        });
+        return [];
+      }
       const targetNodeId = firstAvailableNextNode(lastMessage);
       options.onStructuredOutput?.({
         selectedStrategy: targetNodeId ?? 'finalize',

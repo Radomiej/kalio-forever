@@ -21,6 +21,9 @@ import {
   sessionAttentionLabel,
   waitingDetail,
 } from './agentRuntimeAttentionSupport';
+import { selectPendingRaAppApprovals } from './agentRuntimeRaAppApprovals';
+
+export { selectPendingApprovalCount } from './agentRuntimeApprovalSelectors';
 
 type LiveSessionLoopSeed = {
   sessionId: string;
@@ -210,21 +213,10 @@ export function selectRunningLoops(params: {
   return [...loopsBySessionId.values()].sort((left, right) => left.startedAt - right.startedAt);
 }
 
-export function selectPendingApprovalCount(params: {
-  pendingConfirmations?: Record<string, ToolConfirmationRequest[] | ToolConfirmationRequest> | null;
-  pendingBudgetApprovals?: Record<string, AgentBudgetApprovalRequest[] | AgentBudgetApprovalRequest> | null;
-}): number {
-  const confirmationCount = Object.values(params.pendingConfirmations ?? {})
-    .reduce((total, entries) => total + normalizePendingEntries(entries).length, 0);
-  const budgetApprovalCount = Object.values(params.pendingBudgetApprovals ?? {})
-    .reduce((total, entries) => total + normalizePendingEntries(entries).length, 0);
-
-  return confirmationCount + budgetApprovalCount;
-}
-
 export function selectRuntimeAttentionItems(params: {
   pendingConfirmations?: Record<string, ToolConfirmationRequest[] | ToolConfirmationRequest> | null;
   pendingBudgetApprovals?: Record<string, AgentBudgetApprovalRequest[] | AgentBudgetApprovalRequest> | null;
+  pendingRaAppApprovals?: ReturnType<typeof selectPendingRaAppApprovals> | null;
   runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot> | null;
   sessions?: ChatSession[] | null;
   sessionMessages?: Record<string, ChatMessage[]> | null;
@@ -262,6 +254,22 @@ export function selectRuntimeAttentionItems(params: {
       });
       actionableSessionIds.add(approval.sessionId);
     });
+  });
+
+  selectPendingRaAppApprovals({
+    durableApprovals: params.pendingRaAppApprovals,
+    sessionMessages: params.sessionMessages,
+  }).forEach((approval) => {
+    approvalItems.push({
+      id: `raapp:${approval.sessionId}:${approval.requestId}`,
+      sessionId: approval.sessionId,
+      kind: 'hitl',
+      label: 'RA-App approval',
+      detail: approval.displayLabel,
+      actionable: true,
+      priority: 0,
+    });
+    actionableSessionIds.add(approval.sessionId);
   });
 
   const sessions = params.sessions ?? [];

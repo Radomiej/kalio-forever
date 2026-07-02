@@ -7,6 +7,7 @@ import type {
   ChatSession,
 } from '@kalio/types';
 import { reloadSessionHistoryWithArchitectureProjection } from './architectureReloadHydration';
+import { buildTurnsFromHistory } from './chatUtils';
 
 const mockState: {
   activeSessionId: string | null;
@@ -327,6 +328,126 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
         }),
       }),
     ]));
+    expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'host');
+  });
+
+  it('keeps multiple workflow envelopes after host reload follow-ups', async () => {
+    const hostMessages: ChatMessage[] = [
+      {
+        id: 'architecture:run-1:user',
+        sessionId: 'host',
+        role: 'user',
+        content: '[Architecture: Strategic Decision Council]\nAssess the project.',
+        createdAt: 10,
+      },
+      {
+        id: 'architecture:run-1:text:final',
+        sessionId: 'host',
+        role: 'assistant',
+        content: '',
+        createdAt: 11,
+        turnId: 'architecture-turn-run-1',
+        promptMessageId: 'architecture:run-1:user',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'completed',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+          graphNodes: [],
+        },
+      },
+      {
+        id: 'architecture:run-2:user',
+        sessionId: 'host',
+        role: 'user',
+        content: '[Architecture: Strategic Decision Council]\nAssess the project again.',
+        createdAt: 20,
+      },
+      {
+        id: 'architecture:run-2:text:final',
+        sessionId: 'host',
+        role: 'assistant',
+        content: '',
+        createdAt: 21,
+        turnId: 'architecture-turn-run-2',
+        promptMessageId: 'architecture:run-2:user',
+        architectureRun: {
+          runId: 'run-2',
+          schemaId: 'strategic-decision-council',
+          status: 'failed',
+          hostProjectionKind: 'workflow-envelope',
+          trace: [],
+          routeHops: [],
+          graphNodes: [],
+        },
+      },
+    ];
+    const fetchMessages = vi.fn(async () => hostMessages);
+    const fetchArchitectureRunProjection = vi.fn(async (runId: string) => {
+      const graph: ArchitectureGraphProjection = {
+        runId,
+        schemaId: 'strategic-decision-council',
+        schemaName: 'Strategic Decision Council',
+        status: runId === 'run-2' ? 'failed' : 'completed',
+        nodes: [
+          {
+            id: `${runId}-router`,
+            label: 'Router',
+            kind: 'router',
+            status: runId === 'run-2' ? 'failed' : 'completed',
+            eventIds: [`${runId}-event-router`],
+          },
+        ],
+        edges: [],
+      };
+      const events: ArchitectureExecutionEvent[] = [
+        {
+          id: `${runId}-event-router`,
+          runId,
+          sequence: 1,
+          type: 'node_completed' as ArchitectureExecutionEvent['type'],
+          message: runId === 'run-2' ? 'Router failed with typed status.' : 'Router completed.',
+          nodeId: `${runId}-router`,
+          roleSlotId: 'router',
+          ...(runId === 'run-2' ? { status: 'failed' as const } : {}),
+          createdAt: runId === 'run-2' ? 21 : 11,
+        },
+      ];
+      const chat: ArchitectureChatProjection = {
+        runId,
+        messages: [],
+      };
+      return { chat, events, graph };
+    });
+    const setMessages = vi.fn();
+    const setAgentTurns = vi.fn();
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    const workflowRunIds = (reloadedMessages ?? [])
+      .map((message) => message.architectureRun?.runId)
+      .filter((runId): runId is string => typeof runId === 'string');
+    const workflowTurns = buildTurnsFromHistory(reloadedMessages ?? [], 'host')
+      .filter((turn) => turn.turnKind === 'workflow-envelope');
+
+    expect(fetchArchitectureRunProjection).toHaveBeenCalledWith('run-1');
+    expect(fetchArchitectureRunProjection).toHaveBeenCalledWith('run-2');
+    expect(workflowRunIds).toEqual(['run-1', 'run-2']);
+    expect(workflowTurns).toHaveLength(2);
+    expect(workflowTurns.map((turn) => turn.promptMessageId)).toEqual([
+      'architecture:run-1:user',
+      'architecture:run-2:user',
+    ]);
     expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'host');
   });
 

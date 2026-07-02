@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { RAAppSummary, RAAppGroup, VFSListResult } from '@kalio/types';
+import type { RAAppSummary, RAAppGroup, RaAppPendingApprovalSnapshot, VFSListResult } from '@kalio/types';
 import { resolvePairedBackendOrigin } from './backendOrigin';
 import { readRuntimeConfig } from './runtimeConfig';
 
@@ -54,6 +54,11 @@ export async function getRAApps(): Promise<RAAppSummary[]> {
 
 export async function getRAAppGroups(): Promise<RAAppGroup[]> {
   const { data } = await apiClient.get<RAAppGroup[]>('/api/ra-apps/groups');
+  return data;
+}
+
+export async function getPendingRAAppApprovals(): Promise<RaAppPendingApprovalSnapshot[]> {
+  const { data } = await apiClient.get<RaAppPendingApprovalSnapshot[]>('/api/ra-apps/pending-approvals');
   return data;
 }
 

@@ -181,7 +181,7 @@ describe('RAAppHITLService', () => {
       expect(results).toHaveLength(0);
     });
 
-    it('does not execute timed out approvals', async () => {
+    it('executes old pending approvals after explicit approval instead of timing them out', async () => {
       const handler = vi.fn().mockResolvedValue({ done: true });
       registry.register({
         id: 'stale_write',
@@ -201,18 +201,17 @@ describe('RAAppHITLService', () => {
 
       const results = await service.executeApproved(['stale-1'], 'sess-stale');
 
-      expect(results).toHaveLength(0);
-      expect(handler).not.toHaveBeenCalled();
-      expect(auditMock.log).toHaveBeenCalledWith(
+      expect(results).toEqual([
         expect.objectContaining({
-          type: 'external_hitl',
-          sessionId: 'sess-stale',
+          id: 'stale-1',
+          status: 'executed',
+          result: { done: true },
+        }),
+      ]);
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(auditMock.log).not.toHaveBeenCalledWith(
+        expect.objectContaining({
           label: 'raapp:timeout stale_write',
-          data: expect.objectContaining({
-            domain: 'hitl',
-            eventType: 'raapp_approval_timeout',
-            approvalId: 'stale-1',
-          }),
         }),
       );
     });
@@ -316,7 +315,7 @@ describe('RAAppHITLService', () => {
       expect(pending).toHaveLength(0);
     });
 
-    it('expires stale pending approvals and logs timeout lifecycle events', async () => {
+    it('keeps stale pending approvals until explicit approve or cancel', async () => {
       await service.savePendingApprovals('tc-timeout', 'sess-timeout', [
         { id: 'timeout-1', system: 'vfs_write', args: { path: 'stale.txt' }, displayLabel: 'Write stale.txt' },
         { id: 'fresh-1', system: 'vfs_delete', args: { path: 'fresh.txt' }, displayLabel: 'Delete fresh.txt' },
@@ -334,32 +333,16 @@ describe('RAAppHITLService', () => {
       );
       const pending = await service.getPendingForSession('sess-timeout');
 
-      expect(expired).toEqual([
+      expect(expired).toEqual([]);
+      expect(pending.map((item) => item.id).sort()).toEqual(['fresh-1', 'timeout-1']);
+      expect(auditMock.log).not.toHaveBeenCalledWith(
         expect.objectContaining({
-          id: 'timeout-1',
-          status: 'cancelled',
-          result: { reason: 'timeout', timeoutMs: 600_000 },
-        }),
-      ]);
-      expect(pending).toHaveLength(1);
-      expect(pending[0].id).toBe('fresh-1');
-      expect(auditMock.log).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'external_hitl',
-          sessionId: 'sess-timeout',
           label: 'raapp:timeout vfs_write',
-          data: expect.objectContaining({
-            kind: 'raapp_hitl_lifecycle',
-            eventType: 'raapp_approval_timeout',
-            approvalId: 'timeout-1',
-            toolCallId: 'tc-timeout',
-            timeoutMs: 600_000,
-          }),
         }),
       );
     });
 
-    it('uses configured RA-App timeout when listing pending approvals', async () => {
+    it('does not use configured RA-App timeout when listing pending approvals', async () => {
       hitlConfig.getConfig.mockResolvedValue({
         mode: 'manual',
         autoPersonaId: null,
@@ -378,18 +361,38 @@ describe('RAAppHITLService', () => {
         .set({ createdAt: new Date(Date.now() - 180_000) })
         .where(eq(schema.raappPendingApprovals.id, 'config-timeout-1'));
 
-      await expect(service.getPendingForSession('sess-config-timeout')).resolves.toHaveLength(0);
-      expect(auditMock.log).toHaveBeenCalledWith(
+      await expect(service.getPendingForSession('sess-config-timeout')).resolves.toEqual([
+        expect.objectContaining({ id: 'config-timeout-1', status: 'pending' }),
+      ]);
+      expect(auditMock.log).not.toHaveBeenCalledWith(
         expect.objectContaining({
-          type: 'external_hitl',
-          sessionId: 'sess-config-timeout',
           label: 'raapp:timeout vfs_write',
-          data: expect.objectContaining({
-            eventType: 'raapp_approval_timeout',
-            timeoutMs: 120_000,
-          }),
         }),
       );
+    });
+  });
+
+  describe('getAllPendingApprovals()', () => {
+    it('returns pending approvals across sessions for global HITL inbox hydration', async () => {
+      await service.savePendingApprovals('tc-global-a', 'sess-global-a', [
+        { id: 'global-a', system: 'vfs_write', args: { path: 'a.md' }, displayLabel: 'Write A' },
+      ]);
+      await service.savePendingApprovals('tc-global-b', 'sess-global-b', [
+        { id: 'global-b', system: 'vfs_write', args: { path: 'b.md' }, displayLabel: 'Write B' },
+      ]);
+      await service.cancelApprovals(['global-b'], 'sess-global-b');
+
+      const pending = await service.getAllPendingApprovals();
+
+      expect(pending).toEqual([
+        expect.objectContaining({
+          id: 'global-a',
+          sessionId: 'sess-global-a',
+          toolCallId: 'tc-global-a',
+          displayLabel: 'Write A',
+          status: 'pending',
+        }),
+      ]);
     });
   });
 

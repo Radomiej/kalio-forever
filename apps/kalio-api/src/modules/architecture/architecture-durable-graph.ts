@@ -70,13 +70,13 @@ function reconstructGraphFromMessages(
       return;
     }
     completedNodeIds.add(nodeId);
-    eventIdsByNodeId.set(nodeId, [...(eventIdsByNodeId.get(nodeId) ?? []), eventIdFromToolCall(runId, toolCall)]);
+    appendEventId(eventIdsByNodeId, nodeId, eventIdFromToolCall(toolCall));
   });
 
   if (persistedSummary?.status === 'completed' && persistedSummaryMessage) {
     const finalNodeId = primaryFinalNodeId(schema);
     completedNodeIds.add(finalNodeId);
-    eventIdsByNodeId.set(finalNodeId, [...(eventIdsByNodeId.get(finalNodeId) ?? []), persistedSummaryMessage.id]);
+    appendEventId(eventIdsByNodeId, finalNodeId, persistedSummaryMessage.id);
   }
 
   const routeHops = persistedSummary?.routeHops.length
@@ -86,8 +86,8 @@ function reconstructGraphFromMessages(
   routeHops.forEach((hop) => {
     completedNodeIds.add(hop.fromNodeId);
     completedNodeIds.add(hop.toNodeId);
-    eventIdsByNodeId.set(hop.fromNodeId, [...(eventIdsByNodeId.get(hop.fromNodeId) ?? []), hop.eventId]);
-    eventIdsByNodeId.set(hop.toNodeId, [...(eventIdsByNodeId.get(hop.toNodeId) ?? []), hop.eventId]);
+    appendEventId(eventIdsByNodeId, hop.fromNodeId, hop.eventId);
+    appendEventId(eventIdsByNodeId, hop.toNodeId, hop.eventId);
   });
   markCompletedParallelNodes(schema, completedNodeIds, eventIdsByNodeId);
 
@@ -114,14 +114,18 @@ function reconstructGraphFromMessages(
   };
 }
 
-function eventIdFromToolCall(runId: string, toolCall: NonNullable<ChatMessage['toolCalls']>[number]): string {
-  const legacyPrefix = `architecture:${runId}:`;
-  if (toolCall.id.startsWith(legacyPrefix)) {
-    return toolCall.id.slice(legacyPrefix.length);
-  }
+function eventIdFromToolCall(toolCall: NonNullable<ChatMessage['toolCalls']>[number]): string {
   return stringField(toolCall.args, 'architectureEventId')
     ?? stringField(toolCall.args, 'eventId')
     ?? toolCall.id;
+}
+
+function appendEventId(eventIdsByNodeId: Map<string, string[]>, nodeId: string, eventId: string): void {
+  const eventIds = eventIdsByNodeId.get(nodeId) ?? [];
+  if (eventIds.includes(eventId)) {
+    return;
+  }
+  eventIdsByNodeId.set(nodeId, [...eventIds, eventId]);
 }
 
 function sessionIdForNode(runId: string, slotOrNodeId: string | undefined): string | undefined {
@@ -186,7 +190,7 @@ function reconstructChildAgents(
         id: childSessionId,
         parentNodeId: parent.nodeId ?? sessionParent?.nodeId ?? previous?.parentNodeId,
         parentRoleSlotId: parent.roleSlotId ?? sessionParent?.roleSlotId ?? previous?.parentRoleSlotId,
-        parentEventId: eventIdFromToolCall(runId, toolCall),
+        parentEventId: eventIdFromToolCall(toolCall),
         kind: 'cli-agent',
         backend: stringField(result, 'agentId') ?? stringField(toolCall.args, 'agentId') ?? previous?.backend,
         status: latestCliStatus(previous, normalizeCliStatus(stringField(result, 'status')), message.createdAt),
@@ -299,7 +303,7 @@ function reconstructRouteHops(
       return;
     }
     hops.push({
-      eventId: eventIdFromToolCall(runId, toolCall),
+      eventId: eventIdFromToolCall(toolCall),
       source: 'agent',
       fromNodeId: nodeId,
       toNodeId: routerNodeId,

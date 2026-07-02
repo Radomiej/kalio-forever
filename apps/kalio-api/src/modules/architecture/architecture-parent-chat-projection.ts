@@ -1,7 +1,9 @@
 import type {
+  ArchitectureChatRunSummary,
   ArchitectureExecutionEvent,
   ArchitectureRun,
   ArchitectureSchema,
+  ArchitectureBranchStreamSummary,
   ChatMessage,
   LLMToolCall,
   SubagentToolResult,
@@ -15,11 +17,15 @@ export function buildArchitectureParentChatMessages(
   now: number,
 ): ChatMessage[] {
   const rootSessionId = run.rootSessionId ?? parentSessionId;
+  const turnId = `architecture-turn-${run.id}`;
+  const promptMessageId = `architecture:${run.id}:user`;
   const messages: ChatMessage[] = [{
-    id: `architecture:${run.id}:user`,
+    id: promptMessageId,
     sessionId: parentSessionId,
     role: 'user',
     content: run.prompt,
+    turnId,
+    promptMessageId,
     createdAt: now,
   }];
   const branchEvents = events.filter((event) => (
@@ -27,6 +33,11 @@ export function buildArchitectureParentChatMessages(
     && typeof event.roleSlotId === 'string'
     && !isSyntheticParallelMessage(eventMessage(event))
   ));
+  const textEvents = events.filter((event) => (
+    (event.type === 'router_decision' || event.type === 'final_artifact' || event.type === 'run_stopped')
+    && !isSyntheticParallelMessage(eventMessage(event))
+  ));
+  const architectureRun = buildArchitectureChatRunSummary(schema, run, events);
   const toolCalls = branchEvents.map((event) => toSubagentToolCall(schema, run, event));
   if (toolCalls.length > 0) {
     messages.push({
@@ -35,6 +46,9 @@ export function buildArchitectureParentChatMessages(
       role: 'assistant',
       content: '',
       toolCalls,
+      turnId,
+      promptMessageId,
+      architectureRun: textEvents.length === 0 ? architectureRun : undefined,
       createdAt: now + 1,
     });
     messages.push(...branchEvents.map((event, index) => ({
@@ -43,19 +57,20 @@ export function buildArchitectureParentChatMessages(
       role: 'tool_result' as const,
       content: JSON.stringify(toSubagentToolResult(run, parentSessionId, rootSessionId, event)),
       toolCallId: `architecture:${run.id}:${event.id}`,
+      turnId,
+      promptMessageId,
       createdAt: now + 2 + index,
     })));
   }
 
-  const textEvents = events.filter((event) => (
-    (event.type === 'router_decision' || event.type === 'final_artifact' || event.type === 'run_stopped')
-    && !isSyntheticParallelMessage(eventMessage(event))
-  ));
   messages.push(...textEvents.map((event, index) => ({
     id: `architecture:${run.id}:text:${event.id}`,
     sessionId: parentSessionId,
     role: 'assistant' as const,
     content: formatParentChatText(run, event),
+    turnId,
+    promptMessageId,
+    architectureRun: index === textEvents.length - 1 ? architectureRun : undefined,
     createdAt: now + 2 + toolCalls.length + index,
   })));
   return messages;
@@ -112,6 +127,81 @@ function streamFromEventData(data: Record<string, unknown> | undefined): string 
   }
   const branchSessionId = stream['branchSessionId'];
   return typeof branchSessionId === 'string' ? branchSessionId : null;
+}
+
+function streamSummaryFromEventData(data: Record<string, unknown> | undefined): ArchitectureBranchStreamSummary | undefined {
+  const stream = data?.['stream'];
+  if (!isPlainRecord(stream)) {
+    return undefined;
+  }
+  const streamGroupId = stream['streamGroupId'];
+  const branchSessionId = stream['branchSessionId'];
+  const status = stream['status'];
+  const chunkCount = stream['chunkCount'];
+  const text = stream['text'];
+  if (
+    typeof streamGroupId !== 'string'
+    || typeof branchSessionId !== 'string'
+    || (status !== 'started' && status !== 'streaming' && status !== 'completed' && status !== 'failed')
+    || typeof chunkCount !== 'number'
+    || typeof text !== 'string'
+  ) {
+    return undefined;
+  }
+  return { streamGroupId, branchSessionId, status, chunkCount, text };
+}
+
+function buildArchitectureChatRunSummary(
+  schema: ArchitectureSchema,
+  run: ArchitectureRun,
+  events: ArchitectureExecutionEvent[],
+): ArchitectureChatRunSummary {
+  return {
+    runId: run.id,
+    schemaId: schema.id,
+    status: run.status,
+    hostProjectionKind: 'workflow-envelope',
+    finalArtifact: finalArtifactFromEvents(events),
+    trace: events
+      .filter((event) => !isSyntheticParallelMessage(eventMessage(event)))
+      .filter((event) => (
+        event.type === 'participant_output'
+        || event.type === 'router_decision'
+        || event.type === 'final_artifact'
+        || event.type === 'run_stopped'
+      ))
+      .map((event) => ({
+        speaker: traceSpeakerForEvent(event),
+        content: stripRuntimeScaffold(eventMessage(event)),
+        eventId: event.id,
+        nodeId: event.nodeId,
+        nextNodeId: event.route?.nextNodeId,
+        reasonCode: event.reasonCode,
+        errorCode: event.errorCode,
+        failure: event.failure,
+        evidence: event.evidence,
+        runtimeDecision: event.runtimeDecision,
+        stream: event.type === 'participant_output' ? streamSummaryFromEventData(event.data) : undefined,
+      })),
+    routeHops: [],
+  };
+}
+
+function traceSpeakerForEvent(event: ArchitectureExecutionEvent): ArchitectureChatRunSummary['trace'][number]['speaker'] {
+  if (event.type === 'participant_output') {
+    return 'participant';
+  }
+  if (event.type === 'final_artifact') {
+    return 'finalizer';
+  }
+  return 'router';
+}
+
+function finalArtifactFromEvents(events: ArchitectureExecutionEvent[]): string | undefined {
+  const finalArtifact = [...events]
+    .reverse()
+    .find((event) => event.type === 'final_artifact' && eventMessage(event).trim().length > 0);
+  return finalArtifact ? stripRuntimeScaffold(eventMessage(finalArtifact)) || eventMessage(finalArtifact).trim() : undefined;
 }
 
 function formatParentChatText(run: ArchitectureRun, event: ArchitectureExecutionEvent): string {

@@ -5,11 +5,12 @@ import {
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
+import { identifyWatchedSession } from '../../services/sessionWatchRegistry';
 import type { ChatSession } from '@kalio/types';
 import { findArchitectureRunInMessages } from './architectureChatSummary';
 import { ArchitectureRunCanvasSection } from './CanvasPanel.ArchitectureRun';
 import { CanvasFocusSection, hasVisibleBranchTranscript } from './CanvasPanel.Focus';
-import { useHydrateChildSessionTranscripts } from './CanvasPanel.hydration';
+import { hydrateChildSessionTranscript, useHydrateChildSessionTranscripts } from './CanvasPanel.hydration';
 import { findFocusedSubAgentFlowResult, SessionStats, ThinkingPreview, ToolCard } from './CanvasPanel.Parts';
 import { AgentFlowConversationCard, buildAgentFlowPreviews } from './CanvasPanel.AgentFlows';
 import { buildSubagentPreviews, SubagentConversationCard } from './CanvasPanel.Subagents';
@@ -240,7 +241,7 @@ export function CanvasPanel() {
     const previousChildPreviewSessionIds = identifiedChildPreviewSessionIdsRef.current;
     childPreviewSessionIds.forEach((sessionId) => {
       if (sessionId !== activeSessionId && !previousChildPreviewSessionIds.has(sessionId)) {
-        eventBus.identifySession(sessionId);
+        identifyWatchedSession(sessionId, 'canvas-child-preview', { sticky: true });
       }
     });
     identifiedChildPreviewSessionIdsRef.current = new Set(childPreviewSessionIds);
@@ -328,7 +329,13 @@ export function CanvasPanel() {
                   run={architectureRun}
                   sessions={sessions}
                   knownBranchSessionIds={openableArchitectureConversationSessionIds}
-                  onOpenSession={(sessionId) => setCanvasFocus({ kind: 'architecture-branch', sessionId })}
+                  onOpenSession={(sessionId) => {
+                    setCanvasFocus({ kind: 'architecture-branch', sessionId });
+                    void hydrateChildSessionTranscript({ sessionId, getSessionMessages, setMessages })
+                      .catch((err: unknown) => {
+                        console.error('[CanvasPanel] failed to preload focused branch transcript', err instanceof Error ? err : new Error(String(err)));
+                      });
+                  }}
                   getBranchMessages={(sessionId) => getSessionMessages(sessionId)}
                   focused={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId}
                   focusedStep={canvasFocus?.kind === 'architecture-run' && canvasFocus.runId === architectureRun.runId

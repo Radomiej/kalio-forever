@@ -6,6 +6,7 @@ import {
   replaceBaselineWatchedSessions,
   resetSessionWatchConnectionEpoch,
 } from './sessionWatchRegistry';
+import { createPendingHostSession } from '../features/chat/pendingHostSession';
 
 vi.mock('./eventBus', () => ({
   eventBus: {
@@ -51,7 +52,9 @@ describe('sessionWatchRegistry', () => {
   });
 
   it('ignores pending host-session ids', () => {
-    identifyWatchedSession('pending-host-session:temp-1', 'active', { sticky: true });
+    const pendingSession = createPendingHostSession({ personaId: 'default', now: 1 });
+
+    identifyWatchedSession(pendingSession.id, 'active', { sticky: true });
 
     expect(eventBus.identifySession).not.toHaveBeenCalled();
 

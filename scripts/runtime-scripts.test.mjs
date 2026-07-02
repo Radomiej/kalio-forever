@@ -11,6 +11,7 @@ const quickstartSource = readFileSync(new URL('../docs/quickstart-user.md', impo
 const localDevGuideSource = readFileSync(new URL('../docs/local-dev-guide.md', import.meta.url), 'utf8');
 const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
 const ac13QaStackSource = readFileSync(new URL('./run-ac13-qa-stack.mjs', import.meta.url), 'utf8');
+const workflowReleaseGateSource = readFileSync(new URL('./workflow-release-gate.mjs', import.meta.url), 'utf8');
 
 test('prod stack fallback paths use prod defaults when --data-root is omitted', () => {
   assert.match(
@@ -100,4 +101,40 @@ test('managed stack status reports effective live llm config from the backend ap
   assert.match(stackStatusSource, /effectiveLlm: await readEffectiveLlmConfig\(state, fetchImpl\)/);
   assert.match(stackStatusSource, /`\$\{apiUrl\}\/llm\/config`/);
   assert.match(ac13QaStackSource, /readEffectiveLlmConfig/);
+});
+
+test('workflow release gate refreshes frontend runtime config before browser checks', () => {
+  assert.match(workflowReleaseGateSource, /function writeFrontendRuntimeConfig\(backendUrl\)/);
+  assert.match(workflowReleaseGateSource, /runtime-config\.js/);
+  assert.match(workflowReleaseGateSource, /JSON\.stringify\(\{ apiUrl: backendUrl, wsUrl: backendUrl \}\)/);
+
+  const writeIndex = workflowReleaseGateSource.indexOf('writeFrontendRuntimeConfig(apiOrigin);');
+  const runIndex = workflowReleaseGateSource.indexOf('await runPlaywrightGroup(group, baseUrl, apiOrigin);');
+
+  assert.notEqual(writeIndex, -1, 'runtime config refresh call not found');
+  assert.notEqual(runIndex, -1, 'Playwright gate call not found');
+  assert.ok(writeIndex < runIndex, 'runtime config must be refreshed before Playwright opens the app');
+});
+
+test('workflow release gate includes recent runtime regression proof groups', () => {
+  assert.match(workflowReleaseGateSource, /name: 'RA-App HITL gate'/);
+  assert.match(workflowReleaseGateSource, /manual mode shows tool confirmation and RA-App approval overlay/);
+  assert.match(workflowReleaseGateSource, /bypass mode auto-executes tool confirmation and RA-App approval/);
+
+  assert.match(workflowReleaseGateSource, /name: 'workflow failure projection gate'/);
+  assert.match(workflowReleaseGateSource, /malformed router structured output becomes terminal failed graph state/);
+
+  assert.match(workflowReleaseGateSource, /name: 'workflow follow-up hydration gate'/);
+  assert.match(workflowReleaseGateSource, /keeps the earlier workflow bubble stable/);
+});
+
+test('managed stack builds inherit the caller environment before runtime overrides', () => {
+  assert.match(
+    stackManagerSource,
+    /env: \{ \.\.\.process\.env, \.\.\.backendEnv, \.\.\.pathEnv \}/,
+  );
+  assert.match(
+    stackManagerSource,
+    /env: \{ \.\.\.process\.env, \.\.\.frontendEnv, \.\.\.pathEnv \}/,
+  );
 });

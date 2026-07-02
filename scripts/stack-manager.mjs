@@ -651,13 +651,13 @@ async function buildStack(pnpm, backendEnv, frontendEnv) {
   await runProcess(
     pnpm.command,
     [...pnpm.argsPrefix, '--filter', 'kalio-api', 'run', 'build'],
-    { cwd: repoRoot, env: { ...backendEnv, ...pathEnv }, shell: pnpm.shell },
+    { cwd: repoRoot, env: { ...process.env, ...backendEnv, ...pathEnv }, shell: pnpm.shell },
     'building backend',
   );
   await runProcess(
     pnpm.command,
     [...pnpm.argsPrefix, '--filter', 'kalio-web', 'run', 'build'],
-    { cwd: repoRoot, env: { ...frontendEnv, ...pathEnv }, shell: pnpm.shell },
+    { cwd: repoRoot, env: { ...process.env, ...frontendEnv, ...pathEnv }, shell: pnpm.shell },
     'building frontend preview bundle',
   );
 }

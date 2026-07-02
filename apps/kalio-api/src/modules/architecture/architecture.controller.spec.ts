@@ -343,7 +343,7 @@ describe('Architecture controllers', () => {
       id: 'cli-child-1',
       parentNodeId: 'implementer',
       parentRoleSlotId: 'implementer',
-      parentEventId: `${runId}:event:4`,
+      parentEventId: toolCallId,
       kind: 'cli-agent',
       backend: 'copilot',
       status: 'running',

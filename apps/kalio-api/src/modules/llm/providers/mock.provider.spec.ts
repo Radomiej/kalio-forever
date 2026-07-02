@@ -19,6 +19,36 @@ describe('MockLLMProvider', () => {
     expect(onChunk).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: emits malformed architecture router structured output for workflow failure e2e', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onStructuredOutput = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Slot: Router\nForce contract failure [[mock:architecture:router:malformed-output]]',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(messages, [], {
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      onChunk,
+      onStructuredOutput,
+      structuredOutput: {
+        name: 'architecture_router_output',
+        schema: {},
+      },
+    });
+
+    expect(toolCalls).toEqual([]);
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onStructuredOutput).toHaveBeenCalledWith(expect.objectContaining({
+      nextAction: 'route_to',
+      targetNodeId: 123,
+    }));
+  });
+
   it('REGRESSION: returns a deterministic raapp_create tool call without arg-progress chunks for fallback UX e2e', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

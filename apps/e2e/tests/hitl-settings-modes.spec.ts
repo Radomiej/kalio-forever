@@ -134,7 +134,7 @@ async function seedRaAppFixture(
   sessionId: string,
   filePath: string,
   fileContent: string,
-): Promise<void> {
+): Promise<{ approvalId: string }> {
   const toolCallId = `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -164,6 +164,7 @@ async function seedRaAppFixture(
   });
 
   expect(response.ok()).toBeTruthy();
+  return { approvalId };
 }
 
 async function openTalk(page: Page): Promise<void> {
@@ -202,9 +203,15 @@ test.describe('HITL settings modes', () => {
 
       await expectVfsContent(request, toolSession.id, MOCK_VFS_WRITE_PATH, MOCK_VFS_WRITE_CONTENT);
 
-      await seedRaAppFixture(request, raappSession.id, 'e2e/raapp-manual.txt', 'raapp-manual-approved');
+      const raAppFixture = await seedRaAppFixture(request, raappSession.id, 'e2e/raapp-manual.txt', 'raapp-manual-approved');
       await expectHitlAuditEvent(request, raappSession.id, 'raapp_approval_pending');
-      await selectSession(page, raappSession.id, raappSession.title);
+
+      await page.reload();
+      await openTalk(page);
+      await page.getByTestId('talk-tab-agents').click();
+      await expect(page.getByTestId('home-hitl-inbox')).toContainText('RA-App approval');
+      await expect(page.getByTestId('home-hitl-inbox')).toContainText('seeded write');
+      await page.getByTestId(`home-hitl-open-raapp-${raAppFixture.approvalId}`).click();
 
       const overlay = page.getByTestId('raapp-hitl-overlay');
       await expect(overlay).toBeVisible({ timeout: 10_000 });

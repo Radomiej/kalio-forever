@@ -8,6 +8,7 @@ import { ToolConfirmationService, type ConfirmationResolutionStatus, type Pendin
 import { MCPService } from '../mcp/mcp.service';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 
 /**
  * Resolves tool calls by name, handles HITL (human-in-the-loop) confirmation
@@ -26,9 +27,10 @@ export class ToolDispatchService {
     @Optional() @Inject(MCPService) private readonly mcpService: MCPService | null,
     @Optional() @Inject(HitlPolicyService) hitlPolicy: HitlPolicyService | null,
     @Optional() @Inject(HitlNotificationService) hitlNotifications: HitlNotificationService | null,
+    @Optional() @Inject(RuntimeAuditLogger) runtimeAudit: RuntimeAuditLogger | null = null,
     @Optional() @Inject(ToolConfirmationService) confirmations?: ToolConfirmationService | null,
   ) {
-    this.confirmations = confirmations ?? new ToolConfirmationService(hitlPolicy, hitlNotifications);
+    this.confirmations = confirmations ?? new ToolConfirmationService(hitlPolicy, hitlNotifications, runtimeAudit);
     this.toolMap = new Map(tools.map(t => [t.meta.name, t]));
     this.logger.log(`Tool registry loaded: [${[...this.toolMap.keys()].join(', ')}]`);
   }

@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { AuditLogEntry, AuditType } from '@kalio/types';
 import { TruthBoard } from './TruthBoard';
+import { laneForEntry } from './TruthBoard.model';
 
 function entry(overrides: Partial<AuditLogEntry> & { type: AuditType; label: string }): AuditLogEntry {
   return {
@@ -17,6 +18,24 @@ function entry(overrides: Partial<AuditLogEntry> & { type: AuditType; label: str
 }
 
 describe('TruthBoard', () => {
+  it('routes typed runtime events to stable observability lanes', () => {
+    expect(laneForEntry(entry({
+      type: 'runtime_event',
+      label: 'workflow.node.started',
+      data: { eventName: 'workflow.node.started' },
+    }))).toBe('architecture');
+    expect(laneForEntry(entry({
+      type: 'runtime_event',
+      label: 'llm.turn.completed',
+      data: { eventName: 'llm.turn.completed' },
+    }))).toBe('llm');
+    expect(laneForEntry(entry({
+      type: 'runtime_event',
+      label: 'tool.confirmation.requested',
+      data: { eventName: 'tool.confirmation.requested' },
+    }))).toBe('hooks');
+  });
+
   it('summarizes architecture runs, subagent children, and omitted tool paths', () => {
     render(
       <TruthBoard

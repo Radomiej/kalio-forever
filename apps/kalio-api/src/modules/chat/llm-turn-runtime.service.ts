@@ -5,6 +5,7 @@ import { StreamProcessorService } from './stream-processor.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import type { LLMStructuredOutputRequest, SocketEvents, ToolResult } from '@kalio/types';
@@ -37,6 +38,7 @@ export class LLMTurnRuntimeService {
     private readonly sessionManager: SessionManagerService,
     private readonly toolDispatch: ToolDispatchService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly runtimeAudit?: RuntimeAuditLogger,
   ) {}
 
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
@@ -103,6 +105,18 @@ export class LLMTurnRuntimeService {
       }
 
       const turnStart = performance.now();
+      await this.runtimeAudit?.log({
+        eventName: 'llm.turn.started',
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        status: 'started',
+        data: {
+          runtimeKind: request.runtimeKind,
+          iteration,
+          limit: currentLimit,
+          model: request.model,
+        },
+      });
       await this.audit?.log({
         sessionId: request.sessionId,
         type: 'llm_request',
@@ -185,6 +199,21 @@ export class LLMTurnRuntimeService {
             this.structuredOutputRepairMessage(request.structuredOutput, error),
           ]);
         } else {
+          await this.runtimeAudit?.log({
+            eventName: 'llm.turn.failed',
+            sessionId: request.sessionId,
+            turnId: request.turnId,
+            status: 'failed',
+            errorCode: typeof (error as { code?: unknown })?.code === 'string'
+              ? (error as { code: string }).code
+              : 'RUNTIME_ERROR',
+            durationMs: Math.round(performance.now() - turnStart),
+            data: {
+              runtimeKind: request.runtimeKind,
+              iteration,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
           throw error;
         }
       }
@@ -203,6 +232,22 @@ export class LLMTurnRuntimeService {
           toolCallCount: state.toolCalls.length,
           usage,
           estimatedOutputTokens: estimateTextTokens(state.text) + estimateTextTokens(state.thinking),
+          ...(structuredOutputRepairRetried ? { structuredOutputRepairRetry: true } : {}),
+        },
+      });
+      await this.runtimeAudit?.log({
+        eventName: 'llm.turn.completed',
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        status: 'completed',
+        durationMs: Math.round(performance.now() - turnStart),
+        data: {
+          runtimeKind: request.runtimeKind,
+          iteration,
+          textLength: state.text.length,
+          thinkingLength: state.thinking.length,
+          toolCallCount: state.toolCalls.length,
+          ...(usage ? { usage } : {}),
           ...(structuredOutputRepairRetried ? { structuredOutputRepairRetry: true } : {}),
         },
       });

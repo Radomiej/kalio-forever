@@ -202,6 +202,49 @@ describe('ArchitectureRunTimeline', () => {
     expect(onOpenStep).not.toHaveBeenCalled();
   });
 
+  it('renders terminal graph node statuses from typed projection without falling back to pending text', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-terminal-status',
+      schemaId: 'strategic-decision-council',
+      status: 'failed',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'router',
+          label: 'Router',
+          kind: 'router',
+          status: 'failed',
+          eventIds: ['run-terminal-status:event:1'],
+        },
+        {
+          id: 'final-artifact',
+          label: 'Finalizer',
+          kind: 'artifact',
+          status: 'cancelled',
+          eventIds: [],
+        },
+      ],
+      graphEdges: [
+        { id: 'edge-final', fromNodeId: 'router', toNodeId: 'final-artifact' },
+      ],
+      trace: [],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-router')).toHaveAttribute('data-status', 'failed');
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('failed');
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'cancelled');
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('cancelled');
+    expect(screen.getByTestId('architecture-route-finalizer')).not.toHaveTextContent('pending');
+  });
+
   it('renders the orchestrator actor label while keeping router semantics in secondary metadata', () => {
     const run: ArchitectureRunWithGraph = {
       runId: 'run-orchestrator',

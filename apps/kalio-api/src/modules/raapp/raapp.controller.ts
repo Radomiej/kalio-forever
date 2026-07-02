@@ -15,9 +15,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import type { RAAppSummary, RAAppGroup } from '@kalio/types';
+import type { RAAppSummary, RAAppGroup, RaAppPendingApprovalSnapshot } from '@kalio/types';
 import { RAAppService } from './raapp.service';
 import { RAAppVersioningService, deriveSlug } from './raapp-versioning.service';
+import { RAAppHITLService } from './raapp-hitl.service';
 import type { LoadedRAApp } from './raapp.service';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
 
@@ -26,6 +27,7 @@ export class RAAppController {
   constructor(
     private readonly raAppService: RAAppService,
     private readonly versioningService: RAAppVersioningService,
+    private readonly hitlService: RAAppHITLService,
   ) {}
 
   @Get()
@@ -63,6 +65,21 @@ export class RAAppController {
     const group = this.versioningService.getGroupBySlug(slug);
     if (!group) throw new NotFoundException(`RA-App group not found: ${slug}`);
     return group;
+  }
+
+  @Get('pending-approvals')
+  async listPendingApprovals(): Promise<RaAppPendingApprovalSnapshot[]> {
+    const pending = await this.hitlService.getAllPendingApprovals();
+    return pending.map((approval) => ({
+      id: approval.id,
+      sessionId: approval.sessionId,
+      toolCallId: approval.toolCallId,
+      system: approval.system,
+      displayLabel: approval.displayLabel,
+      args: approval.args,
+      status: 'pending',
+      createdAt: approval.createdAt.getTime(),
+    }));
   }
 
   @Get('groups/:slug/download/:version')

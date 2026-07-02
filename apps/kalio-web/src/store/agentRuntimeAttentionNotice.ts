@@ -7,10 +7,15 @@ export const RUNTIME_ATTENTION_NOTICE_WINDOW_MS = 5 * 60 * 1000;
 
 export interface RuntimeAttentionNotice {
   items: RuntimeAttentionItem[];
+  reviewKeys: string[];
   totalRecentCount: number;
   hiddenRecentCount: number;
   maxUpdatedAt: number;
   nextExpiresInMs: number;
+}
+
+export function runtimeAttentionReviewKey(item: RuntimeAttentionItem, updatedAt: number): string {
+  return `${item.id}:${updatedAt}`;
 }
 
 function itemUpdatedAt(params: {
@@ -37,6 +42,7 @@ export function selectRuntimeAttentionNotice(params: {
   sessions?: ChatSession[] | null;
   nowMs: number;
   dismissedThroughUpdatedAt?: number | null;
+  reviewedItemKeys?: ReadonlySet<string> | null;
   limit?: number;
   windowMs?: number;
 }): RuntimeAttentionNotice | null {
@@ -55,10 +61,11 @@ export function selectRuntimeAttentionNotice(params: {
         sessionsById,
       }),
     }))
-    .filter(({ updatedAt }) => (
+    .filter(({ item, updatedAt }) => (
       updatedAt > dismissedThroughUpdatedAt
       && updatedAt > 0
       && params.nowMs - updatedAt <= windowMs
+      && !params.reviewedItemKeys?.has(runtimeAttentionReviewKey(item, updatedAt))
     ))
     .sort((left, right) => {
       if (left.updatedAt !== right.updatedAt) {
@@ -80,6 +87,7 @@ export function selectRuntimeAttentionNotice(params: {
 
   return {
     items: visibleItems.map(({ item }) => item),
+    reviewKeys: recentItems.map(({ item, updatedAt }) => runtimeAttentionReviewKey(item, updatedAt)),
     totalRecentCount: recentItems.length,
     hiddenRecentCount: Math.max(0, recentItems.length - visibleItems.length),
     maxUpdatedAt: recentItems[0]?.updatedAt ?? params.nowMs,

@@ -32,6 +32,7 @@ import { SubagentRuntimeService } from './subagent-runtime.service';
 import { ToolPolicyService } from './tool-policy.service';
 import { ChatTestSupportService } from './chat-test-support.service';
 import { RunJournalService } from './run-journal.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { SessionEventsService } from './session-events.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
@@ -102,6 +103,7 @@ import {
     SessionsService,
     ChatTestSupportService,
     RunJournalService,
+    RuntimeAuditLogger,
     ChatService,
     SessionPipelineService,
     ChatGateway,
@@ -153,7 +155,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, RunJournalService, SubagentRuntimeService, SUBAGENT_RUNTIME],
+  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(

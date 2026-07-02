@@ -929,6 +929,13 @@ export interface RaAppPendingApproval {
   args: Record<string, unknown>;        // resolved args to be executed on approval
 }
 
+export interface RaAppPendingApprovalSnapshot extends RaAppPendingApproval {
+  sessionId: ID;
+  toolCallId: ID;
+  status: 'pending';
+  createdAt: number;
+}
+
 // Native execution result pushed back to FE after approve/cancel
 export interface RaAppNativeResult {
   id: string;                           // matches RaAppPendingApproval.id
@@ -1477,6 +1484,7 @@ export interface RAAppGroup {
 export type AuditType =
   | 'llm_request'
   | 'llm_response'
+  | 'runtime_event'
   | 'tool_call'
   | 'tool_result'
   | 'architecture_event'
@@ -1891,6 +1899,8 @@ export interface ArchitectureGraphProjection {
     actionSummary?: string;
     action?: ArchitectureEventAction;
     detail?: string;
+    errorCode?: WorkflowErrorCode;
+    failure?: WorkflowFailure;
     visitCount?: number;
     eventIds: ID[];
     toolEvidence?: Record<string, unknown>;

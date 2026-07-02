@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import type { RuntimeAttentionItem } from './agentRuntimeSelectors';
-import { selectRuntimeAttentionNotice } from './agentRuntimeAttentionNotice';
+import { runtimeAttentionReviewKey, selectRuntimeAttentionNotice } from './agentRuntimeAttentionNotice';
 
 function makeSession(id: string, title: string, updatedAt: number): ChatSession {
   return {
@@ -91,6 +91,11 @@ describe('selectRuntimeAttentionNotice', () => {
       hiddenRecentCount: 0,
       maxUpdatedAt: 4_000,
       nextExpiresInMs: 3_001,
+      reviewKeys: [
+        'attention-message-backed:4000',
+        'attention-snapshot-backed:3500',
+        'attention-session-backed:3000',
+      ],
     });
   });
 
@@ -117,7 +122,31 @@ describe('selectRuntimeAttentionNotice', () => {
       hiddenRecentCount: 0,
       maxUpdatedAt: 4_500,
       nextExpiresInMs: 4_501,
+      reviewKeys: ['attention-newest:4500'],
     });
+  });
+
+  it('filters only the reviewed item version keyed by id and updatedAt', () => {
+    const reviewed = makeAttentionItem('reviewed');
+    const notice = selectRuntimeAttentionNotice({
+      items: [
+        reviewed,
+        makeAttentionItem('fresh'),
+      ],
+      sessions: [
+        makeSession('reviewed', 'Reviewed', 4_500),
+        makeSession('fresh', 'Fresh', 4_400),
+      ],
+      nowMs: 5_000,
+      windowMs: 5_000,
+      reviewedItemKeys: new Set([runtimeAttentionReviewKey(reviewed, 4_500)]),
+    });
+
+    expect(notice).toEqual(expect.objectContaining({
+      items: [expect.objectContaining({ sessionId: 'fresh' })],
+      reviewKeys: ['attention-fresh:4400'],
+      totalRecentCount: 1,
+    }));
   });
 
   it('ignores actionable and stale items while capping visible rows and reporting hidden recent count', () => {
@@ -152,6 +181,12 @@ describe('selectRuntimeAttentionNotice', () => {
       hiddenRecentCount: 2,
       maxUpdatedAt: 4_800,
       nextExpiresInMs: 301,
+      reviewKeys: [
+        'attention-same-time-high-priority:4800',
+        'attention-newest:4800',
+        'attention-mid:4700',
+        'attention-old-visible:4600',
+      ],
     });
   });
 });

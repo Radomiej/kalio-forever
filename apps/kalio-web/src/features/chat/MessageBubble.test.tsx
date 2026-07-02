@@ -57,6 +57,21 @@ describe('MessageBubble layout', () => {
     expect(bubble).toHaveClass('px-2.5', 'py-1.5');
   });
 
+  it('wraps long user workflow prompts without horizontal overflow', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({
+          role: 'user',
+          content: `Run workflow\n${'C:/Projekty/FamilyQuest/'.repeat(20)}`,
+        })}
+      />,
+    );
+
+    const content = screen.getByTestId('message-content');
+    expect(content).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(content.parentElement).toHaveClass('max-w-full', 'overflow-hidden');
+  });
+
   it('does not rerender markdown when an unrelated live chunk changes', () => {
     const message = makeMessage({ id: 'message-1', role: 'assistant', content: 'assistant response' });
     const { rerender } = render(<MessageBubble message={message} />);

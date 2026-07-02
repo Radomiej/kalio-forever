@@ -329,12 +329,19 @@ describe('buildArchitectureGraphProjection', () => {
       status: 'failed',
       action: 'node_failed',
       detail: 'structured output was malformed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: {
+        code: 'CONTRACT_VIOLATION',
+        source: 'llm-provider',
+        retryable: false,
+      },
     });
     expect(graph.nodes.find((node) => node.id === 'final-artifact')).toMatchObject({
       status: 'cancelled',
       action: 'node_failed',
       detail: 'Skipped because an upstream workflow node failed before this node started.',
       eventIds: ['event-3'],
+      errorCode: 'CONTRACT_VIOLATION',
     });
   });
 

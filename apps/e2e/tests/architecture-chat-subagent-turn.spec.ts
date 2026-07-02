@@ -36,6 +36,39 @@ type ArchitectureChatResponse = {
   }>;
 };
 
+function isRetryableApiTransportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /ECONNRESET|ECONNREFUSED|socket hang up|ERR_CONNECTION_RESET/i.test(message);
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function getJsonWithTransportRetry<T>(
+  request: APIRequestContext,
+  url: string,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await request.get(url, { timeout: 15_000 });
+      expect(response.ok()).toBeTruthy();
+      return await response.json() as T;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableApiTransportError(error) || attempt === 2) {
+        throw error;
+      }
+      await delay(250 * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
 async function waitForArchitectureRunCompleted(
   request: APIRequestContext,
   runId: string,
@@ -61,6 +94,47 @@ async function waitForArchitectureRunCompleted(
       return `${graph.status ?? 'missing'}:${finalizerNode?.status ?? 'missing'}:${hasFinalizerMessage ? 'finalizer-message' : 'missing-finalizer-message'}`;
     }, { timeout: timeoutMs })
     .toBe('completed:completed:finalizer-message');
+}
+
+async function getSession(
+  request: APIRequestContext,
+  sessionId: string,
+): Promise<ArchitectureSessionListItem> {
+  return getJsonWithTransportRetry<ArchitectureSessionListItem>(
+    request,
+    `${API_BASE}/sessions/${encodeURIComponent(sessionId)}`,
+  );
+}
+
+async function getSessionDescendants(
+  request: APIRequestContext,
+  rootSessionId: string,
+): Promise<ArchitectureSessionListItem[]> {
+  const descendants: ArchitectureSessionListItem[] = [];
+  const seen = new Set<string>();
+  const queue = [rootSessionId];
+
+  while (queue.length > 0) {
+    const parentSessionId = queue.shift();
+    if (!parentSessionId) {
+      continue;
+    }
+
+    const children = await getJsonWithTransportRetry<ArchitectureSessionListItem[]>(
+      request,
+      `${API_BASE}/sessions/${encodeURIComponent(parentSessionId)}/children`,
+    );
+    for (const child of children) {
+      if (seen.has(child.id)) {
+        continue;
+      }
+      seen.add(child.id);
+      descendants.push(child);
+      queue.push(child.id);
+    }
+  }
+
+  return descendants;
 }
 
 test.describe('Architecture chat turn projection', () => {
@@ -220,22 +294,7 @@ test.describe('Architecture chat turn projection', () => {
       const branchSessionIds = branchSessionProofs.map((proof) => proof.sessionId);
       expect(new Set(branchSessionIds).size).toBe(5);
       expect(new Set(branchSessionProofs.map((proof) => proof.label))).toEqual(new Set(expectedBranchLabels));
-      const sessionsResponse = await request.get(`${API_BASE}/sessions`);
-      expect(sessionsResponse.ok()).toBeTruthy();
-      const persistedSessions = await sessionsResponse.json() as ArchitectureSessionListItem[];
-      const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
-      const isCurrentWorkflowDescendant = (candidate: { id: string; parentSessionId?: string }): boolean => {
-        let currentParentId = candidate.parentSessionId;
-        const visited = new Set<string>();
-        while (currentParentId) {
-          if (visited.has(currentParentId)) return false;
-          if (currentParentId === session.id) return true;
-          visited.add(currentParentId);
-          currentParentId = sessionById.get(currentParentId)?.parentSessionId;
-        }
-        return false;
-      };
-      const currentWorkflowSessions = persistedSessions.filter((candidate) => isCurrentWorkflowDescendant(candidate));
+      const currentWorkflowSessions = await getSessionDescendants(request, session.id);
       const architectureRunId = currentWorkflowSessions
         .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
         .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
@@ -496,16 +555,7 @@ test.describe('Architecture chat turn projection', () => {
 
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
 
-      const allSessionsResponse = await request.get(`${API_BASE}/sessions`);
-      expect(allSessionsResponse.ok()).toBeTruthy();
-      const sessions = await allSessionsResponse.json() as Array<{
-        id: string;
-        parentSessionId?: string;
-        runtimeContext?: {
-          architectureSlotId?: string;
-          architectureContext?: { architectureRunId?: string };
-        };
-      }>;
+      const sessions = await getSessionDescendants(request, session.id);
       const envelopeSession = sessions.find((candidate) => (
         candidate.parentSessionId === session.id
         && typeof candidate.runtimeContext?.architectureContext?.architectureRunId === 'string'
@@ -561,26 +611,10 @@ test.describe('Architecture chat turn projection', () => {
       title = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? '';
       expect(title.length).toBeGreaterThan(0);
 
-      const sessionsResponse = await request.get(`${API_BASE}/sessions`);
-      expect(sessionsResponse.ok()).toBeTruthy();
-      const persistedSessions = await sessionsResponse.json() as ArchitectureSessionListItem[];
-      const rootSession = persistedSessions.find((candidate) => candidate.id === sessionId);
+      const rootSession = await getSession(request, sessionId);
       expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath);
 
-      const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
-      const isCurrentWorkflowDescendant = (candidate: { id: string; parentSessionId?: string }): boolean => {
-        let currentParentId = candidate.parentSessionId;
-        const visited = new Set<string>();
-        while (currentParentId) {
-          if (visited.has(currentParentId)) return false;
-          if (currentParentId === sessionId) return true;
-          visited.add(currentParentId);
-          currentParentId = sessionById.get(currentParentId)?.parentSessionId;
-        }
-        return false;
-      };
-
-      const currentWorkflowSessions = persistedSessions.filter((candidate) => isCurrentWorkflowDescendant(candidate));
+      const currentWorkflowSessions = await getSessionDescendants(request, sessionId);
       const architectureRunId = currentWorkflowSessions
         .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
         .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);

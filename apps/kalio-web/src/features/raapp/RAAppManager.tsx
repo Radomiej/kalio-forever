@@ -7,10 +7,8 @@ import {
   PreviewPane,
   SessionView,
   WorkView,
-  type CatalogRunTarget,
-  type FoundRAApp,
-  type WorkDraft,
 } from './RAAppManager.Views';
+import type { CatalogRunTarget, FoundRAApp, WorkDraft } from './RAAppManager.types';
 import {
   getRAApps,
   getRAAppGroups,

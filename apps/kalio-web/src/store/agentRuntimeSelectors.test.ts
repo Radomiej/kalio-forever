@@ -753,6 +753,61 @@ describe('agentRuntimeSelectors', () => {
     })).toBe(2);
   });
 
+  it('counts RA-App pending approvals from structured tool results', () => {
+    expect(selectPendingApprovalCount({
+      sessionMessages: {
+        'session-raapp': [
+          makeToolResultMessage('session-raapp', {
+            status: 'ready',
+            type: 'html',
+            mode: 'interactive',
+            content: '<p>Approve write</p>',
+            pendingApprovals: [{
+              id: 'raapp-approval-1',
+              system: 'vfs_write',
+              displayLabel: 'write architecture.md',
+              args: { path: 'architecture.md' },
+            }],
+          }),
+        ],
+      },
+    })).toBe(1);
+  });
+
+  it('projects RA-App pending approvals ahead of passive runtime attention', () => {
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots: {
+        'session-raapp': makeWaitingRuntimeSnapshot('session-raapp'),
+      },
+      sessions: [makeSession('session-raapp', 'RA-App delivery')],
+      sessionMessages: {
+        'session-raapp': [
+          makeToolResultMessage('session-raapp', {
+            status: 'ready',
+            type: 'html',
+            mode: 'interactive',
+            content: '<p>Approve write</p>',
+            pendingApprovals: [{
+              id: 'raapp-approval-1',
+              system: 'vfs_write',
+              displayLabel: 'write architecture.md',
+              args: { path: 'architecture.md' },
+            }],
+          }),
+        ],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        id: 'raapp:session-raapp:raapp-approval-1',
+        sessionId: 'session-raapp',
+        kind: 'hitl',
+        label: 'RA-App approval',
+        detail: 'write architecture.md',
+        actionable: true,
+      }),
+    ]);
+  });
+
   it('keeps actionable approvals ahead of passive runtime waiting and avoids duplicate attention rows for the same session', () => {
     const pendingConfirmations = {
       'session-1': [{

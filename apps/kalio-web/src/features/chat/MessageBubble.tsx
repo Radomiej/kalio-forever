@@ -8,6 +8,46 @@ interface MessageBubbleProps {
   message: ChatMessage;
 }
 
+const LONG_USER_PROMPT_THRESHOLD = 1200;
+
+function splitUserPrompt(content: string): { visible: string; technical: string | null } {
+  if (content.length <= LONG_USER_PROMPT_THRESHOLD) {
+    return { visible: content, technical: null };
+  }
+
+  const contextIndex = content.search(/(?:^|\s)(Context|Input|Available next nodes|Incoming graph outputs):/);
+  if (contextIndex > 240 && contextIndex < content.length - 80) {
+    return {
+      visible: content.slice(0, contextIndex).trimEnd(),
+      technical: content.slice(contextIndex).trimStart(),
+    };
+  }
+
+  return {
+    visible: `${content.slice(0, LONG_USER_PROMPT_THRESHOLD).trimEnd()}\n...`,
+    technical: content.slice(LONG_USER_PROMPT_THRESHOLD).trimStart(),
+  };
+}
+
+function UserMessageContent({ content }: { content: string }) {
+  const promptParts = splitUserPrompt(content);
+  return (
+    <>
+      <span data-testid="message-content" className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        {promptParts.visible}
+      </span>
+      {promptParts.technical && (
+        <details className="mt-2 max-w-full rounded-lg border border-white/15 bg-black/10 px-2 py-1 text-xs text-white/80">
+          <summary className="cursor-pointer select-none text-white/70">Technical context</summary>
+          <pre className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed">
+            {promptParts.technical}
+          </pre>
+        </details>
+      )}
+    </>
+  );
+}
+
 export const MessageBubble = memo(function MessageBubble({ message }: MessageBubbleProps) {
   const liveContent = useSessionStore((state) => state.streamingChunks[message.id] ?? '');
   const liveThinking = useSessionStore((state) => state.thinkingChunks[message.id] ?? '');
@@ -34,9 +74,9 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
   if (isUser) {
     return (
       <div data-testid="message-bubble" data-role="user" className="flex justify-end">
-        <div className="flex flex-col items-end max-w-[min(100%,72rem)]">
-          <div className="rounded-2xl px-3.5 py-2 text-sm bg-sky-700 text-white">
-            <span data-testid="message-content">{displayContent}</span>
+        <div className="flex max-w-[min(100%,72rem)] flex-col items-end">
+          <div className="max-w-full overflow-hidden rounded-2xl bg-sky-700 px-3.5 py-2 text-sm text-white">
+            <UserMessageContent content={displayContent} />
           </div>
         </div>
       </div>

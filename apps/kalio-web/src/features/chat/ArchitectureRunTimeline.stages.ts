@@ -10,7 +10,7 @@ export type TraceStage =
   | { kind: 'step'; step: TraceStep }
   | { kind: 'parallel'; steps: TraceStep[] };
 
-export type TimelineStatus = 'pending' | 'running' | 'completed' | 'waiting' | 'failed';
+export type TimelineStatus = 'pending' | 'running' | 'completed' | 'waiting' | 'failed' | 'cancelled';
 
 export function nodeLabel(step: TraceStep): string {
   if (step.plannedLabel) {
@@ -109,6 +109,12 @@ export function statusForStep(step: TraceStep | undefined): TimelineStatus | nul
   }
   if (step.plannedStatus === 'completed') {
     return 'completed';
+  }
+  if (step.plannedStatus === 'failed') {
+    return 'failed';
+  }
+  if (step.plannedStatus === 'cancelled') {
+    return 'cancelled';
   }
   if (step.plannedStatus === 'pending') {
     return 'pending';

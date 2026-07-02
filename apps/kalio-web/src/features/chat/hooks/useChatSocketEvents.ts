@@ -7,6 +7,7 @@ import { shouldRefreshVfsForToolResult, type ChatConnectionState } from '../Chat
 import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolArgProgressHandlers, findPendingConfirmationForToolResult, mergeRaAppNativeResultIntoMessages, type ReconnectUiState, type UseChatSocketEventsOptions } from './useChatSocketEvents.helpers';
 import { handleCliChildProgress, handleCliChildToolResult, isCliChildToolName, resolveCliToolName } from './useChatSocketEvents.cliChild';
 import { registerConnectionRecoveryHandlers, registerSessionLifecycleHandlers } from './useChatSocketEvents.lifecycle';
+import { projectSubAgentFlowArchitectureResult } from '../architectureAgentFlowProjection';
 
 export function useChatSocketEvents({
   hasPendingChunksForSession,
@@ -370,6 +371,19 @@ export function useChatSocketEvents({
         if (toolResultMsg) {
           addMessage(toolResultMsg);
         }
+        void projectSubAgentFlowArchitectureResult({
+          toolName,
+          resultData: result.data,
+          resultSessionId,
+          toolResultMessageId: toolResultMsg?.id,
+          getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+          getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
+          getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+          setMessages,
+          setAgentTurns,
+        }).catch((error: unknown) => {
+          console.error('[EventBus] run_sub_agentflow architecture projection failed', error);
+        });
       }
       onContextInvalidated?.();
       if (

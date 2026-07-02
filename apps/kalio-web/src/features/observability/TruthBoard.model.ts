@@ -6,6 +6,7 @@ export const AUDIT_TYPE_LABELS: Record<AuditType, string> = {
   tool_call: 'Tool Call',
   tool_result: 'Tool Result',
   architecture_event: 'Architecture Event',
+  runtime_event: 'Runtime Event',
   error: 'Error',
   raapp_native_call: 'RA-App Native Call',
   raapp_native_approved: 'RA-App Approved',
@@ -63,7 +64,9 @@ function hasArchitectureScope(entry: AuditLogEntry): boolean {
   const domain = auditDomain(entry);
   const kind = auditKind(entry);
   const label = entry.label.toLowerCase();
+  const eventName = stringValue(data, 'eventName');
   return domain === 'architecture'
+    || eventName?.startsWith('workflow.') === true
     || label.startsWith('architecture:')
     || label.startsWith('architecture_event:')
     || label.includes('architecture_run')
@@ -118,8 +121,10 @@ function isHookEntry(entry: AuditLogEntry): boolean {
   const domain = auditDomain(entry);
   const kind = auditKind(entry);
   const label = entry.label.toLowerCase();
+  const eventName = stringValue(data, 'eventName');
   return domain === 'hitl'
     || domain === 'hook'
+    || eventName?.startsWith('tool.confirmation.') === true
     || entry.type === 'external_hitl'
     || entry.type === 'raapp_native_call'
     || entry.type === 'raapp_native_approved'
@@ -132,6 +137,7 @@ function isHookEntry(entry: AuditLogEntry): boolean {
 
 export function laneForEntry(entry: AuditLogEntry): typeof TRUTH_LANES[number]['id'] {
   if (entry.type === 'error') return 'errors';
+  if (entry.type === 'runtime_event' && stringValue(auditData(entry), 'eventName')?.startsWith('llm.') === true) return 'llm';
   if (isSubagentEntry(entry)) return 'subagents';
   if (isArchitectureEntry(entry)) return 'architecture';
   if (isHookEntry(entry)) return 'hooks';
@@ -370,4 +376,3 @@ export function laneStatus(laneId: TruthLaneId, count: number): { label: string;
   }
   return { label: 'active', className: 'bg-sky-400/10 text-sky-300 border-sky-400/25' };
 }
-

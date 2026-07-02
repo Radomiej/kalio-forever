@@ -88,6 +88,13 @@ describe('Monorepo Package Compatibility (REGRESSION TEST)', () => {
       expect(existsSync(resolveKalioPackagePath('sdk', sdkPackage.main))).toBe(true);
       expect(existsSync(resolveKalioPackagePath('sdk', sdkPackage.types))).toBe(true);
     });
+
+    it('does not run nested pnpm from @kalio/sdk package scripts', () => {
+      const sdkPackage = readKalioJson('sdk', 'package.json');
+
+      expect(sdkPackage.scripts?.build).not.toContain('pnpm ');
+      expect(sdkPackage.scripts?.typecheck).not.toContain('pnpm ');
+    });
   });
 
   describe('TypeScript Configuration Compatibility', () => {

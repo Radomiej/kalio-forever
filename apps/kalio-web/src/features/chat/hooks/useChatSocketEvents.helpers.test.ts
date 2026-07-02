@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   handleConnectionStateEvent,
   handleSessionStatusEvent,
+  mergeRaAppNativeResultIntoMessages,
   materializeLiveTurnFromHydratedRuntimeState,
   runtimeSnapshotKeepsSessionLive,
   sessionStatusKeepsSessionLive,
   type ReconnectUiState,
 } from './useChatSocketEvents.helpers';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
-import type { RuntimeActivitySnapshot } from '@kalio/types';
+import type { ChatMessage, RuntimeActivitySnapshot } from '@kalio/types';
 
 function makeWaitingRuntimeSnapshot(sessionId: string, turnId = 'turn-1'): RuntimeActivitySnapshot {
   return {
@@ -110,6 +111,43 @@ describe('handleConnectionStateEvent', () => {
     );
 
     expect(result.notices).toEqual([]);
+  });
+});
+
+describe('mergeRaAppNativeResultIntoMessages', () => {
+  it('clears matching RA-App pending approvals by approval id when toolCallId is stale', () => {
+    const messages: ChatMessage[] = [{
+      id: 'tool-result-1',
+      sessionId: 'session-raapp',
+      role: 'tool_result',
+      toolCallId: 'actual-tool-call',
+      content: JSON.stringify({
+        pendingApprovals: [{
+          id: 'approval-1',
+          system: 'vfs_write',
+          displayLabel: 'write file',
+          args: { path: 'architecture.md' },
+        }],
+      }),
+      createdAt: 1,
+    }];
+
+    const [updated] = mergeRaAppNativeResultIntoMessages(messages, 'stale-tool-call', [{
+      id: 'approval-1',
+      system: 'vfs_write',
+      status: 'executed',
+      result: { ok: true },
+    }]);
+
+    expect(JSON.parse(updated.content)).toEqual({
+      pendingApprovals: [],
+      nativeResults: [{
+        id: 'approval-1',
+        system: 'vfs_write',
+        status: 'executed',
+        result: { ok: true },
+      }],
+    });
   });
 });
 

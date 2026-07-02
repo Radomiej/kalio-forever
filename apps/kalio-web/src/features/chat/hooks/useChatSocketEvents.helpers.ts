@@ -352,13 +352,52 @@ export function mergeRaAppNativeResultIntoMessages(
   toolCallId: string,
   results: unknown,
 ): ChatMessage[] {
+  const nativeResults = Array.isArray(results) ? results : [];
+  const completedApprovalIds = new Set(
+    nativeResults
+      .map((result) => {
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+          return null;
+        }
+        const id = (result as Record<string, unknown>).id;
+        return typeof id === 'string' ? id : null;
+      })
+      .filter((id): id is string => Boolean(id)),
+  );
+
   return messages.map((message) => {
-    if (message.toolCallId !== toolCallId || message.role !== 'tool_result') return message;
+    if (message.role !== 'tool_result') return message;
     try {
       const data = JSON.parse(message.content) as Record<string, unknown>;
+      const pendingApprovals = Array.isArray(data.pendingApprovals)
+        ? data.pendingApprovals
+        : [];
+      const matchesToolCall = message.toolCallId === toolCallId;
+      const matchesApprovalId = pendingApprovals.some((approval) => {
+        if (!approval || typeof approval !== 'object' || Array.isArray(approval)) {
+          return false;
+        }
+        const id = (approval as Record<string, unknown>).id;
+        return typeof id === 'string' && completedApprovalIds.has(id);
+      });
+
+      if (!matchesToolCall && !matchesApprovalId) {
+        return message;
+      }
+
+      const nextPendingApprovals = matchesToolCall
+        ? []
+        : pendingApprovals.filter((approval) => {
+          if (!approval || typeof approval !== 'object' || Array.isArray(approval)) {
+            return true;
+          }
+          const id = (approval as Record<string, unknown>).id;
+          return typeof id !== 'string' || !completedApprovalIds.has(id);
+        });
+
       return {
         ...message,
-        content: JSON.stringify({ ...data, nativeResults: results, pendingApprovals: [] }),
+        content: JSON.stringify({ ...data, nativeResults: results, pendingApprovals: nextPendingApprovals }),
       };
     } catch (err) {
       console.error('[ChatInterface] failed to merge RA-App native result', err instanceof Error ? err : new Error(String(err)));

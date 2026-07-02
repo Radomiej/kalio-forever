@@ -13,9 +13,13 @@ const {
   markSessionHydrated,
   getRAApps,
   getRAAppGroups,
+  getPendingRAAppApprovals,
   apiPost,
   confirmTool,
   cancelTool,
+  approveRaApp,
+  cancelRaApp,
+  identifySession,
   setPendingConfirmation,
   removePendingConfirmation,
   updateToolActivity,
@@ -30,9 +34,13 @@ const {
   markSessionHydrated: vi.fn(),
   getRAApps: vi.fn<() => Promise<RAAppSummary[]>>(),
   getRAAppGroups: vi.fn<() => Promise<RAAppGroup[]>>(),
+  getPendingRAAppApprovals: vi.fn().mockResolvedValue([]),
   apiPost: vi.fn(),
   confirmTool: vi.fn(),
   cancelTool: vi.fn(),
+  approveRaApp: vi.fn(),
+  cancelRaApp: vi.fn(),
+  identifySession: vi.fn(),
   setPendingConfirmation: vi.fn(),
   removePendingConfirmation: vi.fn(),
   updateToolActivity: vi.fn(),
@@ -82,6 +90,7 @@ vi.mock('../../store/sessionStore', () => {
     sessions: [
       { id: 'session-hitl', title: 'Agent delivery run', updatedAt: 1 },
     ],
+    sessionMessages: {},
     addSession,
     setActiveSession,
     setMessages,
@@ -115,12 +124,16 @@ vi.mock('../../services/eventBus', () => ({
   eventBus: {
     confirmTool,
     cancelTool,
+    approveRaApp,
+    cancelRaApp,
+    identifySession,
   },
 }));
 
 vi.mock('../../services/apiClient', () => ({
   getRAApps,
   getRAAppGroups,
+  getPendingRAAppApprovals,
   apiClient: {
     post: apiPost,
   },

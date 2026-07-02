@@ -21,6 +21,8 @@ const mockMessage: ChatMessage = {
 function makeService() {
   return {
     list: vi.fn().mockResolvedValue([mockSession]),
+    listChildren: vi.fn().mockResolvedValue([mockSession]),
+    get: vi.fn().mockResolvedValue(mockSession),
     create: vi.fn().mockResolvedValue(mockSession),
     getMessages: vi.fn().mockResolvedValue([mockMessage]),
     getMessagePage: vi.fn().mockResolvedValue({
@@ -136,6 +138,23 @@ describe('SessionsController', () => {
       const result = await controller.listRuntimeWatchTargets();
       expect(runtimeWatchlist.list).toHaveBeenCalledWith();
       expect(result).toEqual([{ sessionId: 'sess-1', reasons: ['active'] }]);
+    });
+  });
+
+  describe('listChildren()', () => {
+    it('returns only children for the requested parent session', async () => {
+      const result = await controller.listChildren('parent-session');
+      expect(svc.listChildren).toHaveBeenCalledWith('parent-session');
+      expect(result).toEqual([mockSession]);
+    });
+  });
+
+  describe('get()', () => {
+    it('returns a single session by id without listing the full session history', async () => {
+      const result = await controller.get('sess-1');
+      expect(svc.get).toHaveBeenCalledWith('sess-1');
+      expect(svc.list).not.toHaveBeenCalled();
+      expect(result).toEqual(mockSession);
     });
   });
 

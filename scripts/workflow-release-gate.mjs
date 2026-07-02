@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 const e2eDir = resolve(repoRoot, 'apps/e2e');
+const webDistDir = resolve(repoRoot, 'apps/kalio-web/dist');
 const playwrightCli = resolve(e2eDir, 'node_modules/@playwright/test/cli.js');
 
 const args = new Set(process.argv.slice(2));
@@ -97,6 +99,16 @@ async function restoreActiveCredential(apiOrigin, credentialId) {
   }
 }
 
+function writeFrontendRuntimeConfig(backendUrl) {
+  const runtimeConfigPath = resolve(webDistDir, 'runtime-config.js');
+  mkdirSync(dirname(runtimeConfigPath), { recursive: true });
+  writeFileSync(
+    runtimeConfigPath,
+    `window.__KALIO_RUNTIME_CONFIG__ = ${JSON.stringify({ apiUrl: backendUrl, wsUrl: backendUrl })};\n`,
+    'utf8',
+  );
+}
+
 async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin) {
   console.log(`[workflow-release-gate] ${name}`);
   const env = normalizedWindowsEnv({
@@ -130,6 +142,18 @@ const groups = [
     grep: 'stop drains the active turn|replayed stale confirmation|workflow stop clears the stop action',
   },
   {
+    name: 'RA-App HITL gate',
+    grep: 'manual mode shows tool confirmation and RA-App approval overlay|bypass mode auto-executes tool confirmation and RA-App approval',
+  },
+  {
+    name: 'workflow failure projection gate',
+    grep: 'malformed router structured output becomes terminal failed graph state',
+  },
+  {
+    name: 'workflow follow-up hydration gate',
+    grep: 'keeps the earlier workflow bubble stable',
+  },
+  {
     name: 'normal chat gate',
     grep: 'assistant turn appears|agent response streams|multiple turns',
   },
@@ -152,6 +176,7 @@ try {
   console.log(`[workflow-release-gate] fixed QA ${baseUrl} -> ${apiOrigin}`);
   console.log(`[workflow-release-gate] llm provider=${llmConfig.provider} model=${llmConfig.model} source=${llmConfig.source}`);
   console.log(`[workflow-release-gate] active credential=${originalActiveCredentialId ?? 'none'}`);
+  writeFrontendRuntimeConfig(apiOrigin);
 
   if (requireLive) {
     const liveFailures = [

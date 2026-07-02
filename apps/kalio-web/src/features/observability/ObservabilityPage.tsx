@@ -16,6 +16,7 @@ const TYPE_CONFIG: Record<AuditType, { icon: React.ReactNode; cls: string; bg: s
   tool_call:            { icon: <Wrench size={12} />,        cls: 'text-emerald-400', bg: 'bg-emerald-400/10', short: 'Tool →',  label: 'Tool Call' },
   tool_result:          { icon: <CheckCircle2 size={12} />,  cls: 'text-emerald-400', bg: 'bg-emerald-400/10', short: '← Tool',  label: 'Tool Result' },
   architecture_event:   { icon: <Zap size={12} />,           cls: 'text-warning',     bg: 'bg-warning/10',     short: 'Arch',    label: 'Architecture Event' },
+  runtime_event:        { icon: <Zap size={12} />,           cls: 'text-cyan-300',    bg: 'bg-cyan-400/10',    short: 'Run',     label: 'Runtime Event' },
   error:                { icon: <XCircle size={12} />,       cls: 'text-error',       bg: 'bg-error/10',       short: 'Error',   label: 'Error' },
   raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     bg: 'bg-warning/10',     short: 'RA call', label: 'RA-App Native Call' },
   raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     bg: 'bg-warning/10',     short: 'RA ok',   label: 'RA-App Approved' },

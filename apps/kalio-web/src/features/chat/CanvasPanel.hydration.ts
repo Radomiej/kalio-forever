@@ -3,7 +3,7 @@ import type { ChatMessage } from '@kalio/types';
 import { useSessionStore } from '../../store/sessionStore';
 import { hasVisibleBranchTranscript } from './CanvasPanel.Focus';
 import { mergeFetchedMessages } from './chatUtils';
-import { DEFAULT_CHILD_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
+import { DEFAULT_CHILD_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow, type SessionHistoryWindow } from './sessionHistoryApi';
 
 const FOCUSED_BRANCH_RETRY_DELAY_MS = 1_000;
 
@@ -14,6 +14,22 @@ interface ChildTranscriptHydrationOptions {
   getSessionMessages: (sessionId: string | null) => ChatMessage[];
   sessionMessages: Record<string, ChatMessage[]>;
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
+}
+
+export async function hydrateChildSessionTranscript({
+  sessionId,
+  getSessionMessages,
+  setMessages,
+}: {
+  sessionId: string;
+  getSessionMessages: (sessionId: string | null) => ChatMessage[];
+  setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
+}): Promise<SessionHistoryWindow> {
+  const loadedWindow = await fetchSessionHistoryWindow(sessionId, { limit: DEFAULT_CHILD_SESSION_HISTORY_LIMIT });
+  const currentMessages = getSessionMessages(sessionId);
+  useSessionStore.getState().setSessionHistoryMeta(sessionId, loadedWindow.meta);
+  setMessages(mergeFetchedMessages(currentMessages, loadedWindow.messages), sessionId);
+  return loadedWindow;
 }
 
 export function useHydrateChildSessionTranscripts({
@@ -73,7 +89,7 @@ export function useHydrateChildSessionTranscripts({
 
     void Promise.all(
       missingSessionIds.map(async (sessionId) => {
-        const response = await fetchSessionHistoryWindow(sessionId, { limit: DEFAULT_CHILD_SESSION_HISTORY_LIMIT });
+        const response = await hydrateChildSessionTranscript({ sessionId, getSessionMessages, setMessages });
         return [sessionId, response] as const;
       }),
     )
@@ -82,9 +98,6 @@ export function useHydrateChildSessionTranscripts({
         if (cancelled) return;
         let focusedBranchStillMissing = false;
         results.forEach(([sessionId, loadedWindow]) => {
-          const currentMessages = getSessionMessages(sessionId);
-          useSessionStore.getState().setSessionHistoryMeta(sessionId, loadedWindow.meta);
-          setMessages(mergeFetchedMessages(currentMessages, loadedWindow.messages), sessionId);
           if (sessionId === focusedCanvasSessionId && !hasVisibleBranchTranscript(loadedWindow.messages)) {
             focusedBranchStillMissing = true;
           }

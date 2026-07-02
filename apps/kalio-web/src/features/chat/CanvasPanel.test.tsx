@@ -4,6 +4,7 @@ import { CanvasPanel } from './CanvasPanel';
 import type { ChatMessage, ChatSession, RuntimeActivitySnapshot, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from './cliChildProjection.model';
 import type { ArchitectureRunSummaryWithGraph } from './architectureChatSummary';
+import { clearSessionWatchRegistry } from '../../services/sessionWatchRegistry';
 
 interface MockAgentState {
   toolActivities: Array<{
@@ -231,6 +232,7 @@ vi.mock('../../store/sessionStore', () => {
 describe('CanvasPanel subagent grouping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSessionWatchRegistry();
     mockApiPost.mockRejectedValue(new Error('unexpected apiClient.post call'));
     agentState.toolActivities = [
       {
@@ -391,6 +393,11 @@ describe('CanvasPanel subagent grouping', () => {
       },
     };
 
+    mockApiGet.mockResolvedValue({
+      data: sessionState.sessionMessages['sub-session-1'],
+      headers: {},
+    });
+
     render(<CanvasPanel />);
 
     expect(screen.getByTestId('canvas-subagents-section')).toBeDefined();
@@ -404,7 +411,7 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.queryByText('run_subagent')).toBeNull();
   });
 
-  it('derives live canvas state from the active session runtime without relying on the global streaming bit', () => {
+  it('derives live canvas state from the active session runtime without relying on the global streaming bit', async () => {
     agentState.isStreaming = false;
     sessionState.agentTurns = [{ id: 'turn-1', sessionId: 'session-1', done: false, items: [] }];
     sessionState.getSessionActiveTurnId = () => 'turn-1';
@@ -434,12 +441,15 @@ describe('CanvasPanel subagent grouping', () => {
       },
     };
 
-    render(<CanvasPanel />);
+    await act(async () => {
+      render(<CanvasPanel />);
+      await Promise.resolve();
+    });
 
     expect(screen.getByText('Live')).toBeInTheDocument();
   });
 
-  it('shows architecture run detail with branch open controls', () => {
+  it('shows architecture run detail with branch open controls', async () => {
     agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-1' };
     sessionState.messages = [
       {
@@ -518,6 +528,13 @@ describe('CanvasPanel subagent grouping', () => {
     fireEvent.click(screen.getByTestId('architecture-open-branch-sub-session-1'));
 
     expect(agentState.setCanvasFocus).toHaveBeenCalledWith({ kind: 'architecture-branch', sessionId: 'sub-session-1' });
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/sub-session-1/messages', expect.objectContaining({
+      params: expect.objectContaining({ limit: 24 }),
+    })));
+    await waitFor(() => expect(sessionState.sessionMessages['sub-session-1']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'branch-user' }),
+      expect.objectContaining({ id: 'branch-agent' }),
+    ])));
   });
 
   it('does not duplicate architecture branch sessions in the generic sub-agents canvas section', () => {
@@ -1623,8 +1640,11 @@ describe('CanvasPanel CLI children section', () => {
     agentState.canvasOpen = true;
   });
 
-  it('renders CLI child cards from projections in the canvas section', () => {
-    render(<CanvasPanel />);
+  it('renders CLI child cards from projections in the canvas section', async () => {
+    await act(async () => {
+      render(<CanvasPanel />);
+      await Promise.resolve();
+    });
 
     expect(screen.getByTestId('canvas-cli-children-section')).toBeInTheDocument();
     expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();

@@ -55,6 +55,9 @@ export function useChatSessionActivation({
     if (isPendingHostSession(activeSession) || isPendingHostSessionId(activeSessionId)) return;
 
     identifyWatchedSession(activeSessionId, 'session-activation-active', { sticky: true });
+    if (activeSession?.parentSessionId) {
+      identifyWatchedSession(activeSession.parentSessionId, 'session-activation-parent', { sticky: true });
+    }
 
     const runtimeSnapshot = useAgentStore.getState().getRuntimeActivitySnapshot(activeSessionId);
     const hasRestoredPendingTool = (runtimeSnapshot?.pendingConfirmations ?? []).length > 0

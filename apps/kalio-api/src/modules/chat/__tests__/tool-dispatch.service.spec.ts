@@ -6,6 +6,7 @@ import { TOOL_REGISTRY } from '../chat.tokens';
 import { MCPService } from '../../mcp/mcp.service';
 import { HitlNotificationService } from '../../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../../hitl/hitl-policy.service';
+import { RuntimeAuditLogger } from '../runtime-audit-logger.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
 import type { ToolDomain } from '@kalio/types';
@@ -220,11 +221,15 @@ describe('ToolDispatchService', () => {
         notifyApprovalRequested: vi.fn().mockResolvedValue(undefined),
         logApprovalLifecycle: vi.fn().mockResolvedValue(undefined),
       };
+      const runtimeAudit = {
+        log: vi.fn().mockResolvedValue('audit-1'),
+      };
       const moduleRef = await Test.createTestingModule({
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
           { provide: HitlNotificationService, useValue: hitlNotifications },
+          { provide: RuntimeAuditLogger, useValue: runtimeAudit },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -256,6 +261,92 @@ describe('ToolDispatchService', () => {
           sessionId: 'sid',
           name: 'dangerous_tool',
           toolCallId: 'c1',
+        }),
+      }));
+      expect(runtimeAudit.log).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        eventName: 'tool.confirmation.requested',
+        sessionId: 'sid',
+        turnId: undefined,
+        status: 'waiting_for_human',
+        data: expect.objectContaining({
+          toolCallId: 'c1',
+          toolName: 'dangerous_tool',
+        }),
+      }));
+      expect(runtimeAudit.log).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        eventName: 'tool.confirmation.approved',
+        sessionId: 'sid',
+        status: 'completed',
+        data: expect.objectContaining({
+          toolCallId: 'c1',
+          toolName: 'dangerous_tool',
+        }),
+      }));
+      const requestId = (ctx.emit.mock.calls.find(([event]) => event === 'tool:confirmation_required')?.[1] as { requestId: string }).requestId;
+      expect(runtimeAudit.log).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        data: expect.objectContaining({
+          requestId,
+        }),
+      }));
+      expect(runtimeAudit.log).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        data: expect.objectContaining({
+          requestId,
+        }),
+      }));
+    });
+
+    it('logs requested and denied runtime audit events when the user cancels confirmation', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const runtimeAudit = {
+        log: vi.fn().mockResolvedValue('audit-1'),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: RuntimeAuditLogger, useValue: runtimeAudit },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(
+            data['requestId'],
+            'sid',
+            'User rejected the destructive write.',
+          ));
+        }
+      });
+
+      const result = await scopedService.dispatch('c1', 'dangerous_tool', { path: 'demo.txt' }, ctx);
+
+      expect(result).toEqual({
+        callId: 'c1',
+        status: 'cancelled',
+        errorMessage: 'User rejected tool confirmation: User rejected the destructive write.',
+      });
+      const requestId = (ctx.emit.mock.calls.find(([event]) => event === 'tool:confirmation_required')?.[1] as { requestId: string }).requestId;
+      expect(runtimeAudit.log).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        eventName: 'tool.confirmation.requested',
+        sessionId: 'sid',
+        status: 'waiting_for_human',
+        data: expect.objectContaining({
+          requestId,
+          toolCallId: 'c1',
+          toolName: 'dangerous_tool',
+        }),
+      }));
+      expect(runtimeAudit.log).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        eventName: 'tool.confirmation.denied',
+        sessionId: 'sid',
+        status: 'cancelled',
+        data: expect.objectContaining({
+          requestId,
+          toolCallId: 'c1',
+          toolName: 'dangerous_tool',
+          message: 'User rejected the destructive write.',
         }),
       }));
     });
@@ -799,7 +890,7 @@ describe('ToolDispatchService', () => {
       expect(entry.execute).not.toHaveBeenCalled();
     });
 
-    it('uses representative fallback only after a manual confirmation timeout', async () => {
+    it('keeps manual HITL confirmation pending indefinitely instead of falling back after a timeout', async () => {
       vi.useFakeTimers();
       try {
         const entry = makeEntry('dangerous_tool', true, { done: true });
@@ -832,29 +923,32 @@ describe('ToolDispatchService', () => {
 
         expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
           toolName: 'dangerous_tool',
-          timeoutMs: 600_000,
+          timeoutMs: 0,
         }));
         const requestId = (ctx.emit.mock.calls.find(([event]) => event === 'tool:confirmation_required')?.[1] as { requestId: string }).requestId;
 
+        const settled: { done: boolean } = { done: false };
+        void dispatchPromise.finally(() => {
+          settled.done = true;
+        });
         await vi.advanceTimersByTimeAsync(600_000);
-        const result = await dispatchPromise;
+        await Promise.resolve();
 
-        expect(result.status).toBe('success');
-        expect(hitlPolicy.resolveUnattendedApproval).toHaveBeenCalledWith(expect.objectContaining({
-          kind: 'tool',
-          sessionId: 'sid',
-          name: 'dangerous_tool',
-          toolCallId: 'c-timeout',
-        }));
-        expect(hitlNotifications.logApprovalLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+        expect(settled.done).toBe(false);
+        expect(hitlPolicy.resolveUnattendedApproval).not.toHaveBeenCalled();
+        expect(hitlNotifications.logApprovalLifecycle).not.toHaveBeenCalledWith(expect.objectContaining({
           eventType: 'hitl_approval_timeout',
           requestId,
         }));
+
+        scopedService.resolveConfirmation(requestId, 'sid');
+        const result = await dispatchPromise;
+
+        expect(result.status).toBe('success');
         expect(hitlNotifications.logApprovalLifecycle).toHaveBeenCalledWith(expect.objectContaining({
-          eventType: 'hitl_approval_representative_approved',
+          eventType: 'hitl_approval_confirmed',
           requestId,
-          source: 'representative',
-          reason: 'User did not respond; representative approved the constrained request.',
+          source: 'manual',
         }));
         expect(entry.execute).toHaveBeenCalledTimes(1);
       } finally {

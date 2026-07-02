@@ -4,8 +4,9 @@ import type { ToolConfirmationInvalidated, ToolConfirmationRequest } from '@kali
 import type { StreamContext } from './interfaces/stream-context.interface';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 
-const HITL_TIMEOUT_MS = 600_000;
+const HITL_TIMEOUT_MS = 0;
 const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
 const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set([
   'fs_write',
@@ -42,6 +43,7 @@ export class ToolConfirmationService {
   constructor(
     @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
     @Optional() @Inject(HitlNotificationService) private readonly hitlNotifications: HitlNotificationService | null,
+    @Optional() @Inject(RuntimeAuditLogger) private readonly runtimeAudit: RuntimeAuditLogger | null = null,
   ) {}
 
   resolveConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
@@ -56,6 +58,7 @@ export class ToolConfirmationService {
     this.pending.delete(requestId);
     this.emitConfirmationInvalidated(pending, 'confirmed');
     this.logConfirmationLifecycle(pending, 'hitl_approval_confirmed', 'manual', message);
+    void this.logRuntimeConfirmation(pending, 'tool.confirmation.approved', 'completed');
     pending.resolve();
     return 'resolved';
   }
@@ -72,6 +75,7 @@ export class ToolConfirmationService {
     this.pending.delete(requestId);
     this.emitConfirmationInvalidated(pending, 'cancelled');
     this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'manual', message);
+    void this.logRuntimeConfirmation(pending, 'tool.confirmation.denied', 'cancelled', message);
     pending.reject(message);
     return 'rejected';
   }
@@ -227,16 +231,30 @@ export class ToolConfirmationService {
         toolCallId: callId,
       },
     });
+    void this.runtimeAudit?.log({
+      eventName: 'tool.confirmation.requested',
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      status: 'waiting_for_human',
+      data: {
+        requestId,
+        toolCallId: callId,
+        toolName,
+        agentRunId: ctx.agentRun?.agentRunId,
+        agentType: ctx.agentRun?.agentType,
+      },
+    });
 
     return new Promise<ConfirmationWaitResult>(resolve => {
       const timeout = timeoutMs > 0
         ? setTimeout(() => {
             const pending = this.pending.get(requestId);
-            if (pending) {
-              this.pending.delete(requestId);
-              this.emitConfirmationInvalidated(pending, 'timeout', `Approval timed out for tool ${toolName}.`);
-              this.logConfirmationLifecycle(pending, 'hitl_approval_timeout', 'manual');
-            }
+          if (pending) {
+            this.pending.delete(requestId);
+            this.emitConfirmationInvalidated(pending, 'timeout', `Approval timed out for tool ${toolName}.`);
+            this.logConfirmationLifecycle(pending, 'hitl_approval_timeout', 'manual');
+            void this.logRuntimeConfirmation(pending, 'tool.confirmation.timeout', 'failed');
+          }
             this.logger.warn(`HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`);
             resolve({ status: 'timeout', requestId });
           }, timeoutMs)
@@ -252,6 +270,7 @@ export class ToolConfirmationService {
           this.pending.delete(requestId);
           this.emitConfirmationInvalidated(pending, 'cancelled', `Tool confirmation aborted for ${toolName}.`);
           this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'abort');
+          void this.logRuntimeConfirmation(pending, 'tool.confirmation.cancelled', 'cancelled');
         }
         if (timeout) clearTimeout(timeout);
         cleanupAbortListener();
@@ -358,6 +377,27 @@ export class ToolConfirmationService {
       reason,
       ...(message !== undefined ? { message } : {}),
       ...(pending.payload.agentRun !== undefined ? { agentRun: pending.payload.agentRun } : {}),
+    });
+  }
+
+  private logRuntimeConfirmation(
+    pending: PendingConfirmation,
+    eventName: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    reason?: string,
+  ): Promise<string> | undefined {
+    return this.runtimeAudit?.log({
+      eventName,
+      sessionId: pending.payload.sessionId,
+      status,
+      data: {
+        requestId: pending.payload.requestId,
+        toolCallId: pending.payload.toolCallId,
+        toolName: pending.payload.toolName,
+        agentRunId: pending.payload.agentRun?.agentRunId,
+        agentType: pending.payload.agentRun?.agentType,
+        ...(reason ? { message: reason } : {}),
+      },
     });
   }
 }

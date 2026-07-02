@@ -49,6 +49,16 @@ export class SessionsController {
     return this.runtimeWatchlist.list();
   }
 
+  @Get(':id/children')
+  listChildren(@Param('id') id: string): Promise<ChatSession[]> {
+    return this.sessions.listChildren(id);
+  }
+
+  @Get(':id')
+  get(@Param('id') id: string): Promise<ChatSession> {
+    return this.sessions.get(id);
+  }
+
   @Post()
   create(@Body() dto: CreateSessionDto): Promise<ChatSession> {
     return this.sessions.create({

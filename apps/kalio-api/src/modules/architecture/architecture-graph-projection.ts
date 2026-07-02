@@ -68,6 +68,7 @@ function toGraphNode(
   const incompleteReason = latestIncompleteReason(nodeEvents);
   const status = nodeStatus(projectionEvents);
   const actionFields = latestActionFields(projectionEvents, node.kind, status);
+  const failureFields = latestFailureFields(projectionEvents);
   return {
     id: node.id,
     sessionId: sessionIdForNode(runId, node),
@@ -79,6 +80,8 @@ function toGraphNode(
     actionSummary: actionFields.actionSummary,
     action: actionFields.action,
     detail: actionFields.detail,
+    errorCode: failureFields.errorCode,
+    failure: failureFields.failure,
     visitCount: nodeVisitCount(nodeEvents),
     eventIds,
     toolEvidence,
@@ -177,7 +180,7 @@ function latestRunFailureEvent(
   if (status !== 'failed' && status !== 'cancelled') {
     return undefined;
   }
-  return [...events].reverse().find((event) => (
+  const runLevelFailure = [...events].reverse().find((event) => (
     event.nodeId === undefined
     && event.roleSlotId === undefined
     && (
@@ -185,6 +188,19 @@ function latestRunFailureEvent(
       || event.errorCode !== undefined
       || event.reasonCode !== undefined
       || event.runtimeDecision?.reasonCode !== undefined
+      || event.status === 'failed'
+      || event.status === 'cancelled'
+    )
+  ));
+  if (runLevelFailure) {
+    return runLevelFailure;
+  }
+  return [...events].reverse().find((event) => (
+    event.type === 'node_failed'
+    && (
+      event.failure !== undefined
+      || event.errorCode !== undefined
+      || event.reasonCode !== undefined
       || event.status === 'failed'
       || event.status === 'cancelled'
     )
@@ -248,6 +264,21 @@ function latestIncompleteReason(events: ArchitectureExecutionEvent[]): string | 
     .reverse()
     .map((event) => event.data?.['incompleteReason'])
     .find((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function latestFailureFields(events: ArchitectureExecutionEvent[]): Pick<
+  ArchitectureGraphProjection['nodes'][number],
+  'errorCode' | 'failure'
+> {
+  for (const event of [...events].reverse()) {
+    if (event.errorCode || event.failure) {
+      return {
+        errorCode: event.errorCode ?? event.failure?.code,
+        failure: event.failure,
+      };
+    }
+  }
+  return {};
 }
 
 function latestActionFields(

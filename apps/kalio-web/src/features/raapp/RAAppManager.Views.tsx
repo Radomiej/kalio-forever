@@ -13,25 +13,8 @@ import {
 import { RAAppRenderer } from './RAAppRenderer';
 import { RAAppGroupCard } from './components/RAAppGroupCard';
 import { RAAppCoreCard } from './components/RAAppCoreCard';
-import type { RAAppBlock, RAAppGroup, RAAppSummary, VFSFile } from '@kalio/types';
-
-export interface CatalogRunTarget {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-export interface FoundRAApp {
-  messageId: string;
-  block: RAAppBlock;
-  index: number;
-}
-
-export interface WorkDraft {
-  id: string;
-  files: VFSFile[];
-  updatedAt: number;
-}
+import type { RAAppGroup, RAAppSummary } from '@kalio/types';
+import type { CatalogRunTarget, FoundRAApp, WorkDraft } from './RAAppManager.types';
 
 export function CatalogView({
   catalogCount,

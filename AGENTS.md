@@ -247,6 +247,10 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
 - For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
+- Workspace package scripts invoked by root gates must call local tools directly and never invoke nested `pnpm`/`npm` orchestration; root workspace commands own package order and dependency resolution.
+- Runtime E2E for one workflow must use scoped session/children endpoints for that host session instead of fetching global `/api/sessions` and filtering the entire QA database.
+- Persisted chat-history fixtures must seed assistant messages with durable `turn_id` and `prompt_message_id`; chronological reconstruction is only a legacy fallback, not an E2E contract.
+- After rebuilding the frontend while a random-port QA stack is already running, refresh `apps/kalio-web/dist/runtime-config.js` from the managed stack state before Playwright/release gates so API and Socket.IO origins stay authoritative.
 
 ---
 

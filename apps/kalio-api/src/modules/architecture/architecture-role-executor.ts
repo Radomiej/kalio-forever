@@ -22,7 +22,7 @@ import { structuredOutputForArchitectureSlot } from './architecture-structured-o
 import { createArchitectureBranchStreamHook, type ArchitectureBranchStreamSnapshot } from './architecture-stream-hooks';
 import { PersonaService } from '../persona/persona.service';
 import { CredentialsService } from '../credentials/credentials.service';
-import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
+import { createWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 
 export const ARCHITECTURE_ROLE_EXECUTOR = Symbol('ARCHITECTURE_ROLE_EXECUTOR');
 
@@ -733,6 +733,25 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   ): Record<string, unknown> {
     const typedRouterOutput = routerOutputFromStructuredOutput(structuredOutput);
     const parsedRoute = structuredRouteToCall(structuredOutput);
+    if (structuredOutput !== undefined && input.node?.kind === 'router') {
+      if (!typedRouterOutput) {
+        throw createWorkflowError(
+          'CONTRACT_VIOLATION',
+          `${input.slot.label} structured router output did not match the workflow contract.`,
+          { source: 'architecture-router', retryable: false },
+        );
+      }
+      if (
+        typedRouterOutput.nextAction === 'route_to'
+        && (!parsedRoute || !outgoingNodeIds.includes(parsedRoute.targetNodeId))
+      ) {
+        throw createWorkflowError(
+          'CONTRACT_VIOLATION',
+          `${input.slot.label} structured router output selected an invalid workflow target.`,
+          { source: 'architecture-router', retryable: false },
+        );
+      }
+    }
     if (parsedRoute && outgoingNodeIds.includes(parsedRoute.targetNodeId)) {
       return {
         routerOutput: parsedRoute.routerOutput,

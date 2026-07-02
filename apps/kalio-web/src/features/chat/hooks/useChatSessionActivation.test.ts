@@ -84,6 +84,47 @@ describe('useChatSessionActivation', () => {
     });
   });
 
+  it('identifies the parent when a child session is selected so backend can replay the child tree', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+    useSessionStore.setState({
+      activeSessionId: 'child-session-1',
+      sessions: [
+        { id: 'parent-session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
+        {
+          id: 'child-session-1',
+          personaId: 'default',
+          title: 'Child',
+          kind: 'subagent',
+          parentSessionId: 'parent-session-1',
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+      sessionMessages: {
+        'parent-session-1': [],
+        'child-session-1': [],
+      },
+    });
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'child-session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    expect(eventBus.identifySession).toHaveBeenCalledWith('child-session-1');
+    expect(eventBus.identifySession).toHaveBeenCalledWith('parent-session-1');
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/child-session-1/messages', expect.objectContaining({
+        params: { limit: 40 },
+      }));
+    });
+  });
+
   it('skips history hydration for pending host-session ids', async () => {
     const pendingSession = createPendingHostSession({
       personaId: 'default',

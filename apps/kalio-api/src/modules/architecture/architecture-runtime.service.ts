@@ -23,6 +23,7 @@ import type {
 import { SessionsService } from '../chat/sessions.service';
 import { SessionManagerService } from '../chat/session-manager.service';
 import { AuditService, type AuditLogEntry } from '../chat/audit.service';
+import { RuntimeAuditLogger } from '../chat/runtime-audit-logger.service';
 import { VFSService } from '../vfs/vfs.service';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 import {
@@ -37,6 +38,7 @@ import { buildArchitectureGraphProjection } from './architecture-graph-projectio
 import { reconstructDurableArchitectureGraph } from './architecture-durable-graph';
 import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
+import { architectureFailureRuntimeAuditEventInput, architectureRuntimeAuditEventInput } from './architecture-runtime-audit';
 import { hydrateArchitectureRootVfs, type ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
 import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
@@ -86,6 +88,7 @@ export class ArchitectureRuntimeService {
     @Optional() private readonly audit?: AuditService,
     @Optional() private readonly vfs?: VFSService,
     @Optional() private readonly cliAgentConfig?: Pick<CLIAgentConfigService, 'getConfig'>,
+    @Optional() private readonly runtimeAudit?: RuntimeAuditLogger,
   ) {}
 
   async createRun(dto: CreateArchitectureRunDto, emit?: ArchitectureRoleExecutionInput['emit']): Promise<ArchitectureRun> {
@@ -306,25 +309,47 @@ export class ArchitectureRuntimeService {
     resumeFrom?: AgentFlowContinuationCursor,
   ): Promise<ArchitectureRun> {
     const { hydration, run, schema } = prepared;
-    const events = await createArchitectureGraphEvents({
-      schema,
-      run,
-      now: run.createdAt,
-      roleExecutor: this.roleExecutor,
-      personaForSlot: (slot) => this.personaForRunSlot(run, slot),
-      priorEvents,
-      resumeFrom,
-      emit,
-      onEvent: liveEvents ? (event) => {
-        if (this.stoppedRunIds.has(run.id)) {
-          throw new Error(`Architecture run ${run.id} was stopped by the user.`);
-        }
-        liveEvents.push(event);
-        run.updatedAt = Date.now();
-        this.runs.set(run.id, run);
-        this.auditArchitectureEvent(schema, run, event);
-      } : undefined,
-    });
+    const emittedEvents = liveEvents ?? [];
+    let events: ArchitectureExecutionEvent[];
+    try {
+      events = await createArchitectureGraphEvents({
+        schema,
+        run,
+        now: run.createdAt,
+        roleExecutor: this.roleExecutor,
+        personaForSlot: (slot) => this.personaForRunSlot(run, slot),
+        priorEvents,
+        resumeFrom,
+        emit,
+        onEvent: (event) => {
+          if (this.stoppedRunIds.has(run.id)) {
+            throw new Error(`Architecture run ${run.id} was stopped by the user.`);
+          }
+          emittedEvents.push(event);
+          if (liveEvents) {
+            run.updatedAt = Date.now();
+            this.runs.set(run.id, run);
+            this.auditArchitectureEvent(schema, run, event);
+          }
+        },
+      });
+    } catch (error) {
+      if (emittedEvents.length === 0) {
+        throw error;
+      }
+      events = emittedEvents;
+      const completedAt = Date.now();
+      run.status = this.statusFromEvents(events) === 'running' ? 'failed' : this.statusFromEvents(events);
+      run.updatedAt = completedAt;
+      run.completedAt = completedAt;
+      this.runs.set(run.id, run);
+      this.schemasByRunId.set(run.id, this.cloneSchema(schema));
+      this.eventsByRunId.set(run.id, events);
+      this.auditArchitectureHydration(run, hydration);
+      this.auditArchitectureRun(schema, run, events, liveEvents === undefined);
+      await this.persistParentChatProjection(schema, run, events);
+      return run;
+    }
     if (this.stoppedRunIds.has(run.id) || run.status !== 'running') {
       return run;
     }
@@ -770,41 +795,47 @@ export class ArchitectureRuntimeService {
     run: ArchitectureRun,
     event: ArchitectureExecutionEvent,
   ): void {
-    if (!this.audit) return;
-    const actionFields = architectureActionFieldsForEvent(event);
-    void this.audit.log({
-      sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
-      type: 'architecture_event',
-      label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
-      data: {
-        domain: 'architecture',
-        kind: 'architecture_event',
-        runId: run.id,
-        architectureRunId: run.id,
-        schemaId: schema.id,
-        executionMode: run.executionMode,
-        eventId: event.id,
-        eventType: event.type,
-        sequence: event.sequence,
-        nodeId: event.nodeId,
-        roleSlotId: event.roleSlotId,
-        prompt: event.type === 'run_created' ? run.prompt : undefined,
-        reasonCode: event.reasonCode,
-        errorCode: event.errorCode,
-        failure: event.failure,
-        evidence: event.evidence,
-        runtimeDecision: event.runtimeDecision,
-        incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
-        runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
-        toolEvidence: this.toolEvidenceForAudit(event),
-        route: event.route,
-        routerOutput: event.routerOutput,
-        messagePreview: event.message.slice(0, 800),
-        actionSummary: actionFields.actionSummary,
-        action: actionFields.action,
-        detail: actionFields.detail,
-      },
-    });
+    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
+    if (this.audit) {
+      const actionFields = architectureActionFieldsForEvent(event);
+      void this.audit.log({
+        sessionId,
+        type: 'architecture_event',
+        label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId: run.id,
+          architectureRunId: run.id,
+          schemaId: schema.id,
+          executionMode: run.executionMode,
+          eventId: event.id,
+          eventType: event.type,
+          sequence: event.sequence,
+          nodeId: event.nodeId,
+          roleSlotId: event.roleSlotId,
+          prompt: event.type === 'run_created' ? run.prompt : undefined,
+          reasonCode: event.reasonCode,
+          errorCode: event.errorCode,
+          failure: event.failure,
+          evidence: event.evidence,
+          runtimeDecision: event.runtimeDecision,
+          incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
+          runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
+          toolEvidence: this.toolEvidenceForAudit(event),
+          route: event.route,
+          routerOutput: event.routerOutput,
+          messagePreview: event.message.slice(0, 800),
+          actionSummary: actionFields.actionSummary,
+          action: actionFields.action,
+          detail: actionFields.detail,
+        },
+      });
+    }
+    const runtimeEvent = architectureRuntimeAuditEventInput(schema, run, event, sessionId);
+    if (runtimeEvent) {
+      void this.runtimeAudit?.log(runtimeEvent);
+    }
   }
 
   private toolEvidenceForAudit(event: ArchitectureExecutionEvent): Record<string, unknown> | undefined {
@@ -837,6 +868,8 @@ export class ArchitectureRuntimeService {
         errorMessage: failure.message,
       },
     });
+    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
+    void this.runtimeAudit?.log(architectureFailureRuntimeAuditEventInput(schema, run, failure, sessionId));
   }
 
   private auditArchitectureHydration(

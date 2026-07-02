@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SessionsService } from '../chat/sessions.service';
 import type { SessionManagerService } from '../chat/session-manager.service';
 import type { AuditLogEntry, AuditService } from '../chat/audit.service';
+import { RuntimeAuditLogger } from '../chat/runtime-audit-logger.service';
 import type { VFSService } from '../vfs/vfs.service';
 import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
@@ -2364,6 +2365,38 @@ describe('ArchitectureRuntimeService', () => {
         messagePreview: expect.any(String),
       }),
     }));
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'workflow.run.started',
+      type: 'runtime_event',
+      sessionId: 'parent-session',
+      data: expect.objectContaining({
+        domain: 'runtime',
+        eventName: 'workflow.run.started',
+        runId: run.id,
+        schemaId: 'strategic-decision-council',
+        executionMode: 'subagent_execution',
+        status: 'started',
+      }),
+    }));
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'workflow.node.started',
+      type: 'runtime_event',
+      sessionId: 'parent-session',
+      data: expect.objectContaining({
+        domain: 'runtime',
+        eventName: 'workflow.node.started',
+        runId: run.id,
+        nodeId: expect.any(String),
+        schemaId: 'strategic-decision-council',
+        eventType: 'node_started',
+        status: 'started',
+      }),
+    }));
+    const runtimeRows = audit.log.mock.calls
+      .map(([entry]) => entry)
+      .filter((entry) => entry.type === 'runtime_event');
+    expect(runtimeRows.length).toBeGreaterThan(0);
+    expect(runtimeRows.every((entry) => !('prompt' in (entry.data ?? {})))).toBe(true);
   });
 
   it('executes the Goal Master loop with bounded continuation routing', async () => {
@@ -5269,6 +5302,7 @@ function createService(options: {
       audit as unknown as AuditService,
       vfs as unknown as VFSService,
       cliAgentConfig,
+      new RuntimeAuditLogger(audit as unknown as AuditService),
     ),
     executor,
     sessions,
