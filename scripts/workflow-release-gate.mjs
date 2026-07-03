@@ -11,6 +11,7 @@ const playwrightCli = resolve(e2eDir, 'node_modules/@playwright/test/cli.js');
 
 const args = new Set(process.argv.slice(2));
 const requireLive = args.has('--require-live');
+const reuseStack = args.has('--reuse-stack') || requireLive;
 
 function normalizedWindowsEnv(baseEnv) {
   if (process.platform !== 'win32') {
@@ -73,6 +74,37 @@ async function readStackStatus() {
   return JSON.parse(result.stdout);
 }
 
+async function ensureFreshMockStackUnlessReusing() {
+  if (reuseStack) {
+    return;
+  }
+
+  console.log('[workflow-release-gate] starting fresh mock QA stack');
+  const result = await run(process.execPath, [
+    'scripts/stack-manager.mjs',
+    'start',
+    '--backend-port',
+    '0',
+    '--frontend-port',
+    '0',
+    '--provider',
+    'mock',
+    '--model',
+    'mock',
+    '--force-env-llm',
+    '--force-restart',
+    '--runtime',
+    'direct',
+  ], {
+    cwd: repoRoot,
+    env: normalizedWindowsEnv(process.env),
+    stdio: 'inherit',
+  });
+  if (result.code !== 0) {
+    throw new Error(`failed to start fresh mock QA stack with exit code ${result.code}`);
+  }
+}
+
 async function readLlmConfig(apiOrigin) {
   const response = await fetch(`${apiOrigin}/api/llm/config`);
   if (!response.ok) {
@@ -109,7 +141,7 @@ function writeFrontendRuntimeConfig(backendUrl) {
   );
 }
 
-async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin) {
+async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin, stackState) {
   console.log(`[workflow-release-gate] ${name}`);
   const env = normalizedWindowsEnv({
     ...process.env,
@@ -117,6 +149,7 @@ async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin) {
     PLAYWRIGHT_BASE_URL: baseUrl,
     PLAYWRIGHT_API_ORIGIN: apiOrigin,
     TEST_API_URL: `${apiOrigin}/api`,
+    DATABASE_PATH: stackState.databasePath,
   });
   const result = await run(process.execPath, [playwrightCli, 'test', '--project=chromium', '--grep', grep], {
     cwd: e2eDir,
@@ -142,8 +175,16 @@ const groups = [
     grep: 'stop drains the active turn|replayed stale confirmation|workflow stop clears the stop action',
   },
   {
+    name: 'child session live HITL gate',
+    grep: 'child session receives live HITL and confirms without reload|auto-approved child tool completes without creating manual confirmation',
+  },
+  {
     name: 'RA-App HITL gate',
     grep: 'manual mode shows tool confirmation and RA-App approval overlay|bypass mode auto-executes tool confirmation and RA-App approval',
+  },
+  {
+    name: 'AgentFlow Goal Guard gate',
+    grep: 'renders parent run_sub_agentflow history bubble|starts a two-agent Goal Guard AgentFlow|keeps a Talk-started durable AgentFlow result fresh after child completion and reload',
   },
   {
     name: 'workflow failure projection gate',
@@ -160,6 +201,7 @@ const groups = [
 ];
 
 try {
+  await ensureFreshMockStackUnlessReusing();
   const status = await readStackStatus();
   if (status.status !== 'running' || !status.backendUp || !status.frontendUp) {
     throw new Error(`fixed QA stack is not ready: ${JSON.stringify(status)}`);
@@ -191,7 +233,7 @@ try {
 
   try {
     for (const group of groups) {
-      await runPlaywrightGroup(group, baseUrl, apiOrigin);
+      await runPlaywrightGroup(group, baseUrl, apiOrigin, status.state);
     }
   } finally {
     await restoreActiveCredential(apiOrigin, originalActiveCredentialId);

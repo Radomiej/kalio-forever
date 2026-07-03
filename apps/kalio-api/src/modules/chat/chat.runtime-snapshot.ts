@@ -18,6 +18,7 @@ import type { AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port
 import type { CLIAgentSessionRuntimePort } from '../cli-agent/cli-agent-session-runtime.port';
 import { readPendingRAAppLaunchIntent } from './raapp-launch-intent';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
+import { safeLoadRuntimeSnapshotSessionMetadata } from './chat.runtime-session-metadata';
 
 interface RuntimeSnapshotLogger {
   warn(message: string): void;
@@ -405,8 +406,9 @@ export async function buildRuntimeActivitySnapshotBatch({
   }));
 
   const agentFlowSnapshotsByParentSessionId = await preloadAgentFlowSnapshotsByParentSessionId(sessionIds, agentFlowRuntime);
+  const rootSession = await safeLoadRuntimeSnapshotSessionMetadata(rootSessionId, sessionsService, logger);
   const sessionsBySessionId: Record<string, ChatSession> = {
-    [rootSessionId]: await sessionsService.get(rootSessionId),
+    ...(rootSession ? { [rootSessionId]: rootSession } : {}),
     ...resolvedSessionTree.childSessionsById,
   };
 

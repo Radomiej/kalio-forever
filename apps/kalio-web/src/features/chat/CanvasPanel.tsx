@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Loader2, ArrowLeftFromLine, ArrowRightToLine, Info,
 } from 'lucide-react';
@@ -168,13 +168,20 @@ export function CanvasPanel() {
     () => subagentPreviews.filter((preview) => !architecturePreviewSessionIds.has(preview.sessionId)),
     [architecturePreviewSessionIds, subagentPreviews],
   );
-  const focusedSubAgentFlowResult = useMemo(
-    () => findFocusedSubAgentFlowResult(
-      messages,
-      canvasFocus?.kind === 'architecture-run' ? canvasFocus.runId : undefined,
-    ),
-    [canvasFocus, messages],
-  );
+  const focusedAgentFlowRunId = canvasFocus?.kind === 'architecture-run' ? canvasFocus.runId : undefined;
+  const focusedSubAgentFlowResult = useMemo(() => {
+    const persistedResult = findFocusedSubAgentFlowResult(messages, focusedAgentFlowRunId);
+    if (persistedResult) {
+      return persistedResult;
+    }
+
+    return agentFlowPreviews.find((preview) => (
+      preview.flowRunId === focusedAgentFlowRunId
+      || preview.graphRunId === focusedAgentFlowRunId
+      || preview.result?.flowRunId === focusedAgentFlowRunId
+      || preview.result?.openGraphRunId === focusedAgentFlowRunId
+    ))?.result ?? null;
+  }, [agentFlowPreviews, focusedAgentFlowRunId, messages]);
   const focusedCanvasSessionId = canvasFocus?.kind === 'architecture-branch' ? canvasFocus.sessionId : undefined;
   const childPreviewSessionIds = useMemo(
     () => Array.from(
@@ -272,6 +279,30 @@ export function CanvasPanel() {
   const focusedCanvasDisplayTranscript = hasVisibleBranchTranscript(focusedCanvasTranscript)
     ? focusedCanvasTranscript
     : focusedTranscriptOverrideMatches && focusedTranscriptOverride ? focusedTranscriptOverride : focusedCanvasTranscript;
+  const openCanvasConversationSession = useCallback((sessionId: string) => {
+    identifyWatchedSession(sessionId, 'canvas-open-session', { sticky: true });
+    const activateTargetSession = () => {
+      void activateConversationSession({
+        sessionId,
+        sessions,
+        setActiveSession,
+        reason: 'canvas',
+      }).catch((err: unknown) => {
+        console.error('[CanvasPanel] failed to activate focused branch session', err instanceof Error ? err : new Error(String(err)));
+      });
+    };
+
+    if (hasVisibleBranchTranscript(getSessionMessages(sessionId))) {
+      activateTargetSession();
+      return;
+    }
+
+    activateTargetSession();
+    void hydrateChildSessionTranscript({ sessionId, getSessionMessages, setMessages })
+      .catch((err: unknown) => {
+        console.error('[CanvasPanel] failed to hydrate focused branch before opening', err instanceof Error ? err : new Error(String(err)));
+      });
+  }, [getSessionMessages, sessions, setActiveSession, setMessages]);
 
   return (
     <>
@@ -313,14 +344,7 @@ export function CanvasPanel() {
                   sessions={sessions}
                   transcript={focusedCanvasDisplayTranscript}
                   onClear={() => setCanvasFocus(null)}
-                  onOpenSession={(sessionId) => {
-                    void activateConversationSession({
-                      sessionId,
-                      sessions,
-                      setActiveSession,
-                      reason: 'canvas',
-                    });
-                  }}
+                  onOpenSession={openCanvasConversationSession}
                 />
               )}
 

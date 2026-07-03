@@ -30,7 +30,7 @@ function makeSchema(): ArchitectureSchema {
   };
 }
 
-function makeRun(): ArchitectureRun {
+function makeRun(overrides: Partial<ArchitectureRun> = {}): ArchitectureRun {
   return {
     id: 'run-1',
     schemaId: 'schema-1',
@@ -43,6 +43,7 @@ function makeRun(): ArchitectureRun {
     branchSessionIds: {
       analyst: 'branch-analyst-fallback',
     },
+    ...overrides,
   };
 }
 
@@ -89,6 +90,37 @@ describe('buildArchitectureParentChatMessages', () => {
       hostProjectionKind: 'workflow-envelope',
       finalArtifact: 'Final typed answer.',
     });
+  });
+
+  it('links parent chat projection to the real prompt message id when chat launch context provides one', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-final',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'final_artifact',
+        nodeId: 'final',
+        message: 'Final typed answer.',
+        createdAt: 13,
+      },
+    ];
+
+    const messages = buildArchitectureParentChatMessages(
+      makeSchema(),
+      makeRun({ context: { promptMessageId: 'user-real' } }),
+      'parent-1',
+      events,
+      100,
+    );
+    const assistantMessages = messages.filter((message) => message.role === 'assistant');
+
+    expect(messages[0]).toMatchObject({
+      id: 'user-real',
+      role: 'user',
+      promptMessageId: 'user-real',
+    });
+    expect(assistantMessages).not.toHaveLength(0);
+    expect(assistantMessages.every((message) => message.promptMessageId === 'user-real')).toBe(true);
   });
 
   it('attaches typed workflow-envelope metadata to branch-only projections', () => {

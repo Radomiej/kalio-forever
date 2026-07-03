@@ -196,6 +196,33 @@ describe('ChatService', () => {
     );
   });
 
+  it('uses the client message id as the durable prompt id for live turn anchoring', async () => {
+    sessionManager.persistUserMessage.mockImplementation(
+      async (sessionId: string, content: string, _attachments: unknown, turnLink?: { messageId?: string }) => ({
+        id: turnLink?.messageId ?? 'u1',
+        sessionId,
+        role: 'user',
+        content,
+        createdAt: 1,
+      }),
+    );
+    const llmSource = makeLLMSource([{ type: 'text_delta', delta: 'ok' }, { type: 'done' }]);
+    await buildService(llmSource);
+
+    await service.handleTurn('sid', 'hello', 'persona-1', emit as EmitFn, undefined, 'turn-1', undefined, 'client-user-123');
+
+    expect(sessionManager.persistUserMessage).toHaveBeenCalledWith(
+      'sid',
+      'hello',
+      undefined,
+      expect.objectContaining({ turnId: 'turn-1', messageId: 'client-user-123' }),
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'agent:start',
+      expect.objectContaining({ promptMessageId: 'client-user-123', turnId: 'turn-1' }),
+    );
+  });
+
   it('forwards attachments to persistUserMessage', async () => {
     const llmSource = makeLLMSource([]);
     await buildService(llmSource);

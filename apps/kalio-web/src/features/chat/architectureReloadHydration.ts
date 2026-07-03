@@ -67,7 +67,9 @@ function buildReloadedArchitectureSummaryMessage(
   summary: ArchitectureRunSummary,
 ): ChatMessage {
   const turnId = `architecture-turn-${summary.runId}`;
-  const promptMessageId = `architecture:${summary.runId}:user`;
+  const fallbackPromptMessageId = `architecture:${summary.runId}:user`;
+  const promptMessageId = promptMessageIdForArchitectureRun(messages, summary.runId)
+    ?? fallbackPromptMessageId;
   const relatedMessages = messages.filter((message) => (
     message.architectureRun?.runId === summary.runId
     || message.turnId === turnId
@@ -97,6 +99,26 @@ function buildReloadedArchitectureSummaryMessage(
     },
     createdAt: typeof firstAssistantAt === 'number' ? Math.max(0, firstAssistantAt - 1) : lastUserAt + 1,
   };
+}
+
+function promptMessageIdForArchitectureRun(messages: ChatMessage[], runId: string): string | null {
+  for (const message of messages) {
+    if (
+      message.architectureRun?.runId === runId
+      && typeof message.promptMessageId === 'string'
+      && message.promptMessageId.trim().length > 0
+    ) {
+      return message.promptMessageId;
+    }
+    if (
+      message.toolCalls?.some((toolCall) => toolCall.args['architectureRunId'] === runId) === true
+      && typeof message.promptMessageId === 'string'
+      && message.promptMessageId.trim().length > 0
+    ) {
+      return message.promptMessageId;
+    }
+  }
+  return null;
 }
 
 function mergeReloadedArchitectureSummaryMessage(

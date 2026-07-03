@@ -756,6 +756,51 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
+  it('stops active runs by root or branch session id for chat stop integration', async () => {
+    const { service, executor } = createService();
+    let rejectFirstBranch: ((error: Error) => void) | undefined;
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => {
+      if (slot.id === 'pragmatist') {
+        return new Promise((_resolve, reject) => {
+          rejectFirstBranch = reject;
+        });
+      }
+      return Promise.resolve({
+        message: `${slot.label} branch prepared for: ${run.prompt}`,
+        data: {
+          branchSessionId,
+          personaId,
+          sessionPersonaId: personaId,
+          rootSessionId: run.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: run.executionMode,
+        },
+      });
+    });
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Stop active architecture workflow from chat.',
+      context: { parentSessionId: 'host-session' },
+    });
+    await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
+
+    const stoppedRunIds = await service.stopRunsForSessions(['host-session', run.rootSessionId ?? 'missing']);
+    rejectFirstBranch?.(new Error('late branch failure after session stop'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stoppedRunIds).toEqual([run.id]);
+    expect(service.findRun(run.id)).toMatchObject({
+      id: run.id,
+      status: 'cancelled',
+      reasonCode: 'user_stop',
+    });
+    expect(service.getEvents(run.id).at(-1)).toMatchObject({
+      type: 'run_stopped',
+      reasonCode: 'user_stop',
+    });
+  });
+
   it('persists an async run start projection to parent chat before graph execution completes', async () => {
     const { service, executor, sessionManager } = createService();
     const resolvers: Array<(value: Awaited<ReturnType<ArchitectureRoleExecutor['execute']>>) => void> = [];
@@ -1871,6 +1916,79 @@ describe('ArchitectureRuntimeService', () => {
       message: 'Runtime stopped after 1 graph steps.',
       data: {
         pendingNodeIds: ['agent-1'],
+        visitCounts: { 'agent-1': 1, 'router-1': 1 },
+      },
+    });
+  });
+
+  it('fails resumed runs with a typed max_node_visits event when the pending node is already capped', async () => {
+    const { service, executor } = createService();
+    const baseSchema = new ArchitectureRegistryService().findOne('strategic-decision-council')!;
+    const roleSlots = baseSchema.roleSlots.filter((slot) => ['pragmatist', 'router'].includes(slot.id));
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, node, personaId, run, slot }) => ({
+      message: `${slot.label} response for ${node?.id ?? 'unknown'}`,
+      data: {
+        branchSessionId,
+        personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+        ...(node?.id === 'router-1'
+          ? routerData('agent-1', 'Loop back.')
+          : {}),
+      },
+    }));
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Resume should fail when pending node is visit-capped.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 1, maxArchitectureNodeVisits: 1 },
+      schema: {
+        ...baseSchema,
+        id: 'resume-max-node-visits',
+        name: 'Resume Max Node Visits',
+        roleSlots,
+        nodes: [
+          { id: 'agent-1', label: 'Agent 1', kind: 'role' as const, roleSlotId: 'pragmatist' },
+          {
+            id: 'router-1',
+            label: 'Router 1',
+            kind: 'router' as const,
+            roleSlotId: 'router',
+            behavior: { mode: 'choose_one' as const },
+          },
+        ],
+        edges: [
+          { id: 'agent-1-router-1', fromNodeId: 'agent-1', toNodeId: 'router-1' },
+          { id: 'router-1-agent-1', fromNodeId: 'router-1', toNodeId: 'agent-1' },
+        ],
+      },
+    });
+
+    vi.mocked(executor.execute).mockClear();
+    const resumed = await service.resumeRun(run.id, {
+      maxSteps: 5,
+      continuation: {
+        reason: 'max_steps',
+        waitingNodeId: 'router-1',
+        pendingNodeIds: ['router-1'],
+        visitCounts: { 'agent-1': 1, 'router-1': 1 },
+        lastCompletedNodeId: 'agent-1',
+        message: 'Router 1 was pending after a previous pause.',
+      },
+    });
+
+    expect(executor.execute).not.toHaveBeenCalled();
+    expect(resumed.status).toBe('failed');
+    expect(resumed.completedAt).toBeDefined();
+    expect(service.findRun(run.id)?.status).toBe('failed');
+    expect(service.getEvents(run.id).at(-1)).toMatchObject({
+      type: 'router_decision',
+      reasonCode: 'max_node_visits',
+      data: {
+        reasonCode: 'max_node_visits',
+        pendingNodeIds: ['router-1'],
         visitCounts: { 'agent-1': 1, 'router-1': 1 },
       },
     });
@@ -3171,7 +3289,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Finalizer must not accept an unresolved CLI child.',
       executionMode: 'subagent_execution',
@@ -3179,7 +3297,23 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
       },
-    })).rejects.toThrow('Architecture finalization blocked: CLI child implementation is incomplete');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'UNKNOWN',
+      failure: expect.objectContaining({
+        code: 'UNKNOWN',
+        retryable: false,
+        message: expect.stringContaining('Architecture finalization blocked: CLI child implementation is incomplete'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'UNKNOWN',
+    });
   });
 
   it('passes all prior childCliSessions into Goal Master and finalizer inputs', async () => {
@@ -3770,7 +3904,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Reject prose-only proof.',
       executionMode: 'subagent_execution',
@@ -3780,7 +3914,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
         requireGoalMasterLoopProof: true,
       },
-    })).rejects.toThrow('verifier did not produce a successful read or terminal evidence result');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('verifier did not produce a successful read or terminal evidence result'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('allows Goal Master finalization when host project file proof is visible', async () => {
@@ -3851,7 +4002,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Reject prose-only implementer.',
       executionMode: 'subagent_execution',
@@ -3859,7 +4010,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
       },
-    })).rejects.toThrow('completed without required tool evidence');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('completed without required tool evidence'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('allows strict Implementer proof mode to continue when a downstream Implementer writes', async () => {
@@ -3952,7 +4120,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       schema,
       prompt: 'Reject read-only Implementer in a two-agent proof flow.',
@@ -3962,7 +4130,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 10,
         requireImplementerWriteProof: true,
       },
-    })).rejects.toThrow('implementer did not produce a successful write result');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('implementer did not produce a successful write result'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('fails Goal Guard proof mode when Implementer only reads files and never writes', async () => {
@@ -4000,7 +4185,7 @@ describe('ArchitectureRuntimeService', () => {
       };
     });
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Reject read-only Implementer in Goal Guard proof mode.',
       executionMode: 'subagent_execution',
@@ -4009,7 +4194,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
         requireGoalMasterLoopProof: true,
       },
-    })).rejects.toThrow('implementer did not produce a successful write result');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('implementer did not produce a successful write result'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('uses an inline draft schema for run graph projections without changing the registry schema', async () => {
@@ -4783,6 +4985,49 @@ describe('ArchitectureRuntimeService', () => {
       status: 'running',
       rootSessionId: `arch-${runId}-root`,
     });
+  });
+
+  it('returns a live graph without legacy persisted child-agent reconstruction when the schema cannot spawn CLI children', async () => {
+    const { service, executor, sessions } = createService();
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
+      message: slot.id === 'router'
+        ? 'Router selected the final artifact path.'
+        : slot.id === 'finalizer'
+          ? 'Finalizer produced the concise project assessment.'
+          : `${slot.label} branch prepared for: ${run.prompt}`,
+      data: {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+        ...(slot.id === 'router' ? routerData('final-artifact') : {}),
+      },
+    }));
+    sessions.list.mockRejectedValue(new Error('legacy reconstruction should not run for this live graph'));
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Assess the project architecture without CLI child agents.',
+      executionMode: 'subagent_execution',
+      context: {
+        maxArchitectureNodeVisits: 1,
+        maxArchitectureSteps: 20,
+      },
+    });
+
+    const graph = await service.getGraphDurable(run.id);
+
+    expect(graph).toMatchObject({
+      runId: run.id,
+      status: 'completed',
+      childAgents: [],
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: 'final-artifact', status: 'completed' }),
+      ]),
+    });
+    expect(sessions.list).not.toHaveBeenCalled();
   });
 
   it('prefers audit-event node state while overlaying persisted CLI child agents', async () => {

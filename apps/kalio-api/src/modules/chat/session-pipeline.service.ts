@@ -301,7 +301,7 @@ export class SessionPipelineService {
       turnId,
     });
     const executionPromise = this.chat
-      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId, run?.id)
+      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId, run?.id, payload.clientMessageId)
       .catch((err) => {
         // ChatService.handleTurn already swallows its own errors, but be
         // defensive so a thrown error never wedges the pipeline state.

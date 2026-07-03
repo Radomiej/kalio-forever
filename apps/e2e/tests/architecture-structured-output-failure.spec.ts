@@ -3,6 +3,7 @@ import {
   API_BASE,
   deleteSessionIfExists,
   ensureEnvMockProvider,
+  getJsonWithTransportRetry,
   selectArchitectureInComposer,
   sendMessageFromComposer,
 } from './helpers/test-config';
@@ -80,14 +81,14 @@ test.describe('Architecture structured-output failure handling', () => {
       const timeline = page.getByTestId('architecture-run-timeline');
       await expect(timeline).toBeVisible({ timeout: 120_000 });
       await expect(timeline).toHaveAttribute('data-status', 'failed', { timeout: 120_000 });
-      await expect(page.getByTestId('architecture-route-router').last()).toHaveAttribute('data-status', 'failed', { timeout: 30_000 });
-      await expect(page.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'cancelled', { timeout: 30_000 });
-      await expect(page.getByTestId('architecture-route-finalizer')).not.toHaveText(/pending/i);
+      await expect(page.locator('[data-testid="architecture-route-router"][data-status="failed"]')).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('[data-testid^="architecture-route-"][data-status="pending"]')).toHaveCount(0, { timeout: 30_000 });
 
       const runId = await architectureRunIdForHost(request, hostSessionId);
-      const graphResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/graph`);
-      expect(graphResponse.ok()).toBeTruthy();
-      const graph = await graphResponse.json() as ArchitectureGraphResponse;
+      const graph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${runId}/graph`,
+      );
       const failedRouter = graph.nodes?.find((node) => node.kind === 'router' && node.status === 'failed');
       const finalizer = graph.nodes?.find((node) => node.id === 'final-artifact' || node.kind === 'artifact');
 

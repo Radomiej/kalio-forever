@@ -262,11 +262,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         }
       : undefined;
 
-    trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, agentRun });
-    if (!requestedChildSessionId) {
-      trackingEmit?.('session:created', childSession);
-    }
-
     const promptMessage = await this.sessionManager.persistUserMessage(
       childSessionId,
       objectiveWithAttachmentHint,
@@ -274,6 +269,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       { turnId },
     );
     const promptMessageId = promptMessage?.id;
+    trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, promptMessageId, agentRun });
+    if (!requestedChildSessionId) {
+      trackingEmit?.('session:created', childSession);
+    }
 
     const controller = new AbortController();
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;

@@ -92,7 +92,10 @@ async function expectVfsContent(
     .poll(async () => {
       const response = await request.get(
         `${API_BASE}/sessions/${sessionId}/vfs/read?path=${encodeURIComponent(filePath)}`,
-      );
+      ).catch(() => null);
+      if (!response) {
+        return null;
+      }
       if (!response.ok()) {
         return null;
       }

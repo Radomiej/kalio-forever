@@ -32,6 +32,12 @@ export function getArchitectureParentToolCallId(
   return stringField(context, 'parentToolCallId');
 }
 
+export function getArchitecturePromptMessageId(
+  context: Record<string, unknown> | undefined,
+): string | undefined {
+  return stringField(context, 'promptMessageId');
+}
+
 export function getArchitectureHostSessionId(
   context: Record<string, unknown> | undefined,
 ): string | undefined {

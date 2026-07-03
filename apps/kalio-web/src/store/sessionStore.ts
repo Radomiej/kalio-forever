@@ -9,6 +9,7 @@ import {
   getStoredSessionTurns,
   mergePendingMessages,
   resolveSessionSlice,
+  withActiveTurnLinkage,
 } from './sessionStore.helpers';
 
 export type { AgentTurn, AgentTurnItem } from './sessionStore.helpers';
@@ -59,7 +60,7 @@ interface SessionState {
   dequeueUserAction: () => string | undefined;
 
   // Agent turn management
-  startAgentTurn: (turnId: ID, sessionId: ID, agentRun?: AgentRunContext) => void;
+  startAgentTurn: (turnId: ID, sessionId: ID, agentRun?: AgentRunContext, promptMessageId?: ID) => void;
   addTurnItem: (item: AgentTurnItem, sessionId?: string | null) => void;
   finalizeAgentTurn: (sessionId?: string | null) => void;
   clearAgentTurns: (sessionId?: string | null) => void;
@@ -213,18 +214,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       const baseMessages = getStoredSessionMessages(s, targetSessionId);
       const msgExists = baseMessages.some((message) => message.id === messageId);
+      const activeTurnId = getStoredSessionActiveTurnId(s, targetSessionId);
+      const activeTurn = getStoredSessionTurns(s, targetSessionId).find((turn) => turn.id === activeTurnId);
       const nextMessages = msgExists
-        ? [...baseMessages]
+        ? baseMessages.map((message) =>
+            message.id === messageId ? withActiveTurnLinkage(message, activeTurn) : message,
+          )
         : [
             ...baseMessages,
-            {
+            withActiveTurnLinkage({
               id: messageId,
               sessionId: targetSessionId,
               role: 'assistant' as const,
               content: '',
               streaming: true,
               createdAt: Date.now(),
-            },
+            }, activeTurn),
           ];
 
       if (thinking) {
@@ -456,11 +461,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   // Agent turn management — unified chronological rendering per user prompt
-  startAgentTurn: (turnId, sessionId, agentRun) =>
+  startAgentTurn: (turnId, sessionId, agentRun, explicitPromptMessageId) =>
     set((s) => {
       const existingTurns = getStoredSessionTurns(s, sessionId);
       const existingTurn = existingTurns.find((turn) => turn.id === turnId) ?? null;
-      const promptMessageId = [...getStoredSessionMessages(s, sessionId)]
+      const promptMessageId = explicitPromptMessageId ?? [...getStoredSessionMessages(s, sessionId)]
         .reverse()
         .find((message) => message.role === 'user')?.id;
       const nextSessionTurns = existingTurn
@@ -470,7 +475,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 ...turn,
                 done: false,
                 agentRun: agentRun ?? turn.agentRun,
-                promptMessageId: turn.promptMessageId ?? promptMessageId,
+                promptMessageId: explicitPromptMessageId ?? turn.promptMessageId ?? promptMessageId,
               }
             : turn
         ))

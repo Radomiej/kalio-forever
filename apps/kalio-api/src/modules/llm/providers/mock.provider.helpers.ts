@@ -19,6 +19,7 @@ const MOCK_SCRIPT_END = '[[/mock:script]]';
 
 type MockScriptAction =
   | { kind: 'wait'; ms: number }
+  | { kind: 'hold'; ms: number }
   | { kind: 'return'; text: string };
 
 type MockScriptCase = {
@@ -128,13 +129,17 @@ export function parseMockScript(script: string): MockScriptCase[] {
 
 function parseMockScriptActions(source: string): MockScriptAction[] {
   const actions: MockScriptAction[] = [];
-  const actionPattern = /wait\((\d+)\)|return\((['"])([\s\S]*?)\2\)/gi;
+  const actionPattern = /hold\((\d+)\)|wait\((\d+)\)|return\((['"])([\s\S]*?)\3\)/gi;
   for (const match of source.matchAll(actionPattern)) {
     if (match[1] !== undefined) {
-      actions.push({ kind: 'wait', ms: Number(match[1]) });
+      actions.push({ kind: 'hold', ms: Number(match[1]) });
       continue;
     }
-    actions.push({ kind: 'return', text: match[3] ?? '' });
+    if (match[2] !== undefined) {
+      actions.push({ kind: 'wait', ms: Number(match[2]) });
+      continue;
+    }
+    actions.push({ kind: 'return', text: match[4] ?? '' });
   }
   return actions;
 }
@@ -282,10 +287,14 @@ export function hasPriorToolResult(messages: ContextManagedLLMMessage[], toolNam
     const role = String(message.role);
     if (role !== 'tool' && role !== 'tool_result') return false;
     const result = parseToolResultObject(message.content);
-    if (result?.['name'] !== toolName) {
+    const matchingToolCall = findAssistantToolCallById(messages, message.toolCallId);
+    const resultToolName = getToolResultName(result) ?? matchingToolCall?.name ?? null;
+    if (resultToolName !== toolName) {
       return false;
     }
-    return targetPath === undefined || recordContainsStringValue(result, targetPath);
+    return targetPath === undefined
+      || recordContainsStringValue(result, targetPath)
+      || recordContainsStringValue(matchingToolCall?.args, targetPath);
   });
 }
 
@@ -305,10 +314,17 @@ export function hasPriorAssistantToolCall(messages: ContextManagedLLMMessage[], 
 
 export function hasPriorAgentFlowResult(messages: ContextManagedLLMMessage[]): boolean {
   return messages.some((message) => {
-    if (message.role !== 'tool') return false;
+    const role = String(message.role);
+    if (role !== 'tool' && role !== 'tool_result') return false;
     const result = parseToolResultObject(message.content);
-    return typeof result?.['flowRunId'] === 'string'
-      && typeof result['childSessionId'] === 'string';
+    if (!result) return false;
+    if (typeof result['flowRunId'] === 'string' && typeof result['childSessionId'] === 'string') {
+      return true;
+    }
+    return result['domain'] === 'architecture'
+      && result['kind'] === 'architecture_runtime'
+      && typeof result['runId'] === 'string'
+      && typeof result['rootSessionId'] === 'string';
   });
 }
 
@@ -322,6 +338,34 @@ function parseToolResultObject(content: ContextManagedLLMMessage['content']): Re
   } catch {
     return null;
   }
+}
+
+function getToolResultName(result: Record<string, unknown> | null): string | null {
+  const legacyName = result?.['name'];
+  if (typeof legacyName === 'string') {
+    return legacyName;
+  }
+  const typedName = result?.['toolName'];
+  return typeof typedName === 'string' ? typedName : null;
+}
+
+function findAssistantToolCallById(
+  messages: ContextManagedLLMMessage[],
+  toolCallId: string | undefined,
+): LLMToolCall | null {
+  if (!toolCallId) {
+    return null;
+  }
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !Array.isArray(message.toolCalls)) {
+      continue;
+    }
+    const toolCall = message.toolCalls.find((candidate) => candidate.id === toolCallId);
+    if (toolCall) {
+      return toolCall;
+    }
+  }
+  return null;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

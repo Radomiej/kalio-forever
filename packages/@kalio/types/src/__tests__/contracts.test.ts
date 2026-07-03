@@ -755,6 +755,8 @@ describe('@kalio/types contract shape', () => {
         actionSummary?: string;
         action?: ArchitectureExecutionEvent['action'];
         detail?: string;
+        errorCode?: ArchitectureExecutionEvent['errorCode'];
+        failure?: ArchitectureExecutionEvent['failure'];
         visitCount?: number;
         eventIds: ID[];
         toolEvidence?: Record<string, unknown>;

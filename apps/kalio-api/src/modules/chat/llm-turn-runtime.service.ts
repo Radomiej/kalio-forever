@@ -12,6 +12,7 @@ import type { LLMStructuredOutputRequest, SocketEvents, ToolResult } from '@kali
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
+import { buildEmptyNoToolRuntimeAuditEvent } from './llm-turn-runtime-audit.events';
 import {
   estimateContentTokens,
   estimateTextTokens,
@@ -303,12 +304,28 @@ export class LLMTurnRuntimeService {
         if (!hasAssistantOutput && maxEmptyNoToolRetries > 0) {
           emptyNoToolRetries++;
           if (emptyNoToolRetries <= maxEmptyNoToolRetries) {
+            await this.runtimeAudit?.log(buildEmptyNoToolRuntimeAuditEvent({
+              eventName: 'llm.turn.empty_no_tool_retry',
+              request,
+              iteration,
+              retryCount: emptyNoToolRetries,
+              retryLimit: maxEmptyNoToolRetries,
+              state,
+            }));
             this.logger.warn(
               `Agent produced empty no-tool iteration for session ${request.sessionId} at iteration ${iteration}; retry ${emptyNoToolRetries}/${maxEmptyNoToolRetries}`,
             );
             iteration--;
             continue;
           }
+          await this.runtimeAudit?.log(buildEmptyNoToolRuntimeAuditEvent({
+            eventName: 'llm.turn.empty_no_tool_exhausted',
+            request,
+            iteration,
+            retryCount: emptyNoToolRetries,
+            retryLimit: maxEmptyNoToolRetries,
+            state,
+          }));
           emptyNoToolRetriesExhausted = true;
           break;
         }

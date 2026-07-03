@@ -41,6 +41,37 @@ type ChildStatusPatch = Omit<Partial<SocketEvents['session:status']>, 'run'> & {
 };
 
 describe('buildRuntimeActivitySnapshot', () => {
+  it('returns a snapshot instead of throwing when watched session metadata is missing', async () => {
+    const logger = { warn: vi.fn() };
+
+    const snapshot = await buildRuntimeActivitySnapshot({
+      sessionId: 'missing-session',
+      status: makeStatus('missing-session'),
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockResolvedValue(makeStatus('missing-session')),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([]),
+      },
+      sessionsService: {
+        listChildren: vi.fn().mockResolvedValue([]),
+        get: vi.fn().mockRejectedValue(new Error('Session not found: missing-session')),
+        getMessages: vi.fn(),
+      },
+      logger,
+    });
+
+    expect(snapshot).toMatchObject({
+      sessionId: 'missing-session',
+      active: false,
+      childExecutions: [],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Unable to load session metadata missing-session'));
+  });
+
   it('uses parent-scoped agent flow lookup instead of loading all runs', async () => {
     const findByParentSessionId = vi.fn().mockResolvedValue([makeAgentFlowSnapshot('session-1')]);
     const findAll = vi.fn().mockResolvedValue([makeAgentFlowSnapshot('other-session')]);

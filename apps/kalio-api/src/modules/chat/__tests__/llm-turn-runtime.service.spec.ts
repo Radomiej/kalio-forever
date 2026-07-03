@@ -8,6 +8,7 @@ import type { SessionManagerService } from '../session-manager.service';
 import type { StreamProcessorService } from '../stream-processor.service';
 import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { AuditService } from '../audit.service';
+import type { RuntimeAuditLogger } from '../runtime-audit-logger.service';
 
 async function* streamFrom(chunks: InternalLLMChunk[]): AsyncIterable<InternalLLMChunk> {
   for (const chunk of chunks) yield chunk;
@@ -245,6 +246,144 @@ describe('LLMTurnRuntimeService', () => {
     });
 
     expect(onBeforeIteration).toHaveBeenCalledWith(1, 'first-message', 7);
+  });
+
+  it('logs typed runtime events for empty no-tool retries without raw prompt data', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn()
+        .mockImplementationOnce(() => streamFrom([{ type: 'done' }]))
+        .mockImplementationOnce(() => streamFrom([
+          { type: 'text_delta', delta: 'done' },
+          { type: 'done' },
+        ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void } }) => {
+        if (chunk.type === 'text_delta') ctx.state.appendText(chunk.delta);
+      }),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtimeAuditLog = vi.fn<RuntimeAuditLogger['log']>().mockResolvedValue('runtime-audit-id');
+    const runtimeAudit = {
+      log: runtimeAuditLog,
+    } satisfies Pick<RuntimeAuditLogger, 'log'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+      undefined,
+      runtimeAudit as unknown as RuntimeAuditLogger,
+    );
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+      maxEmptyNoToolRetries: 1,
+    });
+
+    const retryEvent = runtimeAudit.log.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.eventName === 'llm.turn.empty_no_tool_retry');
+    expect(result.finalText).toBe('done');
+    expect(retryEvent).toMatchObject({
+      eventName: 'llm.turn.empty_no_tool_retry',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      status: 'running',
+      reasonCode: 'runtime_stalled',
+      data: {
+        runtimeKind: 'chat',
+        iteration: 1,
+        retryCount: 1,
+        retryLimit: 1,
+        textLength: 0,
+        thinkingLength: 0,
+        toolCallCount: 0,
+      },
+    });
+    expect(retryEvent?.data).not.toHaveProperty('prompt');
+    expect(retryEvent?.data).not.toHaveProperty('messages');
+    expect(retryEvent?.data).not.toHaveProperty('history');
+  });
+
+  it('logs typed runtime events when empty no-tool retries are exhausted', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([{ type: 'done' }])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async () => undefined),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtimeAuditLog = vi.fn<RuntimeAuditLogger['log']>().mockResolvedValue('runtime-audit-id');
+    const runtimeAudit = {
+      log: runtimeAuditLog,
+    } satisfies Pick<RuntimeAuditLogger, 'log'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+      undefined,
+      runtimeAudit as unknown as RuntimeAuditLogger,
+    );
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+      maxEmptyNoToolRetries: 1,
+    });
+
+    const exhaustedEvent = runtimeAudit.log.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.eventName === 'llm.turn.empty_no_tool_exhausted');
+    expect(result.emptyNoToolRetriesExhausted).toBe(true);
+    expect(exhaustedEvent).toMatchObject({
+      eventName: 'llm.turn.empty_no_tool_exhausted',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      status: 'failed',
+      reasonCode: 'runtime_stalled',
+      errorCode: 'CONTRACT_VIOLATION',
+      data: {
+        runtimeKind: 'chat',
+        iteration: 1,
+        retryCount: 2,
+        retryLimit: 1,
+        textLength: 0,
+        thinkingLength: 0,
+        toolCallCount: 0,
+      },
+    });
+    expect(exhaustedEvent?.data).not.toHaveProperty('prompt');
+    expect(exhaustedEvent?.data).not.toHaveProperty('messages');
+    expect(exhaustedEvent?.data).not.toHaveProperty('history');
   });
 
   it('routes every internal stream through llmSource.stream', async () => {

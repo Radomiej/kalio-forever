@@ -15,9 +15,16 @@ import type { SessionMessagePage } from './interfaces/message-repository.interfa
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
+const DEFAULT_ACTIVE_SESSION_LIST_LIMIT = 250;
+const MAX_SESSION_LIST_LIMIT = 500;
 const MAX_TITLE_LENGTH = 60;
 interface SessionRuntimeScopeOptions {
   registerRuntimeProjectPath?: boolean;
+}
+
+interface SessionListOptions {
+  includeArchived?: boolean;
+  limit?: number;
 }
 
 const TITLE_SYSTEM_PROMPT = [
@@ -48,13 +55,15 @@ export class SessionsService {
     private readonly allowedPaths: AllowedPathsService,
   ) {}
 
-  async list(options: { includeArchived?: boolean } = {}): Promise<ChatSession[]> {
+  async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
+    const limit = normalizeSessionListLimit(options);
     const query = this.drizzle.db
       .select()
       .from(sessions);
-    const rows = await (options.includeArchived
+    const orderedQuery = options.includeArchived
       ? query.orderBy(desc(sessions.updatedAt))
-      : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt)));
+      : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt));
+    const rows = await (limit === undefined ? orderedQuery : orderedQuery.limit(limit));
     return rows.map(this.toChatSession);
   }
 
@@ -311,6 +320,13 @@ function projectPathFromRuntimeContext(runtimeContext: SessionRuntimeContext | n
   }
 
   return undefined;
+}
+
+function normalizeSessionListLimit(options: SessionListOptions): number | undefined {
+  if (typeof options.limit === 'number' && Number.isFinite(options.limit)) {
+    return Math.min(MAX_SESSION_LIST_LIMIT, Math.max(1, Math.trunc(options.limit)));
+  }
+  return options.includeArchived ? undefined : DEFAULT_ACTIVE_SESSION_LIST_LIMIT;
 }
 
 function buildTitlePrompt(history: ChatMessage[]): ContextManagedLLMMessage[] {

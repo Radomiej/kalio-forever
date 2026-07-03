@@ -23,6 +23,10 @@ import {
   CLI_AGENT_SESSION_RUNTIME,
   type CLIAgentSessionRuntimePort,
 } from '../cli-agent/cli-agent-session-runtime.port';
+import {
+  ARCHITECTURE_RUNTIME_STOP,
+  type ArchitectureRuntimeStopPort,
+} from './architecture-runtime-stop.port';
 import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
 import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
@@ -53,6 +57,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
     @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
+    @Optional() @Inject(ARCHITECTURE_RUNTIME_STOP) private readonly architectureRuntimeStop?: ArchitectureRuntimeStopPort,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {
     this.sessionEvents.onSessionCreated(({ session }) => {
@@ -157,22 +162,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const sessionTree = await this.collectRuntimeSnapshotSessionTree(payload.sessionId);
     const descendantSessionIds = sessionTree.descendantIdsBySessionId[payload.sessionId] ?? [];
+    const stoppedSessionIds = [payload.sessionId, ...descendantSessionIds];
+
+    await this.stopArchitectureRunsForSessions(stoppedSessionIds);
+    await this.stopAgentFlowRunsForSessions(stoppedSessionIds);
+
+    const stoppedStatusesBySessionId = await this.buildStoppedSessionStatuses(sessionTree.sessionIds);
+    const stoppedSnapshotBatch = await this.buildRuntimeActivitySnapshots(
+      payload.sessionId,
+      sessionTree,
+      stoppedStatusesBySessionId,
+    );
+    this.emitRuntimeActivitySnapshotBatch(client.id, stoppedSnapshotBatch);
 
     for (const sessionId of sessionTree.sessionIds) {
       await this.stopCliAgentSessionIfNeeded(client.id, sessionId);
       await this.pipeline.stopAndDrain(sessionId);
     }
-    await this.stopAgentFlowRunsForSessions([payload.sessionId, ...descendantSessionIds]);
 
     const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree);
-    for (const sessionId of snapshotBatch.sessionIds) {
-      this.emitToInitiatorAndSessionSubscribers(
-        client.id,
-        sessionId,
-        'session:runtime_snapshot',
-        snapshotBatch.snapshotsBySessionId[sessionId],
-      );
-    }
+    this.emitRuntimeActivitySnapshotBatch(client.id, snapshotBatch);
   }
 
   @SubscribeMessage('tool:confirm')
@@ -394,6 +403,56 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  private async buildStoppedSessionStatuses(
+    sessionIds: readonly string[],
+  ): Promise<Record<string, SocketEvents['session:status']>> {
+    const now = Date.now();
+    const entries = await Promise.all(sessionIds.map(async (sessionId) => {
+      const currentStatus = await this.pipeline.getSessionStatusWithRun(sessionId).catch((error: unknown) => {
+        this.logger.warn(
+          `Unable to load session status ${sessionId} for stop snapshot: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      });
+      const stoppedStatus: SocketEvents['session:status'] = {
+        sessionId,
+        active: false,
+        queueLength: 0,
+        ...(currentStatus?.turnId ? { turnId: currentStatus.turnId } : {}),
+        ...(currentStatus?.run ? {
+          run: {
+            ...currentStatus.run,
+            phase: 'interrupted',
+            status: 'interrupted',
+            safeResume: false,
+            errorCode: currentStatus.run.errorCode ?? 'USER_STOPPED',
+            errorMessage: currentStatus.run.errorMessage ?? 'Stopped by user.',
+            updatedAt: now,
+            lastHeartbeatAt: now,
+            completedAt: now,
+          },
+        } : {}),
+      };
+      return [sessionId, stoppedStatus] as const;
+    }));
+
+    return Object.fromEntries(entries);
+  }
+
+  private emitRuntimeActivitySnapshotBatch(
+    initiatorSocketId: string,
+    snapshotBatch: Awaited<ReturnType<ChatGateway['buildRuntimeActivitySnapshots']>>,
+  ): void {
+    for (const sessionId of snapshotBatch.sessionIds) {
+      this.emitToInitiatorAndSessionSubscribers(
+        initiatorSocketId,
+        sessionId,
+        'session:runtime_snapshot',
+        snapshotBatch.snapshotsBySessionId[sessionId],
+      );
+    }
+  }
+
   private emitSessionLifecycleEvent<K extends 'session:created' | 'session:updated'>(
     event: K,
     payload: SocketEvents[K],
@@ -478,6 +537,29 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       } catch (error) {
         this.logger.warn(`Failed to stop AgentFlow run ${snapshot.run.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+
+  private async stopArchitectureRunsForSessions(sessionIds: string[]): Promise<void> {
+    const architectureRuntime = this.getArchitectureRuntimeStopPort();
+    if (!architectureRuntime) {
+      return;
+    }
+    try {
+      await architectureRuntime.stopRunsForSessions(sessionIds);
+    } catch (error) {
+      this.logger.warn(`Failed to stop Architecture runs: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private getArchitectureRuntimeStopPort(): ArchitectureRuntimeStopPort | undefined {
+    if (this.architectureRuntimeStop) {
+      return this.architectureRuntimeStop;
+    }
+    try {
+      return this.moduleRef?.get<ArchitectureRuntimeStopPort>(ARCHITECTURE_RUNTIME_STOP, { strict: false });
+    } catch {
+      return undefined;
     }
   }
 

@@ -47,6 +47,45 @@ describe('sessionStore — AgentTurn actions', () => {
       expect(agentTurns[0]).toMatchObject({ id: 't1', sessionId: 's1', done: false });
       expect(activeTurnId).toBe('t1');
     });
+
+    it('uses explicit promptMessageId from agent:start instead of inferring from the latest user message', () => {
+      useSessionStore.setState({
+        activeSessionId: 's1',
+        sessionMessages: {
+          s1: [
+            { id: 'user-old', sessionId: 's1', role: 'user', content: 'old', createdAt: 1 },
+            { id: 'user-new', sessionId: 's1', role: 'user', content: 'new', createdAt: 2 },
+          ],
+        },
+      });
+
+      useSessionStore.getState().startAgentTurn('t1', 's1', undefined, 'user-old');
+
+      const agentTurns = useSessionStore.getState().getSessionAgentTurns('s1');
+      expect(agentTurns[0]).toMatchObject({ id: 't1', promptMessageId: 'user-old' });
+    });
+  });
+
+  describe('appendChunk', () => {
+    it('links live assistant placeholders to the active turn and prompt', () => {
+      useSessionStore.setState({
+        activeSessionId: 's1',
+        sessionMessages: {
+          s1: [
+            { id: 'user-1', sessionId: 's1', role: 'user', content: 'Reply FIRST', createdAt: 1 },
+          ],
+        },
+      });
+      useSessionStore.getState().startAgentTurn('turn-1', 's1', undefined, 'user-1');
+
+      useSessionStore.getState().appendChunk('assistant-1', 'FIRST', false, 's1');
+
+      const messages = useSessionStore.getState().getSessionMessages('s1');
+      expect(messages.find((message) => message.id === 'assistant-1')).toMatchObject({
+        turnId: 'turn-1',
+        promptMessageId: 'user-1',
+      });
+    });
   });
 
   describe('finalizeAgentTurn', () => {

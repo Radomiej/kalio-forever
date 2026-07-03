@@ -34,6 +34,82 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     mockState.sessionMessages = {};
   });
 
+  it('keeps a rehydrated workflow envelope attached to its real user prompt after a follow-up prompt exists', async () => {
+    mockState.sessions = [
+      { id: 'host', personaId: 'default', title: 'Host', createdAt: 1, updatedAt: 1 },
+    ];
+
+    const fetchMessages = vi.fn(async () => [
+      {
+        id: 'user-1',
+        sessionId: 'host',
+        role: 'user' as const,
+        content: 'Assess what this workflow can do.',
+        createdAt: 10,
+      },
+      {
+        id: 'architecture:run-1:text:event-finalizer',
+        sessionId: 'host',
+        role: 'assistant' as const,
+        content: '',
+        turnId: 'architecture-turn-run-1',
+        promptMessageId: 'user-1',
+        createdAt: 20,
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'completed' as const,
+          trace: [],
+          routeHops: [],
+          hostProjectionKind: 'workflow-envelope' as const,
+          finalArtifact: 'Mock structured final artifact.',
+        },
+      },
+      {
+        id: 'user-2',
+        sessionId: 'host',
+        role: 'user' as const,
+        content: 'Repeat the previous conclusion.',
+        createdAt: 30,
+      },
+    ]);
+    const fetchArchitectureRunProjection = vi.fn(async () => ({
+      events: [],
+      chat: { runId: 'run-1', messages: [] } satisfies ArchitectureChatProjection,
+      graph: {
+        runId: 'run-1',
+        schemaId: 'strategic-decision-council',
+        schemaName: 'Strategic Decision Council',
+        status: 'completed' as const,
+        nodes: [],
+        edges: [],
+        routeHops: [],
+      } satisfies ArchitectureGraphProjection,
+    }));
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessions: () => mockState.sessions,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages: vi.fn(),
+      setAgentTurns: vi.fn(),
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+    if (!reloadedMessages) {
+      throw new Error('Expected reloaded messages');
+    }
+
+    const summary = reloadedMessages.find((message) => message.id === 'architecture-rehydrate:host:run-1');
+    expect(summary).toMatchObject({
+      turnId: 'architecture-turn-run-1',
+      promptMessageId: 'user-1',
+    });
+    const turns = buildTurnsFromHistory(reloadedMessages, 'host');
+    expect(turns.find((turn) => turn.id === 'architecture-turn-run-1')?.promptMessageId).toBe('user-1');
+  });
+
   it('hydrates a workflow-envelope summary from typed projection when raw host messages only identify the run', async () => {
     const hostSession: ChatSession = {
       id: 'host',

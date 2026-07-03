@@ -654,6 +654,19 @@ describe('ChatInterface event wiring', () => {
     });
   });
 
+  it('includes the real prompt message id in architecture launch context when provided', () => {
+    expect(buildArchitectureRunContext('session-1', [], [], '', 'user-1')).toEqual({
+      maxArchitectureSteps: 64,
+      maxArchitectureNodeVisits: 4,
+      maxArchitectureSubagentIterations: 30,
+      parentSessionId: 'session-1',
+      hostSessionId: 'session-1',
+      historySessionId: 'session-1',
+      sessionSurface: 'host-envelope',
+      promptMessageId: 'user-1',
+    });
+  });
+
   it('includes the selected project path in architecture launch context', () => {
     expect(buildArchitectureRunContext('session-1', [], ['vfs_read'], 'C:\\Projekty\\kalio-forever')).toEqual({
       maxArchitectureSteps: 64,

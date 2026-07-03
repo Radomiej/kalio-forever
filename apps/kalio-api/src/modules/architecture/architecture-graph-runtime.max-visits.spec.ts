@@ -713,6 +713,108 @@ describe('createArchitectureGraphEvents max visit guards', () => {
     }));
   });
 
+  it('emits max_node_visits when resuming onto a pending node already at the visit cap', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'resume-max-visits-runtime',
+      name: 'Resume Max Visits Runtime',
+      description: 'Schema where resumed pending work is already visit-capped.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'worker',
+        label: 'Worker',
+        description: 'Should not be executed after the visit cap is reached.',
+        slotType: 'participant',
+        defaultPersonaId: 'dev',
+        allowedPersonaTags: ['implementation'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [{
+        id: 'worker',
+        label: 'Worker',
+        kind: 'role',
+        roleSlotId: 'worker',
+      }],
+      edges: [],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-resume-max-visits',
+      schemaId: schema.id,
+      prompt: 'Resume onto capped pending node.',
+      executionMode: 'subagent_execution',
+      context: {
+        maxArchitectureSteps: 10,
+        maxArchitectureNodeVisits: 1,
+      },
+      rootSessionId: 'root-run-resume-max-visits',
+      branchSessionIds: { worker: 'arch-run-resume-max-visits-worker' },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async () => ({
+        message: 'Worker should not execute.',
+        data: {},
+      })),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+      priorEvents: [{
+        id: 'event-prior-worker-completed',
+        runId: run.id,
+        sequence: 1,
+        type: 'node_completed',
+        message: 'Worker completed before pause.',
+        nodeId: 'worker',
+        roleSlotId: 'worker',
+        status: 'done',
+        data: { selectedNodeIds: ['worker'] },
+        createdAt: run.createdAt,
+      }],
+      resumeFrom: {
+        reason: 'max_steps',
+        waitingNodeId: 'worker',
+        pendingNodeIds: ['worker'],
+        visitCounts: { worker: 1 },
+      },
+    });
+
+    expect(roleExecutor.execute).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      type: 'router_decision',
+      message: expect.stringContaining('max node visits'),
+      reasonCode: 'max_node_visits',
+      data: expect.objectContaining({
+        reasonCode: 'max_node_visits',
+        maxNodeVisits: 1,
+        pendingNodeIds: ['worker'],
+        visitCounts: { worker: 1 },
+      }),
+    }));
+  });
+
   it('surfaces branch budget approvals as human gate events before timeout fallback', async () => {
     const schema: ArchitectureSchema = {
       id: 'budget-human-gate-runtime',

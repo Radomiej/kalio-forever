@@ -23,6 +23,7 @@ import {
   type ExecutionGraphNodeStatus,
 } from './executionGraphModel.helpers';
 import { applyGraphNodeLayout, estimateGraphNodeHeight } from './executionGraphNodePresentation';
+import { agentFlowRuntimeLabel, agentFlowRuntimeStatusLabel } from './useExecutionGraphRuntimeSources';
 import type {
   BuildExecutionGraphModelInput,
   ExecutionGraphEdge,
@@ -66,30 +67,6 @@ function cliSessionStatusFromRuntimeExecution(
     return 'running';
   }
   return 'idle';
-}
-
-function agentFlowStatusFromRuntimeExecution(
-  status: RuntimeChildExecution['status'],
-): 'queued' | 'running' | 'waiting_on_orchestrator' | 'done' | 'failed' | 'cancelled' | 'blocked' {
-  if (status === 'completed') {
-    return 'done';
-  }
-  if (status === 'waiting') {
-    return 'waiting_on_orchestrator';
-  }
-  if (status === 'failed') {
-    return 'failed';
-  }
-  if (status === 'blocked') {
-    return 'blocked';
-  }
-  if (status === 'cancelled' || status === 'stopped') {
-    return 'cancelled';
-  }
-  if (status === 'running') {
-    return 'running';
-  }
-  return 'queued';
 }
 
 export function buildExecutionGraphModel({
@@ -423,6 +400,13 @@ export function buildExecutionGraphModel({
       if (subAgentFlowResult) {
         const childSessionId = subAgentFlowResult.openChatSessionId ?? subAgentFlowResult.childSessionId;
         const graphRunId = subAgentFlowResult.openGraphRunId ?? subAgentFlowResult.flowRunId;
+        const childSession = sessionById.get(childSessionId) ?? null;
+        const runtimeFlowStatusLabel = runtimeAgentFlowExecution
+          ? agentFlowRuntimeStatusLabel(runtimeAgentFlowExecution.status)
+          : subAgentFlowResult.status;
+        const runtimeFlowLabel = runtimeAgentFlowExecution
+          ? agentFlowRuntimeLabel(runtimeAgentFlowExecution, childSession?.title)
+          : 'Sub AgentFlow';
         const flowRow = Math.max(branchStartRow - 1, 0);
         const flowStatus: ExecutionGraphNodeStatus = runtimeAgentFlowExecution
           ? statusFromRuntimeChildExecution(runtimeAgentFlowExecution.status)
@@ -436,9 +420,9 @@ export function buildExecutionGraphModel({
         const flowNode = addNode({
           id: `agent-flow:${subAgentFlowResult.flowRunId}`,
           kind: 'agent-flow',
-          title: 'Sub AgentFlow',
-          subtitle: `${graphRunId} / ${subAgentFlowResult.status}`,
-          detail: compactGraphText(subAgentFlowResult.summary),
+          title: runtimeFlowLabel,
+          subtitle: runtimeAgentFlowExecution ? `${runtimeFlowLabel} / ${runtimeFlowStatusLabel}` : `${graphRunId} / ${subAgentFlowResult.status}`,
+          detail: compactGraphText(runtimeAgentFlowExecution?.lastOutput) ?? compactGraphText(subAgentFlowResult.summary),
           status: flowStatus,
           column: branchColumn,
           row: flowRow,
@@ -576,12 +560,13 @@ export function buildExecutionGraphModel({
         const childSession = sessionById.get(runtimeAgentFlowExecution.childSessionId) ?? null;
         const graphRunId = runtimeAgentFlowExecution.flowRunId ?? runtimeAgentFlowExecution.id;
         const flowRow = Math.max(branchStartRow - 1, 0);
-        const runtimeFlowStatus = agentFlowStatusFromRuntimeExecution(runtimeAgentFlowExecution.status);
+        const runtimeFlowStatus = agentFlowRuntimeStatusLabel(runtimeAgentFlowExecution.status);
+        const runtimeFlowLabel = agentFlowRuntimeLabel(runtimeAgentFlowExecution, childSession?.title);
         const flowNode = addNode({
           id: `agent-flow:${graphRunId}`,
           kind: 'agent-flow',
-          title: runtimeAgentFlowExecution.label ?? childSession?.title ?? 'Sub AgentFlow',
-          subtitle: `${graphRunId} / ${runtimeFlowStatus}`,
+          title: runtimeFlowLabel,
+          subtitle: `${runtimeFlowLabel} / ${runtimeFlowStatus}`,
           detail: compactGraphText(runtimeAgentFlowExecution.lastOutput) || 'Live AgentFlow runtime',
           status: statusFromRuntimeChildExecution(runtimeAgentFlowExecution.status),
           column: branchColumn,

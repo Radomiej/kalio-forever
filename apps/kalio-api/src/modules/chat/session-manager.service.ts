@@ -137,9 +137,9 @@ export class SessionManagerService {
     sessionId: string,
     content: string,
     attachments?: ChatAttachment[],
-    turnLink?: { turnId?: string },
+    turnLink?: { turnId?: string; messageId?: string },
   ): Promise<ChatMessage> {
-    const messageId = nanoid();
+    const messageId = turnLink?.messageId ?? nanoid();
     const msg: ChatMessage = {
       id: messageId,
       sessionId,

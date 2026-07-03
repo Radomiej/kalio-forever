@@ -759,6 +759,45 @@ describe('CanvasPanel subagent grouping', () => {
     expect(sessionState.setActiveSession).toHaveBeenCalledWith('sub-session-1');
   });
 
+  it('starts focused architecture branch hydration when opening it as the active chat', async () => {
+    let resolveHistory!: (value: { data: ChatMessage[]; headers?: Record<string, string> }) => void;
+    const historyPromise = new Promise<{ data: ChatMessage[]; headers?: Record<string, string> }>((resolve) => {
+      resolveHistory = resolve;
+    });
+    mockApiGet.mockReturnValueOnce(historyPromise);
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-branch', sessionId: 'sub-session-1', label: 'Pragmatist' };
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'parent task', createdAt: 1 }],
+    };
+    sessionState.messages = sessionState.sessionMessages['session-1'];
+
+    render(<CanvasPanel />);
+
+    fireEvent.click(screen.getByTestId('canvas-focus-open-session-sub-session-1'));
+
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/sub-session-1/messages', expect.objectContaining({
+      params: expect.objectContaining({ limit: 24 }),
+    }));
+    expect(sessionState.setActiveSession).toHaveBeenCalledWith('sub-session-1');
+
+    await act(async () => {
+      resolveHistory({
+        data: [
+          { id: 'branch-user', sessionId: 'sub-session-1', role: 'user', content: 'Pragmatist branch prompt', createdAt: 4 },
+          { id: 'branch-agent', sessionId: 'sub-session-1', role: 'assistant', content: 'Pragmatist branch answer', createdAt: 5 },
+        ],
+      });
+      await historyPromise;
+    });
+
+    expect(sessionState.sessionMessages['sub-session-1']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'branch-user', content: 'Pragmatist branch prompt' }),
+      expect.objectContaining({ id: 'branch-agent', content: 'Pragmatist branch answer' }),
+    ]));
+  });
+
   it('hides branch open controls and transcripts for synthetic architecture branch ids missing from sessions', () => {
     agentState.toolActivities = [];
     agentState.activeAgentLoops = {};
@@ -1432,6 +1471,84 @@ describe('CanvasPanel subagent grouping', () => {
     await waitFor(() => expect(screen.getByTestId('agentflow-canvas-section')).toBeDefined());
     expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Waiting on orchestrator');
     expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Resume AgentFlow');
+  });
+
+  it('shows the focused AgentFlow canvas section from live runtime activity before history is persisted', async () => {
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'flow-linked-graph' };
+    agentState.toolActivities = [
+      {
+        callId: 'agentflow-call-1',
+        toolName: 'run_sub_agentflow',
+        args: {},
+        status: 'success',
+        startedAt: 1,
+        finishedAt: 2,
+        result: {
+          callId: 'agentflow-call-1',
+          status: 'success',
+          data: {
+            flowRunId: 'flow-run-1',
+            flowDefinitionId: 'goal_guard_delivery_loop',
+            childSessionId: 'flow-child-source',
+            status: 'done',
+            summary: 'Goal Guard accepted live runtime evidence.',
+            decisions: [],
+            nextActions: [],
+            artifacts: [],
+            openChatSessionId: 'flow-linked-chat',
+            openGraphRunId: 'flow-linked-graph',
+          },
+        },
+      },
+    ];
+    agentState.runtimeActivitySnapshots = {
+      'session-1': {
+        sessionId: 'session-1',
+        active: false,
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        childExecutions: [
+          {
+            id: 'child-flow-1',
+            kind: 'agent_flow',
+            parentSessionId: 'session-1',
+            childSessionId: 'flow-linked-chat',
+            parentToolCallId: 'agentflow-call-1',
+            flowRunId: 'flow-run-1',
+            label: 'Goal Guard',
+            status: 'completed',
+            updatedAt: 3,
+          },
+        ],
+        toolActivities: [],
+        updatedAt: 3,
+      },
+    };
+    sessionState.messages = [
+      { id: 'm1', sessionId: 'session-1', role: 'user', content: 'build with goal guard', createdAt: 1 },
+    ];
+    sessionState.sessionMessages = { 'session-1': sessionState.messages };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'flow-linked-chat',
+        personaId: 'default',
+        title: 'Goal Guard AgentFlow',
+        kind: 'agent-flow',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'agentflow-call-1',
+        createdAt: 2,
+        updatedAt: 3,
+      },
+    ];
+
+    render(<CanvasPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('agentflow-canvas-section')).toBeDefined());
+    expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('done');
+    expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Goal Guard accepted live runtime evidence.');
   });
 
   it('shows the same resume action for a hydrated waiting AgentFlow preview', async () => {

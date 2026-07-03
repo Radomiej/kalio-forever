@@ -11,6 +11,7 @@ import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-sessi
 import type { SessionEventsService } from '../session-events.service';
 import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import type { ModuleRef } from '@nestjs/core';
+import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from '../architecture-runtime-stop.port';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 type SessionCreatedHandler = (event: { session: ChatSession }) => void;
@@ -26,6 +27,8 @@ describe('ChatGateway', () => {
   let cliAgentSessionRuntime: CLIAgentSessionRuntimePort;
   let sessionEvents: SessionEventsService;
   let agentBudgetApprovals: AgentBudgetApprovalService;
+  let architectureRuntimeStop: ArchitectureRuntimeStopPort;
+  let moduleRef: ModuleRef;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
@@ -91,6 +94,12 @@ describe('ChatGateway', () => {
       isSyntheticPendingApproval: vi.fn().mockReturnValue(false),
       resolveApproval: vi.fn().mockReturnValue('resolved'),
     } as unknown as AgentBudgetApprovalService;
+    architectureRuntimeStop = {
+      stopRunsForSessions: vi.fn().mockResolvedValue([]),
+    };
+    moduleRef = {
+      get: vi.fn((token: symbol) => (token === ARCHITECTURE_RUNTIME_STOP ? architectureRuntimeStop : undefined)),
+    } as unknown as ModuleRef;
 
     client = {
       id: 'socket-1',
@@ -101,7 +110,18 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals, agentFlowRuntime, cliAgentSessionRuntime);
+    gateway = new ChatGateway(
+      toolDispatch,
+      pipeline,
+      raappHITL,
+      sessions,
+      sessionEvents,
+      agentBudgetApprovals,
+      agentFlowRuntime,
+      cliAgentSessionRuntime,
+      architectureRuntimeStop,
+      moduleRef,
+    );
     gateway.handleConnection(client as never);
     gateway.handleConnection(observer as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
@@ -197,6 +217,66 @@ describe('ChatGateway', () => {
     );
   });
 
+  it('REGRESSION: chat:stop emits a stopped runtime snapshot before slow turn drain settles', async () => {
+    let resolveDrain!: () => void;
+    (pipeline.stopAndDrain as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((resolve) => {
+      resolveDrain = resolve;
+    }));
+    (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockResolvedValue({
+      sessionId: 'session-1',
+      active: true,
+      turnId: 'turn-1',
+      queueLength: 1,
+      run: {
+        id: 'run-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        phase: 'llm_streaming',
+        status: 'active',
+        retryCount: 0,
+        safeResume: true,
+        startedAt: 1,
+        updatedAt: 2,
+        lastHeartbeatAt: 2,
+      },
+    });
+
+    const stopPromise = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(client.emit).toHaveBeenCalledWith(
+      'session:runtime_snapshot',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        active: false,
+        queueLength: 0,
+        run: expect.objectContaining({
+          phase: 'interrupted',
+          status: 'interrupted',
+          errorCode: 'USER_STOPPED',
+        }),
+      }),
+    );
+
+    resolveDrain();
+    await stopPromise;
+  });
+
+  it('REGRESSION: chat:stop stops active architecture runs for the root and descendant session tree', async () => {
+    (sessions.listChildren as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([{ id: 'arch-run-root' }])
+      .mockResolvedValueOnce([{ id: 'arch-run-analyst' }])
+      .mockResolvedValueOnce([]);
+
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+
+    expect(architectureRuntimeStop.stopRunsForSessions).toHaveBeenCalledWith([
+      'session-1',
+      'arch-run-root',
+      'arch-run-analyst',
+    ]);
+  });
+
   it('REGRESSION: chat:stop broadcasts terminal runtime snapshots to session subscribers', async () => {
     await gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
     vi.mocked(observer.emit).mockClear();
@@ -226,7 +306,7 @@ describe('ChatGateway', () => {
     await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
 
     expect(sessions.listChildren).toHaveBeenCalledTimes(2);
-    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
+    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(4);
   });
 
   it('does not delegate chat:stop to CLI runtime for non-cli-agent sessions', async () => {
@@ -335,6 +415,7 @@ describe('ChatGateway', () => {
       sessionEvents,
       agentBudgetApprovals,
       agentFlowRuntime,
+      undefined,
       undefined,
       moduleRef,
     );
@@ -839,7 +920,18 @@ describe('ChatGateway', () => {
       findByParentSessionId,
       stop: vi.fn().mockResolvedValue(null),
     } as unknown as AgentFlowRuntimePort;
-    gateway = new ChatGateway(toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals, agentFlowRuntime, cliAgentSessionRuntime);
+    gateway = new ChatGateway(
+      toolDispatch,
+      pipeline,
+      raappHITL,
+      sessions,
+      sessionEvents,
+      agentBudgetApprovals,
+      agentFlowRuntime,
+      cliAgentSessionRuntime,
+      undefined,
+      moduleRef,
+    );
     gateway.handleConnection(client as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
       .get(client.id)

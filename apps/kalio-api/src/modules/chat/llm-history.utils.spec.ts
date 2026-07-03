@@ -94,4 +94,40 @@ describe('sanitizeToolResultContentForLLM', () => {
       headingPath: ['Top', 'Leaf'],
     });
   });
+
+  it('keeps oversized AgentFlow tool results as parseable control metadata', () => {
+    const content = JSON.stringify({
+      flowRunId: 'flow-1',
+      flowDefinitionId: 'goal_guard_delivery_loop',
+      parentSessionId: 'parent-1',
+      parentToolCallId: 'tool-1',
+      childSessionId: 'child-1',
+      status: 'completed',
+      summary: 'AgentFlow completed with deterministic evidence.',
+      decisions: ['accepted'],
+      nextActions: ['continue parent chat'],
+      artifacts: ['architecture.md'],
+      openChatSessionId: 'child-1',
+      openGraphRunId: 'graph-1',
+      tracePreview: Array.from({ length: 80 }, (_, index) => ({
+        id: `event-${index}`,
+        message: 'large trace event '.repeat(80),
+        detail: { payload: 'x'.repeat(500) },
+      })),
+    });
+
+    const sanitized = sanitizeToolResultContentForLLM(content);
+    const parsed = JSON.parse(sanitized) as {
+      flowRunId?: string;
+      childSessionId?: string;
+      tracePreview?: unknown[];
+    };
+
+    expect(parsed.flowRunId).toBe('flow-1');
+    expect(parsed.childSessionId).toBe('child-1');
+    expect(JSON.stringify(parsed).length).toBeLessThanOrEqual(4000);
+    expect(parsed.tracePreview).toEqual([
+      { omitted: 80, reason: 'omitted for context safety' },
+    ]);
+  });
 });

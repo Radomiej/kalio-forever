@@ -133,6 +133,10 @@ export class MockLLMProvider implements ILLMProvider {
           await (this.options.delay ?? mockScriptDelay)(action.ms);
           continue;
         }
+        if (action.kind === 'hold') {
+          await (this.options.delay ?? defaultDelay)(action.ms);
+          continue;
+        }
         onChunk({ delta: action.text, done: false, sessionId, messageId });
       }
       if (!abortSignal?.aborted) {

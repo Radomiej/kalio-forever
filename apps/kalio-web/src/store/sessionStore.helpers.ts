@@ -99,6 +99,20 @@ export function getStoredSessionActiveTurnId(state: SessionProjectionState, sess
   return sessionActiveTurnIds[sessionId] ?? (sessionId === state.activeSessionId ? state.activeTurnId : null);
 }
 
+export function withActiveTurnLinkage(message: ChatMessage, activeTurn: AgentTurn | undefined): ChatMessage {
+  if (!activeTurn) {
+    return message;
+  }
+
+  return {
+    ...message,
+    turnId: message.turnId ?? activeTurn.id,
+    ...(message.promptMessageId ?? activeTurn.promptMessageId
+      ? { promptMessageId: message.promptMessageId ?? activeTurn.promptMessageId }
+      : {}),
+  };
+}
+
 function buildRestoredTurn(
   sessionId: string | null,
   messages: ChatMessage[],

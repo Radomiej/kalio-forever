@@ -231,8 +231,9 @@ export async function launchSingleChatPrompt({
     updateSession,
   );
 
+  const userMessageId = nanoid();
   addMessage({
-    id: nanoid(),
+    id: userMessageId,
     sessionId: session.id,
     role: 'user',
     content,
@@ -249,6 +250,7 @@ export async function launchSingleChatPrompt({
     content,
     personaId,
     interrupt,
+    clientMessageId: userMessageId,
   });
 
   if (!sent) {
@@ -368,7 +370,7 @@ export async function launchWorkflowPrompt({
     const result = schemaId === 'goal-master-delivery-loop'
       ? await startGoalGuardAgentFlowRun(
         content,
-        buildGoalGuardRunContext(sessionWithScope.id, sourceFiles, activeToolNames, projectPath),
+        buildGoalGuardRunContext(sessionWithScope.id, sourceFiles, activeToolNames, projectPath, userMessageId),
         sessionWithScope.id,
         applyArchitectureProjection,
       )
@@ -378,7 +380,7 @@ export async function launchWorkflowPrompt({
         {},
         'subagent_execution',
         undefined,
-        buildArchitectureRunContext(sessionWithScope.id, sourceFiles, activeToolNames, projectPath),
+        buildArchitectureRunContext(sessionWithScope.id, sourceFiles, activeToolNames, projectPath, userMessageId),
         applyArchitectureProjection,
       );
     applyArchitectureProjection(result);

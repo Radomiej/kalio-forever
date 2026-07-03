@@ -73,9 +73,15 @@ function makeContextPreviewService() {
   };
 }
 
-function makeSessionPipeline() {
+function makeRuntimeStop() {
   return {
-    stopAndDrain: vi.fn().mockResolvedValue(undefined),
+    stopSessionTree: vi.fn().mockResolvedValue({
+      rootSessionId: 'sess-1',
+      sessionIds: ['sess-1'],
+      directChildIdsBySessionId: { 'sess-1': [] },
+      descendantIdsBySessionId: { 'sess-1': [] },
+      childSessionsById: {},
+    }),
   };
 }
 
@@ -93,21 +99,21 @@ describe('SessionsController', () => {
   let svc: ReturnType<typeof makeService>;
   let runJournal: ReturnType<typeof makeRunJournal>;
   let contextPreview: ReturnType<typeof makeContextPreviewService>;
-  let sessionPipeline: ReturnType<typeof makeSessionPipeline>;
   let runtimeWatchlist: ReturnType<typeof makeRuntimeWatchlist>;
+  let runtimeStop: ReturnType<typeof makeRuntimeStop>;
 
   beforeEach(() => {
     svc = makeService();
     runJournal = makeRunJournal();
     contextPreview = makeContextPreviewService();
-    sessionPipeline = makeSessionPipeline();
     runtimeWatchlist = makeRuntimeWatchlist();
+    runtimeStop = makeRuntimeStop();
     controller = new SessionsController(
       svc as never,
       runJournal as never,
       contextPreview as never,
-      sessionPipeline as never,
       runtimeWatchlist as never,
+      runtimeStop as never,
     );
   });
 
@@ -121,6 +127,11 @@ describe('SessionsController', () => {
     it('passes includeArchived through to the service', async () => {
       await controller.list('true');
       expect(svc.list).toHaveBeenCalledWith({ includeArchived: true });
+    });
+
+    it('passes explicit session list limit through to the service', async () => {
+      await controller.list(undefined, '75');
+      expect(svc.list).toHaveBeenCalledWith({ includeArchived: false, limit: 75 });
     });
   });
 
@@ -226,14 +237,41 @@ describe('SessionsController', () => {
   });
 
   describe('delete()', () => {
-    it('drains the session pipeline before deleting a session', async () => {
+    it('stops the runtime tree before deleting a session', async () => {
       await controller.delete('sess-1');
 
-      expect(sessionPipeline.stopAndDrain).toHaveBeenCalledWith('sess-1');
+      expect(runtimeStop.stopSessionTree).toHaveBeenCalledWith('sess-1');
       expect(svc.delete).toHaveBeenCalledWith('sess-1');
-      expect(sessionPipeline.stopAndDrain.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(runtimeStop.stopSessionTree.mock.invocationCallOrder[0]).toBeLessThan(
         svc.delete.mock.invocationCallOrder[0],
       );
+    });
+
+    it('deletes descendants before deleting the root session', async () => {
+      runtimeStop.stopSessionTree.mockResolvedValueOnce({
+        rootSessionId: 'sess-1',
+        sessionIds: ['sess-1', 'child-1', 'grandchild-1'],
+        directChildIdsBySessionId: {
+          'sess-1': ['child-1'],
+          'child-1': ['grandchild-1'],
+          'grandchild-1': [],
+        },
+        descendantIdsBySessionId: {
+          'sess-1': ['child-1', 'grandchild-1'],
+          'child-1': ['grandchild-1'],
+          'grandchild-1': [],
+        },
+        childSessionsById: {
+          'child-1': { ...mockSession, id: 'child-1', parentSessionId: 'sess-1' },
+          'grandchild-1': { ...mockSession, id: 'grandchild-1', parentSessionId: 'child-1' },
+        },
+      });
+
+      await controller.delete('sess-1');
+
+      expect(svc.delete).toHaveBeenNthCalledWith(1, 'grandchild-1');
+      expect(svc.delete).toHaveBeenNthCalledWith(2, 'child-1');
+      expect(svc.delete).toHaveBeenNthCalledWith(3, 'sess-1');
     });
   });
 

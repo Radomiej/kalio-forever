@@ -287,8 +287,8 @@ function resolveQaEnv() {
   const useEnvLlm = args.includes('--use-env-llm');
   const forceEnvLlm = args.includes('--force-env-llm');
   const fileEnv = {
-    ...readEnvFile(resolveEnvFilePath(testEnvFile)),
     ...readEnvFile(resolveEnvFilePath(envFile)),
+    ...readEnvFile(resolveEnvFilePath(testEnvFile)),
   };
   const llmEnv = useEnvLlm ? { ...fileEnv, ...process.env } : {};
 

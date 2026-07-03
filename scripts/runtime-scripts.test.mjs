@@ -12,6 +12,7 @@ const localDevGuideSource = readFileSync(new URL('../docs/local-dev-guide.md', i
 const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
 const ac13QaStackSource = readFileSync(new URL('./run-ac13-qa-stack.mjs', import.meta.url), 'utf8');
 const workflowReleaseGateSource = readFileSync(new URL('./workflow-release-gate.mjs', import.meta.url), 'utf8');
+const webViteConfigSource = readFileSync(new URL('../apps/kalio-web/vite.config.ts', import.meta.url), 'utf8');
 
 test('prod stack fallback paths use prod defaults when --data-root is omitted', () => {
   assert.match(
@@ -103,23 +104,63 @@ test('managed stack status reports effective live llm config from the backend ap
   assert.match(ac13QaStackSource, /readEffectiveLlmConfig/);
 });
 
+test('stack manager prefers ignored test env values over base env file values', () => {
+  assert.match(stackManagerSource, /const fileEnv = \{\s*\.\.\.readEnvFile\(resolveEnvFilePath\(envFile\)\),\s*\.\.\.readEnvFile\(resolveEnvFilePath\(testEnvFile\)\),\s*\};/);
+});
+
 test('workflow release gate refreshes frontend runtime config before browser checks', () => {
   assert.match(workflowReleaseGateSource, /function writeFrontendRuntimeConfig\(backendUrl\)/);
   assert.match(workflowReleaseGateSource, /runtime-config\.js/);
   assert.match(workflowReleaseGateSource, /JSON\.stringify\(\{ apiUrl: backendUrl, wsUrl: backendUrl \}\)/);
 
   const writeIndex = workflowReleaseGateSource.indexOf('writeFrontendRuntimeConfig(apiOrigin);');
-  const runIndex = workflowReleaseGateSource.indexOf('await runPlaywrightGroup(group, baseUrl, apiOrigin);');
+  const runIndex = workflowReleaseGateSource.indexOf('await runPlaywrightGroup(group, baseUrl, apiOrigin, status.state);');
 
   assert.notEqual(writeIndex, -1, 'runtime config refresh call not found');
   assert.notEqual(runIndex, -1, 'Playwright gate call not found');
   assert.ok(writeIndex < runIndex, 'runtime config must be refreshed before Playwright opens the app');
 });
 
+test('vite preview serves runtime config from the running process environment', () => {
+  assert.match(webViteConfigSource, /function runtimeConfigPlugin\(\): Plugin/);
+  assert.match(webViteConfigSource, /configurePreviewServer\(server\)/);
+  assert.match(webViteConfigSource, /server\.middlewares\.use\('\/runtime-config\.js', serveRuntimeConfig\)/);
+  assert.match(webViteConfigSource, /JSON\.stringify\(\{ apiUrl: apiOrigin, wsUrl: wsOrigin \}\)/);
+  assert.match(webViteConfigSource, /Cache-Control', 'no-store'/);
+});
+
+test('workflow release gate passes managed QA database path to Playwright tests', () => {
+  assert.match(workflowReleaseGateSource, /DATABASE_PATH: stackState\.databasePath/);
+  assert.match(workflowReleaseGateSource, /runPlaywrightGroup\(group, baseUrl, apiOrigin, status\.state\)/);
+});
+
+test('workflow release gate starts a fresh mock QA stack by default', () => {
+  assert.match(workflowReleaseGateSource, /const reuseStack = args\.has\('--reuse-stack'\) \|\| requireLive;/);
+  assert.match(workflowReleaseGateSource, /async function ensureFreshMockStackUnlessReusing\(\)/);
+  assert.match(workflowReleaseGateSource, /'start',\s*'--backend-port',\s*'0',\s*'--frontend-port',\s*'0'/s);
+  assert.match(workflowReleaseGateSource, /'--provider',\s*'mock',\s*'--model',\s*'mock'/s);
+  assert.match(workflowReleaseGateSource, /'--force-env-llm',\s*'--force-restart',\s*'--runtime',\s*'direct'/s);
+
+  const freshIndex = workflowReleaseGateSource.indexOf('await ensureFreshMockStackUnlessReusing();');
+  const statusIndex = workflowReleaseGateSource.indexOf('const status = await readStackStatus();');
+  assert.notEqual(freshIndex, -1, 'fresh stack guard call not found');
+  assert.notEqual(statusIndex, -1, 'stack status read not found');
+  assert.ok(freshIndex < statusIndex, 'release gate must start/verify the fresh stack before reading status');
+});
+
 test('workflow release gate includes recent runtime regression proof groups', () => {
   assert.match(workflowReleaseGateSource, /name: 'RA-App HITL gate'/);
   assert.match(workflowReleaseGateSource, /manual mode shows tool confirmation and RA-App approval overlay/);
   assert.match(workflowReleaseGateSource, /bypass mode auto-executes tool confirmation and RA-App approval/);
+
+  assert.match(workflowReleaseGateSource, /name: 'child session live HITL gate'/);
+  assert.match(workflowReleaseGateSource, /child session receives live HITL and confirms without reload/);
+  assert.match(workflowReleaseGateSource, /auto-approved child tool completes without creating manual confirmation/);
+
+  assert.match(workflowReleaseGateSource, /name: 'AgentFlow Goal Guard gate'/);
+  assert.match(workflowReleaseGateSource, /renders parent run_sub_agentflow history bubble/);
+  assert.match(workflowReleaseGateSource, /starts a two-agent Goal Guard AgentFlow/);
+  assert.match(workflowReleaseGateSource, /keeps a Talk-started durable AgentFlow result fresh after child completion and reload/);
 
   assert.match(workflowReleaseGateSource, /name: 'workflow failure projection gate'/);
   assert.match(workflowReleaseGateSource, /malformed router structured output becomes terminal failed graph state/);

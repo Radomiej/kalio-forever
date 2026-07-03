@@ -260,7 +260,12 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.updateSession.mockReset();
     sessionState.hydratedSessionIds = {};
     sessionState.markSessionHydrated.mockReset();
-    apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
+    apiGetMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/agent-flows/runs?')) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.resolve({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
+    });
     apiPostMock.mockReset();
     apiPatchMock.mockReset();
     startArchitectureRunMock.mockReset();
@@ -1767,5 +1772,57 @@ describe('ExecutionGraphView empty-session state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open child graph' }));
     expect(sessionState.setActiveSession).toHaveBeenLastCalledWith('arch-flow-1-root');
+  });
+
+  it('renders active session graph from sessionMessages when the global message buffer is stale', async () => {
+    const promptOnly = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Run Goal Guard flow', createdAt: 1 }),
+    ];
+    const fullMessages = [
+      promptOnly[0],
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{
+          id: 'call-flow-1',
+          name: 'run_sub_agentflow',
+          args: { flowId: 'goal_guard_delivery_loop', goal: 'Verify delivery' },
+        }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-flow-1',
+        content: JSON.stringify({
+          flowRunId: 'flow-1',
+          childSessionId: 'arch-flow-1-root',
+          openChatSessionId: 'arch-flow-1-root',
+          openGraphRunId: 'flow-1',
+          status: 'done',
+          summary: 'Final response produced.',
+          decisions: [],
+          nextActions: [],
+          artifacts: [],
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = promptOnly;
+    sessionState.sessionMessages = { 'session-1': fullMessages };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 3 },
+      { id: 'arch-flow-1-root', personaId: 'default', title: 'Goal Guard AgentFlow', kind: 'chat', parentSessionId: 'session-1', createdAt: 2, updatedAt: 3 },
+    ];
+    sessionState.agentTurns = [];
+    sessionState.sessionAgentTurns = { 'session-1': buildTurnsFromHistory(fullMessages, 'session-1') };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    expect(screen.getByTestId('graph-node-tool:call-flow-1')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-agent-flow:flow-1')).toBeInTheDocument();
   });
 });

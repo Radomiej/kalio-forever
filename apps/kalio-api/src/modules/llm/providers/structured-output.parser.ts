@@ -1,12 +1,10 @@
-import Ajv from 'ajv';
 import type { LLMStructuredOutputRequest } from '@kalio/types';
+import { validateStructuredOutputSchema } from './structured-output-schema.validator';
 
 const WRAPPER_KEYS = ['output', 'result', 'data', 'routerOutput', 'finalArtifact'] as const;
 const MAX_VALIDATION_ERRORS = 3;
 const MAX_JSON_CANDIDATES = 30;
 const MAX_JSON_CANDIDATE_CHARS = 200_000;
-
-const ajv = new Ajv({ allErrors: true, strict: false });
 
 export type StructuredOutputRecoveryMode = 'strict' | 'extracted' | 'unwrapped' | 'extracted_unwrapped';
 
@@ -75,7 +73,7 @@ export function parseStructuredOutputResponse(
       reason: 'schema_mismatch',
       preview: preview(raw),
       details: firstValidationDetails,
-    }
+    };
   }
 
   return {
@@ -106,20 +104,16 @@ function normalizeStructuredOutput(
 }
 
 function matchesSchema(value: unknown, request: LLMStructuredOutputRequest): boolean {
-  const validate = ajv.compile(request.schema);
-  return validate(value);
+  return validateStructuredOutputSchema(value, request.schema, 1).length === 0;
 }
 
 function validationDetails(value: unknown, request: LLMStructuredOutputRequest): string | undefined {
-  const validate = ajv.compile(request.schema);
-  validate(value);
-  const errors = validate.errors ?? [];
-  if (errors.length === 0) {
+  const issues = validateStructuredOutputSchema(value, request.schema, MAX_VALIDATION_ERRORS);
+  if (issues.length === 0) {
     return undefined;
   }
-  return errors
-    .slice(0, MAX_VALIDATION_ERRORS)
-    .map((error) => `${error.instancePath || '/'} ${error.message ?? 'failed validation'}`)
+  return issues
+    .map((issue) => `${issue.path} ${issue.message}`)
     .join('; ');
 }
 

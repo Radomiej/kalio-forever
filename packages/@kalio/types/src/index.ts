@@ -73,6 +73,7 @@ export type WorkflowConversationVisibility = 'visible' | 'hidden';
 export interface ArchitectureRuntimeContext extends Record<string, unknown> {
   parentSessionId?: ID;
   parentToolCallId?: ID;
+  promptMessageId?: ID;
   architectureRunId?: ID;
   hostSessionId?: ID;
   historySessionId?: ID;
@@ -1189,7 +1190,7 @@ export interface RuntimeActivitySnapshot {
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
   // Chat — client → server
-  'chat:send': { sessionId: ID; content: string; personaId: ID; interrupt?: boolean; attachments?: ChatAttachment[] };
+  'chat:send': { sessionId: ID; content: string; personaId: ID; interrupt?: boolean; attachments?: ChatAttachment[]; clientMessageId?: ID };
   /** Client requests immediate abort of the active agent loop for sessionId. No new turn is started. */
   'chat:stop': { sessionId: ID };
 
@@ -1255,7 +1256,7 @@ export interface SocketEvents {
   'raapp:native_result': { toolCallId: string; sessionId: ID; results: RaAppNativeResult[] };
 
   // Agent loop lifecycle — server → client
-  'agent:start': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
+  'agent:start': { sessionId: ID; turnId: ID; promptMessageId?: ID; agentRun?: AgentRunContext };
   'agent:done': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
   'agent:budget_progress': ToolBudgetProgress;
   'agent:budget_required': AgentBudgetApprovalRequest;

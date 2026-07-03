@@ -15,8 +15,8 @@ type SessionContextPreviewBody = Omit<Extract<ContextPreviewRequest, { sessionId
 import { SessionsService } from './sessions.service';
 import { RunJournalService } from './run-journal.service';
 import { ContextPreviewService } from './context-preview.service';
-import { SessionPipelineService } from './session-pipeline.service';
 import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
+import { SessionRuntimeStopService } from './session-runtime-stop.service';
 
 const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'projectPath',
@@ -35,13 +35,23 @@ export class SessionsController {
     private readonly sessions: SessionsService,
     private readonly runJournal: RunJournalService,
     private readonly contextPreview: ContextPreviewService,
-    private readonly sessionPipeline: SessionPipelineService,
     private readonly runtimeWatchlist: SessionRuntimeWatchlistService,
+    private readonly runtimeStop: SessionRuntimeStopService,
   ) {}
 
   @Get()
-  list(@Query('includeArchived') includeArchived?: string): Promise<ChatSession[]> {
-    return this.sessions.list({ includeArchived: includeArchived === 'true' });
+  list(
+    @Query('includeArchived') includeArchived?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ChatSession[]> {
+    const parsedLimit = parseSessionListLimit(limit);
+    const options: { includeArchived: boolean; limit?: number } = {
+      includeArchived: includeArchived === 'true',
+    };
+    if (parsedLimit !== undefined) {
+      options.limit = parsedLimit;
+    }
+    return this.sessions.list(options);
   }
 
   @Get('runtime-watchlist')
@@ -112,8 +122,11 @@ export class SessionsController {
 
   @Delete(':id')
   async delete(@Param('id') id: string): Promise<void> {
-    await this.sessionPipeline.stopAndDrain(id);
-    await this.sessions.delete(id);
+    const sessionTree = await this.runtimeStop.stopSessionTree(id);
+    const deleteOrder = [...sessionTree.sessionIds].reverse();
+    for (const sessionId of deleteOrder) {
+      await this.sessions.delete(sessionId);
+    }
   }
 
   @Post(':id/archive')
@@ -141,6 +154,14 @@ export class SessionsController {
   async generateTitle(@Param('id') id: string): Promise<{ title: string }> {
     return this.sessions.generateTitle(id);
   }
+}
+
+function parseSessionListLimit(limit: string | undefined): number | undefined {
+  if (!limit || limit.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(limit, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function sanitizePublicRuntimeContext(

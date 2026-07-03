@@ -8,6 +8,7 @@ import type {
   LLMToolCall,
   SubagentToolResult,
 } from '@kalio/types';
+import { getArchitecturePromptMessageId } from './architecture-session-context';
 
 export function buildArchitectureParentChatMessages(
   schema: ArchitectureSchema,
@@ -18,7 +19,7 @@ export function buildArchitectureParentChatMessages(
 ): ChatMessage[] {
   const rootSessionId = run.rootSessionId ?? parentSessionId;
   const turnId = `architecture-turn-${run.id}`;
-  const promptMessageId = `architecture:${run.id}:user`;
+  const promptMessageId = getArchitecturePromptMessageId(run.context) ?? `architecture:${run.id}:user`;
   const messages: ChatMessage[] = [{
     id: promptMessageId,
     sessionId: parentSessionId,

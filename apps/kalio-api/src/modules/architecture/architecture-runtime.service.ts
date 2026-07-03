@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type {
   AgentFlowContinuationCursor,
@@ -6,12 +6,9 @@ import type {
   ArchitectureChildAgentProjection,
   ArchitectureExecutionMode,
   ArchitectureExecutionEvent,
-  ArchitectureExecutionEventType,
   ChatMessage,
   ArchitectureGraphProjection,
   ArchitectureRoleSlot,
-  ArchitectureRouteDecision,
-  ArchitectureRouterOutput,
   ArchitectureSchema,
   ArchitectureRun,
   ArchitectureSchemaEdge,
@@ -35,11 +32,43 @@ import { CLIAgentConfigService } from '../cli-agent/cli-agent-config.service';
 import { mergeChildAgentStatus } from './architecture-cli-child-status';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
 import { buildArchitectureGraphProjection } from './architecture-graph-projection';
+import { shouldOverlayPersistedChildAgents } from './architecture-graph-overlay.utils';
 import { reconstructDurableArchitectureGraph } from './architecture-durable-graph';
 import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
+import { buildArchitectureRuntimeChatProjection } from './architecture-runtime-chat-projection.utils';
 import { architectureFailureRuntimeAuditEventInput, architectureRuntimeAuditEventInput } from './architecture-runtime-audit';
+import {
+  architectureAuditEventActionField,
+  architectureAuditExecutionMode,
+  architectureAuditNumberField,
+  architectureAuditPromptFromRecords,
+  architectureAuditRecordField,
+  architectureAuditRouteDecisionField,
+  architectureAuditRouterOutputField,
+  architectureAuditStringField,
+  architectureAuditStringRecordField,
+  architectureAuditWorkflowErrorCodeField,
+  architectureAuditWorkflowEvidenceArrayField,
+  architectureAuditWorkflowFailureField,
+  architectureAuditWorkflowReasonCodeField,
+  architectureAuditWorkflowRuntimeDecisionField,
+  isArchitectureExecutionEventType,
+  statusFromArchitectureAuditEventSummary,
+  statusFromArchitectureEvents,
+} from './architecture-runtime-audit-recovery.utils';
+import {
+  cloneArchitectureRuntimeSchema,
+  validateArchitectureCreateRunDto,
+  validateArchitectureCreateRunSlotOverrides,
+} from './architecture-runtime-schema.utils';
 import { hydrateArchitectureRootVfs, type ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
+import { terminalWorkflowFailureFromEvents } from './architecture-runtime-failure.utils';
+import {
+  ARCHITECTURE_CLI_AGENT_IDS,
+  buildArchitectureCliAgentContext,
+  buildArchitectureVfsEvidenceContext,
+} from './architecture-runtime-context.utils';
 import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
 import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import {
@@ -50,6 +79,7 @@ import {
   getArchitectureParentSessionId,
   getArchitectureParentToolCallId,
 } from './architecture-session-context';
+import type { ArchitectureRuntimeStopPort } from '../chat/architecture-runtime-stop.port';
 
 const ARCHITECTURE_PERSONA_ALIASES: Record<string, string> = {
   'persona.pragmatist': 'dev',
@@ -70,10 +100,9 @@ const ARCHITECTURE_PERSONA_ALIASES: Record<string, string> = {
   'persona.adr_writer': 'dev',
 };
 const PERSISTED_GRAPH_RECOVERY_TIMEOUT_MS = 1500;
-const ARCHITECTURE_CLI_AGENT_IDS = ['copilot', 'codex', 'gemini', 'claude'] as const;
 
 @Injectable()
-export class ArchitectureRuntimeService {
+export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   private readonly logger = new Logger(ArchitectureRuntimeService.name);
   private readonly runs = new Map<string, ArchitectureRun>();
   private readonly eventsByRunId = new Map<string, ArchitectureExecutionEvent[]>();
@@ -100,7 +129,7 @@ export class ArchitectureRuntimeService {
     const prepared = await this.prepareRun(dto, 'running');
     const liveEvents: ArchitectureExecutionEvent[] = [];
     this.runs.set(prepared.run.id, prepared.run);
-    this.schemasByRunId.set(prepared.run.id, this.cloneSchema(prepared.schema));
+    this.schemasByRunId.set(prepared.run.id, cloneArchitectureRuntimeSchema(prepared.schema));
     this.eventsByRunId.set(prepared.run.id, liveEvents);
     await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
 
@@ -149,7 +178,7 @@ export class ArchitectureRuntimeService {
     const baseSchema = this.registry.findOne(normalizedDto.schemaId);
     if (!baseSchema) throw new NotFoundException(`Architecture schema ${normalizedDto.schemaId} not found`);
     const schema = normalizedDto.schema ?? baseSchema;
-    this.validateCreateRunSlotOverrides(schema, normalizedDto.slotOverrides);
+    validateArchitectureCreateRunSlotOverrides(schema, normalizedDto.slotOverrides);
 
     const now = Date.now();
     const runId = nanoid();
@@ -181,34 +210,21 @@ export class ArchitectureRuntimeService {
     if (!this.cliAgentConfig || context?.['cliAgentToolPreferences'] !== undefined || context?.['availableCliAgents'] !== undefined) {
       return context;
     }
-    const preferences: Record<string, { model?: string; preference?: string }> = {};
-    const availableCliAgents: string[] = [];
+    const configs = [];
     for (const agentId of ARCHITECTURE_CLI_AGENT_IDS) {
       const config = await this.cliAgentConfig.getConfig(agentId);
-      if (!config.enabled) {
-        continue;
-      }
-      availableCliAgents.push(agentId);
-      const model = typeof config.model === 'string' && config.model.trim().length > 0
-        ? config.model.trim()
-        : undefined;
-      const preference = typeof config.architecturePreference === 'string' && config.architecturePreference.trim().length > 0
-        ? config.architecturePreference.trim()
-        : undefined;
-      if (model || preference) {
-        preferences[agentId] = { ...(model ? { model } : {}), ...(preference ? { preference } : {}) };
-      }
+      configs.push({
+        agentId,
+        enabled: config.enabled,
+        model: config.model,
+        architecturePreference: config.architecturePreference,
+      });
     }
-    return {
-      ...(context ?? {}),
-      availableCliAgents,
-      architectureCliAgentsEnabled: availableCliAgents.length > 0,
-      ...(Object.keys(preferences).length > 0 ? { cliAgentToolPreferences: preferences } : {}),
-    };
+    return buildArchitectureCliAgentContext(context, configs);
   }
 
   private async normalizeCreateRunDto(dto: CreateArchitectureRunDto): Promise<CreateArchitectureRunDto> {
-    const validated = this.validateCreateRunDto(dto);
+    const validated = validateArchitectureCreateRunDto(dto);
     const inheritedContext = await this.inheritAllowanceContext(validated.context);
     return {
       ...validated,
@@ -270,35 +286,11 @@ export class ArchitectureRuntimeService {
       return context;
     }
 
-    const maxFiles = 12;
-    const maxExcerptBytes = 1600;
-    const maxTotalBytes = 12_000;
-    let totalBytes = 0;
-    const files: Array<{ path: string; sizeBytes: number; excerpt: string; truncated: boolean }> = [];
-    for (const file of hydration.copiedFiles.slice(0, maxFiles)) {
-      if (totalBytes >= maxTotalBytes) break;
-      const buffer = this.vfs.readBinary(rootSessionId, file.toPath);
-      const remainingBytes = Math.max(0, maxTotalBytes - totalBytes);
-      const excerptBytes = Math.min(maxExcerptBytes, remainingBytes, buffer.length);
-      const excerpt = buffer.subarray(0, excerptBytes).toString('utf8');
-      files.push({
-        path: file.toPath,
-        sizeBytes: file.sizeBytes,
-        excerpt,
-        truncated: excerptBytes < buffer.length,
-      });
-      totalBytes += excerptBytes;
-    }
-
-    return {
-      ...(context ?? {}),
-      architectureVfsEvidence: {
-        rootSessionId,
-        sourceSessionId: hydration.fromSessionId,
-        totalCopiedFiles: hydration.copiedFiles.length,
-        files,
-      },
-    };
+    return buildArchitectureVfsEvidenceContext(context, {
+      rootSessionId,
+      hydration,
+      readFile: (path) => this.vfs?.readBinary(rootSessionId, path) ?? Buffer.alloc(0),
+    });
   }
 
   private async executePreparedRun(
@@ -337,13 +329,52 @@ export class ArchitectureRuntimeService {
       if (emittedEvents.length === 0) {
         throw error;
       }
+      if (this.stoppedRunIds.has(run.id) || run.status !== 'running') {
+        return this.runs.get(run.id) ?? run;
+      }
       events = emittedEvents;
       const completedAt = Date.now();
-      run.status = this.statusFromEvents(events) === 'running' ? 'failed' : this.statusFromEvents(events);
+      const recoveredStatus = statusFromArchitectureEvents(events);
+      run.status = recoveredStatus === 'running' ? 'failed' : recoveredStatus;
+      if (run.status === 'failed') {
+        const terminalFailure = terminalWorkflowFailureFromEvents(events);
+        const fallbackFailure = terminalFailure.failure ?? workflowFailureFromError(error);
+        const errorCode = terminalFailure.errorCode ?? fallbackFailure.code;
+        if (!events.some((event) => (
+          event.type === 'router_decision'
+          && event.status === 'failed'
+          && event.message === 'Architecture run failed.'
+        ))) {
+          const terminalEvent: ArchitectureExecutionEvent = {
+            id: `${run.id}:event:${events.length + 1}`,
+            runId: run.id,
+            sequence: events.length + 1,
+            type: 'router_decision',
+            message: 'Architecture run failed.',
+            lifecycle: 'failed',
+            status: 'failed',
+            errorCode,
+            failure: fallbackFailure,
+            data: {
+              errorCode,
+              failure: fallbackFailure,
+            },
+            createdAt: completedAt,
+          };
+          events = [
+            ...events,
+            terminalEvent,
+          ];
+          this.auditArchitectureEvent(schema, run, terminalEvent);
+        }
+        run.errorCode = errorCode;
+        run.failure = fallbackFailure;
+        this.auditArchitectureFailure(schema, run, fallbackFailure);
+      }
       run.updatedAt = completedAt;
       run.completedAt = completedAt;
       this.runs.set(run.id, run);
-      this.schemasByRunId.set(run.id, this.cloneSchema(schema));
+      this.schemasByRunId.set(run.id, cloneArchitectureRuntimeSchema(schema));
       this.eventsByRunId.set(run.id, events);
       this.auditArchitectureHydration(run, hydration);
       this.auditArchitectureRun(schema, run, events, liveEvents === undefined);
@@ -354,11 +385,16 @@ export class ArchitectureRuntimeService {
       return run;
     }
     const completedAt = Date.now();
-    run.status = this.statusFromEvents(events);
+    run.status = statusFromArchitectureEvents(events);
+    if (run.status === 'failed') {
+      const terminalFailure = terminalWorkflowFailureFromEvents(events);
+      run.errorCode = terminalFailure.errorCode;
+      run.failure = terminalFailure.failure;
+    }
     run.updatedAt = completedAt;
     run.completedAt = run.status === 'running' ? undefined : completedAt;
     this.runs.set(run.id, run);
-    this.schemasByRunId.set(run.id, this.cloneSchema(schema));
+    this.schemasByRunId.set(run.id, cloneArchitectureRuntimeSchema(schema));
     this.eventsByRunId.set(run.id, events);
     this.auditArchitectureHydration(run, hydration);
     this.auditArchitectureRun(schema, run, events, liveEvents === undefined);
@@ -417,6 +453,37 @@ export class ArchitectureRuntimeService {
     return stoppedRun;
   }
 
+  async stopRunsForSessions(sessionIds: readonly string[]): Promise<readonly string[]> {
+    const sessionIdSet = new Set(sessionIds.filter((sessionId) => sessionId.trim().length > 0));
+    if (sessionIdSet.size === 0) {
+      return [];
+    }
+
+    const stoppedRunIds: string[] = [];
+    for (const run of this.runs.values()) {
+      if (run.status !== 'running' && run.status !== 'queued') {
+        continue;
+      }
+      if (!this.runBelongsToSessionSet(run, sessionIdSet)) {
+        continue;
+      }
+      await this.stopRun(run.id);
+      stoppedRunIds.push(run.id);
+    }
+    return stoppedRunIds;
+  }
+
+  private runBelongsToSessionSet(run: ArchitectureRun, sessionIds: ReadonlySet<string>): boolean {
+    const runSessionIds = [
+      run.rootSessionId,
+      ...Object.values(run.branchSessionIds ?? {}),
+      getArchitectureParentSessionId(run.context),
+      getArchitectureHostSessionId(run.context),
+      getArchitectureHistorySessionId(run.context),
+    ].filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0);
+    return runSessionIds.some((sessionId) => sessionIds.has(sessionId));
+  }
+
   getEvents(runId: string): ArchitectureExecutionEvent[] {
     return this.eventsByRunId.get(runId) ?? [];
   }
@@ -459,7 +526,7 @@ export class ArchitectureRuntimeService {
       completedAt: undefined,
     };
     this.runs.set(run.id, run);
-    this.schemasByRunId.set(run.id, this.cloneSchema(schema));
+    this.schemasByRunId.set(run.id, cloneArchitectureRuntimeSchema(schema));
     const priorEvents = await this.getEventsDurable(runId);
     this.eventsByRunId.set(run.id, []);
     return this.executePreparedRun({ schema, run, hydration: null }, emit, [], priorEvents, dto.continuation);
@@ -477,11 +544,19 @@ export class ArchitectureRuntimeService {
   async getGraphDurable(runId: string): Promise<ArchitectureGraphProjection | null> {
     const liveEvents = this.getEvents(runId);
     const liveGraph = liveEvents.length > 0 ? this.getGraph(runId) : null;
-    const persistedGraph = await this.reconstructPersistedGraphSafely(runId);
     if (liveGraph) {
+      const liveRun = this.findRun(runId);
+      const liveSchema = liveRun
+        ? this.schemasByRunId.get(runId) ?? this.registry.findOne(liveRun.schemaId) ?? undefined
+        : undefined;
+      if (!shouldOverlayPersistedChildAgents(liveSchema, liveGraph)) {
+        return liveGraph;
+      }
+      const persistedGraph = await this.reconstructPersistedGraphSafely(runId);
       return this.mergePersistedChildAgents(liveGraph, persistedGraph);
     }
 
+    const persistedGraph = await this.reconstructPersistedGraphSafely(runId);
     const run = await this.findRunDurable(runId);
     if (!run) return persistedGraph;
     const schema = this.schemasByRunId.get(runId) ?? this.registry.findOne(run.schemaId);
@@ -577,24 +652,7 @@ export class ArchitectureRuntimeService {
 
   getChat(runId: string): ArchitectureChatProjection | null {
     if (!this.findRun(runId)) return null;
-    return {
-      runId,
-      messages: this.getEvents(runId)
-        .filter((event) => this.isChatProjectionEvent(event))
-        .map((event) => ({
-          id: `${event.id}:message`,
-          eventId: event.id,
-          speaker: this.toSpeaker(event),
-          content: event.message,
-          actionSummary: architectureActionFieldsForEvent(event).actionSummary,
-          action: architectureActionFieldsForEvent(event).action,
-          detail: architectureActionFieldsForEvent(event).detail,
-          roleSlotId: event.roleSlotId,
-          route: event.route,
-          incompleteReason: this.incompleteReasonFromEvent(event),
-          createdAt: event.createdAt,
-        })),
-    };
+    return buildArchitectureRuntimeChatProjection(runId, this.getEvents(runId));
   }
 
   async getChatDurable(runId: string): Promise<ArchitectureChatProjection | null> {
@@ -604,29 +662,7 @@ export class ArchitectureRuntimeService {
     const run = await this.findRunDurable(runId);
     if (!run) return null;
     const events = await this.getEventsDurable(runId);
-    return {
-      runId,
-      messages: events
-        .filter((event) => this.isChatProjectionEvent(event))
-        .map((event) => ({
-          id: `${event.id}:message`,
-          eventId: event.id,
-          speaker: this.toSpeaker(event),
-          content: event.message,
-          actionSummary: architectureActionFieldsForEvent(event).actionSummary,
-          action: architectureActionFieldsForEvent(event).action,
-          detail: architectureActionFieldsForEvent(event).detail,
-          roleSlotId: event.roleSlotId,
-          route: event.route,
-          incompleteReason: this.incompleteReasonFromEvent(event),
-          createdAt: event.createdAt,
-        })),
-    };
-  }
-
-  private incompleteReasonFromEvent(event: ArchitectureExecutionEvent): string | undefined {
-    const reason = event.data?.['incompleteReason'];
-    return typeof reason === 'string' && reason.trim().length > 0 ? reason : undefined;
+    return buildArchitectureRuntimeChatProjection(runId, events);
   }
 
   private async createBranchSessions(
@@ -913,85 +949,44 @@ export class ArchitectureRuntimeService {
       return null;
     }
 
-    const schemaId = this.stringField(source, 'schemaId');
+    const schemaId = architectureAuditStringField(source, 'schemaId');
     if (!schemaId) {
       return null;
     }
 
     const eventTypes = records
-      .map((record) => this.stringField(record, 'eventType'))
+      .map((record) => architectureAuditStringField(record, 'eventType'))
       .filter((type): type is string => Boolean(type));
     const events: Array<{ type: string; reasonCode?: WorkflowReasonCode }> = [];
     for (const record of records) {
-      const type = this.stringField(record, 'eventType');
-      if (!type || !this.isArchitectureExecutionEventType(type)) continue;
+      const type = architectureAuditStringField(record, 'eventType');
+      if (!type || !isArchitectureExecutionEventType(type)) continue;
       events.push({
         type,
-        reasonCode: this.workflowReasonCodeField(record, 'reasonCode')
-          ?? this.workflowReasonCodeField(this.recordField(record, 'data'), 'reasonCode'),
+        reasonCode: architectureAuditWorkflowReasonCodeField(record, 'reasonCode')
+          ?? architectureAuditWorkflowReasonCodeField(architectureAuditRecordField(record, 'data'), 'reasonCode'),
       });
     }
     const hasFinalArtifact = eventTypes.includes('final_artifact');
     const hasError = Boolean(error);
-    const status: ArchitectureRun['status'] = hasError ? 'failed' : hasFinalArtifact ? 'completed' : this.statusFromEventSummary(events);
+    const status: ArchitectureRun['status'] = hasError ? 'failed' : hasFinalArtifact ? 'completed' : statusFromArchitectureAuditEventSummary(events);
     const createdAt = Math.min(...rows.map((row) => row.createdAt));
     const updatedAt = Math.max(...rows.map((row) => row.createdAt));
-    const executionMode = this.executionModeFromAudit(source);
-    const rootSessionId = this.stringField(source, 'rootSessionId') ?? rows.find((row) => row.sessionId)?.sessionId ?? undefined;
+    const executionMode = architectureAuditExecutionMode(source);
+    const rootSessionId = architectureAuditStringField(source, 'rootSessionId') ?? rows.find((row) => row.sessionId)?.sessionId ?? undefined;
 
     return {
       id: runId,
       schemaId,
-      prompt: this.promptFromAudit(records) ?? `Recovered architecture run ${runId}`,
+      prompt: architectureAuditPromptFromRecords(records) ?? `Recovered architecture run ${runId}`,
       executionMode,
       rootSessionId,
-      branchSessionIds: this.stringRecordField(source, 'branchSessionIds'),
+      branchSessionIds: architectureAuditStringRecordField(source, 'branchSessionIds'),
       status,
       createdAt,
       updatedAt,
       completedAt: status === 'running' ? undefined : updatedAt,
     };
-  }
-
-  private statusFromEvents(events: ArchitectureExecutionEvent[]): ArchitectureRun['status'] {
-    if (events.some((event) => event.type === 'final_artifact')) {
-      return 'completed';
-    }
-    return this.statusFromEventSummary(events.map((event) => ({
-      type: event.type,
-      reasonCode: this.reasonCodeForEvent(event),
-      status: event.status,
-    })));
-  }
-
-  private statusFromEventSummary(
-    events: Array<{ type: string; reasonCode?: WorkflowReasonCode; status?: ArchitectureExecutionEvent['status'] }>,
-  ): ArchitectureRun['status'] {
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (event?.status === 'failed' || event?.status === 'blocked') {
-        return 'failed';
-      }
-      if (event?.status === 'cancelled') {
-        return 'cancelled';
-      }
-      if (event?.type === 'run_stopped') {
-        return 'cancelled';
-      }
-      if (event?.type === 'node_failed') {
-        return 'failed';
-      }
-      if (
-        event?.type === 'router_decision'
-        && (event.reasonCode === 'max_steps' || event.reasonCode === 'max_node_visits')
-      ) {
-        return 'failed';
-      }
-      if (event) {
-        return 'running';
-      }
-    }
-    return 'running';
   }
 
   private async reconstructEventsFromAudit(runId: string): Promise<ArchitectureExecutionEvent[]> {
@@ -1000,22 +995,22 @@ export class ArchitectureRuntimeService {
       .map((row) => ({ row, data: this.auditData(row) }))
       .filter(({ data }) =>
         data.kind === 'architecture_event'
-        && this.isArchitectureExecutionEventType(data.eventType));
+        && isArchitectureExecutionEventType(data.eventType));
 
     return eventRows.map(({ row, data }, index) => {
-      const eventId = this.stringField(data, 'eventId') ?? `${runId}:audit:${row.id}`;
+      const eventId = architectureAuditStringField(data, 'eventId') ?? `${runId}:audit:${row.id}`;
       const eventType = data.eventType;
-      if (!this.isArchitectureExecutionEventType(eventType)) {
+      if (!isArchitectureExecutionEventType(eventType)) {
         throw new Error(`Invalid recovered architecture event type for run ${runId}`);
       }
-      const route = this.routeDecisionField(data, 'route');
-      const routerOutput = this.routerOutputField(data, 'routerOutput');
+      const route = architectureAuditRouteDecisionField(data, 'route');
+      const routerOutput = architectureAuditRouterOutputField(data, 'routerOutput');
       // TODO: legacy fallback - older audit rows only persisted messagePreview/actionSummary, so rebuild action/detail from structured route/routerOutput when needed.
       const actionFields = architectureActionFieldsForEvent({
         type: eventType,
-        actionSummary: this.stringField(data, 'actionSummary'),
-        action: this.eventActionField(data, 'action'),
-        detail: this.stringField(data, 'detail'),
+        actionSummary: architectureAuditStringField(data, 'actionSummary'),
+        action: architectureAuditEventActionField(data, 'action'),
+        detail: architectureAuditStringField(data, 'detail'),
         route,
         routerOutput,
         data,
@@ -1023,21 +1018,21 @@ export class ArchitectureRuntimeService {
       return {
         id: eventId,
         runId,
-        sequence: this.numberField(data, 'sequence') ?? index + 1,
+        sequence: architectureAuditNumberField(data, 'sequence') ?? index + 1,
         type: eventType,
-        message: this.stringField(data, 'messagePreview') ?? row.label,
+        message: architectureAuditStringField(data, 'messagePreview') ?? row.label,
         actionSummary: actionFields.actionSummary,
         action: actionFields.action,
         detail: actionFields.detail,
-        nodeId: this.stringField(data, 'nodeId'),
-        roleSlotId: this.stringField(data, 'roleSlotId'),
+        nodeId: architectureAuditStringField(data, 'nodeId'),
+        roleSlotId: architectureAuditStringField(data, 'roleSlotId'),
         route,
         routerOutput,
-        reasonCode: this.workflowReasonCodeField(data, 'reasonCode'),
-        errorCode: this.workflowErrorCodeField(data, 'errorCode'),
-        failure: this.workflowFailureField(data, 'failure'),
-        evidence: this.workflowEvidenceArrayField(data, 'evidence'),
-        runtimeDecision: this.workflowRuntimeDecisionField(data, 'runtimeDecision'),
+        reasonCode: architectureAuditWorkflowReasonCodeField(data, 'reasonCode'),
+        errorCode: architectureAuditWorkflowErrorCodeField(data, 'errorCode'),
+        failure: architectureAuditWorkflowFailureField(data, 'failure'),
+        evidence: architectureAuditWorkflowEvidenceArrayField(data, 'evidence'),
+        runtimeDecision: architectureAuditWorkflowRuntimeDecisionField(data, 'runtimeDecision'),
         data,
         createdAt: row.createdAt,
       };
@@ -1061,8 +1056,8 @@ export class ArchitectureRuntimeService {
         if (left.createdAt !== right.createdAt) {
           return left.createdAt - right.createdAt;
         }
-        const leftSequence = this.numberField(this.auditData(left), 'sequence') ?? 0;
-        const rightSequence = this.numberField(this.auditData(right), 'sequence') ?? 0;
+        const leftSequence = architectureAuditNumberField(this.auditData(left), 'sequence') ?? 0;
+        const rightSequence = architectureAuditNumberField(this.auditData(right), 'sequence') ?? 0;
         return leftSequence - rightSequence;
       });
   }
@@ -1071,547 +1066,14 @@ export class ArchitectureRuntimeService {
     return row.data && this.isPlainRecord(row.data) ? row.data : {};
   }
 
-  private promptFromAudit(records: Array<Record<string, unknown>>): string | undefined {
-    const created = records.find((record) => record.eventType === 'run_created');
-    const prompt = created ? this.stringField(created, 'prompt') : undefined;
-    if (prompt) {
-      return prompt;
-    }
-    const message = created ? this.stringField(created, 'messagePreview') : undefined;
-    const prefix = 'Architecture run created for: ';
-    if (!message) {
-      return undefined;
-    }
-    // TODO: legacy fallback - older audit rows only persisted messagePreview; prompt is now a structured audit field.
-    return message.slice(0, prefix.length) === prefix ? message.slice(prefix.length) : message;
-  }
-
-  private executionModeFromAudit(record: Record<string, unknown>): ArchitectureExecutionMode {
-    const value = record.executionMode;
-    return this.isExecutionMode(value) ? value : 'session_branches';
-  }
-
-  private stringRecordField(record: Record<string, unknown>, key: string): Record<string, string> | undefined {
-    const value = record[key];
-    return this.isStringRecord(value) ? value : undefined;
-  }
-
-  private stringField(record: Record<string, unknown>, key: string): string | undefined {
-    const value = record[key];
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
-  }
-
-  private numberField(record: Record<string, unknown>, key: string): number | undefined {
-    const value = record[key];
-    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-  }
-
-  private recordField(record: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
-    if (!record) return undefined;
-    const value = record[key];
-    return this.isPlainRecord(value) ? value : undefined;
-  }
-
-  private workflowReasonCodeField(record: Record<string, unknown> | undefined, key: string): WorkflowReasonCode | undefined {
-    const value = record?.[key];
-    return typeof value === 'string' && this.isWorkflowReasonCode(value) ? value : undefined;
-  }
-
-  private workflowErrorCodeField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['errorCode'] {
-    const value = record[key];
-    return typeof value === 'string' && this.isWorkflowErrorCode(value) ? value : undefined;
-  }
-
-  private workflowFailureField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['failure'] {
-    const value = record[key];
-    if (!this.isPlainRecord(value)) return undefined;
-    const code = this.workflowErrorCodeField(value, 'code');
-    const message = this.stringField(value, 'message');
-    const retryable = value['retryable'];
-    if (!code || !message || typeof retryable !== 'boolean') return undefined;
-    const source = this.stringField(value, 'source');
-    return { code, message, retryable, ...(source ? { source } : {}) };
-  }
-
-  private workflowEvidenceArrayField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['evidence'] {
-    const value = record[key];
-    if (!Array.isArray(value)) return undefined;
-    const evidence = value
-      .map((item) => this.workflowEvidenceField(item))
-      .filter((item): item is NonNullable<ArchitectureExecutionEvent['evidence']>[number] => item !== undefined);
-    return evidence.length > 0 ? evidence : undefined;
-  }
-
-  private workflowEvidenceField(value: unknown): NonNullable<ArchitectureExecutionEvent['evidence']>[number] | undefined {
-    if (!this.isPlainRecord(value)) return undefined;
-    const kind = value['kind'];
-    const status = value['status'];
-    if (!this.isWorkflowEvidenceKind(kind) || !this.isWorkflowEvidenceStatus(status)) return undefined;
-    const source = this.stringField(value, 'source');
-    const data = this.recordField(value, 'data');
-    return { kind, status, ...(source ? { source } : {}), ...(data ? { data } : {}) };
-  }
-
-  private workflowRuntimeDecisionField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['runtimeDecision'] {
-    const value = record[key];
-    if (!this.isPlainRecord(value)) return undefined;
-    const status = value['status'];
-    if (
-      status !== 'queued'
-      && status !== 'running'
-      && status !== 'waiting_on_orchestrator'
-      && status !== 'done'
-      && status !== 'failed'
-      && status !== 'cancelled'
-      && status !== 'blocked'
-    ) {
-      return undefined;
-    }
-    const reasonCode = this.workflowReasonCodeField(value, 'reasonCode');
-    const nextNodeId = this.stringField(value, 'nextNodeId');
-    const message = this.stringField(value, 'message');
-    const accepted = value['accepted'];
-    return {
-      status,
-      ...(reasonCode ? { reasonCode } : {}),
-      ...(typeof accepted === 'boolean' ? { accepted } : {}),
-      ...(nextNodeId ? { nextNodeId } : {}),
-      ...(message ? { message } : {}),
-    };
-  }
-
-  private reasonCodeForEvent(event: ArchitectureExecutionEvent): WorkflowReasonCode | undefined {
-    return event.reasonCode ?? this.workflowReasonCodeField(event.data, 'reasonCode');
-  }
-
-  private routeDecisionField(record: Record<string, unknown>, key: string): ArchitectureRouteDecision | undefined {
-    const value = record[key];
-    return this.isArchitectureRouteDecision(value) ? value : undefined;
-  }
-
-  private routerOutputField(record: Record<string, unknown>, key: string): ArchitectureRouterOutput | undefined {
-    const value = record[key];
-    return this.isArchitectureRouterOutput(value) ? value : undefined;
-  }
-
-  private eventActionField(record: Record<string, unknown>, key: string): ArchitectureExecutionEvent['action'] {
-    const value = record[key];
-    return value === 'run_created'
-      || value === 'run_stopped'
-      || value === 'participant_completed'
-      || value === 'participant_incomplete'
-      || value === 'router_selected'
-      || value === 'router_returned_to_orchestrator'
-      || value === 'router_incomplete'
-      || value === 'router_synthesized'
-      || value === 'finalizer_completed'
-      ? value
-      : undefined;
-  }
-
-  private isArchitectureExecutionEventType(value: unknown): value is ArchitectureExecutionEventType {
-    return value === 'run_created'
-      || value === 'node_started'
-      || value === 'agent_started'
-      || value === 'participant_output'
-      || value === 'router_decision'
-      || value === 'router_output'
-      || value === 'tool_call'
-      || value === 'human_gate'
-      || value === 'artifact_created'
-      || value === 'memory_persisted'
-      || value === 'final_artifact'
-      || value === 'node_completed'
-      || value === 'run_stopped';
-  }
-
-  private isWorkflowReasonCode(value: string): value is WorkflowReasonCode {
-    return value === 'user_stop'
-      || value === 'system_stop'
-      || value === 'max_steps'
-      || value === 'max_node_visits'
-      || value === 'return_to_orchestrator'
-      || value === 'runtime_pause'
-      || value === 'runtime_missing'
-      || value === 'runtime_stalled'
-      || value === 'unresolved_cli_children'
-      || value === 'return_to_orchestrator_cap_exceeded'
-      || value === 'resume_failed'
-      || value === 'missing_final_artifact'
-      || value === 'finalization_missing'
-      || value === 'final_artifact_blocker'
-      || value === 'final_artifact_accepted'
-      || value === 'external_quality_gate_passed'
-      || value === 'external_quality_gate_failed';
-  }
-
-  private isWorkflowErrorCode(value: string): value is NonNullable<ArchitectureExecutionEvent['errorCode']> {
-    return value === 'RATE_LIMITED'
-      || value === 'TIMEOUT'
-      || value === 'PROVIDER_UNAVAILABLE'
-      || value === 'PROVIDER_UNAUTHORIZED'
-      || value === 'INVALID_ARGUMENT'
-      || value === 'CONTRACT_VIOLATION'
-      || value === 'CLI_AGENT_SESSION_METADATA_MISSING'
-      || value === 'CLI_AGENT_STOPPED'
-      || value === 'SUBAGENT_TIMEOUT'
-      || value === 'RAAPP_RELEASE_NOT_FOUND'
-      || value === 'UNKNOWN';
-  }
-
-  private isWorkflowEvidenceKind(value: unknown): value is NonNullable<ArchitectureExecutionEvent['evidence']>[number]['kind'] {
-    return value === 'BUILD_RESULT'
-      || value === 'GIT_STATUS'
-      || value === 'FINAL_ARTIFACT'
-      || value === 'QUALITY_GATE'
-      || value === 'TOOL_RESULT'
-      || value === 'CLI_CHILD'
-      || value === 'VFS_WRITE'
-      || value === 'VFS_READ';
-  }
-
-  private isWorkflowEvidenceStatus(value: unknown): value is NonNullable<ArchitectureExecutionEvent['evidence']>[number]['status'] {
-    return value === 'passed'
-      || value === 'failed'
-      || value === 'blocked'
-      || value === 'unknown';
-  }
-
-  private isArchitectureRouteDecision(value: unknown): value is ArchitectureRouteDecision {
-    return this.isPlainRecord(value)
-      && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback')
-      && this.isNonEmptyString(value.fromNodeId)
-      && Array.isArray(value.selectedNodeIds)
-      && value.selectedNodeIds.every((nodeId) => typeof nodeId === 'string')
-      && (value.rejectedNodeIds === undefined || (Array.isArray(value.rejectedNodeIds) && value.rejectedNodeIds.every((nodeId) => typeof nodeId === 'string')))
-      && (value.nextNodeId === undefined || typeof value.nextNodeId === 'string')
-      && (value.convergeToNodeId === undefined || typeof value.convergeToNodeId === 'string')
-      && (value.mode === undefined || this.isNodeBehaviorMode(value.mode))
-      && (value.response === undefined || typeof value.response === 'string');
-  }
-
-  private isArchitectureRouterOutput(value: unknown): value is ArchitectureRouterOutput {
-    return this.isPlainRecord(value)
-      && typeof value.selectedStrategy === 'string'
-      && typeof value.mergedDecision === 'string'
-      && Array.isArray(value.acceptedInputs)
-      && Array.isArray(value.rejectedInputs)
-      && Array.isArray(value.unresolvedConflicts)
-      && Array.isArray(value.risks)
-      && typeof value.confidence === 'number'
-      && Number.isFinite(value.confidence)
-      && (
-        value.nextAction === 'finalize'
-        || value.nextAction === 'ask_human'
-        || value.nextAction === 'route_to'
-        || value.nextAction === 'run_more_research'
-        || value.nextAction === 'rerun_with_different_personas'
-      )
-      && (
-        value.nextAction !== 'route_to'
-        || typeof value.targetNodeId === 'string'
-      )
-      && (
-        value.targetNodeId === undefined
-        || typeof value.targetNodeId === 'string'
-      )
-      && (
-        value.response === undefined
-        || typeof value.response === 'string'
-      );
-  }
-
   private toRunSessionTitle(prompt: string): string {
     const trimmed = prompt.trim();
     const summary = trimmed.length > 56 ? `${trimmed.slice(0, 56)}...` : trimmed;
     return `Architecture: ${summary || 'Untitled run'}`;
   }
 
-  private validateCreateRunDto(dto: CreateArchitectureRunDto): CreateArchitectureRunDto {
-    if (!this.isNonEmptyString(dto?.schemaId)) {
-      throw new BadRequestException('schemaId must be a non-empty string');
-    }
-    if (!this.isNonEmptyString(dto?.prompt)) {
-      throw new BadRequestException('prompt must be a non-empty string');
-    }
-    if (dto?.context !== undefined && !this.isPlainRecord(dto.context)) {
-      throw new BadRequestException('context must be an object when provided');
-    }
-    if (dto?.slotOverrides !== undefined && !this.isStringRecord(dto.slotOverrides)) {
-      throw new BadRequestException('slotOverrides must map slot ids to persona ids');
-    }
-    if (dto?.executionMode !== undefined && !this.isExecutionMode(dto.executionMode)) {
-      throw new BadRequestException('executionMode must be session_branches or subagent_execution');
-    }
-    if (dto?.schema !== undefined && !this.isArchitectureSchema(dto.schema)) {
-      throw new BadRequestException('schema must be a valid architecture schema when provided');
-    }
-    return dto;
-  }
-
-  private validateCreateRunSlotOverrides(
-    schema: ArchitectureSchema,
-    slotOverrides: Record<string, string> | undefined,
-  ): void {
-    if (!slotOverrides) {
-      return;
-    }
-
-    const slotById = new Map(schema.roleSlots.map((slot) => [slot.id, slot]));
-    for (const slotId of Object.keys(slotOverrides)) {
-      const slot = slotById.get(slotId);
-      if (!slot) {
-        throw new BadRequestException(`Unknown role slot ${slotId}`);
-      }
-      if (!slot.canOverrideAtRunStart) {
-        throw new BadRequestException(`Role slot ${slotId} cannot be overridden`);
-      }
-    }
-  }
-
-  private cloneSchema(schema: ArchitectureSchema): ArchitectureSchema {
-    return {
-      ...schema,
-      roleSlots: schema.roleSlots.map((slot) => ({ ...slot })),
-      nodes: schema.nodes.map((node) => ({ ...node })),
-      edges: schema.edges.map((edge) => ({ ...edge })),
-      routerPolicy: { ...schema.routerPolicy },
-      contextPolicy: {
-        ...schema.contextPolicy,
-        perSlotOverrides: schema.contextPolicy.perSlotOverrides
-          ? Object.fromEntries(Object.entries(schema.contextPolicy.perSlotOverrides).map(([slotId, override]) => [
-              slotId,
-              { ...override },
-            ]))
-          : undefined,
-      },
-      memoryPolicy: { ...schema.memoryPolicy },
-    };
-  }
-
-  private isArchitectureSchema(value: unknown): value is ArchitectureSchema {
-    return this.isPlainRecord(value)
-      && this.isNonEmptyString(value.id)
-      && this.isNonEmptyString(value.name)
-      && typeof value.description === 'string'
-      && this.isNonEmptyString(value.version)
-      && Array.isArray(value.roleSlots)
-      && value.roleSlots.every((slot) => this.isArchitectureRoleSlot(slot))
-      && Array.isArray(value.nodes)
-      && value.nodes.every((node) => this.isArchitectureSchemaNode(node))
-      && Array.isArray(value.edges)
-      && value.edges.every((edge) => this.isArchitectureSchemaEdge(edge))
-      && this.hasValidNodeBehaviorTopology(value.nodes)
-      && this.hasValidGraphTopology(value.nodes, value.edges)
-      && this.isRouterPolicy(value.routerPolicy)
-      && this.isContextPolicy(value.contextPolicy)
-      && this.isMemoryPolicy(value.memoryPolicy)
-      && typeof value.outputArtifactSchema === 'string';
-  }
-
-  private isArchitectureRoleSlot(value: unknown): value is ArchitectureRoleSlot {
-    return this.isPlainRecord(value)
-      && this.isNonEmptyString(value.id)
-      && this.isNonEmptyString(value.label)
-      && typeof value.description === 'string'
-      && this.isSlotType(value.slotType)
-      && this.isNonEmptyString(value.defaultPersonaId)
-      && Array.isArray(value.allowedPersonaTags)
-      && value.allowedPersonaTags.every((tag) => typeof tag === 'string')
-      && typeof value.required === 'boolean'
-      && typeof value.canOverrideAtRunStart === 'boolean';
-  }
-
-  private isArchitectureSchemaNode(value: unknown): value is ArchitectureSchemaNode {
-    return this.isPlainRecord(value)
-      && this.isNonEmptyString(value.id)
-      && this.isNonEmptyString(value.label)
-      && this.isNodeKind(value.kind)
-      && (value.roleSlotId === undefined || typeof value.roleSlotId === 'string')
-      && (value.maxToolAttempts === undefined || (typeof value.maxToolAttempts === 'number' && Number.isInteger(value.maxToolAttempts) && value.maxToolAttempts >= 1 && value.maxToolAttempts <= 100))
-      && (value.toolOverride === undefined || this.isNodeToolOverride(value.toolOverride))
-      && (value.behavior === undefined || this.isNodeBehavior(value.behavior))
-      && (value.x === undefined || typeof value.x === 'number')
-      && (value.y === undefined || typeof value.y === 'number');
-  }
-
-  private isNodeToolOverride(value: unknown): value is NonNullable<ArchitectureSchemaNode['toolOverride']> {
-    return this.isPlainRecord(value)
-      && (
-        value.allowedToolNames === undefined
-        || (
-          Array.isArray(value.allowedToolNames)
-          && value.allowedToolNames.every((name) => typeof name === 'string' && name.trim().length > 0)
-        )
-      );
-  }
-
-  private isNodeBehavior(value: unknown): value is NonNullable<ArchitectureSchemaNode['behavior']> {
-    return this.isPlainRecord(value)
-      && this.isNodeBehaviorMode(value.mode)
-      && (value.fanOut === undefined || value.fanOut === 'parallel' || value.fanOut === 'sequential')
-      && (value.maxBranches === undefined || (typeof value.maxBranches === 'number' && Number.isInteger(value.maxBranches) && value.maxBranches > 0))
-      && (
-        value.scoringPolicy === undefined
-        || value.scoringPolicy === 'confidence'
-        || value.scoringPolicy === 'risk'
-        || value.scoringPolicy === 'cost'
-        || value.scoringPolicy === 'custom'
-      )
-      && (value.description === undefined || typeof value.description === 'string');
-  }
-
-  private hasValidNodeBehaviorTopology(nodes: ArchitectureSchemaNode[]): boolean {
-    return nodes.every((node) => {
-      if (!node.behavior) {
-        return node.kind !== 'role' || Boolean(node.roleSlotId);
-      }
-      if (node.kind === 'role' && !node.roleSlotId) {
-        return false;
-      }
-      if (node.kind === 'role') {
-        return false;
-      }
-      if (node.kind === 'artifact') {
-        return node.behavior.mode === 'finalize' || node.behavior.mode === 'merge_inputs';
-      }
-      return node.behavior.mode !== 'finalize';
-    });
-  }
-
-  private hasValidGraphTopology(nodes: ArchitectureSchemaNode[], edges: ArchitectureSchemaEdge[]): boolean {
-    const nodeIds = new Set<string>();
-    for (const node of nodes) {
-      if (nodeIds.has(node.id)) {
-        return false;
-      }
-      nodeIds.add(node.id);
-    }
-
-    const edgeIds = new Set<string>();
-    for (const edge of edges) {
-      if (edgeIds.has(edge.id) || edge.fromNodeId === edge.toNodeId) {
-        return false;
-      }
-      edgeIds.add(edge.id);
-      if (!nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private isArchitectureSchemaEdge(value: unknown): value is ArchitectureSchemaEdge {
-    return this.isPlainRecord(value)
-      && this.isNonEmptyString(value.id)
-      && this.isNonEmptyString(value.fromNodeId)
-      && this.isNonEmptyString(value.toNodeId)
-      && (value.label === undefined || typeof value.label === 'string')
-      && (
-        value.selection === undefined
-        || value.selection === 'default'
-        || value.selection === 'converge'
-        || value.selection === 'continuation'
-      )
-      && (value.returnToOrchestrator === undefined || typeof value.returnToOrchestrator === 'boolean');
-  }
-
-  private isRouterPolicy(value: unknown): value is ArchitectureSchema['routerPolicy'] {
-    return this.isPlainRecord(value)
-      && (value.mode === 'rank_then_merge' || value.mode === 'evidence_first' || value.mode === 'risk_weighted')
-      && typeof value.mustAddressCriticFindings === 'boolean'
-      && typeof value.canReturnNeedsMoreResearch === 'boolean';
-  }
-
-  private isContextPolicy(value: unknown): value is ArchitectureSchema['contextPolicy'] {
-    return this.isPlainRecord(value)
-      && typeof value.includeUserTask === 'boolean'
-      && typeof value.includeProjectMemory === 'boolean'
-      && typeof value.includeBrowserSession === 'boolean'
-      && typeof value.includePriorDecisions === 'boolean'
-      && (value.includeOtherAgentOutputs === undefined || typeof value.includeOtherAgentOutputs === 'boolean')
-      && (value.includeToolResults === undefined || typeof value.includeToolResults === 'boolean')
-      && (value.contextCompression === undefined || this.isContextCompression(value.contextCompression))
-      && (value.perSlotOverrides === undefined || this.isContextPolicyOverrides(value.perSlotOverrides));
-  }
-
-  private isContextPolicyOverrides(value: unknown): value is NonNullable<ArchitectureSchema['contextPolicy']['perSlotOverrides']> {
-    return this.isPlainRecord(value) && Object.values(value).every((entry) => (
-      this.isPlainRecord(entry)
-      && (entry.includeUserTask === undefined || typeof entry.includeUserTask === 'boolean')
-      && (entry.includeProjectMemory === undefined || typeof entry.includeProjectMemory === 'boolean')
-      && (entry.includeBrowserSession === undefined || typeof entry.includeBrowserSession === 'boolean')
-      && (entry.includePriorDecisions === undefined || typeof entry.includePriorDecisions === 'boolean')
-      && (entry.includeOtherAgentOutputs === undefined || typeof entry.includeOtherAgentOutputs === 'boolean')
-      && (entry.includeToolResults === undefined || typeof entry.includeToolResults === 'boolean')
-      && (entry.contextCompression === undefined || this.isContextCompression(entry.contextCompression))
-    ));
-  }
-
-  private isContextCompression(value: unknown): value is NonNullable<ArchitectureSchema['contextPolicy']['contextCompression']> {
-    return value === 'none' || value === 'summary' || value === 'evidence_only';
-  }
-
-  private isMemoryPolicy(value: unknown): value is ArchitectureSchema['memoryPolicy'] {
-    return this.isPlainRecord(value)
-      && typeof value.persistFinalArtifact === 'boolean'
-      && typeof value.persistRouterDecision === 'boolean';
-  }
-
-  private isNonEmptyString(value: unknown): value is string {
-    return typeof value === 'string' && value.trim().length > 0;
-  }
-
   private isPlainRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  private isStringRecord(value: unknown): value is Record<string, string> {
-    return this.isPlainRecord(value)
-      && Object.values(value).every((entry) => typeof entry === 'string' && entry.length > 0);
-  }
-
-  private isExecutionMode(value: unknown): value is ArchitectureExecutionMode {
-    return value === 'session_branches' || value === 'subagent_execution';
-  }
-
-  private isSlotType(value: unknown): value is ArchitectureRoleSlot['slotType'] {
-    return value === 'participant'
-      || value === 'router'
-      || value === 'judge'
-      || value === 'finalizer'
-      || value === 'critic'
-      || value === 'tool_executor';
-  }
-
-  private isNodeKind(value: unknown): value is ArchitectureSchemaNode['kind'] {
-    return value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact';
-  }
-
-  private isNodeBehaviorMode(value: unknown): value is NonNullable<ArchitectureSchemaNode['behavior']>['mode'] {
-    return value === 'fan_out_all'
-      || value === 'choose_one'
-      || value === 'rank_then_merge'
-      || value === 'merge_inputs'
-      || value === 'finalize';
-  }
-
-  private toSpeaker(event: ArchitectureExecutionEvent): ArchitectureChatProjection['messages'][number]['speaker'] {
-    if (event.type === 'run_created') return 'system';
-    if (event.type === 'run_stopped') return 'system';
-    if (event.type === 'router_decision') return 'router';
-    if (event.type === 'router_output') return 'router';
-    if (event.type === 'final_artifact') return 'finalizer';
-    if (event.type === 'artifact_created') return 'finalizer';
-    return 'participant';
-  }
-
-  private isChatProjectionEvent(event: ArchitectureExecutionEvent): boolean {
-    return event.type === 'run_created'
-      || event.type === 'run_stopped'
-      || event.type === 'participant_output'
-      || event.type === 'router_decision'
-      || event.type === 'final_artifact';
   }
 
 }

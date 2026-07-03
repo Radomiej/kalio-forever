@@ -306,7 +306,7 @@ export function useChatSocketEvents({
     const offAgentStart = eventBus.onAgentStart((payload) => {
       clearToolArgProgressTracking(payload.sessionId);
       addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
-      startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
+      startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun, payload.promptMessageId);
       clearToolActivities(payload.sessionId);
       setPendingConfirmation(payload.sessionId, null);
       setPendingBudgetApproval?.(payload.sessionId, null);

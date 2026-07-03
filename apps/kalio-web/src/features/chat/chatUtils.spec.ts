@@ -107,6 +107,43 @@ describe('mergeFetchedMessages', () => {
     });
   });
 
+  it('REGRESSION: rewrites durable assistant prompt linkage when an optimistic user id is kept', () => {
+    const currentMessages = [
+      makeMsg({ id: 'u-local-1', role: 'user', content: 'Reply FIRST', createdAt: 10 }),
+      makeMsg({ id: 'u-local-2', role: 'user', content: 'Reply SECOND', createdAt: 30 }),
+    ];
+    const loadedMessages = [
+      makeMsg({ id: 'u-server-1', role: 'user', content: 'Reply FIRST', createdAt: 12 }),
+      makeMsg({
+        id: 'a-server-1',
+        role: 'assistant',
+        content: 'FIRST',
+        turnId: 'turn-1',
+        promptMessageId: 'u-server-1',
+        createdAt: 20,
+      }),
+      makeMsg({ id: 'u-server-2', role: 'user', content: 'Reply SECOND', createdAt: 32 }),
+      makeMsg({
+        id: 'a-server-2',
+        role: 'assistant',
+        content: 'SECOND',
+        turnId: 'turn-2',
+        promptMessageId: 'u-server-2',
+        createdAt: 40,
+      }),
+    ];
+
+    const merged = mergeFetchedMessages(currentMessages, loadedMessages);
+    const turns = buildTurnsFromHistory(merged, 's1');
+    const timeline = buildConversationTimeline(merged, turns).map((entry) =>
+      entry.kind === 'user_message' ? `user:${entry.message.id}` : `turn:${entry.turn.id}`,
+    );
+
+    expect(merged.find((message) => message.id === 'a-server-1')?.promptMessageId).toBe('u-local-1');
+    expect(merged.find((message) => message.id === 'a-server-2')?.promptMessageId).toBe('u-local-2');
+    expect(timeline).toEqual(['user:u-local-1', 'turn:turn-1', 'user:u-local-2', 'turn:turn-2']);
+  });
+
   it('REGRESSION: collapses a persisted tool_result onto the optimistic local copy by toolCallId', () => {
     const currentMessages = [
       makeMsg({
@@ -415,6 +452,56 @@ describe('buildTurnsFromHistory', () => {
     );
 
     expect(timeline).toEqual(['user:u1', 'user:u2', 'turn:turn-2']);
+  });
+
+  it('REGRESSION: timeline reanchors stale live turn prompt ids from durable assistant message linkage', () => {
+    const messages = [
+      makeMsg({ id: 'u-local-1', role: 'user', content: 'Reply FIRST', createdAt: 10 }),
+      makeMsg({
+        id: 'a-server-1',
+        role: 'assistant',
+        content: 'FIRST',
+        turnId: 'turn-1',
+        promptMessageId: 'u-local-1',
+        createdAt: 20,
+      }),
+      makeMsg({ id: 'u-local-2', role: 'user', content: 'Reply SECOND', createdAt: 30 }),
+      makeMsg({
+        id: 'a-server-2',
+        role: 'assistant',
+        content: 'SECOND',
+        turnId: 'turn-2',
+        promptMessageId: 'u-local-2',
+        createdAt: 40,
+      }),
+    ];
+    const turns: AgentTurn[] = [
+      {
+        id: 'turn-1',
+        sessionId: 's1',
+        promptMessageId: 'u-server-1',
+        items: [{ kind: 'text', messageId: 'a-server-1' }],
+        done: true,
+      },
+      {
+        id: 'turn-2',
+        sessionId: 's1',
+        promptMessageId: 'u-server-2',
+        items: [{ kind: 'text', messageId: 'a-server-2' }],
+        done: true,
+      },
+    ];
+
+    const timeline = buildConversationTimeline(messages, turns).map((entry) =>
+      entry.kind === 'user_message' ? `user:${entry.message.id}` : `turn:${entry.turn.id}:${entry.turn.promptMessageId}`,
+    );
+
+    expect(timeline).toEqual([
+      'user:u-local-1',
+      'turn:turn-1:u-local-1',
+      'user:u-local-2',
+      'turn:turn-2:u-local-2',
+    ]);
   });
 
   it('REGRESSION: timeline hides raw architecture host turns when a typed workflow envelope covers the same run', () => {

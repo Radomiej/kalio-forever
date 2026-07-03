@@ -14,6 +14,39 @@ function requireEnv(name: 'PLAYWRIGHT_BASE_URL' | 'TEST_API_URL'): string {
 export const APP_BASE = requireEnv('PLAYWRIGHT_BASE_URL');
 export const API_BASE = requireEnv('TEST_API_URL');
 
+export function isRetryableApiTransportError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return /ECONNRESET|ECONNREFUSED|socket hang up|ERR_CONNECTION_RESET|Timeout \d+ms exceeded/i.test(message);
+}
+
+async function delay(ms: number): Promise<void> {
+	await new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
+export async function getJsonWithTransportRetry<T>(
+	request: APIRequestContext,
+	url: string,
+): Promise<T> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		try {
+			const response = await request.get(url, { timeout: 15_000 });
+			expect(response.ok()).toBeTruthy();
+			return await response.json() as T;
+		} catch (error) {
+			lastError = error;
+			if (!isRetryableApiTransportError(error) || attempt === 2) {
+				throw error;
+			}
+			await delay(250 * (attempt + 1));
+		}
+	}
+
+	throw lastError;
+}
+
 interface LLMConfigResponse {
 	provider: string;
 	source: 'db' | 'env';
@@ -66,21 +99,14 @@ export async function selectSession(page: Page, sessionId: string, title: string
 	await expect(page.getByTestId('session-panel')).toBeVisible({ timeout: 15_000 });
 
 	for (let attempt = 0; attempt < 3; attempt += 1) {
-		await expect
-			.poll(
-				async () => page.getByText('Connecting to backend...').count(),
-				{ timeout: 15_000 },
-			)
-			.toBe(0);
+		await expectChatTransportReady(page);
 
 		const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
 		if (await sessionItem.isVisible().catch(() => false)) {
-			await sessionItem.evaluate((node) => {
-				if (!(node instanceof HTMLElement)) {
-					throw new Error('Session item is not clickable');
-				}
-
-				node.click();
+			await sessionItem.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => undefined);
+			await sessionItem.click({ force: true, timeout: 5_000 }).catch(async () => {
+				await expectChatTransportReady(page);
+				await sessionItem.click({ force: true, timeout: 5_000 });
 			});
 			await expect
 				.poll(
@@ -105,13 +131,55 @@ export async function selectSession(page: Page, sessionId: string, title: string
 		}
 	}
 
-	throw new Error(`Session ${sessionId} (${title}) did not appear in the Talk sidebar.`);
+	const visibleSessionCount = await page.getByTestId('session-item').count().catch(() => 0);
+	const transportMessages = await transportStatusMessages(page);
+	throw new Error(
+		`Session ${sessionId} (${title}) did not appear in the Talk sidebar. `
+		+ `visibleSessions=${visibleSessionCount}; transport=${transportMessages || 'ready'}`,
+	);
+}
+
+async function expectChatTransportReady(page: Page): Promise<void> {
+	await expect
+		.poll(
+			async () => activeTransportStatusMessages(page),
+			{
+				timeout: 30_000,
+				message: 'Expected chat transport to be connected before selecting a session',
+			},
+		)
+		.toBe('');
+}
+
+async function activeTransportStatusMessages(page: Page): Promise<string> {
+	const messages = await page
+		.getByTestId('chat-connection-status')
+		.allTextContents()
+		.catch(() => []);
+	return messages.map((message) => message.trim()).filter(Boolean).join(' | ');
+}
+
+async function transportStatusMessages(page: Page): Promise<string> {
+	const activeMessages = await page
+		.getByTestId('chat-connection-status')
+		.allTextContents()
+		.catch(() => []);
+	const recoveryMessages = await page
+		.getByTestId('chat-recovery-notice')
+		.allTextContents()
+		.catch(() => []);
+	return [...activeMessages, ...recoveryMessages]
+		.map((message) => message.trim())
+		.filter(Boolean)
+		.join(' | ');
 }
 
 export async function sendMessageFromComposer(page: Page, message: string): Promise<void> {
 	const input = await expectComposerEnabled(page, 10_000);
 	await input.fill(message);
+	await expect(input).toHaveValue(message, { timeout: 10_000 });
 	const sendButton = await getComposerSendButton(page);
+	await expect(sendButton).toBeEnabled({ timeout: 10_000 });
 	await sendButton.click();
 }
 

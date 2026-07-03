@@ -25,12 +25,17 @@ interface FakeRow {
 
 function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[]; ops: string[] } {
   const ops: string[] = [];
+  type RowQuery = PromiseLike<FakeRow[]> & { limit: (limit: number) => Promise<FakeRow[]> };
+  const rowQuery = (sourceRows: FakeRow[]): RowQuery => ({
+    then: (onfulfilled, onrejected) => Promise.resolve(sourceRows).then(onfulfilled, onrejected),
+    limit: (limit: number) => Promise.resolve(sourceRows.slice(0, limit)),
+  });
   const select = () => ({
     from: () => ({
-      orderBy: () => Promise.resolve(rows),
+      orderBy: () => rowQuery(rows),
       where: () => ({
-        orderBy: () => Promise.resolve(rows.filter((row) => row.archivedAt == null)),
-        limit: () => Promise.resolve(rows),
+        orderBy: () => rowQuery(rows.filter((row) => row.archivedAt == null)),
+        limit: (limit: number) => Promise.resolve(rows.slice(0, limit)),
       }),
     }),
   });
@@ -204,6 +209,42 @@ describe('SessionsService', () => {
       const result = await service.list({ includeArchived: true });
 
       expect(result.map((session) => session.id)).toEqual(['visible', 'archived']);
+    });
+
+    it('limits the default active session list for large histories', async () => {
+      for (let index = 0; index < 260; index += 1) {
+        rows.push({
+          id: `session-${index}`,
+          personaId: 'p1',
+          title: `Session ${index}`,
+          createdAt: index,
+          updatedAt: index,
+          archivedAt: null,
+        });
+      }
+
+      const result = await service.list();
+
+      expect(result).toHaveLength(250);
+      expect(result.at(0)?.id).toBe('session-0');
+      expect(result.at(-1)?.id).toBe('session-249');
+    });
+
+    it('clamps explicit active session limits to the release-safe maximum', async () => {
+      for (let index = 0; index < 550; index += 1) {
+        rows.push({
+          id: `session-${index}`,
+          personaId: 'p1',
+          title: `Session ${index}`,
+          createdAt: index,
+          updatedAt: index,
+          archivedAt: null,
+        });
+      }
+
+      const result = await service.list({ limit: 999 });
+
+      expect(result).toHaveLength(500);
     });
   });
 

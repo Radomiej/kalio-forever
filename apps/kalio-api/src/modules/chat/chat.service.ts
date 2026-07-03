@@ -15,6 +15,14 @@ import { readPendingRAAppLaunchIntent, stripPendingRAAppLaunchRuntimeContext } f
 
 type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
 
+function normalizeClientMessageId(clientMessageId: string | undefined): string | undefined {
+  if (!clientMessageId) {
+    return undefined;
+  }
+  const trimmed = clientMessageId.trim();
+  return /^[A-Za-z0-9_-]{8,128}$/.test(trimmed) ? trimmed : undefined;
+}
+
 function getChatErrorCode(err: unknown): ChatErrorCode {
   if (err && typeof err === 'object' && 'code' in err) {
     const code = (err as { code?: unknown }).code;
@@ -62,6 +70,7 @@ export class ChatService {
     attachments?: import('@kalio/types').ChatAttachment[],
     suppliedTurnId?: string,
     runId?: string,
+    clientMessageId?: string,
   ): Promise<void> {
     const controller = new AbortController();
     this.abortControllers.set(sessionId, controller);
@@ -82,9 +91,6 @@ export class ChatService {
     };
 
     try {
-      trackingEmit('agent:start', { sessionId, turnId });
-      await checkpointRun('started');
-
       await this.sessionManager.ensureSession(sessionId, personaId);
       const session = await this.sessions.get(sessionId);
       await this.sessions.registerRuntimeProjectPathForSession(sessionId);
@@ -98,10 +104,16 @@ export class ChatService {
       if (!this.contextAssembly) {
         throw new Error('ContextAssemblyService is required for chat turns');
       }
-      const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
-      const promptMessage = await this.sessionManager.persistUserMessage(sessionId, content, attachments, { turnId });
+      const promptMessage = await this.sessionManager.persistUserMessage(sessionId, content, attachments, {
+        turnId,
+        messageId: normalizeClientMessageId(clientMessageId),
+      });
       const promptMessageId = promptMessage?.id;
+      trackingEmit('agent:start', { sessionId, turnId, promptMessageId });
+      await checkpointRun('started');
+
+      const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
       trackingEmit('chat:context', {
         sessionId,
