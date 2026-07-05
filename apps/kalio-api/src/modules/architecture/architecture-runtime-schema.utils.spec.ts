@@ -126,4 +126,127 @@ describe('architecture runtime schema utils', () => {
       finalizer: 'dev',
     })).toThrow(BadRequestException);
   });
+
+  it('rejects inline schemas whose nodes reference missing role slots', () => {
+    const invalidSchema: ArchitectureSchema = {
+      ...validSchema,
+      nodes: [
+        ...validSchema.nodes,
+        {
+          id: 'ghost-role',
+          label: 'Ghost Role',
+          kind: 'role',
+          roleSlotId: 'missing-slot',
+        },
+      ],
+      edges: [
+        ...validSchema.edges,
+        {
+          id: 'router-to-ghost-role',
+          fromNodeId: 'router-node',
+          toNodeId: 'ghost-role',
+        },
+      ],
+    };
+
+    expect(() => validateArchitectureCreateRunDto({
+      schemaId: invalidSchema.id,
+      prompt: 'Review the project architecture.',
+      schema: invalidSchema,
+    })).toThrow(BadRequestException);
+  });
+
+  it('rejects invalid inline schema node behavior and topology contracts', () => {
+    const cases: Array<[string, ArchitectureSchema]> = [
+      [
+        'role node with router behavior',
+        {
+          ...validSchema,
+          nodes: [
+            ...validSchema.nodes,
+            {
+              id: 'role-with-behavior',
+              label: 'Role With Behavior',
+              kind: 'role',
+              roleSlotId: 'finalizer',
+              behavior: { mode: 'rank_then_merge' },
+            },
+          ],
+        },
+      ],
+      [
+        'artifact node with routing behavior',
+        {
+          ...validSchema,
+          nodes: validSchema.nodes.map((node) => (
+            node.id === 'final-node'
+              ? { ...node, behavior: { mode: 'choose_one' } }
+              : node
+          )),
+        },
+      ],
+      [
+        'router node with finalize behavior',
+        {
+          ...validSchema,
+          nodes: validSchema.nodes.map((node) => (
+            node.id === 'router-node'
+              ? { ...node, behavior: { mode: 'finalize' } }
+              : node
+          )),
+        },
+      ],
+      [
+        'duplicate node id',
+        {
+          ...validSchema,
+          nodes: [
+            ...validSchema.nodes,
+            { id: 'router-node', label: 'Duplicate Router', kind: 'router' },
+          ],
+        },
+      ],
+      [
+        'duplicate edge id',
+        {
+          ...validSchema,
+          edges: [
+            ...validSchema.edges,
+            { ...validSchema.edges[0] },
+          ],
+        },
+      ],
+      [
+        'self-loop edge',
+        {
+          ...validSchema,
+          edges: [
+            {
+              id: 'router-self-loop',
+              fromNodeId: 'router-node',
+              toNodeId: 'router-node',
+            },
+          ],
+        },
+      ],
+      [
+        'duplicate role slot id',
+        {
+          ...validSchema,
+          roleSlots: [
+            ...validSchema.roleSlots,
+            { ...validSchema.roleSlots[0], label: 'Duplicate Router Slot' },
+          ],
+        },
+      ],
+    ];
+
+    for (const [name, schema] of cases) {
+      expect(() => validateArchitectureCreateRunDto({
+        schemaId: schema.id,
+        prompt: `Review ${name}.`,
+        schema,
+      }), name).toThrow(BadRequestException);
+    }
+  });
 });

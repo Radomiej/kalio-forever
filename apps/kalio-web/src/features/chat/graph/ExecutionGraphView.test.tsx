@@ -362,12 +362,13 @@ describe('ExecutionGraphView empty-session state', () => {
       role: 'user',
       content: 'Start from graph',
     }));
-    expect(sendMessageMock).toHaveBeenCalledWith({
+    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'new-graph-session',
       content: 'Start from graph',
       personaId: 'default',
       interrupt: false,
-    });
+      clientMessageId: expect.any(String),
+    }));
   });
 
   it('creates a new chat with the selected persona in chat mode', async () => {
@@ -388,12 +389,13 @@ describe('ExecutionGraphView empty-session state', () => {
       personaId: 'persona-child',
       title: 'New Chat',
     }));
-    expect(sendMessageMock).toHaveBeenCalledWith({
+    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'new-graph-session',
       content: 'Start with the specialist',
       personaId: 'persona-child',
       interrupt: false,
-    });
+      clientMessageId: expect.any(String),
+    }));
   });
 
   it('persists the project path on graph launch and sends it with the created session', async () => {
@@ -458,12 +460,13 @@ describe('ExecutionGraphView empty-session state', () => {
     }));
     expect(agentState.clearToolActivities).toHaveBeenCalledWith('session-1');
     expect(agentState.setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
-    expect(sendMessageMock).toHaveBeenCalledWith({
+    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       content: 'Start this graph session',
       personaId: 'default',
       interrupt: false,
-    });
+      clientMessageId: expect.any(String),
+    }));
   });
 
   it('runs the selected workflow when the launch screen switches to workflow mode', async () => {

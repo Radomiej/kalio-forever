@@ -27,6 +27,7 @@ import {
   ARCHITECTURE_RUNTIME_STOP,
   type ArchitectureRuntimeStopPort,
 } from './architecture-runtime-stop.port';
+import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
 import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
@@ -59,6 +60,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
     @Optional() @Inject(ARCHITECTURE_RUNTIME_STOP) private readonly architectureRuntimeStop?: ArchitectureRuntimeStopPort,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() @Inject(SUBAGENT_RUNTIME) private readonly subagentRuntime?: SubagentRuntimePort,
   ) {
     this.sessionEvents.onSessionCreated(({ session }) => {
       this.emitSessionLifecycleEvent('session:created', session);
@@ -380,6 +382,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       sessionsService: this.sessionsService,
       agentFlowRuntime: this.getAgentFlowRuntime(),
       cliAgentSessionRuntime: this.getCliAgentSessionRuntime(),
+      subagentRuntime: this.getSubagentRuntime(),
       logger: this.logger,
     });
   }
@@ -399,6 +402,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       sessionsService: this.sessionsService,
       agentFlowRuntime: this.getAgentFlowRuntime(),
       cliAgentSessionRuntime: this.getCliAgentSessionRuntime(),
+      subagentRuntime: this.getSubagentRuntime(),
       logger: this.logger,
     });
   }
@@ -615,6 +619,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return this.moduleRef?.get<AgentFlowRuntimePort>(AGENT_FLOW_RUNTIME, { strict: false });
     } catch (error) {
       this.logger.warn(`AgentFlow runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
+  private getSubagentRuntime(): SubagentRuntimePort | undefined {
+    if (this.subagentRuntime) {
+      return this.subagentRuntime;
+    }
+    try {
+      return this.moduleRef?.get<SubagentRuntimePort>(SUBAGENT_RUNTIME, { strict: false });
+    } catch (error) {
+      this.logger.warn(`Subagent runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
   }

@@ -998,6 +998,10 @@ describe('useChatSessionActivation', () => {
       expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
       expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBe('turn-restored');
     });
+    expect(useAgentStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingSessionId: 'session-1',
+    });
   });
 
   it('prefers the runtime snapshot over stale buffered session status after hydration', async () => {
@@ -1135,6 +1139,10 @@ describe('useChatSessionActivation', () => {
     await waitFor(() => {
       expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
       expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBe('turn-buffered');
+    });
+    expect(useAgentStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingSessionId: 'session-1',
     });
     expect(useAgentStore.getState().consumeBufferedSessionStatusSnapshots('session-1')).toEqual([]);
   });

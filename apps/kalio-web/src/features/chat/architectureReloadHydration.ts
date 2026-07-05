@@ -10,6 +10,7 @@ import { apiClient } from '../../services/apiClient';
 import { buildArchitectureRunMetadata, findArchitectureRunInMessages } from './architectureChatSummary';
 import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
+import { extractSubAgentFlowResult } from './subAgentFlowResult.parser';
 import {
   DEFAULT_CHILD_SESSION_HISTORY_LIMIT,
   DEFAULT_SESSION_HISTORY_LIMIT,
@@ -118,7 +119,85 @@ function promptMessageIdForArchitectureRun(messages: ChatMessage[], runId: strin
       return message.promptMessageId;
     }
   }
+  const subAgentFlowCallId = subAgentFlowCallIdForArchitectureRun(messages, runId);
+  if (subAgentFlowCallId) {
+    const toolCallMessage = messages.find((message) => (
+      message.role === 'assistant'
+      && message.toolCalls?.some((toolCall) => toolCall.id === subAgentFlowCallId) === true
+    ));
+    if (
+      toolCallMessage
+      && typeof toolCallMessage.promptMessageId === 'string'
+      && toolCallMessage.promptMessageId.trim().length > 0
+    ) {
+      return toolCallMessage.promptMessageId;
+    }
+    const toolCallCreatedAt = toolCallMessage?.createdAt;
+    return [...messages]
+      .filter((message) => (
+        message.role === 'user'
+        && (typeof toolCallCreatedAt !== 'number' || message.createdAt <= toolCallCreatedAt)
+      ))
+      .at(-1)
+      ?.id ?? null;
+  }
   return null;
+}
+
+function subAgentFlowCallIdForArchitectureRun(messages: ChatMessage[], runId: string): string | null {
+  const subAgentFlowCallIds = new Set(messages
+    .filter((message) => message.role === 'assistant' && message.toolCalls)
+    .flatMap((message) => message.toolCalls ?? [])
+    .filter((toolCall) => toolCall.name === 'run_sub_agentflow')
+    .map((toolCall) => toolCall.id));
+
+  for (const message of messages) {
+    if (
+      message.role !== 'tool_result'
+      || typeof message.toolCallId !== 'string'
+      || !subAgentFlowCallIds.has(message.toolCallId)
+    ) {
+      continue;
+    }
+    const result = extractSubAgentFlowResult(parseToolResultContent(message.content));
+    if (result?.openGraphRunId === runId) {
+      return message.toolCallId;
+    }
+  }
+  return null;
+}
+
+function architectureRunIdsFromSubAgentFlowResults(messages: ChatMessage[]): string[] {
+  const subAgentFlowCallIds = new Set(messages
+    .filter((message) => message.role === 'assistant' && message.toolCalls)
+    .flatMap((message) => message.toolCalls ?? [])
+    .filter((toolCall) => toolCall.name === 'run_sub_agentflow')
+    .map((toolCall) => toolCall.id));
+  const runIds: string[] = [];
+
+  for (const message of messages) {
+    if (
+      message.role !== 'tool_result'
+      || typeof message.toolCallId !== 'string'
+      || !subAgentFlowCallIds.has(message.toolCallId)
+    ) {
+      continue;
+    }
+    const result = extractSubAgentFlowResult(parseToolResultContent(message.content));
+    const runId = result?.openGraphRunId?.trim();
+    if (runId && !runIds.includes(runId)) {
+      runIds.push(runId);
+    }
+  }
+  return runIds;
+}
+
+function parseToolResultContent(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
 }
 
 function mergeReloadedArchitectureSummaryMessage(
@@ -405,6 +484,35 @@ export async function hydrateArchitectureProjectionFromDescendants(
       return mergedMessages;
     }
     return mergeReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, typedSummary);
+  }
+
+  const subAgentFlowRunIds = architectureRunIdsFromSubAgentFlowResults(mergedMessages);
+  if (subAgentFlowRunIds.length > 0) {
+    const derivedSummariesByRunId = new Map<string, ArchitectureRunSummary>();
+    for (const runId of subAgentFlowRunIds) {
+      let projection: Awaited<ReturnType<FetchArchitectureRunProjection>>;
+      try {
+        projection = await fetchArchitectureRunProjection(runId);
+      } catch (error) {
+        void error;
+        // TODO: legacy fallback - run_sub_agentflow results may outlive a transient projection fetch failure.
+        continue;
+      }
+      if (getActiveSessionId() !== activeSessionId) {
+        return mergedMessages;
+      }
+      const derivedSummary = buildArchitectureRunSummaryFromProjection(runId, projection);
+      if (derivedSummary) {
+        derivedSummariesByRunId.set(derivedSummary.runId, derivedSummary);
+      }
+    }
+    if (derivedSummariesByRunId.size > 0) {
+      return mergeReloadedArchitectureSummaryMessages(
+        activeSessionId,
+        mergedMessages,
+        [...derivedSummariesByRunId.values()],
+      );
+    }
   }
 
   const candidateSessions = getSessions().filter((session) => (

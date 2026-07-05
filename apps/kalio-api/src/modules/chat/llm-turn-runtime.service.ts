@@ -8,7 +8,7 @@ import { AuditService } from './audit.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
-import type { LLMStructuredOutputRequest, SocketEvents, ToolResult } from '@kalio/types';
+import type { LLMStructuredOutputRequest, SocketEvents, ToolResult, WorkflowErrorCode } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
@@ -205,9 +205,7 @@ export class LLMTurnRuntimeService {
             sessionId: request.sessionId,
             turnId: request.turnId,
             status: 'failed',
-            errorCode: typeof (error as { code?: unknown })?.code === 'string'
-              ? (error as { code: string }).code
-              : 'RUNTIME_ERROR',
+            errorCode: workflowErrorCodeFromThrown(error),
             durationMs: Math.round(performance.now() - turnStart),
             data: {
               runtimeKind: request.runtimeKind,
@@ -473,6 +471,7 @@ export class LLMTurnRuntimeService {
         toolName: toolCall.name,
         args: toolCall.args,
         sessionId: request.sessionId,
+        turnId: request.turnId,
         agentRun: request.agentRun,
       };
     }
@@ -480,6 +479,7 @@ export class LLMTurnRuntimeService {
       callId: toolCall.id,
       toolName: toolCall.name,
       args: toolCall.args,
+      turnId: request.turnId,
     };
   }
 
@@ -517,6 +517,26 @@ function isStructuredOutputError(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function workflowErrorCodeFromThrown(error: unknown): WorkflowErrorCode {
+  const code = typeof (error as { code?: unknown })?.code === 'string'
+    ? (error as { code: string }).code
+    : undefined;
+  switch (code) {
+    case 'LLM_AUTH':
+      return 'PROVIDER_UNAUTHORIZED';
+    case 'LLM_RATE_LIMIT':
+      return 'RATE_LIMITED';
+    case 'LLM_TIMEOUT':
+      return 'TIMEOUT';
+    case 'LLM_PROVIDER_DOWN':
+      return 'PROVIDER_UNAVAILABLE';
+    case 'LLM_BAD_STRUCTURED_OUTPUT':
+      return 'CONTRACT_VIOLATION';
+    default:
+      return 'UNKNOWN';
+  }
 }
 
 function serializeToolResultContent(toolName: string, result: ToolResult): string {

@@ -4,7 +4,7 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
 import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { shouldRefreshVfsForToolResult, type ChatConnectionState } from '../ChatInterface.Parts';
-import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolArgProgressHandlers, findPendingConfirmationForToolResult, mergeRaAppNativeResultIntoMessages, type ReconnectUiState, type UseChatSocketEventsOptions } from './useChatSocketEvents.helpers';
+import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolArgProgressHandlers, findPendingConfirmationForToolResult, materializeToolStartTurn, mergeRaAppNativeResultIntoMessages, type ReconnectUiState, type UseChatSocketEventsOptions } from './useChatSocketEvents.helpers';
 import { handleCliChildProgress, handleCliChildToolResult, isCliChildToolName, resolveCliToolName } from './useChatSocketEvents.cliChild';
 import { registerConnectionRecoveryHandlers, registerSessionLifecycleHandlers } from './useChatSocketEvents.lifecycle';
 import { projectSubAgentFlowArchitectureResult } from '../architectureAgentFlowProjection';
@@ -70,8 +70,6 @@ export function useChatSocketEvents({
   const { addSession } = useSessionStore();
 
   useEffect(() => {
-    if (!eventBus.connected) eventBus.connect();
-
     const { markToolArgProgressSeen, clearToolArgProgressTracking, ensureSyntheticToolIntent } = createToolArgProgressHandlers({
       toolArgProgressSeenRef,
       setToolArgProgress,
@@ -278,15 +276,14 @@ export function useChatSocketEvents({
         startedAt: Date.now(),
       });
       if (payloadSessionId) {
-        const { getSessionActiveTurnId, getSessionAgentTurns, addTurnItem } = useSessionStore.getState();
-        const currentTurnId = getSessionActiveTurnId(payloadSessionId);
-        if (currentTurnId) {
-          const turn = getSessionAgentTurns(payloadSessionId).find((item) => item.id === currentTurnId);
-          const hasItem = turn?.items.some((item) => item.kind === 'tool' && item.callId === payload.callId) ?? false;
-          if (!hasItem) {
-            addTurnItem({ kind: 'tool', callId: payload.callId }, payloadSessionId);
-          }
-        }
+        const { getSessionActiveTurnId, getSessionAgentTurns, startAgentTurn, addTurnItem } = useSessionStore.getState();
+        materializeToolStartTurn(payload, payloadSessionId, {
+          getSessionActiveTurnId,
+          getSessionAgentTurns,
+          addActiveAgentLoop,
+          startAgentTurn,
+          addTurnItem,
+        });
       }
       clearToolArgProgressTracking(payloadSessionId);
     });
@@ -454,6 +451,9 @@ export function useChatSocketEvents({
       setAgentTurns,
       onContextInvalidated,
     });
+    if (!eventBus.connected) {
+      eventBus.connect();
+    }
 
     return () => {
       offChunk();

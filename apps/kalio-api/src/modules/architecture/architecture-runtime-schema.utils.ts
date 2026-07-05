@@ -74,10 +74,12 @@ export function isArchitectureRuntimeSchema(value: unknown): value is Architectu
     && isNonEmptyString(value.version)
     && Array.isArray(value.roleSlots)
     && value.roleSlots.every((slot) => isArchitectureRoleSlot(slot))
+    && hasUniqueRoleSlotIds(value.roleSlots)
     && Array.isArray(value.nodes)
     && value.nodes.every((node) => isArchitectureSchemaNode(node))
     && Array.isArray(value.edges)
     && value.edges.every((edge) => isArchitectureSchemaEdge(edge))
+    && hasValidRoleSlotReferences(value.roleSlots, value.nodes)
     && hasValidNodeBehaviorTopology(value.nodes)
     && hasValidGraphTopology(value.nodes, value.edges)
     && isRouterPolicy(value.routerPolicy)
@@ -165,6 +167,18 @@ function hasValidNodeBehaviorTopology(nodes: ArchitectureSchemaNode[]): boolean 
     }
     return node.behavior.mode !== 'finalize';
   });
+}
+
+function hasValidRoleSlotReferences(
+  roleSlots: ArchitectureRoleSlot[],
+  nodes: ArchitectureSchemaNode[],
+): boolean {
+  const roleSlotIds = new Set(roleSlots.map((slot) => slot.id));
+  return nodes.every((node) => node.roleSlotId === undefined || roleSlotIds.has(node.roleSlotId));
+}
+
+function hasUniqueRoleSlotIds(roleSlots: ArchitectureRoleSlot[]): boolean {
+  return new Set(roleSlots.map((slot) => slot.id)).size === roleSlots.length;
 }
 
 function hasValidGraphTopology(nodes: ArchitectureSchemaNode[], edges: ArchitectureSchemaEdge[]): boolean {

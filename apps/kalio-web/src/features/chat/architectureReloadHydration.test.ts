@@ -303,6 +303,251 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     expect(setAgentTurns).not.toHaveBeenCalledWith(expect.anything(), 'arch-root');
   });
 
+  it('rehydrates a run_sub_agentflow workflow envelope from typed tool result metadata after reload', async () => {
+    const hostMessages: ChatMessage[] = [
+      {
+        id: 'user-goal-guard',
+        sessionId: 'host',
+        role: 'user',
+        content: 'Run Goal Guard from Talk.',
+        createdAt: 10,
+      },
+      {
+        id: 'assistant-agentflow-tool',
+        sessionId: 'host',
+        role: 'assistant',
+        content: '',
+        promptMessageId: 'user-goal-guard',
+        createdAt: 11,
+        toolCalls: [
+          {
+            id: 'call-agentflow',
+            name: 'run_sub_agentflow',
+            args: {
+              flowId: 'goal_guard_delivery_loop',
+              goal: 'Run Implementer and Goal Guard.',
+            },
+          },
+        ],
+      },
+      {
+        id: 'tool-agentflow-result',
+        sessionId: 'host',
+        role: 'tool_result',
+        toolCallId: 'call-agentflow',
+        content: JSON.stringify({
+          flowRunId: 'flow-run-1',
+          childSessionId: 'child-flow-1',
+          status: 'done',
+          summary: 'Goal Guard accepted typed evidence.',
+          decisions: ['accepted'],
+          nextActions: [],
+          artifacts: ['qa/proof.md'],
+          tracePreview: [],
+          openChatSessionId: 'child-flow-1',
+          openGraphRunId: 'run-subflow-1',
+        }),
+        createdAt: 12,
+      },
+    ];
+    const fetchMessages = vi.fn(async () => hostMessages);
+    const fetchArchitectureRunProjection = vi.fn(async () => {
+      const chat: ArchitectureChatProjection = {
+        runId: 'run-subflow-1',
+        messages: [
+          {
+            id: 'chat-finalizer',
+            eventId: 'event-finalizer',
+            speaker: 'finalizer',
+            content: 'Goal Guard accepted typed evidence.',
+            roleSlotId: 'finalizer',
+            createdAt: 20,
+          },
+        ],
+      };
+      const events: ArchitectureExecutionEvent[] = [
+        {
+          id: 'event-finalizer',
+          runId: 'run-subflow-1',
+          sequence: 1,
+          type: 'node_completed' as ArchitectureExecutionEvent['type'],
+          message: 'Finalizer completed with typed evidence.',
+          nodeId: 'finalizer',
+          roleSlotId: 'finalizer',
+          createdAt: 20,
+        },
+      ];
+      const graph: ArchitectureGraphProjection = {
+        runId: 'run-subflow-1',
+        schemaId: 'goal_guard_delivery_loop',
+        schemaName: 'Goal Master Delivery Loop',
+        status: 'completed',
+        nodes: [
+          {
+            id: 'finalizer',
+            label: 'Finalizer',
+            kind: 'artifact',
+            status: 'completed',
+            eventIds: ['event-finalizer'],
+          },
+        ],
+        edges: [],
+      };
+      return { chat, events, graph };
+    });
+    const setMessages = vi.fn();
+    const setAgentTurns = vi.fn();
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages,
+      setAgentTurns,
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    expect(fetchArchitectureRunProjection).toHaveBeenCalledWith('run-subflow-1');
+    expect(reloadedMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'architecture-rehydrate:host:run-subflow-1',
+        promptMessageId: 'user-goal-guard',
+        architectureRun: expect.objectContaining({
+          runId: 'run-subflow-1',
+          schemaId: 'Goal Master Delivery Loop',
+          status: 'completed',
+          hostProjectionKind: 'workflow-envelope',
+        }),
+      }),
+    ]));
+    const workflowTurns = buildTurnsFromHistory(reloadedMessages ?? [], 'host')
+      .filter((turn) => turn.turnKind === 'workflow-envelope');
+    expect(workflowTurns).toHaveLength(1);
+    expect(workflowTurns[0]?.promptMessageId).toBe('user-goal-guard');
+    expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'host');
+  });
+
+  it('keeps a run_sub_agentflow workflow envelope attached to the original user prompt when the tool call lacks promptMessageId', async () => {
+    const hostMessages: ChatMessage[] = [
+      {
+        id: 'user-goal-guard',
+        sessionId: 'host',
+        role: 'user',
+        content: 'Run Goal Guard from Talk.',
+        createdAt: 10,
+      },
+      {
+        id: 'assistant-agentflow-tool',
+        sessionId: 'host',
+        role: 'assistant',
+        content: '',
+        createdAt: 11,
+        toolCalls: [
+          {
+            id: 'call-agentflow',
+            name: 'run_sub_agentflow',
+            args: {
+              flowId: 'goal_guard_delivery_loop',
+              goal: 'Run Implementer and Goal Guard.',
+            },
+          },
+        ],
+      },
+      {
+        id: 'tool-agentflow-result',
+        sessionId: 'host',
+        role: 'tool_result',
+        toolCallId: 'call-agentflow',
+        content: JSON.stringify({
+          flowRunId: 'flow-run-1',
+          childSessionId: 'child-flow-1',
+          status: 'done',
+          summary: 'Goal Guard accepted typed evidence.',
+          decisions: ['accepted'],
+          nextActions: [],
+          artifacts: ['qa/proof.md'],
+          tracePreview: [],
+          openChatSessionId: 'child-flow-1',
+          openGraphRunId: 'run-subflow-1',
+        }),
+        createdAt: 12,
+      },
+      {
+        id: 'follow-up-user',
+        sessionId: 'host',
+        role: 'user',
+        content: 'Repeat the conclusion.',
+        createdAt: 13,
+      },
+    ];
+    const fetchMessages = vi.fn(async () => hostMessages);
+    const fetchArchitectureRunProjection = vi.fn(async () => ({
+      chat: {
+        runId: 'run-subflow-1',
+        messages: [
+          {
+            id: 'chat-finalizer',
+            eventId: 'event-finalizer',
+            speaker: 'finalizer',
+            content: 'Goal Guard accepted typed evidence.',
+            roleSlotId: 'finalizer',
+            createdAt: 20,
+          },
+        ],
+      } satisfies ArchitectureChatProjection,
+      events: [
+        {
+          id: 'event-finalizer',
+          runId: 'run-subflow-1',
+          sequence: 1,
+          type: 'node_completed' as ArchitectureExecutionEvent['type'],
+          message: 'Finalizer completed with typed evidence.',
+          nodeId: 'finalizer',
+          roleSlotId: 'finalizer',
+          createdAt: 20,
+        },
+      ] satisfies ArchitectureExecutionEvent[],
+      graph: {
+        runId: 'run-subflow-1',
+        schemaId: 'goal_guard_delivery_loop',
+        schemaName: 'Goal Master Delivery Loop',
+        status: 'completed',
+        nodes: [
+          {
+            id: 'finalizer',
+            label: 'Finalizer',
+            kind: 'artifact',
+            status: 'completed',
+            eventIds: ['event-finalizer'],
+          },
+        ],
+        edges: [],
+      } satisfies ArchitectureGraphProjection,
+    }));
+
+    const reloadedMessages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages: vi.fn(),
+      setAgentTurns: vi.fn(),
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    const workflowTurn = buildTurnsFromHistory(reloadedMessages ?? [], 'host')
+      .find((turn) => turn.turnKind === 'workflow-envelope');
+    expect(workflowTurn?.promptMessageId).toBe('user-goal-guard');
+    expect(workflowTurn?.promptMessageId).not.toBe('follow-up-user');
+    expect(reloadedMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'architecture-rehydrate:host:run-subflow-1',
+        promptMessageId: 'user-goal-guard',
+      }),
+    ]));
+  });
+
   it('replaces stale architecture metadata with typed projection during workflow host reload', async () => {
     const staleHostMessages: ChatMessage[] = [
       {

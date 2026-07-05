@@ -4,6 +4,7 @@ import type { ArchitectureGraphNodeSummary, ArchitectureRunSummaryWithGraph } fr
 export type TraceStep = ArchitectureChatRunSummary['trace'][number] & {
   plannedLabel?: string;
   plannedStatus?: ArchitectureGraphNodeSummary['status'];
+  hasRuntimeEvidence?: boolean;
 };
 
 export type TraceStage =
@@ -50,10 +51,15 @@ export function buildTimelineStages(run: ArchitectureChatRunSummary): TraceStage
     }
     consumedNodeIds.add(node.id);
 
+    if (isUnevidencedArtifactNode(run, node)) {
+      continue;
+    }
+
     if (node.kind === 'parallel' || node.kind === 'router') {
       stages.push({ kind: 'step', step: stepFromGraphNode(run, node, graphRun) });
       const branchNodes = fanOutBranchNodes(node.id, graphRun, nodeById)
-        .filter((branchNode) => !consumedNodeIds.has(branchNode.id));
+        .filter((branchNode) => !consumedNodeIds.has(branchNode.id))
+        .filter((branchNode) => !isUnevidencedArtifactNode(run, branchNode));
       if (branchNodes.length > 1) {
         branchNodes.forEach((branchNode) => consumedNodeIds.add(branchNode.id));
         stages.push({
@@ -68,6 +74,21 @@ export function buildTimelineStages(run: ArchitectureChatRunSummary): TraceStage
   }
 
   return stages;
+}
+
+function isUnevidencedArtifactNode(
+  run: ArchitectureChatRunSummary,
+  node: ArchitectureGraphNodeSummary,
+): boolean {
+  if (node.kind !== 'artifact') {
+    return false;
+  }
+  const hasTypedEvent = node.hasRuntimeEvidence ?? node.eventIds.length > 0;
+  const hasTrace = run.trace.some((step) => step.nodeId === node.id || node.eventIds.includes(step.eventId ?? ''));
+  const hasFinalArtifact = typeof (run as ArchitectureRunSummaryWithGraph).finalArtifact === 'string'
+    && ((run as ArchitectureRunSummaryWithGraph).finalArtifact ?? '').trim().length > 0;
+  const isTerminalProjection = node.status === 'completed' || node.status === 'failed' || node.status === 'cancelled';
+  return !isTerminalProjection && !hasTypedEvent && !hasTrace && !hasFinalArtifact;
 }
 
 export function graphStepCount(run: ArchitectureChatRunSummary): number {
@@ -104,8 +125,10 @@ export function statusForStep(step: TraceStep | undefined): TimelineStatus | nul
   if (step.stream?.status === 'completed') {
     return 'completed';
   }
-  if (step.plannedStatus === 'running') {
-    return 'running';
+  if (step.hasRuntimeEvidence) {
+    if (step.plannedStatus === 'running') {
+      return 'running';
+    }
   }
   if (step.plannedStatus === 'completed') {
     return 'completed';
@@ -180,6 +203,11 @@ function stepFromGraphNode(
     incompleteReason: traceStep?.incompleteReason ?? node.incompleteReason,
     plannedLabel: node.kind === 'parallel' ? undefined : node.label,
     plannedStatus: node.status,
+    hasRuntimeEvidence: node.hasRuntimeEvidence ?? Boolean(
+      traceStep
+      || node.eventIds.length > 0
+      || (node.kind === 'artifact' && (graphRun.finalArtifact ?? '').trim().length > 0),
+    ),
   };
 }
 

@@ -14,6 +14,7 @@ import { computeAnsweredCallIds } from './chatUtils';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import type { ChatMessage, ChatSession, VFSFile } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
+import { ARCHITECTURE_REGISTRY_CHANGED_EVENT } from '../architect/architectureRegistryEvents';
 import type { AgentTurn } from '../../store/sessionStore';
 
 // jsdom does not implement scrollIntoView
@@ -557,12 +558,12 @@ describe('ChatInterface event wiring', () => {
       await flushReactEffects();
     });
 
-    expect(mockSendMessage).toHaveBeenCalledWith({
+    expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       content: 'What can you do?',
       personaId: 'p1',
       interrupt: false,
-    });
+    }));
     expect(screen.queryByTestId('welcome-screen')).toBeNull();
     expect(screen.getByTestId('pending-agent-bubble')).toBeInTheDocument();
   });
@@ -710,6 +711,41 @@ describe('ChatInterface event wiring', () => {
 
     expect(mockStartArchitectureRun).toHaveBeenCalled();
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
+  });
+
+  it('refreshes Talk architecture options when the registry changes', async () => {
+    const baseSchema = {
+      id: 'strategic-decision-council',
+      name: 'Strategic Decision Council',
+      version: '0.1.0',
+      description: '',
+      nodes: [],
+      edges: [],
+      roleSlots: [],
+    };
+    const variantSchema = {
+      ...baseSchema,
+      id: 'strategic-decision-council-variant-99',
+      name: 'UI Saved Variant',
+    };
+    mockGetArchitectureSchemas
+      .mockResolvedValueOnce([baseSchema])
+      .mockResolvedValueOnce([baseSchema, variantSchema]);
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
+      await flushReactEffects();
+    });
+    await screen.findByRole('option', { name: 'Strategic Decision Council' });
+    expect(screen.queryByRole('option', { name: 'UI Saved Variant' })).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new Event(ARCHITECTURE_REGISTRY_CHANGED_EVENT));
+      await flushReactEffects();
+    });
+
+    expect(await screen.findByRole('option', { name: 'UI Saved Variant' })).toBeInTheDocument();
   });
 
   it('passes the active project path into non-goal architecture launches from chat', async () => {

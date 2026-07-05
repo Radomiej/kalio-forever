@@ -16,9 +16,10 @@ type AgentStateShape = {
   pendingBudgetApprovals: Record<string, Array<{
     requestId: string;
     sessionId: string;
-    scope?: 'chat' | 'agent';
+    scope?: 'chat' | 'subagent' | 'agent-flow-branch';
     usedIterations: number;
     currentLimit: number;
+    suggestedNextLimit?: number;
   }>>;
   toolActivities: ToolActivity[];
   llmActivities: LlmActivity[];
@@ -43,6 +44,7 @@ const {
   approveRaApp,
   cancelRaApp,
   identifySession,
+  approveAgentBudget,
   getPendingRAAppApprovals,
   agentState,
   sessionState,
@@ -52,6 +54,7 @@ const {
   approveRaApp: vi.fn(),
   cancelRaApp: vi.fn(),
   identifySession: vi.fn(),
+  approveAgentBudget: vi.fn(),
   getPendingRAAppApprovals: vi.fn().mockResolvedValue([]),
   agentState: {
     pendingConfirmations: {} as Record<string, Array<{
@@ -66,9 +69,10 @@ const {
     pendingBudgetApprovals: {} as Record<string, Array<{
       requestId: string;
       sessionId: string;
-      scope?: 'chat' | 'agent';
+      scope?: 'chat' | 'subagent' | 'agent-flow-branch';
       usedIterations: number;
       currentLimit: number;
+      suggestedNextLimit?: number;
     }>>,
     toolActivities: [] as ToolActivity[],
     llmActivities: [] as LlmActivity[],
@@ -103,6 +107,7 @@ vi.mock('../../services/eventBus', () => ({
     approveRaApp,
     cancelRaApp,
     identifySession,
+    approveAgentBudget,
   },
 }));
 
@@ -415,6 +420,56 @@ describe('ConversationManagerPanel', () => {
 
     expect(screen.getByTestId('tool-budget-progress-session-budget')).toHaveTextContent('Goal Guard');
     expect(screen.getByTestId('tool-budget-progress-session-budget')).toHaveTextContent('6/8');
+  });
+
+  it('renders pending budget approvals as actionable HITL cards and approves +10', () => {
+    const onOpenSession = vi.fn();
+    sessionState.sessions = [makeSession('session-budget', 'Goal Guard Budget')];
+    agentState.pendingBudgetApprovals = {
+      'session-budget': [{
+        requestId: 'budget-1',
+        sessionId: 'session-budget',
+        scope: 'agent-flow-branch',
+        usedIterations: 30,
+        currentLimit: 30,
+      }],
+    };
+    agentState.runtimeActivitySnapshots = {
+      'session-budget': {
+        sessionId: 'session-budget',
+        active: true,
+        turnId: 'turn-budget',
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [{
+          requestId: 'budget-1',
+          sessionId: 'session-budget',
+          scope: 'agent-flow-branch',
+          usedIterations: 30,
+          currentLimit: 30,
+          suggestedNextLimit: 40,
+        }],
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 10,
+      },
+    };
+
+    render(<ConversationManagerPanel onOpenSession={onOpenSession} />);
+
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('Agent budget approval');
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('30/30');
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('+10 to 40');
+
+    fireEvent.click(screen.getByTestId('home-hitl-open-budget-budget-1'));
+    expect(onOpenSession).toHaveBeenCalledWith('session-budget');
+
+    fireEvent.click(screen.getByTestId('home-hitl-approve-budget-budget-1'));
+    expect(approveAgentBudget).toHaveBeenCalledWith({
+      requestId: 'budget-1',
+      sessionId: 'session-budget',
+      decision: 'allow_ten',
+    });
   });
 
   it('renders non-actionable runtime waiting rows and opens the owning conversation', () => {

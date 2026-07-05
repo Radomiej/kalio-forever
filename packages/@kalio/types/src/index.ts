@@ -1243,7 +1243,7 @@ export interface SocketEvents {
   'agent:budget_approve': { requestId: string; sessionId: ID; decision: AgentBudgetApprovalDecision };
 
   // Tool execution lifecycle — server → client
-  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };
+  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; turnId?: ID; agentRun?: AgentRunContext };
 
   // Tool result — server → client
   'tool:result': ToolResult;
@@ -1903,6 +1903,7 @@ export interface ArchitectureGraphProjection {
     errorCode?: WorkflowErrorCode;
     failure?: WorkflowFailure;
     visitCount?: number;
+    hasRuntimeEvidence?: boolean;
     eventIds: ID[];
     toolEvidence?: Record<string, unknown>;
     incompleteReason?: string;

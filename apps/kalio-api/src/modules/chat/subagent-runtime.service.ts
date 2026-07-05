@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AgentRunContext, ArchitectureRuntimeContext, SessionRuntimeContext, SocketEvents, SubagentCopiedFile } from '@kalio/types';
+import type { SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from '../tool/subagent-runtime.port';
 import { SessionManagerService } from './session-manager.service';
@@ -16,120 +16,26 @@ import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
-import { createWorkflowError, isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
+import { createWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import { RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME } from './raw-tool-call.parser';
+import {
+  ActiveSubagentRunRegistry,
+  type AgentRunWithDepth,
+  appendCopiedOutputLinks,
+  architectureContextForSubagent,
+  buildAttachmentHint,
+  displayTextFromStructuredOutput,
+  resolveHistorySessionId,
+  runtimeContextsEqual,
+  subagentErrorCode,
+} from './subagent-runtime.support';
 
 const DEFAULT_MAX_ITERATIONS = 30;
-
-type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
-type ChatErrorCode = SocketEvents['chat:error']['code'];
-
-function subagentErrorCode(error: Error): ChatErrorCode {
-  if ('code' in error) {
-    const code = (error as { code?: unknown }).code;
-    if (
-      code === 'LLM_RATE_LIMIT'
-      || code === 'LLM_TIMEOUT'
-      || code === 'LLM_AUTH'
-      || code === 'LLM_PROVIDER_DOWN'
-      || code === 'LLM_QUOTA'
-      || code === 'LLM_BAD_TOOL_ARGS'
-      || code === 'LLM_BAD_STRUCTURED_OUTPUT'
-      || code === 'MAX_ITERATIONS_REACHED'
-    ) {
-      return code;
-    }
-  }
-  if (isWorkflowError(error, 'TIMEOUT') || isWorkflowError(error, 'SUBAGENT_TIMEOUT')) {
-    return 'LLM_TIMEOUT';
-  }
-  return 'LLM_ERROR';
-}
-
-function appendCopiedOutputLinks(baseText: string, parentSessionId: string, copiedFiles: SubagentCopiedFile[]): string {
-  if (copiedFiles.length === 0) return baseText;
-
-  const lines = copiedFiles.map((file) => {
-    const downloadUrl = `/api/sessions/${parentSessionId}/vfs/download?path=${encodeURIComponent(file.toPath)}`;
-    return `- ${file.toPath} -> ${downloadUrl}`;
-  });
-
-  return `${baseText}\n\nCopied outputs:\n${lines.join('\n')}`;
-}
-
-function buildAttachmentHint(attachmentPaths: string[]): string {
-  if (attachmentPaths.length === 0) return '';
-  const lines = attachmentPaths.map((path) => `- ${path}`);
-  return `You have attached files available in VFS:\n${lines.join('\n')}\n\n`;
-}
-
-function runtimeContextsEqual(left: SessionRuntimeContext, right: SessionRuntimeContext): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function stringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = record?.[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function architectureContextForSubagent(request: RunSubagentRequest): ArchitectureRuntimeContext | undefined {
-  const base = isRecord(request.architectureContext)
-    ? request.architectureContext as ArchitectureRuntimeContext
-    : undefined;
-  if (!isRecord(request.auditContext) || !stringField(request.auditContext, 'architectureRunId')) {
-    return base;
-  }
-
-  const audit = request.auditContext;
-  const roleSlotId = stringField(audit, 'roleSlotId');
-  const roleSlotType = stringField(audit, 'roleSlotType');
-  const technicalSlot = roleSlotType === 'router'
-    || roleSlotType === 'finalizer'
-    || roleSlotId === 'router'
-    || roleSlotId === 'finalizer'
-    || roleSlotId === 'orchestrator';
-
-  return {
-    ...(base ?? {}),
-    architectureRunId: stringField(audit, 'architectureRunId'),
-    schemaId: stringField(audit, 'schemaId') ?? base?.schemaId,
-    schemaName: stringField(audit, 'schemaName') ?? base?.schemaName,
-    roleSlotId,
-    roleSlotType,
-    roleLabel: stringField(audit, 'roleLabel'),
-    displayLabel: stringField(audit, 'displayLabel') ?? stringField(audit, 'roleLabel') ?? base?.displayLabel,
-    sessionSurface: technicalSlot ? 'technical-node' : (base?.sessionSurface ?? 'conversation-branch'),
-    conversationVisibility: 'visible',
-  };
-}
-
-function resolveHistorySessionId(
-  runtimeKind: SessionRuntimeContext['runtimeKind'],
-  architectureContext: ArchitectureRuntimeContext | undefined,
-  parentSessionId: string,
-  childSessionId: string,
-): string {
-  if (runtimeKind !== 'agent-flow-branch') {
-    return childSessionId;
-  }
-  const historySessionId = architectureContext?.historySessionId;
-  if (typeof historySessionId === 'string' && historySessionId.trim().length > 0) {
-    return historySessionId.trim();
-  }
-  const hostSessionId = architectureContext?.hostSessionId;
-  if (typeof hostSessionId === 'string' && hostSessionId.trim().length > 0) {
-    return hostSessionId.trim();
-  }
-  return parentSessionId;
-}
 
 @Injectable()
 export class SubagentRuntimeService implements SubagentRuntimePort {
   private readonly logger = new Logger(SubagentRuntimeService.name);
+  private readonly activeRuns = new ActiveSubagentRunRegistry();
 
   constructor(
     @Inject(LLM_SOURCE) private readonly llmSource: ILLMSource,
@@ -142,6 +48,14 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() private readonly audit?: AuditService,
   ) {}
+
+  stopAndDrainSessions(sessionIds: readonly string[]): Promise<void> {
+    return this.activeRuns.stopAndDrainSessions(sessionIds);
+  }
+
+  getActiveRunStatus(sessionId: string) {
+    return this.activeRuns.getStatus(sessionId);
+  }
 
   async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
     const startedAt = performance.now();
@@ -275,6 +189,16 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     }
 
     const controller = new AbortController();
+    const completeActiveRun = this.activeRuns.register({
+      childSessionId,
+      parentSessionId: request.parentSessionId,
+      historySessionId,
+      vfsSessionId,
+      turnId,
+      promptMessageId,
+      agentRun,
+      controller,
+    });
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
     try {
@@ -497,6 +421,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       throw error;
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      completeActiveRun();
     }
   }
 
@@ -530,18 +455,4 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       return null;
     }
   }
-}
-
-function displayTextFromStructuredOutput(output: unknown): string | null {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    return null;
-  }
-  const record = output as Record<string, unknown>;
-  for (const key of ['answer', 'response', 'message', 'finalAnswer']) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-  return null;
 }

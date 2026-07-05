@@ -20,14 +20,21 @@ type AgentFlowRunSnapshot = {
     id: string;
     childSessionId?: string;
     status: string;
+    checkpoint?: {
+      continuation?: unknown;
+      resumeContext?: unknown;
+      goal?: string;
+    };
   };
   result?: {
     status?: string;
     childSessionId?: string;
     openChatSessionId?: string;
     openGraphRunId?: string;
+    flowDefinitionId?: string;
+    summary?: string;
   };
-  events?: unknown;
+  events: Array<{ type?: string } & Record<string, unknown>>;
 };
 
 const GOAL_FLOW_ROOT_LABEL = /Goal Guard|Architecture|Goal Master Delivery Loop/i;
@@ -201,43 +208,60 @@ async function waitForAgentFlow(
   request: APIRequestContext,
   runId: string,
   terminal: (status: string) => boolean,
-  attempts = 80,
+  timeoutMs = 40_000,
 ) {
-  let snapshot: {
-    run: { status: string };
-    result?: { status: string; summary?: string };
-  } | null = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  let snapshot: AgentFlowRunSnapshot | null = null;
+  await expect
+    .poll(async () => {
     const response = await request.get(`${API_BASE}/agent-flows/runs/${runId}`);
-    expect(response.ok()).toBeTruthy();
-    snapshot = await response.json();
-    if (terminal(snapshot.run.status)) {
-      return snapshot;
+      if (!response.ok()) {
+        return `http:${response.status()}`;
+      }
+      snapshot = await response.json() as AgentFlowRunSnapshot;
+      return terminal(snapshot.run.status) ? 'matched' : snapshot.run.status;
+    }, {
+      timeout: timeoutMs,
+      message: `AgentFlow ${runId} did not reach expected terminal state`,
+    })
+    .toBe('matched');
+
+  if (!snapshot) {
+    throw new Error(`AgentFlow ${runId} returned no snapshot`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`AgentFlow ${runId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'}`);
+  return snapshot;
 }
 
 async function waitForParentAgentFlowRun(
   request: APIRequestContext,
   parentSessionId: string,
   terminal: (snapshot: AgentFlowRunSnapshot) => boolean,
-  attempts = 90,
+  timeoutMs = 45_000,
 ) {
   let snapshot: AgentFlowRunSnapshot | undefined;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(parentSessionId)}`);
-    expect(response.ok()).toBeTruthy();
-    const runs = await response.json() as AgentFlowRunSnapshot[];
-    const match = runs.find((entry) => terminal(entry));
-    if (match) {
-      return match;
-    }
-    snapshot = runs.at(-1) ?? runs[0];
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  let lastError: string | undefined;
+  let matched: AgentFlowRunSnapshot | undefined;
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(parentSessionId)}`);
+      if (!response.ok()) {
+        lastError = `HTTP ${response.status()}`;
+        return lastError;
+      }
+      const runs = await response.json() as AgentFlowRunSnapshot[];
+      matched = runs.find((entry) => terminal(entry));
+      snapshot = runs.at(-1) ?? runs[0];
+      lastError = undefined;
+      return matched ? 'matched' : snapshot?.run.status ?? 'missing';
+    }, {
+      timeout: timeoutMs,
+      message: `AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state`,
+    })
+    .toBe('matched');
+
+  if (!matched) {
+    throw new Error(`AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'} error=${lastError ?? 'none'}`);
   }
-  throw new Error(`AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'}`);
+  return matched;
 }
 
 async function waitForAuditEntry(
@@ -245,17 +269,26 @@ async function waitForAuditEntry(
   predicate: (entry: { data?: unknown; type?: string; label?: string }) => boolean,
 ) {
   let rows: Array<{ data?: unknown; type?: string; label?: string }> = [];
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  let match: { data?: unknown; type?: string; label?: string } | undefined;
+  await expect
+    .poll(async () => {
     const response = await request.get(`${API_BASE}/audit-log?limit=500&type=architecture_event&sessionId=architect-ui`);
-    expect(response.ok()).toBeTruthy();
+      if (!response.ok()) {
+        return `http:${response.status()}`;
+      }
     rows = await response.json();
-    const match = rows.find(predicate);
-    if (match) {
-      return match;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+      match = rows.find(predicate);
+      return match ? 'matched' : `rows:${rows.length}`;
+    }, {
+      timeout: 10_000,
+      message: 'Expected architecture audit entry was not recorded',
+    })
+    .toBe('matched');
+
+  if (!match) {
+    throw new Error(`Expected architecture audit entry was not recorded; rows=${rows.length}`);
   }
-  throw new Error(`Expected architecture audit entry was not recorded; rows=${rows.length}`);
+  return match;
 }
 
 async function createParentSession(request: APIRequestContext, title: string): Promise<string> {

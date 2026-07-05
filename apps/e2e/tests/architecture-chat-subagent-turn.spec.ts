@@ -24,11 +24,27 @@ type ArchitectureSessionListItem = {
 
 type ArchitectureGraphResponse = {
   status?: string;
+  schemaId?: string;
   nodes?: Array<{
     id: string;
     label: string;
     kind: string;
     status?: string;
+  }>;
+};
+
+type ArchitectureRunResponse = {
+  id: string;
+  schemaId: string;
+  status?: string;
+};
+
+type ArchitectureSchemaListItem = {
+  id: string;
+  name: string;
+  nodes?: Array<{
+    id: string;
+    maxToolAttempts?: number;
   }>;
 };
 
@@ -130,6 +146,49 @@ async function getSessionDescendants(
   return descendants;
 }
 
+async function waitForArchitectureSchemaByName(
+  request: APIRequestContext,
+  name: string,
+): Promise<ArchitectureSchemaListItem> {
+  let matchedSchema: ArchitectureSchemaListItem | null = null;
+  await expect
+    .poll(async () => {
+      const schemas = await getJsonWithTransportRetry<ArchitectureSchemaListItem[]>(
+        request,
+        `${API_BASE}/architecture-registry/schemas`,
+      );
+      matchedSchema = schemas.find((schema) => schema.name === name) ?? null;
+      return matchedSchema?.id ?? null;
+    }, { timeout: 30_000 })
+    .not.toBeNull();
+
+  if (!matchedSchema) {
+    throw new Error(`Architecture schema ${name} was not persisted`);
+  }
+  return matchedSchema;
+}
+
+async function waitForArchitectureRunIdFromSession(
+  request: APIRequestContext,
+  rootSessionId: string,
+): Promise<string> {
+  let architectureRunId: string | null = null;
+  await expect
+    .poll(async () => {
+      const descendants = await getSessionDescendants(request, rootSessionId);
+      architectureRunId = descendants
+        .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
+        .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0) ?? null;
+      return architectureRunId;
+    }, { timeout: 60_000 })
+    .not.toBeNull();
+
+  if (!architectureRunId) {
+    throw new Error('Missing architecture run id for workflow proof');
+  }
+  return architectureRunId;
+}
+
 test.describe('Architecture chat turn projection', () => {
   test('renders a sequential router chain without collapsing it into a parallel council', async ({ page, request }) => {
     test.setTimeout(120_000);
@@ -215,6 +274,26 @@ test.describe('Architecture chat turn projection', () => {
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
+      const architectureRunId = await waitForArchitectureRunIdFromSession(request, session.id);
+      await waitForArchitectureRunCompleted(request, architectureRunId);
+
+      const run = await getJsonWithTransportRetry<ArchitectureRunResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}`,
+      );
+      expect(run.schemaId).toBe(variant.id);
+      expect(run.status).toBe('completed');
+
+      const graph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}/graph`,
+      );
+      expect(graph.schemaId).toBe(variant.id);
+      expect(graph.status).toBe('completed');
+      expect(graph.nodes?.filter((node) => node.kind === 'router')).toHaveLength(3);
+      expect(graph.nodes?.filter((node) => node.kind === 'role')).toHaveLength(2);
+      expect(graph.nodes?.find((node) => node.id === 'final-artifact')?.status).toBe('completed');
+
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
@@ -238,6 +317,75 @@ test.describe('Architecture chat turn projection', () => {
     } finally {
       await deleteSessionIfExists(request, session.id);
       await request.delete(`${API_BASE}/architecture-registry/schemas/${variant.id}`, { timeout: 5000 }).catch(() => undefined);
+    }
+  });
+
+  test('saves an Architect UI variant and runs it through Talk workflow mode', async ({ page, request }) => {
+    test.setTimeout(240_000);
+    const title = `Architecture UI Variant E2E ${Date.now()}`;
+    const variantName = `E2E UI Tool Budget ${Date.now()}`;
+    let sessionId: string | null = null;
+    let variantId: string | null = null;
+
+    try {
+      await page.goto('/');
+      await page.getByTestId('nav-architect').click();
+      await expect(page.getByTestId('architect-page')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('architect-node-pragmatist')).toBeVisible({ timeout: 30_000 });
+
+      await page.getByTestId('architect-node-pragmatist').click();
+      await page.getByTestId('architect-node-properties-open').click();
+      await page.getByTestId('architect-node-max-tool-attempts').fill('7');
+      await page.getByTestId('architect-node-properties-close').click();
+      await expect(page.getByTestId('architect-save-variant')).toBeEnabled();
+
+      await page.getByTestId('architect-save-variant').click();
+      await page.getByTestId('architect-variant-name-input').fill(variantName);
+      await page.getByTestId('architect-confirm-save-variant').click();
+
+      const variant = await waitForArchitectureSchemaByName(request, variantName);
+      variantId = variant.id;
+      expect(variant.nodes?.find((node) => node.id === 'pragmatist')?.maxToolAttempts).toBe(7);
+
+      const response = await request.post(`${API_BASE}/sessions`, {
+        data: { title, personaId: 'default' },
+      });
+      expect(response.ok()).toBeTruthy();
+      const session = await response.json() as { id: string };
+      sessionId = session.id;
+
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, session.id, title);
+      await selectArchitectureInComposer(page, variant.id);
+      await expect(page.getByTestId('welcome-architecture-select').locator(`option[value="${variant.id}"]`)).toHaveCount(1, { timeout: 30_000 });
+      await sendMessageFromComposer(page, 'Run the UI-saved architecture variant and produce a concise final decision.');
+
+      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
+      const architectureRunId = await waitForArchitectureRunIdFromSession(request, session.id);
+      await waitForArchitectureRunCompleted(request, architectureRunId);
+
+      const run = await getJsonWithTransportRetry<ArchitectureRunResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}`,
+      );
+      expect(run.schemaId).toBe(variant.id);
+      expect(run.status).toBe('completed');
+
+      const graph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}/graph`,
+      );
+      expect(graph.schemaId).toBe(variant.id);
+      expect(graph.status).toBe('completed');
+      expect(graph.nodes?.some((node) => node.id === 'pragmatist')).toBe(true);
+      await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
+    } finally {
+      if (sessionId) {
+        await deleteSessionIfExists(request, sessionId);
+      }
+      if (variantId) {
+        await request.delete(`${API_BASE}/architecture-registry/schemas/${variantId}`, { timeout: 5000 }).catch(() => undefined);
+      }
     }
   });
 

@@ -18,6 +18,7 @@ import type {
 } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
 import { normalizeArchitectureSchemas } from './architect.schema';
+import { notifyArchitectureRegistryChanged } from './architectureRegistryEvents';
 import { resumeAgentFlowRun as resumeAgentFlowRunApi } from '../agent-flow/agentFlow.api';
 
 export { resumeAgentFlowRun } from '../agent-flow/agentFlow.api';
@@ -51,11 +52,13 @@ export async function saveArchitectureVariant(
     throw new Error('Architecture variant response was empty');
   }
   const variant = normalizeArchitectureSchemas([data])[0];
+  notifyArchitectureRegistryChanged();
   return variant;
 }
 
 export async function deleteArchitectureSchema(schemaId: string): Promise<void> {
   await apiClient.delete(`/api/architecture-registry/schemas/${schemaId}`);
+  notifyArchitectureRegistryChanged();
 }
 
 export async function startArchitectureRun(

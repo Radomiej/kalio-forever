@@ -365,9 +365,11 @@ export class KalioSDK {
     };
     this.socket.on('disconnect', onDisconnect);
     this.socket.on('connect', onConnect);
+    this.socket.io.on('reconnect', onConnect);
     return () => {
       this.socket.off('disconnect', onDisconnect);
       this.socket.off('connect', onConnect);
+      this.socket.io.off('reconnect', onConnect);
     };
   }
 
@@ -387,12 +389,17 @@ export class KalioSDK {
     this.socket.on('connect', onConnect);
     this.socket.on('disconnect', onDisconnect);
     this.socket.io.on('reconnect_attempt', onReconnectAttempt);
+    this.socket.io.on('reconnect', onConnect);
     this.socket.on('connect_error', onConnectError);
+    if (this.socket.connected) {
+      onConnect();
+    }
 
     return () => {
       this.socket.off('connect', onConnect);
       this.socket.off('disconnect', onDisconnect);
       this.socket.io.off('reconnect_attempt', onReconnectAttempt);
+      this.socket.io.off('reconnect', onConnect);
       this.socket.off('connect_error', onConnectError);
     };
   }

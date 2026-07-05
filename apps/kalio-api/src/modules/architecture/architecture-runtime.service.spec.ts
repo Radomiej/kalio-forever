@@ -785,9 +785,10 @@ describe('ArchitectureRuntimeService', () => {
     });
     await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
 
-    const stoppedRunIds = await service.stopRunsForSessions(['host-session', run.rootSessionId ?? 'missing']);
+    const stopPromise = service.stopRunsForSessions(['host-session', run.rootSessionId ?? 'missing']);
     rejectFirstBranch?.(new Error('late branch failure after session stop'));
     await new Promise((resolve) => setTimeout(resolve, 0));
+    const stoppedRunIds = await stopPromise;
 
     expect(stoppedRunIds).toEqual([run.id]);
     expect(service.findRun(run.id)).toMatchObject({
@@ -797,6 +798,53 @@ describe('ArchitectureRuntimeService', () => {
     });
     expect(service.getEvents(run.id).at(-1)).toMatchObject({
       type: 'run_stopped',
+      reasonCode: 'user_stop',
+    });
+  });
+
+  it('waits for active architecture execution to settle before resolving session-tree stop', async () => {
+    const { service, executor } = createService();
+    let rejectFirstBranch: ((error: Error) => void) | undefined;
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => {
+      if (slot.id === 'pragmatist') {
+        return new Promise((_resolve, reject) => {
+          rejectFirstBranch = reject;
+        });
+      }
+      return Promise.resolve({
+        message: `${slot.label} branch prepared for: ${run.prompt}`,
+        data: {
+          branchSessionId,
+          personaId,
+          sessionPersonaId: personaId,
+          rootSessionId: run.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: run.executionMode,
+        },
+      });
+    });
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Stop and delete only after graph execution drains.',
+      context: { parentSessionId: 'host-session' },
+    });
+    await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
+
+    let stopped = false;
+    const stopPromise = service.stopRunsForSessions(['host-session']).then((runIds) => {
+      stopped = true;
+      return runIds;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stopped).toBe(false);
+
+    rejectFirstBranch?.(new Error('branch settled after session-tree stop'));
+    await expect(stopPromise).resolves.toEqual([run.id]);
+    expect(service.findRun(run.id)).toMatchObject({
+      id: run.id,
+      status: 'cancelled',
       reasonCode: 'user_stop',
     });
   });

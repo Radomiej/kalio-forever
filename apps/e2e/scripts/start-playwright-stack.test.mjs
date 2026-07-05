@@ -233,6 +233,13 @@ function withoutPlaywrightUrls(env) {
   return nextEnv;
 }
 
+function withoutSystemNodeOverride(env) {
+  return {
+    ...env,
+    KALIO_PLAYWRIGHT_DISABLE_SYSTEM_NODE_OVERRIDE: '1',
+  };
+}
+
 async function waitForReady(child, output, timeoutMs) {
   const readyMarker = '[playwright-stack] backend and frontend are ready';
 
@@ -457,6 +464,64 @@ test('launcher starts on Windows without pnpm.cmd when corepack entrypoint is av
   }
 });
 
+test('launcher prefers explicit system corepack over pnpm.cmd from PATH on Windows', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows-only launcher selection test');
+    return;
+  }
+
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-win-corepack-first-'));
+  const output = [];
+
+  try {
+    const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot, {
+      includePnpmCmd: true,
+      includeCorepackCmd: false,
+      includeCorepackShim: true,
+    });
+    await writeFile(
+      resolve(binDir, 'pnpm.cmd'),
+      '@echo off\r\necho [broken-pnpm-cmd] should not be selected\r\nexit /b 31\r\n',
+      'utf8',
+    );
+    const frontendPort = await getFreePort();
+    const backendPort = await getFreePort();
+    const fakeProgramFiles = resolve(sandboxRoot, 'program-files');
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const controlledPath = `${binDir}${delimiter}${resolve(systemRoot, 'System32')}`;
+
+    const child = spawn(process.execPath, [launcherPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...process.env,
+        CI: 'true',
+        PATH: controlledPath,
+        PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${frontendPort}`,
+        PLAYWRIGHT_API_ORIGIN: `http://127.0.0.1:${backendPort}`,
+        ProgramFiles: fakeProgramFiles,
+        KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT: resolve(fakeProgramFiles, 'nodejs/node_modules/corepack/dist/corepack.js'),
+        KALIO_PLAYWRIGHT_NODE_COMMAND: process.execPath,
+        KALIO_FAKE_PNPM_PATH: resolve(binDir, 'fake-pnpm.cjs'),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      await waitForReady(child, output, launcherReadyTimeoutMs);
+      const fullOutput = output.join('');
+      assert.match(fullOutput, /backend and frontend are ready/);
+      assert.doesNotMatch(fullOutput, /\[broken-pnpm-cmd\]/);
+    } finally {
+      stopCollecting();
+      await terminateProcess(child);
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
 test('launcher can start from prebuilt artifacts when build step is skipped', async () => {
   const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-skip-build-'));
   const output = [];
@@ -515,7 +580,7 @@ KALIO_PLAYWRIGHT_SKIP_BUILD=1
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...process.env,
+        ...withoutSystemNodeOverride(process.env),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -552,7 +617,7 @@ test('playwright wrapper allocates E2E ports when URLs are not pinned', async ()
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -594,7 +659,7 @@ test('playwright wrapper gives each run isolated database and workspace paths', 
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -641,7 +706,7 @@ test('playwright wrapper forces env mock LLM and fast mock streaming', async () 
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -679,7 +744,7 @@ test('playwright wrapper ignores legacy ports from repo .env.test when not expli
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -754,7 +819,7 @@ test('playwright wrapper rejects legacy ports from explicit environment by defau
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...process.env,
+        ...withoutSystemNodeOverride(process.env),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
         PLAYWRIGHT_BASE_URL: 'http://127.0.0.1:5288',

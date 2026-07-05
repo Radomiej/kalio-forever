@@ -54,6 +54,16 @@ export interface RunSubagentResult {
   durationMs: number;
 }
 
+export interface ActiveSubagentRunStatus {
+  sessionId: string;
+  parentSessionId: string;
+  turnId: string;
+  promptMessageId?: string;
+  agentRun?: AgentRunContext;
+}
+
 export interface SubagentRuntimePort {
   runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult>;
+  getActiveRunStatus?(sessionId: string): ActiveSubagentRunStatus | null;
+  stopAndDrainSessions?(sessionIds: readonly string[]): Promise<void>;
 }

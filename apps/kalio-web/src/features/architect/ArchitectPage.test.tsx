@@ -1166,6 +1166,35 @@ describe('ArchitectPage', () => {
     });
   });
 
+  it('saves max tool attempts as a versioned schema variant change', async () => {
+    apiPost.mockResolvedValueOnce({ data: strategicCouncilVariant });
+    render(<ArchitectPage />);
+
+    fireEvent.click(await screen.findByTestId('architect-node-pragmatist'));
+    fireEvent.click(screen.getByTestId('architect-node-properties-open'));
+    fireEvent.change(screen.getByTestId('architect-node-max-tool-attempts'), {
+      target: { value: '7' },
+    });
+    fireEvent.click(screen.getByTestId('architect-node-properties-close'));
+
+    const saveButton = screen.getByTestId('architect-save-variant');
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+    fireEvent.change(await screen.findByTestId('architect-variant-name-input'), {
+      target: { value: 'Tool budget council' },
+    });
+    fireEvent.click(screen.getByTestId('architect-confirm-save-variant'));
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith('/api/architecture-registry/schemas/strategic-decision-council/variants', expect.objectContaining({
+        name: 'Tool budget council',
+        nodes: expect.arrayContaining([
+          expect.objectContaining({ id: 'pragmatist', maxToolAttempts: 7 }),
+        ]),
+      }));
+    });
+  });
+
   it('does not save a schema variant before a persona override is selected', async () => {
     render(<ArchitectPage />);
 

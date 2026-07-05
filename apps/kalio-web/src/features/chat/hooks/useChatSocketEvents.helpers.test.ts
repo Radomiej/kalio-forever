@@ -231,6 +231,63 @@ describe('materializeLiveTurnFromHydratedRuntimeState', () => {
     expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
     expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
   });
+
+  it('falls back to typed session status when a runtime snapshot is present but not live', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-stale',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 10,
+        },
+        bufferedSessionStatusSnapshots: [
+          {
+            sessionId: 'session-1',
+            active: true,
+            turnId: 'turn-buffered',
+            queueLength: 0,
+            run: {
+              id: 'run-buffered',
+              sessionId: 'session-1',
+              turnId: 'turn-buffered',
+              phase: 'llm_streaming',
+              status: 'active',
+              retryCount: 0,
+              safeResume: true,
+              startedAt: 1,
+              updatedAt: 20,
+              lastHeartbeatAt: 20,
+            },
+          },
+        ],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-buffered');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-buffered', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
+  });
 });
 
 describe('terminal runtime cleanup guards', () => {

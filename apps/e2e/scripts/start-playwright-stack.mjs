@@ -68,6 +68,9 @@ const corepackEntrypoint = process.env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT
   ? resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js')
   : resolve(nodeBinDir, 'node_modules/corepack/dist/corepack.js'));
 const corepackPnpmCandidate = { command: corepackNodeCommand, argsPrefix: [corepackEntrypoint, 'pnpm'] };
+const hasExplicitCorepackOverride = Boolean(
+  process.env.KALIO_PLAYWRIGHT_NODE_COMMAND || process.env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT,
+);
 
 function isCommandOnPath(command) {
   const pathValue = process.env.PATH;
@@ -86,9 +89,10 @@ function isCommandOnPath(command) {
 
 const pnpmCandidates = process.platform === 'win32'
   ? [
+      ...(hasExplicitCorepackOverride && existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
       ...(isCommandOnPath('pnpm.cmd') ? [{ command: 'pnpm.cmd', argsPrefix: [] }] : []),
       ...(isCommandOnPath('corepack.cmd') ? [{ command: 'corepack.cmd', argsPrefix: ['pnpm'] }] : []),
-      ...(existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
+      ...(!hasExplicitCorepackOverride && existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
     ]
   : [{ command: 'pnpm', argsPrefix: [] }];
 

@@ -83,6 +83,7 @@ function toGraphNode(
     errorCode: failureFields.errorCode,
     failure: failureFields.failure,
     visitCount: nodeVisitCount(nodeEvents),
+    hasRuntimeEvidence: hasNodeRuntimeEvidence(projectionEvents),
     eventIds,
     toolEvidence,
     incompleteReason,
@@ -313,6 +314,21 @@ function nodeStatus(events: ArchitectureExecutionEvent[]): ArchitectureGraphNode
     return 'running';
   }
   return 'pending';
+}
+
+function hasNodeRuntimeEvidence(events: ArchitectureExecutionEvent[]): boolean {
+  return events.some((event) => (
+    event.type === 'node_started'
+    || event.type === 'agent_started'
+    || event.type === 'tool_call'
+    || event.type === 'human_gate'
+    || event.type === 'node_completed'
+    || event.type === 'participant_output'
+    || event.type === 'router_output'
+    || event.type === 'final_artifact'
+    || event.type === 'artifact_created'
+    || event.type === 'node_failed'
+  ));
 }
 
 function latestNodeTerminalStatus(events: ArchitectureExecutionEvent[]): ArchitectureGraphNodeStatus | undefined {

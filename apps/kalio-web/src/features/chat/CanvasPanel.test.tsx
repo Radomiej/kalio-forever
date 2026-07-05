@@ -725,11 +725,11 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Router dispatch');
     expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Parallel sub-agents');
     expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Router merge');
-    expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-run-flow')).not.toHaveTextContent('Finalizer');
     expect(screen.getByTestId('architecture-run-branch-count')).toHaveTextContent('5');
     expect(screen.getByTestId('architecture-run-branches')).toHaveTextContent('pending');
     expect(screen.getByTestId('architecture-run-step-synthesizer')).toHaveTextContent('pending');
-    expect(screen.getByTestId('architecture-run-step-final-artifact')).toHaveTextContent('pending');
+    expect(screen.queryByTestId('architecture-run-step-final-artifact')).toBeNull();
     expect(screen.getByTestId('architecture-run-internal-transcript')).toHaveTextContent('Orchestrator is dispatching the council.');
     expect(screen.getAllByTestId('architecture-run-transcript-entry')).toHaveLength(2);
   });

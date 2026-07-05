@@ -136,6 +136,7 @@ export function useChatSessionActivation({
           );
         }
         const agentState = useAgentStore.getState();
+        const sessionState = useSessionStore.getState();
         materializeLiveTurnFromHydratedRuntimeState(
           {
             runtimeSnapshot: agentState.getRuntimeActivitySnapshot(activeSessionId),
@@ -146,7 +147,8 @@ export function useChatSessionActivation({
             hasActiveLoopForSession: (sessionId) => useAgentStore.getState().hasActiveLoopForSession(sessionId),
             getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
             addActiveAgentLoop: (sessionId, turnId) => useAgentStore.getState().addActiveAgentLoop(sessionId, turnId),
-            startAgentTurn: (turnId, sessionId) => useSessionStore.getState().startAgentTurn(turnId, sessionId),
+            startAgentTurn: (turnId, sessionId) => sessionState.startAgentTurn(turnId, sessionId),
+            setStreaming: (value, messageId, sessionId) => useAgentStore.getState().setStreaming(value, messageId, sessionId),
           },
         );
       })

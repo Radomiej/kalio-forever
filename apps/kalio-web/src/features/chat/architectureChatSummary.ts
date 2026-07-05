@@ -20,7 +20,7 @@ type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 type ArchitectureRunChatMessage = ArchitectRunResult['chat']['messages'][number] & { speaker: TraceSpeaker };
 export type ArchitectureGraphNodeSummary = Pick<
   ArchitectureGraphProjection['nodes'][number],
-  'id' | 'sessionId' | 'roleSlotId' | 'label' | 'kind' | 'behavior' | 'status' | 'eventIds' | 'incompleteReason'
+  'id' | 'sessionId' | 'roleSlotId' | 'label' | 'kind' | 'behavior' | 'status' | 'hasRuntimeEvidence' | 'eventIds' | 'incompleteReason'
 >;
 export type ArchitectureRunSummaryWithGraph = ArchitectureChatRunSummary & {
   graphNodes?: ArchitectureGraphNodeSummary[];

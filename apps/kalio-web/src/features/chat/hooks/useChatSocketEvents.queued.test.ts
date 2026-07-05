@@ -233,6 +233,33 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     expect(removeLastAgentTurn).not.toHaveBeenCalled();
   });
 
+  it('materializes the live turn from typed tool:start when agent:start was missed', () => {
+    const startAgentTurn = vi.fn();
+    const addTurnItem = vi.fn();
+    useSessionStore.setState({
+      getSessionActiveTurnId: () => null,
+      getSessionAgentTurns: () => [],
+      startAgentTurn,
+      addTurnItem,
+    });
+    mountHook();
+
+    act(() => {
+      fire('tool:start', {
+        sessionId: 'session-1',
+        turnId: 'turn-tool-1',
+        callId: 'call-tool-1',
+        toolName: 'run_subagent',
+        args: { task: 'child HITL' },
+        agentRun: { kind: 'chat' },
+      });
+    });
+
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-tool-1', 'session-1', { kind: 'chat' });
+    expect(addTurnItem).toHaveBeenCalledWith({ kind: 'tool', callId: 'call-tool-1' }, 'session-1');
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
+  });
+
   it('stores replayed inactive descendant session status for sidebar recovery', () => {
     mountHook();
 

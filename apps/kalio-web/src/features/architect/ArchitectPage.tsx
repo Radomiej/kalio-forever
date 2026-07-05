@@ -112,6 +112,8 @@ export function ArchitectPage() {
       || Object.keys(contextPolicyOverrides).length > 0
       || Object.keys(graphDraft.nodePositions).length > 0
       || Object.keys(graphDraft.nodeBehaviors).length > 0
+      || Object.keys(graphDraft.nodeMaxToolAttempts).length > 0
+      || Object.keys(graphDraft.nodeToolOverrides).length > 0
       || graphDraft.addedNodes.length > 0
       || graphDraft.edges !== null,
     [contextPolicyOverrides, graphDraft, nodeKindOverrides, personaOverrides],
@@ -121,6 +123,8 @@ export function ArchitectPage() {
       || Object.keys(contextPolicyOverrides).length > 0
       || Object.keys(graphDraft.nodePositions).length > 0
       || Object.keys(graphDraft.nodeBehaviors).length > 0
+      || Object.keys(graphDraft.nodeMaxToolAttempts).length > 0
+      || Object.keys(graphDraft.nodeToolOverrides).length > 0
       || graphDraft.addedNodes.length > 0
       || graphDraft.edges !== null,
     [contextPolicyOverrides, graphDraft, nodeKindOverrides],

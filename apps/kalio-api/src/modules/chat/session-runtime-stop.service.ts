@@ -10,6 +10,7 @@ import {
   ARCHITECTURE_RUNTIME_STOP,
   type ArchitectureRuntimeStopPort,
 } from './architecture-runtime-stop.port';
+import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
 import {
   collectRuntimeSnapshotSessionTree,
@@ -28,6 +29,7 @@ export class SessionRuntimeStopService {
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
     @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
     @Optional() @Inject(ARCHITECTURE_RUNTIME_STOP) private readonly architectureRuntimeStop?: ArchitectureRuntimeStopPort,
+    @Optional() @Inject(SUBAGENT_RUNTIME) private readonly subagentRuntime?: SubagentRuntimePort,
     @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
@@ -37,6 +39,7 @@ export class SessionRuntimeStopService {
 
     await this.stopArchitectureRunsForSessions(sessionIds);
     await this.stopAgentFlowRunsForSessions(sessionIds);
+    await this.stopSubagentRunsForSessions(sessionIds);
 
     for (const sessionId of sessionIds) {
       await this.stopCliAgentSessionIfNeeded(sessionId);
@@ -44,6 +47,18 @@ export class SessionRuntimeStopService {
     }
 
     return sessionTree;
+  }
+
+  private async stopSubagentRunsForSessions(sessionIds: string[]): Promise<void> {
+    const subagentRuntime = this.getSubagentRuntime();
+    if (!subagentRuntime?.stopAndDrainSessions) {
+      return;
+    }
+    try {
+      await subagentRuntime.stopAndDrainSessions(sessionIds);
+    } catch (error) {
+      this.logger.warn(`Failed to stop subagent runs: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async stopArchitectureRunsForSessions(sessionIds: string[]): Promise<void> {
@@ -136,6 +151,17 @@ export class SessionRuntimeStopService {
     }
     try {
       return this.moduleRef?.get<CLIAgentSessionRuntimePort>(CLI_AGENT_SESSION_RUNTIME, { strict: false });
+    } catch {
+      return undefined;
+    }
+  }
+
+  private getSubagentRuntime(): SubagentRuntimePort | undefined {
+    if (this.subagentRuntime) {
+      return this.subagentRuntime;
+    }
+    try {
+      return this.moduleRef?.get<SubagentRuntimePort>(SUBAGENT_RUNTIME, { strict: false });
     } catch {
       return undefined;
     }

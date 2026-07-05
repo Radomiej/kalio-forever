@@ -148,6 +148,36 @@ test('workflow release gate starts a fresh mock QA stack by default', () => {
   assert.ok(freshIndex < statusIndex, 'release gate must start/verify the fresh stack before reading status');
 });
 
+test('workflow release gate uses an isolated data root for fresh mock QA runs', () => {
+  assert.match(workflowReleaseGateSource, /function createWorkflowGateDataRoot\(\)/);
+  assert.match(workflowReleaseGateSource, /'--data-root',\s*createWorkflowGateDataRoot\(\)/s);
+});
+
+test('workflow release gate does not use fixed quiet-time waits as runtime proof', () => {
+  assert.doesNotMatch(workflowReleaseGateSource, /waitForRuntimeAuditQuiet/);
+  assert.doesNotMatch(workflowReleaseGateSource, /runtimeAuditQuiet/);
+  assert.doesNotMatch(workflowReleaseGateSource, /setTimeout/);
+
+  const groupIndex = workflowReleaseGateSource.indexOf('await runPlaywrightGroup(group, baseUrl, apiOrigin, status.state);');
+  assert.notEqual(groupIndex, -1, 'group run call not found');
+});
+
+test('live workflow release gate runs paid readiness before browser workflow checks', () => {
+  assert.match(workflowReleaseGateSource, /async function runLiveReadinessGate\(apiOrigin\)/);
+  assert.match(workflowReleaseGateSource, /scripts\/agentflow-paid-readiness\.mjs/);
+  assert.match(workflowReleaseGateSource, /'--api',\s*`\$\{apiOrigin\}\/api`/s);
+
+  const liveGuardIndex = workflowReleaseGateSource.indexOf('if (requireLive) {');
+  const readinessIndex = workflowReleaseGateSource.indexOf('await runLiveReadinessGate(apiOrigin);');
+  const groupIndex = workflowReleaseGateSource.indexOf('await runPlaywrightGroup(group, baseUrl, apiOrigin, status.state);');
+
+  assert.notEqual(liveGuardIndex, -1, 'live guard not found');
+  assert.notEqual(readinessIndex, -1, 'live readiness call not found');
+  assert.notEqual(groupIndex, -1, 'Playwright gate call not found');
+  assert.ok(liveGuardIndex < readinessIndex, 'live readiness must run only inside the live guard');
+  assert.ok(readinessIndex < groupIndex, 'live readiness must pass before browser workflow checks start');
+});
+
 test('workflow release gate includes recent runtime regression proof groups', () => {
   assert.match(workflowReleaseGateSource, /name: 'RA-App HITL gate'/);
   assert.match(workflowReleaseGateSource, /manual mode shows tool confirmation and RA-App approval overlay/);
@@ -167,6 +197,15 @@ test('workflow release gate includes recent runtime regression proof groups', ()
 
   assert.match(workflowReleaseGateSource, /name: 'workflow follow-up hydration gate'/);
   assert.match(workflowReleaseGateSource, /keeps the earlier workflow bubble stable/);
+
+  assert.match(workflowReleaseGateSource, /name: 'sequential router-chain gate'/);
+  assert.match(workflowReleaseGateSource, /renders a sequential router chain without collapsing it into a parallel council/);
+
+  assert.match(workflowReleaseGateSource, /name: 'architect UI variant runtime gate'/);
+  assert.match(workflowReleaseGateSource, /saves an Architect UI variant and runs it through Talk workflow mode/);
+
+  assert.match(workflowReleaseGateSource, /name: 'cross-browser workflow replay gate'/);
+  assert.match(workflowReleaseGateSource, /a second browser session restores host state, child transcripts, and technical node notes/);
 });
 
 test('managed stack builds inherit the caller environment before runtime overrides', () => {

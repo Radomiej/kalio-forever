@@ -299,6 +299,101 @@ describe('buildRuntimeActivitySnapshot', () => {
     expect(snapshot.run?.status).toBe('failed');
   });
 
+  it('hydrates active subagent turn and pending budget from the subagent runtime for late watchers', async () => {
+    const childSession = {
+      id: 'child-subagent-1',
+      personaId: 'default',
+      title: 'Lab Bug Hunter: Orchestrator',
+      kind: 'subagent',
+      parentSessionId: 'root-session-1',
+      parentToolCallId: 'call-subagent-1',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const pendingBudgetApproval: AgentBudgetApprovalRequest = {
+      requestId: 'budget-child-1',
+      sessionId: 'child-subagent-1',
+      scope: 'agent-flow-branch',
+      usedIterations: 30,
+      currentLimit: 30,
+      suggestedNextLimit: 40,
+      requestedBy: 'orchestrator',
+      roleSlotId: 'orchestrator',
+      nodeId: 'orchestrator',
+    };
+    const listChildren = vi.fn().mockImplementation(async (sessionId: string) => (
+      sessionId === 'root-session-1' ? [childSession] : []
+    ));
+
+    const batch = await buildRuntimeActivitySnapshotBatch({
+      rootSessionId: 'root-session-1',
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockImplementation(async (sessionId: string) => makeStatus(sessionId)),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockImplementation((sessionId: string) => (
+          sessionId === 'child-subagent-1' ? [pendingBudgetApproval] : []
+        )),
+      },
+      sessionsService: {
+        listChildren,
+        get: vi.fn().mockImplementation(async (sessionId: string) => (
+          sessionId === 'child-subagent-1'
+            ? childSession
+            : { id: 'root-session-1', personaId: 'default', kind: 'chat' }
+        )),
+        getMessages: vi.fn().mockResolvedValue([]),
+      },
+      subagentRuntime: {
+        getActiveRunStatus: vi.fn().mockImplementation((sessionId: string) => (
+          sessionId === 'child-subagent-1'
+            ? {
+                sessionId: 'child-subagent-1',
+                parentSessionId: 'root-session-1',
+                turnId: 'turn-child-active',
+                promptMessageId: 'prompt-child-active',
+                agentRun: {
+                  agentRunId: 'subagent-active-run',
+                  agentType: 'subagent',
+                  parentSessionId: 'root-session-1',
+                  parentToolCallId: 'call-subagent-1',
+                  label: 'Orchestrator',
+                },
+              }
+            : null
+        )),
+      },
+    });
+
+    expect(batch.snapshotsBySessionId['child-subagent-1']).toMatchObject({
+      sessionId: 'child-subagent-1',
+      active: true,
+      turnId: 'turn-child-active',
+      pendingBudgetApprovals: [pendingBudgetApproval],
+      toolBudgetProgress: {
+        sessionId: 'child-subagent-1',
+        usedIterations: 30,
+        currentLimit: 30,
+        status: 'waiting',
+        runtimeKind: 'agent-flow-branch',
+      },
+      run: expect.objectContaining({
+        status: 'active',
+        phase: 'llm_streaming',
+        turnId: 'turn-child-active',
+      }),
+    });
+    expect(batch.snapshotsBySessionId['root-session-1'].childExecutions).toEqual([
+      expect.objectContaining({
+        childSessionId: 'child-subagent-1',
+        status: 'running',
+      }),
+    ]);
+  });
+
   it.each([
     ['completed', 'completed'],
     ['failed', 'failed'],

@@ -166,7 +166,7 @@ describe('Architecture controllers', () => {
     const controller = new ArchitectureRunsController(runtime);
 
     const run = await controller.create({
-      schemaId: 'strategic-decision-council',
+      schemaId: 'goal-master-delivery-loop',
       prompt: 'Build the demo site.',
       executionMode: 'subagent_execution',
     });
@@ -177,12 +177,12 @@ describe('Architecture controllers', () => {
         id: `architecture:${run.id}:user`,
         sessionId: rootSessionId,
         role: 'user',
-        content: '[Architecture: Strategic Decision Council]\nBuild the demo site.',
+        content: '[Architecture: Goal Master Delivery Loop]\nBuild the demo site.',
         createdAt: 1,
       },
       {
         id: `architecture:${run.id}:tool-calls`,
-        sessionId: `arch-${run.id}-orchestrator`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'assistant',
         content: '',
         toolCalls: [{
@@ -190,8 +190,9 @@ describe('Architecture controllers', () => {
           name: 'spawn_cli_agent',
           args: {
             architectureRunId: run.id,
-            nodeId: 'shadow',
-            roleSlotId: 'shadow',
+            schemaId: 'goal-master-delivery-loop',
+            nodeId: 'implementer',
+            roleSlotId: 'implementer',
             agentId: 'copilot',
             workdir: 'C:\\Projekty\\TurboProject2',
             expectedChangedFiles: ['src/App.tsx'],
@@ -201,7 +202,7 @@ describe('Architecture controllers', () => {
       },
       {
         id: `architecture:${run.id}:tool-result`,
-        sessionId: `arch-${run.id}-orchestrator`,
+        sessionId: `arch-${run.id}-implementer`,
         role: 'tool_result',
         toolCallId,
         content: JSON.stringify({
@@ -218,8 +219,8 @@ describe('Architecture controllers', () => {
       runId: run.id,
       childAgents: [expect.objectContaining({
         id: 'cli-child-live-overlay',
-        parentNodeId: 'shadow',
-        parentRoleSlotId: 'shadow',
+        parentNodeId: 'implementer',
+        parentRoleSlotId: 'implementer',
         kind: 'cli-agent',
         backend: 'copilot',
         status: 'running',

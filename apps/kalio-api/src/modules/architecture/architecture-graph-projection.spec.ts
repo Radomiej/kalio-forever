@@ -37,6 +37,7 @@ describe('buildArchitectureGraphProjection', () => {
     expect(graph.schemaName).toBe('Test Schema');
     expect(graph.nodes[0]?.sessionId).toBe('arch-run-1-implementer');
     expect(graph.nodes[0]?.status).toBe('pending');
+    expect(graph.nodes[0]?.hasRuntimeEvidence).toBe(false);
   });
 
   it('marks a role node running from start-only events', () => {
@@ -91,6 +92,7 @@ describe('buildArchitectureGraphProjection', () => {
     expect(graph.nodes[0]).toMatchObject({
       id: 'agent',
       status: 'running',
+      hasRuntimeEvidence: true,
       visitCount: 1,
       eventIds: ['event-1', 'event-2'],
     });

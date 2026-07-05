@@ -320,6 +320,64 @@ describe('LLMTurnRuntimeService', () => {
     expect(retryEvent?.data).not.toHaveProperty('history');
   });
 
+  it('maps provider auth failures to workflow runtime error codes without parsing message text', async () => {
+    const providerError = Object.assign(new Error('provider rejected credentials'), {
+      code: 'LLM_AUTH',
+    });
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => throwingStream(providerError)),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async () => undefined),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtimeAuditLog = vi.fn<RuntimeAuditLogger['log']>().mockResolvedValue('runtime-audit-id');
+    const runtimeAudit = {
+      log: runtimeAuditLog,
+    } satisfies Pick<RuntimeAuditLogger, 'log'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+      undefined,
+      runtimeAudit as unknown as RuntimeAuditLogger,
+    );
+
+    await expect(runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+    })).rejects.toThrow('provider rejected credentials');
+
+    const failedEvent = runtimeAudit.log.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.eventName === 'llm.turn.failed');
+    expect(failedEvent).toMatchObject({
+      eventName: 'llm.turn.failed',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      status: 'failed',
+      errorCode: 'PROVIDER_UNAUTHORIZED',
+      data: {
+        runtimeKind: 'chat',
+        iteration: 1,
+      },
+    });
+  });
+
   it('logs typed runtime events when empty no-tool retries are exhausted', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([{ type: 'done' }])),
@@ -661,6 +719,7 @@ describe('LLMTurnRuntimeService', () => {
     expect(emit).toHaveBeenCalledWith('tool:start', expect.objectContaining({
       toolName: 'run_raapp',
       args: { id: 'right-id' },
+      turnId: 'turn-1',
     }));
     expect(toolDispatch.dispatch).toHaveBeenCalledWith(
       'call-1',

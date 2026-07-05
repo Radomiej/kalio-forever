@@ -108,6 +108,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   private readonly eventsByRunId = new Map<string, ArchitectureExecutionEvent[]>();
   private readonly schemasByRunId = new Map<string, ArchitectureSchema>();
   private readonly stoppedRunIds = new Set<string>();
+  private readonly activeRunExecutions = new Map<string, Promise<ArchitectureRun>>();
 
   constructor(
     private readonly registry: ArchitectureRegistryService,
@@ -133,9 +134,9 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.eventsByRunId.set(prepared.run.id, liveEvents);
     await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
 
-    void this.executePreparedRun(prepared, emit, liveEvents).catch(async (error: unknown) => {
+    const execution = this.executePreparedRun(prepared, emit, liveEvents).catch(async (error: unknown) => {
       if (prepared.run.status !== 'running' || this.stoppedRunIds.has(prepared.run.id)) {
-        return;
+        return this.runs.get(prepared.run.id) ?? prepared.run;
       }
       const now = Date.now();
       const failure = workflowFailureFromError(error);
@@ -165,7 +166,14 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       this.auditArchitectureFailure(prepared.schema, prepared.run, failure);
       this.auditArchitectureRun(prepared.schema, prepared.run, liveEvents);
       await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
+      return prepared.run;
+    }).finally(() => {
+      if (this.activeRunExecutions.get(prepared.run.id) === execution) {
+        this.activeRunExecutions.delete(prepared.run.id);
+      }
     });
+    this.activeRunExecutions.set(prepared.run.id, execution);
+    void execution;
 
     return prepared.run;
   }
@@ -460,6 +468,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     }
 
     const stoppedRunIds: string[] = [];
+    const drainPromises: Promise<ArchitectureRun>[] = [];
     for (const run of this.runs.values()) {
       if (run.status !== 'running' && run.status !== 'queued') {
         continue;
@@ -469,6 +478,18 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       }
       await this.stopRun(run.id);
       stoppedRunIds.push(run.id);
+      const activeExecution = this.activeRunExecutions.get(run.id);
+      if (activeExecution) {
+        drainPromises.push(activeExecution.catch((error: unknown) => {
+          this.logger.warn(
+            `Draining stopped Architecture run ${run.id} rejected: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return this.runs.get(run.id) ?? run;
+        }));
+      }
+    }
+    if (drainPromises.length > 0) {
+      await Promise.all(drainPromises);
     }
     return stoppedRunIds;
   }

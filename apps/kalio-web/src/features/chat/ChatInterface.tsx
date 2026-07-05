@@ -17,6 +17,7 @@ import { buildTurnsFromHistory, computeAnsweredCallIds, buildConversationTimelin
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
 import { getArchitectureSchemas } from '../architect/architect.api';
+import { ARCHITECTURE_REGISTRY_CHANGED_EVENT } from '../architect/architectureRegistryEvents';
 import type { ArchitectSchema } from '../architect/architect.types';
 import {
   getLaunchProjectPath,
@@ -142,11 +143,27 @@ export function ChatInterface() {
     setProjectPath(getLaunchProjectPath(activeSession?.runtimeContext));
   }, [activeSession?.runtimeContext, activeSessionId]);
 
-  useEffect(() => {
+  const refreshArchitectures = useCallback(() => {
     getArchitectureSchemas()
-      .then((schemas) => setArchitectures(schemas))
+      .then((schemas) => {
+        setArchitectures(schemas);
+        setSelectedArchitectureId((current) => (
+          current === 'single-chat' || schemas.some((schema) => schema.id === current)
+            ? current
+            : 'single-chat'
+        ));
+      })
       .catch((err: unknown) => console.error('[ChatInterface] architecture registry load failed', err));
   }, []);
+
+  useEffect(() => {
+    refreshArchitectures();
+  }, [refreshArchitectures]);
+
+  useEffect(() => {
+    window.addEventListener(ARCHITECTURE_REGISTRY_CHANGED_EVENT, refreshArchitectures);
+    return () => window.removeEventListener(ARCHITECTURE_REGISTRY_CHANGED_EVENT, refreshArchitectures);
+  }, [refreshArchitectures]);
 
   useEffect(() => {
     apiClient

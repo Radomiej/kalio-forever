@@ -84,8 +84,25 @@ function normalizedWindowsEnv(baseEnv) {
   }
 
   const nodeDir = dirname(process.execPath);
+  const programFilesNodeDir = resolve(baseEnv.ProgramFiles ?? 'C:/Program Files', 'nodejs');
+  const systemNodePath = resolve(programFilesNodeDir, 'node.exe');
+  const systemCorepackPath = resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js');
   const pathValue = baseEnv.PATH ?? baseEnv.Path ?? '';
-  env.Path = `${nodeDir};${pathValue}`;
+  const isUsingSystemNode = nodeDir.toLowerCase() === programFilesNodeDir.toLowerCase();
+  const pathHasCodexBundledRuntime = pathValue.toLowerCase().includes('.cache\\codex-runtimes')
+    || pathValue.toLowerCase().includes('.cache/codex-runtimes');
+  const systemOverrideDisabled = baseEnv.KALIO_PLAYWRIGHT_DISABLE_SYSTEM_NODE_OVERRIDE === '1';
+  const shouldPreferSystemNode = !systemOverrideDisabled
+    && existsSync(systemNodePath)
+    && (!isUsingSystemNode || pathHasCodexBundledRuntime);
+  const preferredNodeDir = shouldPreferSystemNode ? programFilesNodeDir : nodeDir;
+  env.Path = `${preferredNodeDir};${pathValue}`;
+  if (shouldPreferSystemNode) {
+    env.KALIO_PLAYWRIGHT_NODE_COMMAND = baseEnv.KALIO_PLAYWRIGHT_NODE_COMMAND ?? systemNodePath;
+  }
+  if (shouldPreferSystemNode && existsSync(systemCorepackPath)) {
+    env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT = baseEnv.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT ?? systemCorepackPath;
+  }
   return env;
 }
 

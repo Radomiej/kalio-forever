@@ -32,6 +32,7 @@ Treat Kalio architecture and appflow changes as runtime-contract work, not local
 - Global RA-App approve/deny actions must identify/watch the owning session before emitting socket events, because backend approval handling enforces socket session ownership.
 - RA-App inline pending overlays must settle only from typed approval resolution (`raapp:native_result`, approval id, session id) or refreshed durable state, never from display text.
 - Runtime lifecycle observability must emit typed `runtime_event` rows with stable `eventName`, status, reason/error code, and IDs. Do not use prompt/message text as the audit contract.
+- Fixed-duration waits are not an architecture fix. Sleeps may be used only as bounded diagnostic/test fallbacks; runtime correctness must come from typed state, drain/ack barriers, durable snapshots, or explicit lifecycle events.
 - Durable graph reconstruction must prefer typed event fields such as `architectureEventId` / `eventId` and treat `toolCall.id`, `sessionId`, and message ids as opaque identifiers, not state machines or event classifiers.
 - Malformed structured output from architecture router/finalizer paths is a typed `CONTRACT_VIOLATION`, not a routing hint. Persist the failed run, expose node-level `errorCode/failure` in graph projection, and cancel downstream nodes instead of leaving finalizer/children pending.
 - Structured-output tests should validate the contract schema shape directly. Do not prove router/finalizer correctness by accepting prose that merely contains JSON-like text.
@@ -68,6 +69,7 @@ Treat Kalio architecture and appflow changes as runtime-contract work, not local
 - Stop/cancellation tests need deterministic long-running work such as mock `hold(ms)`. Do not rely on naturally slow LLM/tool behavior or racing a fast mock response.
 - Full workflow release evidence should run against a freshly rebuilt or explicitly verified managed QA stack. A long-lived manual stack with stale sockets or hundreds of old sessions is useful for diagnosis, not for final release proof.
 - Workflow release gates should start from a fresh mock QA stack by default. Use `--reuse-stack` only when explicitly diagnosing stale-stack or reconnect behavior.
+- On Windows, run Kalio Playwright/QA stack commands outside the sandbox with system Node on PATH. Sandbox access to pnpm junctions can produce `EPERM` or false `MODULE_NOT_FOUND` errors for installed dependencies such as `ajv`; rerun with the system runtime before treating that as an app regression.
 
 ## Design Moves
 
@@ -89,6 +91,7 @@ Treat Kalio architecture and appflow changes as runtime-contract work, not local
 | Emitting RA-App approve/deny from a global inbox without session ownership | Identify/watch the approval's session before emitting the socket command. |
 | Keeping an inline RA-App overlay pending after typed approval execution | Settle the overlay from `raapp:native_result` matching the session and approval id. |
 | Logging `error.message` or prompt content as the runtime source of truth | Log typed `runtime_event` names and reason/error codes; keep text display-only. |
+| Solving lifecycle races with `wait X ms` | Add a typed runtime state, drain/ack barrier, durable snapshot, or explicit lifecycle event. |
 | Parsing `toolCall.id`, `sessionId`, or message-id prefixes to infer graph state | Add explicit typed fields and use raw ids only as opaque compatibility fallbacks. |
 | Treating malformed structured-output text as a fallback router decision | Fail with typed `CONTRACT_VIOLATION`, project the failed node, and cancel downstream nodes. |
 | Testing tool loops with invented `{ name, result }` tool-result messages only | Reproduce the real dispatcher shape: assistant tool call metadata plus later `tool_result.toolCallId` and bare result payload. |
@@ -122,6 +125,7 @@ Treat Kalio architecture and appflow changes as runtime-contract work, not local
 | Testing stop behavior by hoping a workflow is slow enough | Use explicit mock `hold(ms)` or another deterministic running state. |
 | Calling a workflow slice green because it passed on a stale manual QA stack | Restart or verify the managed stack, refresh runtime config, and rerun the full release gate. |
 | Letting release workflow proof reuse a stale QA stack by default | Start a fresh mock stack unless `--reuse-stack` or live-provider proof is explicit. |
+| Treating sandbox `EPERM` / false `MODULE_NOT_FOUND` from pnpm junctions as a Kalio runtime bug | Rerun the Playwright/QA stack outside the sandbox with system Node on PATH, then classify the result. |
 | Classifying empty LLM turns by logger warning text | Emit and assert prompt-safe `runtime_event` rows such as `llm.turn.empty_no_tool_retry` and `llm.turn.empty_no_tool_exhausted`. |
 | Testing custom Execution Graph canvas labels through whole-container text | Assert backend graph projection plus stable `graph-node-*` ids, status aria-labels, and inspector actions. |
 | Requiring the full workflow prompt text immediately after opening a child branch session | Wait for durable/live transcript readiness and allow typed status fallback before asserting role label and transcript length. |
@@ -160,6 +164,7 @@ Treat Kalio architecture and appflow changes as runtime-contract work, not local
 - For recoverable node error fallback changes, run `architecture-graph-recoverable-error.utils.spec.ts`, `architecture-graph-runtime.typed-events.spec.ts`, `architecture-graph-runtime.max-visits.spec.ts`, and `architecture-runtime.service.spec.ts`; recoverable role/router/artifact fallback must stay typed and must not parse message text.
 - For architecture role execution budget changes, run `architecture-role-execution-budget.utils.spec.ts` plus `architecture-role-executor.spec.ts`; default max iterations must remain `30` unless typed node/persona/context/global settings override it.
 - For release-gate script changes, run `node --test scripts\runtime-scripts.test.mjs` and `release:workflow-gate`; final proof should use a fresh mock QA stack unless the test explicitly covers stack reuse.
+- For Windows Playwright/QA stack proof, use system Node outside the sandbox. If a sandbox run fails on pnpm junction access (`EPERM`) or a declared dependency appears missing (`MODULE_NOT_FOUND`, for example `ajv`), rerun outside the sandbox before recording a product failure.
 - Run affected typecheck and build.
 - Run Playwright or built-stack smoke for the relevant user flow.
 - For runtime/appflow slices, explicitly verify:

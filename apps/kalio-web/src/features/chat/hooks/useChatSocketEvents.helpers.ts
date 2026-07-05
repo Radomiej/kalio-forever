@@ -148,6 +148,18 @@ interface LiveSessionStatusMaterializationDeps {
   setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
 }
 
+interface ToolStartTurnMaterializationDeps {
+  getSessionActiveTurnId: (sessionId: string) => string | null;
+  getSessionAgentTurns: (sessionId: string) => Array<{ id: string; items: Array<{ kind: string; callId?: string }> }>;
+  addActiveAgentLoop: (sessionId: string, turnId: string, agentRun?: SocketEvents['tool:start']['agentRun']) => void;
+  startAgentTurn: (
+    turnId: string,
+    sessionId: string,
+    agentRun?: SocketEvents['tool:start']['agentRun'],
+  ) => void;
+  addTurnItem: (item: { kind: 'tool'; callId: string }, sessionId: string) => void;
+}
+
 function materializeLiveTurn(
   sessionId: string,
   turnId: string,
@@ -161,6 +173,29 @@ function materializeLiveTurn(
   }
   deps.setAwaitingFirstChunk?.(false);
   deps.setStreaming?.(true, undefined, sessionId);
+}
+
+export function materializeToolStartTurn(
+  payload: SocketEvents['tool:start'],
+  sessionId: string,
+  deps: ToolStartTurnMaterializationDeps,
+): void {
+  const currentTurnId = deps.getSessionActiveTurnId(sessionId);
+  const effectiveTurnId = payload.turnId ?? currentTurnId;
+  if (!effectiveTurnId) {
+    return;
+  }
+
+  if (payload.turnId && currentTurnId !== payload.turnId) {
+    deps.addActiveAgentLoop(sessionId, payload.turnId, payload.agentRun);
+    deps.startAgentTurn(payload.turnId, sessionId, payload.agentRun);
+  }
+
+  const turn = deps.getSessionAgentTurns(sessionId).find((item) => item.id === effectiveTurnId);
+  const hasItem = turn?.items.some((item) => item.kind === 'tool' && item.callId === payload.callId) ?? false;
+  if (!hasItem) {
+    deps.addTurnItem({ kind: 'tool', callId: payload.callId }, sessionId);
+  }
 }
 
 function releaseLiveTurn(
@@ -236,6 +271,10 @@ export function selectReplayableSessionStatusSnapshot(
   return finalSnapshot;
 }
 
+function sessionStatusUpdatedAt(snapshot: SocketEvents['session:status'] | undefined): number {
+  return snapshot?.run?.updatedAt ?? snapshot?.run?.lastHeartbeatAt ?? 0;
+}
+
 export function materializeLiveTurnFromHydratedRuntimeState(
   params: {
     runtimeSnapshot: RuntimeActivitySnapshot | null | undefined;
@@ -246,6 +285,16 @@ export function materializeLiveTurnFromHydratedRuntimeState(
 ): void {
   if (params.runtimeSnapshot) {
     materializeLiveTurnFromRuntimeActivitySnapshot(params.runtimeSnapshot, deps);
+    if (runtimeSnapshotKeepsSessionLive(params.runtimeSnapshot)) {
+      return;
+    }
+    const replayableSnapshot = selectReplayableSessionStatusSnapshot(
+      params.bufferedSessionStatusSnapshots,
+      params.latestSessionStatusSnapshot,
+    );
+    if (sessionStatusUpdatedAt(replayableSnapshot) > params.runtimeSnapshot.updatedAt) {
+      materializeLiveTurnFromSessionStatusSnapshot(replayableSnapshot, deps);
+    }
     return;
   }
 

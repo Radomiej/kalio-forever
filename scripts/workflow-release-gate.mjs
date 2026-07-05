@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,6 +31,10 @@ function normalizedWindowsEnv(baseEnv) {
   const pathValue = baseEnv.PATH ?? baseEnv.Path ?? '';
   env.Path = `${nodeDir};${pathValue}`;
   return env;
+}
+
+function createWorkflowGateDataRoot() {
+  return resolve(tmpdir(), `kalio-workflow-gate-${process.pid}-${Date.now()}`);
 }
 
 function run(command, commandArgs, options) {
@@ -91,6 +96,8 @@ async function ensureFreshMockStackUnlessReusing() {
     'mock',
     '--model',
     'mock',
+    '--data-root',
+    createWorkflowGateDataRoot(),
     '--force-env-llm',
     '--force-restart',
     '--runtime',
@@ -141,6 +148,22 @@ function writeFrontendRuntimeConfig(backendUrl) {
   );
 }
 
+async function runLiveReadinessGate(apiOrigin) {
+  console.log('[workflow-release-gate] live paid-readiness gate');
+  const result = await run(process.execPath, [
+    'scripts/agentflow-paid-readiness.mjs',
+    '--api',
+    `${apiOrigin}/api`,
+  ], {
+    cwd: repoRoot,
+    env: normalizedWindowsEnv(process.env),
+    stdio: 'inherit',
+  });
+  if (result.code !== 0) {
+    throw new Error(`live paid-readiness gate failed with exit code ${result.code}`);
+  }
+}
+
 async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin, stackState) {
   console.log(`[workflow-release-gate] ${name}`);
   const env = normalizedWindowsEnv({
@@ -165,6 +188,14 @@ const groups = [
   {
     name: 'workflow visibility/replay/graph child-chat gate',
     grep: 'renders council branches',
+  },
+  {
+    name: 'sequential router-chain gate',
+    grep: 'renders a sequential router chain without collapsing it into a parallel council',
+  },
+  {
+    name: 'architect UI variant runtime gate',
+    grep: 'saves an Architect UI variant and runs it through Talk workflow mode',
   },
   {
     name: 'reconnect and hydration gate',
@@ -193,6 +224,10 @@ const groups = [
   {
     name: 'workflow follow-up hydration gate',
     grep: 'keeps the earlier workflow bubble stable',
+  },
+  {
+    name: 'cross-browser workflow replay gate',
+    grep: 'a second browser session restores host state, child transcripts, and technical node notes',
   },
   {
     name: 'normal chat gate',
@@ -229,6 +264,7 @@ try {
     if (liveFailures.length > 0) {
       throw new Error(`live workflow gate requires a saved live credential: ${liveFailures.join(', ')}`);
     }
+    await runLiveReadinessGate(apiOrigin);
   }
 
   try {

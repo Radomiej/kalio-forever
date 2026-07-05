@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArchitectureChatRunSummary, ArchitectureGraphProjection, ChatSession } from '@kalio/types';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
+import { statusForStep } from './ArchitectureRunTimeline.stages';
 
 type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
   graphNodes?: ArchitectureGraphProjection['nodes'];
@@ -9,6 +10,16 @@ type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
 };
 
 describe('ArchitectureRunTimeline', () => {
+  it('does not derive running status from planned graph status alone', () => {
+    expect(statusForStep({
+      speaker: 'finalizer',
+      content: '',
+      nodeId: 'final-artifact',
+      plannedLabel: 'Finalizer',
+      plannedStatus: 'running',
+    })).toBe(null);
+  });
+
   it('renders a partial trace step without throwing when typed projection fields are missing', () => {
     const partialStep = {
       content: 'Partial runtime event during reconnect.',
@@ -463,7 +474,7 @@ describe('ArchitectureRunTimeline', () => {
     expect(onOpenStep).not.toHaveBeenCalled();
   });
 
-  it('renders planned pending stages from graph nodes before the trace completes', () => {
+  it('does not render unevidenced pending finalizer while earlier nodes are still running', () => {
     const run: ArchitectureRunWithGraph = {
       runId: 'run-live',
       schemaId: 'Strategic Decision Council',
@@ -527,14 +538,64 @@ describe('ArchitectureRunTimeline', () => {
 
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Sub-agents 5');
-    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-route-shell')).not.toHaveTextContent('Finalizer');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Parallel sub-agents');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('pending');
     expect(screen.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'running');
     expect(screen.getAllByTestId('architecture-route-router')).toHaveLength(2);
-    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
-    expect(screen.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'pending');
+    expect(screen.queryByTestId('architecture-route-finalizer')).toBeNull();
+  });
+
+  it('does not treat preallocated finalizer session id as runtime evidence', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-preallocated-finalizer',
+      schemaId: 'Lab Bug Hunter',
+      status: 'running',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'orchestrator',
+          label: 'Orchestrator',
+          kind: 'router',
+          status: 'running',
+          hasRuntimeEvidence: true,
+          eventIds: ['run-preallocated-finalizer:event:1'],
+        },
+        {
+          id: 'final-artifact',
+          label: 'Finalizer',
+          kind: 'artifact',
+          status: 'running',
+          sessionId: 'arch-run-preallocated-finalizer-final-artifact',
+          hasRuntimeEvidence: false,
+          eventIds: [],
+        },
+      ],
+      graphEdges: [
+        { id: 'e1', fromNodeId: 'orchestrator', toNodeId: 'final-artifact' },
+      ],
+      trace: [
+        {
+          speaker: 'router',
+          content: 'Orchestrator is still routing.',
+          eventId: 'run-preallocated-finalizer:event:1',
+          nodeId: 'orchestrator',
+          nextNodeId: 'final-artifact',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
+    expect(screen.queryByTestId('architecture-route-finalizer')).toBeNull();
   });
 
   it('renders graph-only pending stages before any trace messages exist', () => {
@@ -579,8 +640,8 @@ describe('ArchitectureRunTimeline', () => {
 
     expect(screen.getByText('running / 8 graph steps')).toBeTruthy();
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
-    expect(screen.getAllByText('pending').length).toBeGreaterThanOrEqual(6);
-    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
+    expect(screen.getAllByText('pending').length).toBeGreaterThanOrEqual(5);
+    expect(screen.queryByTestId('architecture-route-finalizer')).toBeNull();
   });
 
   it('treats precreated placeholder branch ids as non-openable when they are not in the known branch set', () => {

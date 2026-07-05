@@ -1063,6 +1063,43 @@ describe('AgentTurnBubble', () => {
     expect(screen.queryByTestId('architecture-route-finalizer')).not.toBeInTheDocument();
   });
 
+  it('does not render a planned graph artifact as an active finalizer without typed event evidence', () => {
+    mockMessages.push(makeMsg({
+      id: 'msg-planned-finalizer',
+      content: '### Router',
+      architectureRun: {
+        runId: 'run-planned-finalizer',
+        schemaId: 'lab-bug-hunter',
+        status: 'running',
+        trace: [
+          {
+            speaker: 'router',
+            content: 'Route to backend first.',
+            nodeId: 'orchestrator',
+            nextNodeId: 'backend-1',
+            eventId: 'event-router-started',
+          },
+        ],
+        routeHops: [],
+        graphNodes: [
+          { id: 'orchestrator', label: 'Orchestrator', kind: 'router', status: 'running', eventIds: ['event-router-started'] },
+          { id: 'backend-1', label: 'Backend', kind: 'role', status: 'pending', eventIds: [] },
+          { id: 'final-artifact', label: 'Finalizer', kind: 'artifact', status: 'running', eventIds: [] },
+        ],
+        graphEdges: [
+          { id: 'orchestrator-backend', fromNodeId: 'orchestrator', toNodeId: 'backend-1' },
+          { id: 'backend-final', fromNodeId: 'backend-1', toNodeId: 'final-artifact' },
+        ],
+      } as NonNullable<ChatMessage['architectureRun']>,
+    }));
+
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-planned-finalizer' }], false)} toolActivities={[]} />);
+
+    expect(screen.getByTestId('architecture-run-timeline')).toHaveTextContent('running');
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('Orchestrator');
+    expect(screen.queryByTestId('architecture-route-finalizer')).not.toBeInTheDocument();
+  });
+
   it('renders a sequential router chain without collapsing agents into a parallel group', () => {
     mockMessages.push(makeMsg({
       id: 'msg-sequential-arch',
