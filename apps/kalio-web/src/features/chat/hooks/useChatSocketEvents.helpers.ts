@@ -230,6 +230,7 @@ export function runtimeSnapshotKeepsSessionLive(
     || snapshot.toolActivities.some((activity) => (
       activity.status === 'running' || activity.status === 'pending_confirmation'
     ))
+    || snapshot.pendingBudgetApprovals.length > 0
     || snapshot.childExecutions.some((execution) => (
       execution.status === 'running' || execution.status === 'waiting'
     ));

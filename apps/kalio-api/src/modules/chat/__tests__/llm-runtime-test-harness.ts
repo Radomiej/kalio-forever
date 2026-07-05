@@ -107,6 +107,7 @@ export function makeSubagentRuntime(params: {
   personaService?: Partial<PersonaService>;
   audit?: Partial<AuditService>;
   skillsService?: SkillsService;
+  agentBudgetApprovals?: Partial<AgentBudgetApprovalService>;
 }): SubagentRuntimeService {
   const personaService = params.personaService ?? {
     getSessionConfig: vi.fn().mockResolvedValue({
@@ -135,9 +136,9 @@ export function makeSubagentRuntime(params: {
     params.vfs,
     contextAssembly,
     toolPolicy,
-    {
+    (params.agentBudgetApprovals ?? {
       requestAdditionalBudget: vi.fn().mockResolvedValue(null),
-    } as unknown as AgentBudgetApprovalService,
+    }) as unknown as AgentBudgetApprovalService,
     params.audit as AuditService,
   );
 }

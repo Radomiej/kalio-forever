@@ -324,6 +324,7 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
 
     expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
     expect(useAgentStore.getState().isStreaming).toBe(false);
+    expect(useSessionStore.getState().finalizeAgentTurn).toHaveBeenCalledWith('session-1');
     expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
     expect(useAgentStore.getState().runtimeActivitySnapshots['session-1']).toMatchObject({
       sessionId: 'session-1',

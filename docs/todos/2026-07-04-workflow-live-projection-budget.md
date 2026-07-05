@@ -122,6 +122,8 @@ classDiagram
 - [x] Fix workspace typecheck contract drift for `ArchitectureGraphProjection.nodes[].hasRuntimeEvidence`.
 - [x] Fix Home HITL inbox crash when older/mocked stores do not expose `pendingBudgetApprovals`.
 - [x] Run full local gates: `release:workflow-gate`, `typecheck`, `test`, and `build`.
+- [x] Verify real Xiaomi MiMo normal chat stream on the FamilyQuest project.
+- [x] Verify real Xiaomi MiMo FamilyQuest workflow completion and F5/reload rehydration.
 - [ ] Verify with a real Xiaomi MiMo workflow/manual run where max tools triggers budget HITL.
 
 ## Acceptance Criteria
@@ -145,4 +147,7 @@ classDiagram
 - 2026-07-04: Full `npm.cmd run typecheck` initially caught contract drift in `packages/@kalio/types/src/__tests__/contracts.test.ts`; fixed by adding optional `hasRuntimeEvidence?: boolean` to the asserted graph node shape, then typecheck passed.
 - 2026-07-04: Full `npm.cmd run test` initially caught `HomeHitlInbox` crashing when `pendingBudgetApprovals` was absent in older/mocked stores; fixed by treating missing pending maps as empty objects. Targeted `LandingPage.test.tsx` and full test gate both pass.
 - 2026-07-04: Full `npm.cmd run build` passed after the runtime/contract fixes. Vite still reports the existing large chunk warning.
+- 2026-07-04: Activated local Xiaomi MiMo credential from ignored env into the managed QA DB, restarted the stack on the same data-root without env/mock forcing, and confirmed `effective provider=xiaomimimo model=mimo-v2.5 source=db`.
+- 2026-07-04: Paid/live readiness passed before and after live Playwright proof: provider test, completion smoke, no stale AgentFlow runs, and no recent provider-failed Architecture projections.
+- 2026-07-04: Real Xiaomi MiMo Playwright proof passed on the existing external stack: normal FamilyQuest chat streamed with the live model, and FamilyQuest Strategic Decision Council workflow completed and rehydrated after refresh.
 - 2026-07-04: `npm.cmd run audit:report` completed and wrote `docs/audit/2026-07-04-report.md`; global audit still reports 25 red findings, requiring triage/waiver before calling the whole repo release-clean.

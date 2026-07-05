@@ -409,6 +409,7 @@ export function useChatSocketEvents({
       addActiveAgentLoop,
       removeActiveAgentLoop,
       startAgentTurn,
+      finalizeAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
       setQueuedDepth,

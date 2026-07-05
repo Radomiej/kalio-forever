@@ -326,6 +326,27 @@ describe('terminal runtime cleanup guards', () => {
     })).toBe(true);
   });
 
+  it('keeps runtime snapshots live while an agent budget approval is pending', () => {
+    expect(runtimeSnapshotKeepsSessionLive({
+      sessionId: 'session-1',
+      active: false,
+      turnId: 'turn-budget',
+      queueLength: 0,
+      pendingConfirmations: [],
+      pendingBudgetApprovals: [{
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        scope: 'agent-flow-branch',
+        usedIterations: 1,
+        currentLimit: 1,
+        suggestedNextLimit: 11,
+      }],
+      toolActivities: [],
+      childExecutions: [],
+      updatedAt: 10,
+    })).toBe(true);
+  });
+
   it('keeps runtime snapshots live while the run is waiting_on_orchestrator', () => {
     expect(runtimeSnapshotKeepsSessionLive(makeWaitingRuntimeSnapshot('session-1'))).toBe(true);
   });
@@ -395,6 +416,51 @@ describe('terminal runtime cleanup guards', () => {
     expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-workflow');
     expect(startAgentTurn).toHaveBeenCalledWith('turn-workflow', 'session-1');
     expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+  });
+
+  it('materializes a live turn from a hydrated runtime snapshot with pending budget approvals', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-budget',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [{
+            requestId: 'budget-1',
+            sessionId: 'session-1',
+            scope: 'agent-flow-branch',
+            usedIterations: 1,
+            currentLimit: 1,
+            suggestedNextLimit: 11,
+          }],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 10,
+        },
+        bufferedSessionStatusSnapshots: [],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-budget');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-budget', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
   });
 
   it('releases a hydrated live turn when session status becomes terminal', () => {

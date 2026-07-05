@@ -30,6 +30,16 @@ export function architectureFailedActionSummaryForNodeKind(nodeKind: Architectur
   return 'Branch failed to produce its role-specific response.';
 }
 
+export function architectureCancelledActionSummaryForNodeKind(nodeKind: ArchitectureNodeKind): string {
+  if (nodeKind === 'artifact') {
+    return 'Finalizer was cancelled before producing the final answer.';
+  }
+  if (nodeKind === 'router' || nodeKind === 'parallel') {
+    return 'Router was cancelled before selecting the next graph node.';
+  }
+  return 'Branch was cancelled before producing its role-specific response.';
+}
+
 export function architectureActionSummaryForEvent(
   type: ArchitectureExecutionEvent['type'],
   nodeKind?: ArchitectureNodeKind,

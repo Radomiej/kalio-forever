@@ -48,8 +48,6 @@ export class AgentBudgetApprovalService {
       agentRun: ctx.agentRun,
     };
 
-    ctx.emit('agent:budget_required', payload);
-
     return new Promise<number | null>((resolve) => {
       const handleAbort = () => {
         const pending = this.pending.get(requestId);
@@ -77,6 +75,7 @@ export class AgentBudgetApprovalService {
         return;
       }
       ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });
+      ctx.emit('agent:budget_required', payload);
     });
   }
 

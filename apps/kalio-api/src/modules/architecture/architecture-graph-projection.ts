@@ -9,6 +9,7 @@ import type {
 } from '@kalio/types';
 import {
   architectureActionFieldsForEvent,
+  architectureCancelledActionSummaryForNodeKind,
   architectureCompletedActionSummaryForNodeKind,
   architectureFailedActionSummaryForNodeKind,
   architectureRunningActionSummaryForNodeKind,
@@ -168,6 +169,7 @@ function inferredUpstreamCancellationEventForNode(
     nodeId: node.id,
     roleSlotId: node.roleSlotId,
     status: 'cancelled',
+    actionSummary: architectureCancelledActionSummaryForNodeKind(node.kind),
     detail: runFailureEvent.reasonCode === 'max_steps' || runFailureEvent.reasonCode === 'max_node_visits'
       ? 'Skipped because the workflow stopped before this node started.'
       : 'Skipped because an upstream workflow node failed before this node started.',
@@ -231,6 +233,9 @@ function inferredRunFailureEventForNode(
     nodeId: node.id,
     roleSlotId: node.roleSlotId,
     status: runStatus === 'cancelled' || runFailureEvent.status === 'cancelled' ? 'cancelled' : 'failed',
+    actionSummary: runStatus === 'cancelled' || runFailureEvent.status === 'cancelled'
+      ? architectureCancelledActionSummaryForNodeKind(node.kind)
+      : architectureFailedActionSummaryForNodeKind(node.kind),
     detail: runFailureEvent.failure?.message ?? runFailureEvent.detail,
   };
 }
@@ -301,6 +306,9 @@ function latestActionFields(
   }
   if (status === 'failed') {
     return { actionSummary: architectureFailedActionSummaryForNodeKind(nodeKind) };
+  }
+  if (status === 'cancelled') {
+    return { actionSummary: architectureCancelledActionSummaryForNodeKind(nodeKind) };
   }
   return {};
 }

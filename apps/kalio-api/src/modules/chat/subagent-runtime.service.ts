@@ -200,16 +200,28 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       controller,
     });
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let rejectExecutionTimeout: ((error: Error) => void) | undefined;
+    const clearExecutionTimeout = () => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+    };
+    const armExecutionTimeout = () => {
+      clearExecutionTimeout();
+      timeoutHandle = setTimeout(() => {
+        const error = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${request.timeoutMs}ms`, {
+          source: 'subagent-runtime',
+        });
+        controller.abort(error);
+        rejectExecutionTimeout?.(error);
+      }, request.timeoutMs);
+    };
 
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          const error = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${request.timeoutMs}ms`, {
-            source: 'subagent-runtime',
-          });
-          controller.abort(error);
-          reject(error);
-        }, request.timeoutMs);
+        rejectExecutionTimeout = reject;
+        armExecutionTimeout();
       });
 
       const toolPolicyRequest = {
@@ -301,7 +313,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                 roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
                 updatedAt: Date.now(),
               });
-              return this.agentBudgetApprovals.requestAdditionalBudget(
+              clearExecutionTimeout();
+              const approvedLimit = await this.agentBudgetApprovals.requestAdditionalBudget(
                 {
                   sessionId: childSessionId,
                   turnId,
@@ -323,6 +336,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                   requestedBy: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : 'subagent',
                 },
               );
+              if (approvedLimit && !controller.signal.aborted) {
+                armExecutionTimeout();
+              }
+              return approvedLimit;
             },
           },
         }),
@@ -420,7 +437,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
       throw error;
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      clearExecutionTimeout();
       completeActiveRun();
     }
   }

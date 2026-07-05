@@ -2,13 +2,18 @@ import type { ArchitectureChatRunSummary } from '@kalio/types';
 
 type TraceSpeaker = ArchitectureChatRunSummary['trace'][number]['speaker'];
 type TraceStreamStatus = NonNullable<ArchitectureChatRunSummary['trace'][number]['stream']>['status'];
+type TraceLifecycleStatus = ArchitectureChatRunSummary['trace'][number]['status'] | 'completed' | 'pending' | 'waiting';
 
 export function architectureTraceActivitySummary(
   speaker: TraceSpeaker,
   streamStatus?: TraceStreamStatus,
+  status?: TraceLifecycleStatus,
 ): string {
   if (speaker === 'router') {
-    if (streamStatus === 'failed') {
+    if (status === 'cancelled') {
+      return 'Router was cancelled before selecting the next graph node.';
+    }
+    if (status === 'failed' || streamStatus === 'failed') {
       return 'Router failed to synthesize the next graph node.';
     }
     if (streamStatus === 'started' || streamStatus === 'streaming') {
@@ -18,7 +23,10 @@ export function architectureTraceActivitySummary(
   }
 
   if (speaker === 'finalizer') {
-    if (streamStatus === 'failed') {
+    if (status === 'cancelled') {
+      return 'Finalizer was cancelled before producing the final answer.';
+    }
+    if (status === 'failed' || streamStatus === 'failed') {
       return 'Finalizer failed to produce the final answer.';
     }
     if (streamStatus === 'started' || streamStatus === 'streaming') {
@@ -27,7 +35,10 @@ export function architectureTraceActivitySummary(
     return 'Final answer produced from the routed graph outputs.';
   }
 
-  if (streamStatus === 'failed') {
+  if (status === 'cancelled') {
+    return 'Branch was cancelled before producing its role-specific response.';
+  }
+  if (status === 'failed' || streamStatus === 'failed') {
     return 'Branch failed to produce its role-specific response.';
   }
   if (streamStatus === 'started' || streamStatus === 'streaming') {

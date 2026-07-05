@@ -116,6 +116,10 @@ export function statusForStep(step: TraceStep | undefined): TimelineStatus | nul
   if (step.incompleteReason) {
     return step.stream?.status === 'failed' ? 'failed' : 'waiting';
   }
+  const typedStatus = timelineStatusFromTypedStatus(step.status);
+  if (typedStatus === 'cancelled' || typedStatus === 'failed' || typedStatus === 'waiting') {
+    return typedStatus;
+  }
   if (step.stream?.status === 'failed') {
     return 'failed';
   }
@@ -125,24 +129,36 @@ export function statusForStep(step: TraceStep | undefined): TimelineStatus | nul
   if (step.stream?.status === 'completed') {
     return 'completed';
   }
+  if (typedStatus === 'running' || typedStatus === 'completed') {
+    return typedStatus;
+  }
   if (step.hasRuntimeEvidence) {
     if (step.plannedStatus === 'running') {
       return 'running';
     }
   }
-  if (step.plannedStatus === 'completed') {
-    return 'completed';
-  }
-  if (step.plannedStatus === 'failed') {
-    return 'failed';
-  }
-  if (step.plannedStatus === 'cancelled') {
-    return 'cancelled';
-  }
-  if (step.plannedStatus === 'pending') {
-    return 'pending';
+  const plannedStatus = timelineStatusFromPlannedStatus(step.plannedStatus);
+  if (plannedStatus) {
+    return plannedStatus;
   }
   return step.content ? 'completed' : null;
+}
+
+function timelineStatusFromTypedStatus(status: TraceStep['status']): TimelineStatus | null {
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'failed' || status === 'blocked') return 'failed';
+  if (status === 'running' || status === 'queued') return 'running';
+  if (status === 'done') return 'completed';
+  if (status === 'waiting_on_orchestrator') return 'waiting';
+  return null;
+}
+
+function timelineStatusFromPlannedStatus(status: TraceStep['plannedStatus']): TimelineStatus | null {
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'failed') return 'failed';
+  if (status === 'completed') return 'completed';
+  if (status === 'pending') return 'pending';
+  return null;
 }
 
 function buildTraceStages(trace: TraceStep[]): TraceStage[] {

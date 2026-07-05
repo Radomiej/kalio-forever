@@ -17,6 +17,7 @@ import { parseRawXmlToolCall } from '../raw-tool-call.parser';
 import { makeSubagentRuntime } from './llm-runtime-test-harness';
 import type { AuditService } from '../audit.service';
 import type { SkillsService } from '../../skills/skills.service';
+import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 
 const tools: ToolMeta[] = [
   { name: 'run_subagent', description: 'spawn child', parameters: {}, requiresConfirmation: false },
@@ -89,6 +90,7 @@ function buildSubagentRuntime(
   personaService?: PersonaService,
   audit?: AuditService,
   skillsService?: SkillsService,
+  agentBudgetApprovals?: Partial<AgentBudgetApprovalService>,
 ): SubagentRuntimeService {
   return makeSubagentRuntime({
     llmSource,
@@ -100,6 +102,7 @@ function buildSubagentRuntime(
     personaService,
     audit,
     skillsService,
+    agentBudgetApprovals,
   });
 }
 
@@ -415,6 +418,191 @@ describe('SubagentRuntimeService nested subagents', () => {
           }),
           errorMessage: 'Sub-agent timed out after 50ms',
         }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count budget approval wait time against the subagent execution timeout', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let resolveBudget: ((limit: number | null) => void) | undefined;
+      const llmSource: ILLMSource = {
+        stream: vi.fn(() => streamFrom([
+          { type: 'tool_call', callId: 'read-1', name: 'vfs_read', args: { path: 'README.md' } },
+          { type: 'done' },
+        ])),
+      };
+      const sessionManager = {
+        persistUserMessage: vi.fn().mockResolvedValue(undefined),
+        persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+        saveToolResult: vi.fn().mockResolvedValue(undefined),
+        loadHistory: vi.fn().mockResolvedValue([]),
+        loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+      } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+      const emit = vi.fn();
+      const agentBudgetApprovals = {
+        requestAdditionalBudget: vi.fn(() => new Promise<number | null>((resolve) => {
+          resolveBudget = resolve;
+        })),
+      };
+      const runtime = buildSubagentRuntime(
+        llmSource,
+        makeProcessor(sessionManager) as StreamProcessorService,
+        {
+          dispatch: vi.fn().mockResolvedValue({
+            callId: 'read-1',
+            toolName: 'vfs_read',
+            status: 'success',
+            data: { content: 'readme' },
+          } satisfies ToolResult),
+          getToolMetas: vi.fn(() => tools),
+        } as unknown as ToolDispatchService,
+        sessionManager as unknown as SessionManagerService,
+        { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+        { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+        { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+        undefined,
+        undefined,
+        agentBudgetApprovals,
+      );
+
+      const runPromise = runtime.runSubagent({
+        parentSessionId: 'master',
+        parentToolCallId: 'call-budget',
+        objective: 'read once then wait for budget',
+        availableTools: tools,
+        timeoutMs: 50,
+        maxIterations: 1,
+        vfsMode: 'isolated',
+        copyOutputs: false,
+        emit,
+      });
+
+      const observation: {
+        value:
+          | { status: 'pending' }
+          | { status: 'resolved' }
+          | { status: 'rejected'; error: unknown };
+      } = { value: { status: 'pending' } };
+      void runPromise.then(
+        () => {
+          observation.value = { status: 'resolved' };
+        },
+        (error: unknown) => {
+          observation.value = { status: 'rejected', error };
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+
+      expect(observation.value.status).toBe('pending');
+
+      resolveBudget?.(null);
+      const result = await runPromise;
+
+      expect(result.status).toBe('failed');
+      expect(result.reasonCode).toBe('max_steps');
+      expect(emit.mock.calls.some((call: unknown[]) => call[0] === 'chat:error')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-arms the execution timeout after approving additional budget', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let resolveBudget: ((limit: number | null) => void) | undefined;
+      let streamCallCount = 0;
+      const llmSource: ILLMSource = {
+        stream: vi.fn(() => {
+          streamCallCount += 1;
+          if (streamCallCount === 1) {
+            return streamFrom([
+              { type: 'tool_call', callId: 'read-1', name: 'vfs_read', args: { path: 'README.md' } },
+              { type: 'done' },
+            ]);
+          }
+          return neverStream();
+        }),
+      };
+      const sessionManager = {
+        persistUserMessage: vi.fn().mockResolvedValue(undefined),
+        persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+        saveToolResult: vi.fn().mockResolvedValue(undefined),
+        loadHistory: vi.fn().mockResolvedValue([]),
+        loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+      } satisfies Pick<SessionManagerService, 'persistUserMessage' | 'persistAssistantMessage' | 'saveToolResult' | 'loadHistory' | 'loadHistoryForLLM'>;
+      const emit = vi.fn();
+      const agentBudgetApprovals = {
+        requestAdditionalBudget: vi.fn(() => new Promise<number | null>((resolve) => {
+          resolveBudget = resolve;
+        })),
+      };
+      const runtime = buildSubagentRuntime(
+        llmSource,
+        makeProcessor(sessionManager) as StreamProcessorService,
+        {
+          dispatch: vi.fn().mockResolvedValue({
+            callId: 'read-1',
+            toolName: 'vfs_read',
+            status: 'success',
+            data: { content: 'readme' },
+          } satisfies ToolResult),
+          getToolMetas: vi.fn(() => tools),
+        } as unknown as ToolDispatchService,
+        sessionManager as unknown as SessionManagerService,
+        { createWithId: vi.fn(async (id: string, dto: { parentSessionId?: string }) => makeSession(id, dto.parentSessionId)) } as unknown as SessionsService,
+        { copySessionFiles: vi.fn(() => []) } as unknown as VFSService,
+        { getSessionConfig: vi.fn().mockResolvedValue({ systemPrompt: '', model: '', availableSkills: [], kv: {} }) } as unknown as PersonaService,
+        undefined,
+        undefined,
+        agentBudgetApprovals,
+      );
+
+      const runPromise = runtime.runSubagent({
+        parentSessionId: 'master',
+        parentToolCallId: 'call-budget-approved-timeout',
+        objective: 'read once then continue after budget approval',
+        availableTools: tools,
+        timeoutMs: 50,
+        maxIterations: 1,
+        vfsMode: 'isolated',
+        copyOutputs: false,
+        emit,
+      });
+      const settledPromise = runPromise.then(
+        () => ({ status: 'resolved' as const }),
+        (error: unknown) => ({ status: 'rejected' as const, error }),
+      );
+
+      await vi.waitFor(() => {
+        expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(500);
+      resolveBudget?.(11);
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(51);
+
+      const settled = await settledPromise;
+      expect(settled.status).toBe('rejected');
+      if (settled.status !== 'rejected') {
+        throw new Error(`Expected timeout rejection, got ${settled.status}`);
+      }
+      expect(settled.error).toBeInstanceOf(Error);
+      expect((settled.error as Error).message).toBe('Sub-agent timed out after 50ms');
+      expect(llmSource.stream).toHaveBeenCalledTimes(2);
+      expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
+        code: 'LLM_TIMEOUT',
+        message: 'Sub-agent timed out after 50ms',
       }));
     } finally {
       vi.useRealTimers();
