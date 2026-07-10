@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
 import type { MutableRefObject } from 'react';
-import type { ChatMessage } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ChatMessage, ChatSession } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { backendHealth } from '../../../services/backendHealth';
+import { apiClient } from '../../../services/apiClient';
 import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { buildCallIdToNameFromMessages, buildTurnsFromHistory } from '../chatUtils';
 import { rebuildCLIChildProjectionsFromMessages } from '../cliChildProjection.model';
@@ -12,6 +13,7 @@ import { isPendingHostSession, isPendingHostSessionId } from '../pendingHostSess
 import {
   materializeLiveTurnFromHydratedRuntimeState,
 } from './useChatSocketEvents.helpers';
+import { budgetApprovalsFromArchitectureEvents } from '../architectureBudgetApprovalProjection';
 
 interface UseChatSessionActivationParams {
   activeSessionId: string | null;
@@ -37,6 +39,19 @@ function buildDeterministicRaAppLaunchPrompt(launchIntent: {
     : exactRunInstruction;
 }
 
+async function hydrateArchitectureBudgetApprovalsFromEvents(session: ChatSession): Promise<void> {
+  const architectureContext = session.runtimeContext?.architectureContext;
+  const runId = typeof architectureContext?.architectureRunId === 'string' ? architectureContext.architectureRunId : null;
+  if (!runId) {
+    return;
+  }
+
+  const { data: events } = await apiClient.get<ArchitectureExecutionEvent[]>(`/api/architecture-runs/${runId}/events`);
+  for (const request of budgetApprovalsFromArchitectureEvents(events, session.id)) {
+    useAgentStore.getState().setPendingBudgetApproval(session.id, request);
+  }
+}
+
 export function useChatSessionActivation({
   activeSessionId,
   clearToolActivities,
@@ -48,15 +63,28 @@ export function useChatSessionActivation({
 }: UseChatSessionActivationParams) {
   const pendingMessage = useSessionStore((state) => state.pendingMessage);
   const pendingRAAppLaunchIntent = useSessionStore((state) => state.pendingRAAppLaunchIntent);
+  const activeArchitectureRunId = useSessionStore((state) => {
+    if (!activeSessionId) {
+      return null;
+    }
+    const session = state.sessions.find((item) => item.id === activeSessionId);
+    const runId = session?.runtimeContext?.architectureContext?.architectureRunId;
+    return typeof runId === 'string' && runId.length > 0 ? runId : null;
+  });
 
   useEffect(() => {
     if (!activeSessionId) return;
     const activeSession = useSessionStore.getState().sessions.find((session) => session.id === activeSessionId);
     if (isPendingHostSession(activeSession) || isPendingHostSessionId(activeSessionId)) return;
 
-    identifyWatchedSession(activeSessionId, 'session-activation-active', { sticky: true });
+    identifyWatchedSession(activeSessionId, 'session-activation-active', { sticky: true, force: true });
     if (activeSession?.parentSessionId) {
       identifyWatchedSession(activeSession.parentSessionId, 'session-activation-parent', { sticky: true });
+    }
+    if (activeSession) {
+      void hydrateArchitectureBudgetApprovalsFromEvents(activeSession).catch((error: unknown) => {
+        console.warn('[ChatInterface] failed to hydrate architecture budget approvals', error instanceof Error ? error : new Error(String(error)));
+      });
     }
 
     const runtimeSnapshot = useAgentStore.getState().getRuntimeActivitySnapshot(activeSessionId);
@@ -156,7 +184,7 @@ export function useChatSessionActivation({
         backendHealth.reportFailure();
         console.error('[ChatInterface] failed to load message history', err instanceof Error ? err : new Error(String(err)));
       });
-  }, [activeSessionId, clearToolActivities, setAgentTurns, setMessages, setPendingConfirmation, updateAgentTurn]);
+  }, [activeArchitectureRunId, activeSessionId, clearToolActivities, setAgentTurns, setMessages, setPendingConfirmation, updateAgentTurn]);
 
   useEffect(() => {
     if (!activeSessionId) return;

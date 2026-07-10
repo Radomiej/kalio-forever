@@ -112,6 +112,7 @@ function branchStreamEventData(event: string, payload: Record<string, unknown>):
     event,
     sessionId: stringField(payload, 'sessionId'),
     callId: stringField(payload, 'callId'),
+    requestId: stringField(payload, 'requestId'),
     toolName: stringField(payload, 'toolName'),
     status: stringField(payload, 'status'),
     errorMessage: stringField(payload, 'message') ?? stringField(payload, 'errorMessage'),

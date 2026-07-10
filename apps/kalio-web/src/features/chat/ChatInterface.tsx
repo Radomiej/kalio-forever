@@ -38,6 +38,7 @@ import { resolveRenderableConversationProjection } from './conversationTranscrip
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
 import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 import { useChatAutoScroll } from './useChatAutoScroll';
+import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -190,6 +191,9 @@ export function ChatInterface() {
     renderableConversationProjection.messages,
     renderableConversationProjection.agentTurns,
   );
+  const activeSessionHasVisibleAgentTurn = activeSessionId
+    ? conversationTimeline.some((entry) => entry.kind === 'agent_turn' && entry.turn.sessionId === activeSessionId)
+    : false;
   const liveTurnState = resolveLiveTurnState({
     sessionId: activeSessionId,
     sessionMessages: messages,
@@ -551,7 +555,10 @@ export function ChatInterface() {
           ))}
 
           {conversationShellState.mode !== 'pending-child-session' && liveTurnState.showPlaceholderBubble && (
-            <PendingAssistantBubble liveTurnState={liveTurnState} />
+            <>
+              <SessionBudgetApprovalBanner sessionId={activeSessionHasVisibleAgentTurn ? null : activeSessionId} />
+              <PendingAssistantBubble liveTurnState={liveTurnState} />
+            </>
           )}
 
           <div />

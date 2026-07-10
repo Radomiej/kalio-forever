@@ -74,6 +74,7 @@ export function registerSessionLifecycleHandlers({
       addActiveAgentLoop,
       removeActiveAgentLoop,
       startAgentTurn,
+      finalizeAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
       recordSessionStatusSnapshot,

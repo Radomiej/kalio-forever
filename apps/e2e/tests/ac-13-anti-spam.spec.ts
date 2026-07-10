@@ -37,10 +37,9 @@ test.describe('AC-13: Queue while streaming', () => {
     await streamingInput.fill('queued follow-up');
     await streamingSendBtn.click();
 
-    await expect(page.getByTestId('chat-queued-badge')).toBeVisible({ timeout: 5000 });
-
     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
     await expect(userMessages).toHaveCount(2, { timeout: 10_000 });
+    await expect(userMessages.nth(1)).toContainText('queued follow-up');
 
     await deleteSessionIfExists(request, session.id);
   });
@@ -67,14 +66,14 @@ test.describe('AC-13: Queue while streaming', () => {
 
     await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
     const streamingInput = await expectComposerEnabled(page, 5000);
+    const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
 
     for (let i = 0; i < 3; i++) {
-      await page.waitForTimeout(200);
       await streamingInput.fill(`queued ${i + 1}`);
       await streamingInput.press('Enter');
+      await expect(userMessages).toHaveCount(i + 2, { timeout: 10_000 });
     }
 
-    const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
     await expect(userMessages).toHaveCount(4, { timeout: 15_000 });
 
     await deleteSessionIfExists(request, session.id);

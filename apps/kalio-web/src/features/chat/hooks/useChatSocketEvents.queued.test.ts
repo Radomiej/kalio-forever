@@ -40,6 +40,8 @@ vi.mock('../../../services/eventBus', () => ({
     onContext: (handler: (...args: unknown[]) => void) => capture('chat:context', handler),
     onAgentStart: (handler: (...args: unknown[]) => void) => capture('agent:start', handler),
     onAgentDone: (handler: (...args: unknown[]) => void) => capture('agent:done', handler),
+    onAgentBudgetRequired: (handler: (...args: unknown[]) => void) => capture('agent:budget_required', handler),
+    onAgentBudgetInvalidated: (handler: (...args: unknown[]) => void) => capture('agent:budget_invalidated', handler),
     onSessionCreated: (handler: (...args: unknown[]) => void) => capture('session:created', handler),
     onSessionUpdated: (handler: (...args: unknown[]) => void) => capture('session:updated', handler),
     onRaAppNativeResult: (handler: (...args: unknown[]) => void) => capture('raapp:native_result', handler),
@@ -165,6 +167,29 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
     });
 
     expect(useAgentStore.getState().queuedDepthBySession['session-1']).toBe(0);
+  });
+
+  it('keeps budget approvals when agent:done marks a HITL pause', () => {
+    mountHook();
+
+    act(() => {
+      fire('agent:budget_required', {
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        scope: 'agent-flow-branch',
+        usedIterations: 1,
+        currentLimit: 1,
+      });
+      fire('agent:done', {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentRun: { kind: 'agent-flow-branch' },
+      });
+    });
+
+    expect(useAgentStore.getState().pendingBudgetApprovals['session-1']).toEqual([
+      expect.objectContaining({ requestId: 'budget-1' }),
+    ]);
   });
 
   it('clears a runId-keyed active loop when chat:error interrupts the session', () => {
@@ -331,6 +356,43 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
       active: false,
       queueLength: 0,
     });
+  });
+
+  it('finalizes a stale active turn when a terminal session status arrives without agent:done', () => {
+    mountHook();
+    useSessionStore.getState().markSessionHydrated('session-1');
+
+    act(() => {
+      fire('agent:start', {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        agentRun: { kind: 'chat' },
+      });
+    });
+
+    act(() => {
+      fire('session:status', {
+        sessionId: 'session-1',
+        active: false,
+        queueLength: 0,
+        run: {
+          id: 'run-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          phase: 'completed',
+          status: 'completed',
+          retryCount: 0,
+          safeResume: true,
+          startedAt: 1,
+          updatedAt: 2,
+          lastHeartbeatAt: 2,
+          completedAt: 2,
+        },
+      });
+    });
+
+    expect(useSessionStore.getState().finalizeAgentTurn).toHaveBeenCalledWith('session-1');
+    expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(false);
   });
 
   it('identifies child sessions discovered from live session:updated events', () => {

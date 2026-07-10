@@ -68,6 +68,8 @@ describe('architecture branch stream event projection', () => {
       slot,
       event: 'agent:budget_required',
       data: {
+        requestId: 'budget-1',
+        sessionId: 'child-1',
         usedIterations: 30,
         currentLimit: 30,
         suggestedNextLimit: 40,
@@ -80,6 +82,8 @@ describe('architecture branch stream event projection', () => {
       options: {
         actionSummary: 'Waiting for budget approval.',
         data: {
+          requestId: 'budget-1',
+          sessionId: 'child-1',
           usedIterations: 30,
           currentLimit: 30,
           suggestedNextLimit: 40,

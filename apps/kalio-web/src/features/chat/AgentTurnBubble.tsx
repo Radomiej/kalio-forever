@@ -437,7 +437,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
               ))}
             </div>
           )}
-          {pendingBudgetApprovalsForTurn.length > 0 && !turn.done && (
+          {pendingBudgetApprovalsForTurn.length > 0 && (
             <div className="space-y-2">
               {pendingBudgetApprovalsForTurn.map((pendingBudgetApproval) => (
                 <div
@@ -471,9 +471,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                             sessionId: pendingBudgetApproval.sessionId,
                             decision: decision as 'block' | 'allow_one' | 'allow_ten' | 'allow_unlimited',
                           });
-                          if (decision === 'block') {
-                            removePendingBudgetApproval(pendingBudgetApproval.sessionId, pendingBudgetApproval.requestId);
-                          }
+                          removePendingBudgetApproval(pendingBudgetApproval.sessionId, pendingBudgetApproval.requestId);
                         }}
                         disabled={submittedBudgetRequestId === pendingBudgetApproval.requestId}
                       >

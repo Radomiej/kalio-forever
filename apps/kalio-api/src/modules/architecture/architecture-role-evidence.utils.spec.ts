@@ -123,6 +123,40 @@ describe('architecture role evidence helpers', () => {
     )).toBe('write completed');
   });
 
+  it('formats router handoff from structured output instead of relying on raw assistant prose', () => {
+    const message = architectureSlotMessage(
+      input({ id: 'orchestrator', label: 'Orchestrator', slotType: 'router' }),
+      '',
+      {
+        toolCallCount: 0,
+        toolResultCount: 0,
+        toolNames: [],
+        successfulToolNames: [],
+        targetPaths: [],
+      },
+      false,
+      {
+        selectedStrategy: 'backend-first',
+        mergedDecision: 'Route backend evidence gathering first.',
+        acceptedInputs: [{ fromSlot: 'orchestrator', insight: 'Need backend status proof.', whyAccepted: 'first dependency' }],
+        rejectedInputs: [],
+        unresolvedConflicts: [],
+        risks: [],
+        confidence: 0.82,
+        nextAction: 'route_to',
+        targetNodeId: 'backend',
+        response: 'Backend should inspect API workflow runtime status and return concise evidence.',
+      },
+    );
+
+    expect(message).toContain('Orchestrator handed off to backend.');
+    expect(message).toContain('Confidence: 82%.');
+    expect(message).toContain('Accepted inputs: 1; rejected inputs: 0.');
+    expect(message).toContain('Decision: Route backend evidence gathering first.');
+    expect(message).toContain('Handoff: Backend should inspect API workflow runtime status');
+    expect(message).toContain('Backend should inspect API workflow runtime status');
+  });
+
   it('formats recoverable branch failures from error objects without changing retry decisions', () => {
     const message = architectureRecoverableErrorMessage(
       input({ id: 'router', label: 'Router', slotType: 'router' }),

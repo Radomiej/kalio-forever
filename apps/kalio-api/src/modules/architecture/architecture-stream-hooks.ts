@@ -10,6 +10,7 @@ export interface ArchitectureBranchStreamEvent {
   childSessionId?: ID;
   messageId?: ID;
   callId?: ID;
+  requestId?: ID;
   toolName?: string;
   toolPath?: string;
   agentId?: string;
@@ -114,6 +115,7 @@ function normalizeStreamEvent<K extends keyof SocketEvents>(
   const childSessionId = payload['childSessionId'];
   const messageId = payload['messageId'];
   const callId = payload['callId'];
+  const requestId = payload['requestId'];
   const toolName = payload['toolName'];
   const status = payload['status'];
   const args = payload['args'];
@@ -134,6 +136,7 @@ function normalizeStreamEvent<K extends keyof SocketEvents>(
         ?? firstStringField(result, ['childSessionId']),
     messageId: typeof messageId === 'string' ? messageId : undefined,
     callId: typeof callId === 'string' ? callId : undefined,
+    requestId: typeof requestId === 'string' ? requestId : undefined,
     toolName: typeof toolName === 'string' ? toolName : undefined,
     toolPath: isRecord(args)
       ? firstStringField(argsRecord, ['path', 'filePath', 'targetPath', 'workdir', 'cwd'])

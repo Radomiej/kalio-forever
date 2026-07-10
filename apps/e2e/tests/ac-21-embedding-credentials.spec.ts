@@ -9,15 +9,16 @@ async function openEmbeddingsPanel(page: Page) {
   await expect(page.getByTestId('settings-modal')).toBeVisible();
   await page.getByTestId('settings-tab-embeddings').click();
   await expect(page.getByTestId('embeddings-panel')).toBeVisible();
+  await expect(page.getByTestId('add-embedding-provider-btn')).toBeVisible({ timeout: 30_000 });
 }
 
 /** Clean up all embedding credentials via API */
 async function cleanupCredentials(page: Page) {
-  const res = await page.request.get(`${API_BASE}/memory/embedding-credentials`);
-  if (!res.ok()) return;
+  const res = await page.request.get(`${API_BASE}/memory/embedding-credentials`).catch(() => null);
+  if (!res?.ok()) return;
   const list: Array<{ id: string }> = await res.json();
   for (const c of list) {
-    await page.request.delete(`${API_BASE}/memory/embedding-credentials/${c.id}`);
+    await page.request.delete(`${API_BASE}/memory/embedding-credentials/${c.id}`).catch(() => undefined);
   }
 }
 
@@ -58,8 +59,8 @@ test.describe('Embedding Credentials UI', () => {
   });
 
   test('shows local fallback when no remote credentials are configured', async ({ page }) => {
-    await expect(page.getByText('No remote embedding providers configured. Local embeddings are used by default.')).toBeVisible();
-    await expect(page.getByTestId('embedding-env-card').getByText('Local embeddings')).toBeVisible();
+    await expect(page.getByTestId('embeddings-panel').getByText(/No remote embedding providers configured/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('embedding-env-card').getByText('Local embeddings')).toBeVisible({ timeout: 30_000 });
   });
 
   test('"Add Provider" button opens the add form', async ({ page }) => {

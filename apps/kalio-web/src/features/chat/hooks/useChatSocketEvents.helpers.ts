@@ -143,6 +143,7 @@ interface LiveSessionStatusMaterializationDeps {
   addActiveAgentLoop: (sessionId: string, turnId: string) => void;
   startAgentTurn: (turnId: string, sessionId: string) => void;
   getActiveSessionId?: () => string | null;
+  finalizeAgentTurn?: (sessionId: string) => void;
   removeActiveAgentLoop?: (sessionId: string) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
   setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
@@ -202,6 +203,7 @@ function releaseLiveTurn(
   sessionId: string,
   deps: LiveSessionStatusMaterializationDeps,
 ): void {
+  deps.finalizeAgentTurn?.(sessionId);
   deps.removeActiveAgentLoop?.(sessionId);
   deps.setStreaming?.(false, undefined, sessionId);
   if (deps.getActiveSessionId?.() === sessionId) {
@@ -318,6 +320,7 @@ export function handleSessionStatusEvent(
     setRecoveryNotice: (value: string) => void;
     addActiveAgentLoop: (sessionId: string, turnId: string) => void;
     startAgentTurn: (turnId: string, sessionId: string) => void;
+    finalizeAgentTurn?: (sessionId: string) => void;
     removeActiveAgentLoop: (sessionId: string) => void;
     setAwaitingFirstChunk: (value: boolean) => void;
     setStreaming: (value: boolean, messageId?: string, sessionId?: string | null) => void;

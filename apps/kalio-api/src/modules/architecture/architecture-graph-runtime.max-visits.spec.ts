@@ -619,6 +619,135 @@ describe('createArchitectureGraphEvents max visit guards', () => {
     }));
   });
 
+  it('does not project ask-human router pauses as downstream route hops', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'ask-human-router-pause-runtime',
+      name: 'Ask Human Router Pause Runtime',
+      description: 'Schema where router pause must not look like a downstream route.',
+      version: '0.1.0',
+      roleSlots: [
+        {
+          id: 'orchestrator',
+          label: 'Orchestrator',
+          description: 'Decides whether to continue.',
+          slotType: 'judge',
+          defaultPersonaId: 'orchestrator',
+          allowedPersonaTags: ['review'],
+          required: true,
+          canOverrideAtRunStart: true,
+        },
+        {
+          id: 'reviewer',
+          label: 'Reviewer',
+          description: 'Should wait for explicit human decision.',
+          slotType: 'participant',
+          defaultPersonaId: 'reviewer',
+          allowedPersonaTags: ['review'],
+          required: true,
+          canOverrideAtRunStart: true,
+        },
+      ],
+      nodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', roleSlotId: 'orchestrator', behavior: { mode: 'choose_one' } },
+        { id: 'reviewer', label: 'Reviewer', kind: 'role', roleSlotId: 'reviewer' },
+      ],
+      edges: [
+        { id: 'orchestrator-reviewer', fromNodeId: 'orchestrator', toNodeId: 'reviewer' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-ask-human-router-pause',
+      schemaId: schema.id,
+      prompt: 'Pause for human review.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-ask-human-router-pause',
+      branchSessionIds: {
+        orchestrator: 'arch-run-ask-human-router-pause-orchestrator',
+        reviewer: 'arch-run-ask-human-router-pause-reviewer',
+      },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const routerOutput: ArchitectureRouterOutput = {
+      selectedStrategy: 'reviewer',
+      mergedDecision: 'Human decision is required before Reviewer runs.',
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: ['The router cannot choose a safe next step.'],
+      risks: [],
+      confidence: 0.2,
+      nextAction: 'ask_human',
+      targetNodeId: 'reviewer',
+      response: 'Human decision is required before Reviewer runs.',
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async ({ branchSessionId, personaId, run: activeRun, slot }) => ({
+        message: slot.id === 'orchestrator'
+          ? 'Human decision is required before Reviewer runs.'
+          : 'Reviewer should not run before human approval.',
+        data: {
+          branchSessionId,
+          personaId,
+          rootSessionId: activeRun.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: activeRun.executionMode,
+          ...(slot.id === 'orchestrator' ? { routerOutput } : {}),
+        },
+      })),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+    const routerDecision = events.find((event) => event.type === 'router_decision' && event.nodeId === 'orchestrator');
+    const humanGate = events.find((event) => event.type === 'human_gate' && event.nodeId === 'orchestrator');
+
+    expect(roleExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(routerDecision?.route).toMatchObject({
+      source: 'router',
+      selectedNodeIds: [],
+      rejectedNodeIds: ['reviewer'],
+    });
+    expect(routerDecision?.route?.nextNodeId).toBeUndefined();
+    expect(routerDecision?.data).toMatchObject({
+      nextAction: 'ask_human',
+      selectedNodeIds: [],
+    });
+    expect(humanGate).toMatchObject({
+      reasonCode: 'runtime_pause',
+      runtimeDecision: {
+        status: 'waiting_on_orchestrator',
+        reasonCode: 'runtime_pause',
+      },
+      route: {
+        selectedNodeIds: [],
+        rejectedNodeIds: ['reviewer'],
+      },
+    });
+  });
+
   it('emits a terminal guard event when maxNodeVisits prevents a routed continuation', async () => {
     const schema: ArchitectureSchema = {
       id: 'self-looping-runtime',

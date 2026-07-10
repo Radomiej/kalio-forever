@@ -328,7 +328,6 @@ export function useChatSocketEvents({
         setAwaitingFirstChunk(false);
       }
       setPendingConfirmation(payload.sessionId, null);
-      setPendingBudgetApproval?.(payload.sessionId, null);
     });
 
     const offContext = eventBus.onContext((payload) => {

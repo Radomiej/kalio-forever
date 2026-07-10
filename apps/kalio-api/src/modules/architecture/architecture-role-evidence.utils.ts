@@ -1,5 +1,6 @@
-import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureRun } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureNodeKind, ArchitectureRoleSlot, ArchitectureRun } from '@kalio/types';
 import type { ArchitectureBranchStreamSnapshot } from './architecture-stream-hooks';
+import { routerOutputFromStructuredOutput } from './architecture-structured-output';
 
 export interface ArchitectureToolEvidence {
   toolCallCount: number;
@@ -18,6 +19,7 @@ export interface ArchitectureToolEvidence {
 export interface ArchitectureRoleEvidenceInput {
   run: Pick<ArchitectureRun, 'context'>;
   slot: Pick<ArchitectureRoleSlot, 'id' | 'label' | 'slotType'>;
+  node?: { kind?: ArchitectureNodeKind };
 }
 
 export function architectureSlotMessage(
@@ -25,7 +27,13 @@ export function architectureSlotMessage(
   rawMessage: string,
   toolEvidence: ArchitectureToolEvidence,
   boundedToolLoopExhausted = false,
+  structuredOutput?: unknown,
 ): string {
+  const routerMessage = architectureRouterStructuredMessage(input, structuredOutput);
+  if (routerMessage) {
+    return routerMessage;
+  }
+
   if (
     !boundedToolLoopExhausted
     || input.slot.slotType === 'tool_executor'
@@ -59,6 +67,35 @@ export function architectureSlotMessage(
     'Risk: the slot did not produce a full narrative before the tool budget ended.',
     'Next step: pass this evidence to the router/finalizer; rerun this slot with a larger iteration budget only if its independent reasoning is required.',
   ].filter((part) => part.length > 0).join(' ');
+}
+
+function architectureRouterStructuredMessage(
+  input: ArchitectureRoleEvidenceInput,
+  structuredOutput: unknown,
+): string | undefined {
+  if (input.slot.slotType !== 'router' && input.slot.slotType !== 'judge' && input.node?.kind !== 'router') {
+    return undefined;
+  }
+  const routerOutput = routerOutputFromStructuredOutput(structuredOutput);
+  if (!routerOutput) {
+    return undefined;
+  }
+
+  const target = routerOutput.nextAction === 'route_to' && routerOutput.targetNodeId
+    ? routerOutput.targetNodeId
+    : routerOutput.nextAction;
+  const decision = routerOutput.mergedDecision.trim();
+  const response = routerOutput.response?.trim();
+  const confidence = Number.isFinite(routerOutput.confidence)
+    ? ` Confidence: ${Math.round(routerOutput.confidence * 100)}%.`
+    : '';
+  const evidence = `Accepted inputs: ${routerOutput.acceptedInputs.length}; rejected inputs: ${routerOutput.rejectedInputs.length}.`;
+  const details = [
+    decision.length > 0 ? `Decision: ${decision}` : '',
+    response && response !== decision ? `Handoff: ${response}` : '',
+  ].filter((part) => part.length > 0).join(' ');
+  const suffix = details.length > 0 ? ` ${details}` : '';
+  return `${input.slot.label} handed off to ${target}.${confidence} ${evidence}${suffix}`.trim();
 }
 
 export function architectureRecoverableErrorMessage(

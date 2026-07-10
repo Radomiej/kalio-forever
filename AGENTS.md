@@ -188,6 +188,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - For Kalio-Forever development, repo/dev-managed MCP config is canonical in `<repo>/.kalio/config.toml` or `~/.kalio/config.toml`; SQLite remains the app-local MCP store, and `.vscode/mcp.json` import is legacy/manual, not the normal dev path.
 - When diagnosing Kalio MCP state, do not use `~/.codex/config.toml` as evidence; that file configures Codex, not the Kalio app.
 - Backend is the durable runtime source of truth; frontend state for chat/appflow/runtime must stay rebuildable from backend snapshots after F5/reconnect.
+- `project-spec.md` is the durable cross-session product/runtime boundary spec; update it when architecture/runtime decisions or non-negotiable boundaries change.
 - Prefer extending shared runtime contracts and selectors over adding panel-local state channels, duplicated truth maps, or one-off socket event handling.
 - Treat CLI agents, subagents, and AgentFlow children as one child-execution model whenever the UI/runtime needs shared lifecycle handling.
 - For chat/appflow changes, verify FE-first parity across Talk, Session Panel, Canvas, and Execution Graph instead of proving behavior only through API polling.

@@ -5,6 +5,7 @@ import {
   expectComposerEnabled,
   getComposerSendButton,
   getActiveCredentialId,
+  isRetryableApiTransportError,
   selectSession,
 } from './helpers/test-config';
 
@@ -110,9 +111,19 @@ async function expectVfsContent(
 ): Promise<void> {
   await expect
     .poll(async () => {
-      const response = await request.get(
-        `${API_BASE}/sessions/${sessionId}/vfs/read?path=${encodeURIComponent(filePath)}`,
-      );
+      let response;
+      try {
+        response = await request.get(
+          `${API_BASE}/sessions/${sessionId}/vfs/read?path=${encodeURIComponent(filePath)}`,
+          { timeout: 10_000 },
+        );
+      } catch (error) {
+        if (isRetryableApiTransportError(error)) {
+          return null;
+        }
+        throw error;
+      }
+
       if (!response.ok()) {
         return null;
       }

@@ -21,9 +21,49 @@ const mockState: {
   getSessionMessages: (sessionId) => mockState.sessionMessages[sessionId] ?? [],
 };
 
+const mockAgentState: {
+  pendingBudgetApprovals: Record<string, Array<{
+    requestId: string;
+    sessionId: string;
+    scope: string;
+    usedIterations: number;
+    currentLimit: number;
+    suggestedNextLimit?: number;
+    requestedBy?: string;
+    nodeId?: string;
+    roleSlotId?: string;
+  }>>;
+  setPendingBudgetApproval: (sessionId: string, request: {
+    requestId: string;
+    sessionId: string;
+    scope: string;
+    usedIterations: number;
+    currentLimit: number;
+    suggestedNextLimit?: number;
+    requestedBy?: string;
+    nodeId?: string;
+    roleSlotId?: string;
+  }) => void;
+} = {
+  pendingBudgetApprovals: {},
+  setPendingBudgetApproval: (sessionId, request) => {
+    const existing = mockAgentState.pendingBudgetApprovals[sessionId] ?? [];
+    mockAgentState.pendingBudgetApprovals[sessionId] = [
+      ...existing.filter((item) => item.requestId !== request.requestId),
+      request,
+    ];
+  },
+};
+
 vi.mock('../../store/sessionStore', () => ({
   useSessionStore: Object.assign(() => mockState, {
     getState: () => mockState,
+  }),
+}));
+
+vi.mock('../../store/agentStore', () => ({
+  useAgentStore: Object.assign(() => mockAgentState, {
+    getState: () => mockAgentState,
   }),
 }));
 
@@ -32,6 +72,7 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     mockState.activeSessionId = 'host';
     mockState.sessions = [];
     mockState.sessionMessages = {};
+    mockAgentState.pendingBudgetApprovals = {};
   });
 
   it('keeps a rehydrated workflow envelope attached to its real user prompt after a follow-up prompt exists', async () => {
@@ -861,6 +902,197 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     expect(reloadedMessages?.[0]?.content).toContain('Status: running');
     expect(reloadedMessages?.[0]?.content).toContain('Last action: Router completed synthesis for the next graph node.');
     expect(setMessages).toHaveBeenCalledWith(reloadedMessages, 'arch-router');
+  });
+
+  it('projects budget HITL requests from typed architecture events during child reload', async () => {
+    const technicalSession: ChatSession = {
+      id: 'arch-pragmatist',
+      personaId: 'default',
+      title: 'Strategic Decision Council: Pragmatist',
+      parentSessionId: 'host',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'pragmatist',
+        architectureContext: {
+          architectureRunId: 'run-budget',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Pragmatist',
+          roleSlotId: 'pragmatist',
+          roleSlotType: 'participant',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    mockState.sessions = [technicalSession];
+    mockState.activeSessionId = 'arch-pragmatist';
+
+    const fetchMessages = vi.fn(async () => []);
+    const fetchArchitectureRunProjection = vi.fn(async () => ({
+      chat: {
+        runId: 'run-budget',
+        messages: [],
+      } satisfies ArchitectureChatProjection,
+      events: [
+        {
+          id: 'event-budget',
+          runId: 'run-budget',
+          sequence: 3,
+          type: 'human_gate',
+          message: 'Pragmatist requested more tool budget (1/1).',
+          nodeId: 'pragmatist',
+          roleSlotId: 'pragmatist',
+          createdAt: 3,
+          data: {
+            kind: 'branch_stream',
+            event: 'agent:budget_required',
+            sessionId: 'arch-pragmatist',
+            requestId: 'budget-1',
+            usedIterations: 1,
+            currentLimit: 1,
+            suggestedNextLimit: 11,
+            requestedBy: 'pragmatist',
+          },
+        },
+      ] satisfies ArchitectureExecutionEvent[],
+      graph: {
+        runId: 'run-budget',
+        schemaName: 'Strategic Decision Council',
+        status: 'running',
+        nodes: [
+          {
+            id: 'pragmatist',
+            sessionId: 'arch-pragmatist',
+            label: 'Pragmatist',
+            kind: 'role',
+            status: 'running',
+            eventIds: ['event-budget'],
+          },
+        ],
+        edges: [],
+      } satisfies ArchitectureGraphProjection,
+    }));
+
+    await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'arch-pragmatist',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessions: () => mockState.sessions,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages: vi.fn(),
+      setAgentTurns: vi.fn(),
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    expect(mockAgentState.pendingBudgetApprovals['arch-pragmatist']).toEqual([
+      expect.objectContaining({
+        requestId: 'budget-1',
+        sessionId: 'arch-pragmatist',
+        scope: 'agent-flow-branch',
+        usedIterations: 1,
+        currentLimit: 1,
+        suggestedNextLimit: 11,
+        requestedBy: 'pragmatist',
+        nodeId: 'pragmatist',
+        roleSlotId: 'pragmatist',
+      }),
+    ]);
+  });
+
+  it('falls back to top-level node metadata when budget HITL payload omits node identifiers', async () => {
+    const technicalSession: ChatSession = {
+      id: 'arch-pragmatist',
+      personaId: 'default',
+      title: 'Strategic Decision Council: Pragmatist',
+      parentSessionId: 'host',
+      kind: 'subagent',
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureSlotId: 'pragmatist',
+        architectureContext: {
+          architectureRunId: 'run-budget',
+          schemaName: 'Strategic Decision Council',
+          displayLabel: 'Pragmatist',
+          roleSlotId: 'pragmatist',
+          roleSlotType: 'participant',
+          sessionSurface: 'technical-node',
+          conversationVisibility: 'visible',
+        },
+      },
+      createdAt: 2,
+      updatedAt: 2,
+    };
+    mockState.sessions = [technicalSession];
+    mockState.activeSessionId = 'arch-pragmatist';
+
+    const fetchMessages = vi.fn(async () => []);
+    const fetchArchitectureRunProjection = vi.fn(async () => ({
+      chat: {
+        runId: 'run-budget',
+        messages: [],
+      } satisfies ArchitectureChatProjection,
+      events: [
+        {
+          id: 'event-budget-fallback',
+          runId: 'run-budget',
+          sequence: 4,
+          type: 'human_gate',
+          message: 'Pragmatist requested more tool budget (2/2).',
+          nodeId: 'pragmatist-top-level',
+          roleSlotId: 'pragmatist-slot-top-level',
+          createdAt: 4,
+          data: {
+            kind: 'branch_stream',
+            event: 'agent:budget_required',
+            sessionId: 'arch-pragmatist',
+            requestId: 'budget-top-level',
+            usedIterations: 2,
+            currentLimit: 2,
+            suggestedNextLimit: 12,
+            requestedBy: 'pragmatist',
+          },
+        },
+      ] satisfies ArchitectureExecutionEvent[],
+      graph: {
+        runId: 'run-budget',
+        schemaName: 'Strategic Decision Council',
+        status: 'running',
+        nodes: [
+          {
+            id: 'pragmatist',
+            sessionId: 'arch-pragmatist',
+            label: 'Pragmatist',
+            kind: 'role',
+            status: 'running',
+            eventIds: ['event-budget-fallback'],
+          },
+        ],
+        edges: [],
+      } satisfies ArchitectureGraphProjection,
+    }));
+
+    await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'arch-pragmatist',
+      getActiveSessionId: () => mockState.activeSessionId,
+      getSessions: () => mockState.sessions,
+      getSessionMessages: mockState.getSessionMessages,
+      setMessages: vi.fn(),
+      setAgentTurns: vi.fn(),
+      fetchMessages,
+      fetchArchitectureRunProjection,
+    });
+
+    expect(mockAgentState.pendingBudgetApprovals['arch-pragmatist']).toEqual([
+      expect.objectContaining({
+        requestId: 'budget-top-level',
+        sessionId: 'arch-pragmatist',
+        nodeId: 'pragmatist-top-level',
+        roleSlotId: 'pragmatist-slot-top-level',
+      }),
+    ]);
   });
 
   it('falls back to typed node activity when architecture chat content is malformed after reload', async () => {

@@ -6,8 +6,10 @@ import type {
   ChatSession,
 } from '@kalio/types';
 import { useSessionStore } from '../../store/sessionStore';
+import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 import { buildArchitectureRunMetadata, findArchitectureRunInMessages } from './architectureChatSummary';
+import { budgetApprovalsBySessionFromArchitectureEvents } from './architectureBudgetApprovalProjection';
 import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
 import { extractSubAgentFlowResult } from './subAgentFlowResult.parser';
@@ -282,6 +284,32 @@ function isUsableArchitectureProjection(
   ));
 }
 
+function syncBudgetApprovalsFromArchitectureProjection(
+  projection: {
+    events: ArchitectureExecutionEvent[];
+  },
+): void {
+  const approvalsBySession = budgetApprovalsBySessionFromArchitectureEvents(projection.events);
+  if (approvalsBySession.size === 0) {
+    return;
+  }
+  const store = useAgentStore.getState();
+  for (const [sessionId, approvals] of approvalsBySession) {
+    for (const approval of approvals) {
+      store.setPendingBudgetApproval(sessionId, approval);
+    }
+  }
+}
+
+async function fetchArchitectureRunProjectionAndSync(
+  runId: string,
+  fetchArchitectureRunProjection: FetchArchitectureRunProjection,
+): Promise<Awaited<ReturnType<FetchArchitectureRunProjection>>> {
+  const projection = await fetchArchitectureRunProjection(runId);
+  syncBudgetApprovalsFromArchitectureProjection(projection);
+  return projection;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -421,7 +449,7 @@ async function hydrateArchitectureActivityForSession(
 
   const syntheticMessage = buildSyntheticArchitectureChildMessage(
     session,
-    await fetchArchitectureRunProjection(runId),
+    await fetchArchitectureRunProjectionAndSync(runId, fetchArchitectureRunProjection),
   );
   return syntheticMessage ? [syntheticMessage] : null;
 }
@@ -446,7 +474,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
     for (const persistedSummary of persistedSummaries) {
       let summaryToMerge: ArchitectureRunSummary | null = null;
       try {
-        const projection = await fetchArchitectureRunProjection(persistedSummary.runId);
+        const projection = await fetchArchitectureRunProjectionAndSync(persistedSummary.runId, fetchArchitectureRunProjection);
         summaryToMerge = buildArchitectureRunSummaryFromProjection(persistedSummary.runId, projection);
       } catch (error) {
         void error;
@@ -473,7 +501,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
   if (inferredSummary?.hostProjectionKind === 'workflow-envelope') {
     let typedSummary = inferredSummary;
     try {
-      const projection = await fetchArchitectureRunProjection(inferredSummary.runId);
+      const projection = await fetchArchitectureRunProjectionAndSync(inferredSummary.runId, fetchArchitectureRunProjection);
       typedSummary = buildArchitectureRunSummaryFromProjection(inferredSummary.runId, projection) ?? inferredSummary;
     } catch (error) {
       void error;
@@ -492,7 +520,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
     for (const runId of subAgentFlowRunIds) {
       let projection: Awaited<ReturnType<FetchArchitectureRunProjection>>;
       try {
-        projection = await fetchArchitectureRunProjection(runId);
+        projection = await fetchArchitectureRunProjectionAndSync(runId, fetchArchitectureRunProjection);
       } catch (error) {
         void error;
         // TODO: legacy fallback - run_sub_agentflow results may outlive a transient projection fetch failure.
@@ -553,7 +581,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
     for (const runId of candidateRunIds) {
       let projection: Awaited<ReturnType<FetchArchitectureRunProjection>>;
       try {
-        projection = await fetchArchitectureRunProjection(runId);
+        projection = await fetchArchitectureRunProjectionAndSync(runId, fetchArchitectureRunProjection);
       } catch (error) {
         void error;
         // TODO: legacy fallback - projection fetch is best-effort during reconnect hydration.

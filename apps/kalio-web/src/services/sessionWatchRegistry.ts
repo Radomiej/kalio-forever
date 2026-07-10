@@ -20,7 +20,7 @@ export function replaceBaselineWatchedSessions(sessionIds: Iterable<string>, rea
 export function identifyWatchedSession(
   sessionId: string | null | undefined,
   reason: string,
-  options: { sticky?: boolean } = {},
+  options: { sticky?: boolean; force?: boolean } = {},
 ): void {
   const normalized = normalizeSessionId(sessionId);
   if (!normalized || isPendingHostSessionId(normalized)) {
@@ -30,7 +30,7 @@ export function identifyWatchedSession(
   if (options.sticky) {
     stickySessionIds.add(normalized);
   }
-  identifySessionOnce(normalized, reason);
+  identifySessionOnce(normalized, reason, options.force === true);
 }
 
 export function resetSessionWatchConnectionEpoch(reason: string): void {
@@ -50,8 +50,8 @@ export function clearSessionWatchRegistry(): void {
   identifiedSessionIds.clear();
 }
 
-function identifySessionOnce(sessionId: string, reason: string): void {
-  if (identifiedSessionIds.has(sessionId)) {
+function identifySessionOnce(sessionId: string, reason: string, force = false): void {
+  if (!force && identifiedSessionIds.has(sessionId)) {
     debugWatch('skip', sessionId, reason);
     return;
   }

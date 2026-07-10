@@ -109,6 +109,33 @@ describe('shouldReplaceTurnsFromHydratedHistory', () => {
     })).toBe(false);
   });
 
+  it('replaces an empty live placeholder when a child agent has durable tool history', () => {
+    const hydratedMessages = [
+      makeMessage({ id: 'user-1', role: 'user', content: 'Inspect repo', createdAt: 1 }),
+      makeMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '',
+        createdAt: 2,
+        toolCalls: [{ id: 'call-1', name: 'vfs_list', args: {} }],
+      }),
+      makeMessage({
+        id: 'tool-1',
+        role: 'tool_result',
+        content: '{"files":[]}',
+        toolCallId: 'call-1',
+        createdAt: 3,
+      }),
+    ];
+
+    expect(shouldReplaceTurnsFromHydratedHistory({
+      sessionId: 'session-1',
+      hydratedMessages,
+      currentTurns: [makeTurn({ id: 'turn-live', items: [] })],
+      activeTurnId: 'turn-live',
+    })).toBe(true);
+  });
+
   it('keeps a reconnecting live turn when the loop is still active but the local turn has not re-materialized yet', () => {
     expect(shouldReplaceTurnsFromHydratedHistory({
       sessionId: 'session-1',

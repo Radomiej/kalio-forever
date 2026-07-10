@@ -12,7 +12,10 @@ import type {
 import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION } from './architecture-final-artifact-contract';
-import { summarizeArchitectureIncomingEvent } from './architecture-incoming-event-summary';
+import {
+  summarizeArchitectureIncomingEvent,
+  summarizeArchitectureIncomingHandoffPacket,
+} from './architecture-incoming-event-summary';
 import {
   finalArtifactContractFromStructuredOutput,
   routerOutputFromStructuredOutput,
@@ -179,7 +182,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     const streamSnapshot = streamHook.snapshot();
     const toolEvidence = summarizeToolEvidence(streamSnapshot);
     const boundedToolLoopExhausted = result.reasonCode === 'max_steps';
-    const message = architectureSlotMessage(input, result.result, toolEvidence, boundedToolLoopExhausted);
+    const message = architectureSlotMessage(input, result.result, toolEvidence, boundedToolLoopExhausted, result.structuredOutput);
 
     return {
       message,
@@ -299,6 +302,15 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       lines.push('', 'Incoming graph outputs:');
       for (const event of incomingEvents) {
         lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType)}${incomingEventEvidenceSummary(event)}`);
+      }
+      const handoffPackets = incomingEvents
+        .map((event) => summarizeArchitectureIncomingHandoffPacket(event))
+        .filter((packet): packet is string => packet !== undefined);
+      if (handoffPackets.length > 0) {
+        lines.push('', 'Incoming handoff packets:');
+        for (const packet of handoffPackets) {
+          lines.push(`- ${packet}`);
+        }
       }
     }
     if (outgoingNodeIds.length > 0) {

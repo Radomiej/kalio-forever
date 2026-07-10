@@ -66,6 +66,27 @@ describe('architecture structured output', () => {
     expect(structuredRouteToCall(output)).toBeNull();
   });
 
+  it('does not convert ask-human targets into route calls', () => {
+    const output = {
+      selectedStrategy: 'reviewer',
+      mergedDecision: 'Human approval is required before Reviewer runs.',
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: ['Router cannot safely choose the next node.'],
+      risks: [],
+      confidence: 0.2,
+      nextAction: 'ask_human',
+      targetNodeId: 'reviewer',
+      response: 'Human approval is required before Reviewer runs.',
+    };
+
+    expect(routerOutputFromStructuredOutput(output)).toMatchObject({
+      nextAction: 'ask_human',
+      targetNodeId: 'reviewer',
+    });
+    expect(structuredRouteToCall(output)).toBeNull();
+  });
+
   it('rejects malformed router and finalizer control objects', () => {
     expect(routerOutputFromStructuredOutput({
       nextAction: 'route_to',

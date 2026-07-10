@@ -81,7 +81,7 @@ test.describe('Architecture structured-output failure handling', () => {
       const timeline = page.getByTestId('architecture-run-timeline');
       await expect(timeline).toBeVisible({ timeout: 120_000 });
       await expect(timeline).toHaveAttribute('data-status', 'failed', { timeout: 120_000 });
-      await expect(page.locator('[data-testid="architecture-route-router"][data-status="failed"]')).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('[data-testid="architecture-route-router"][data-status="failed"]').first()).toBeVisible({ timeout: 30_000 });
       await expect(page.locator('[data-testid^="architecture-route-"][data-status="pending"]')).toHaveCount(0, { timeout: 30_000 });
 
       const runId = await architectureRunIdForHost(request, hostSessionId);

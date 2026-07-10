@@ -557,6 +557,12 @@ class ArchitectureGraphRuntime {
       };
       routerOutput = routerOutputWithActionTarget(routerOutput, actionTargetNodeId);
     }
+    const routerPause = isRouterPauseAction(routerOutput.nextAction);
+    if (routerPause) {
+      finalSelectedNodeIds = [];
+      rejectedNodeIds = [...outgoingNodeIds];
+      route = this.routerPauseRoute(node, route, outgoingNodeIds, routerOutput);
+    }
     this.push('router_decision', result.message, {
       actionSummary: architectureActionSummaryForEvent('router_decision', 'router'),
       nodeId: node.id,
@@ -569,6 +575,7 @@ class ArchitectureGraphRuntime {
         behavior: node.behavior ? { ...node.behavior } : undefined,
         incomingNodeIds,
         nextNodeId: finalSelectedNodeIds[0],
+        nextAction: routerOutput.nextAction,
         outgoingNodeIds,
         incompleteReason,
         runtimeGuard: incompleteReason ?? (guard.applied ? guard.reason : undefined),
@@ -583,7 +590,7 @@ class ArchitectureGraphRuntime {
       route,
       routerOutput,
     });
-    if (isRouterPauseAction(routerOutput.nextAction)) {
+    if (routerPause) {
       this.pushRouterRuntimePause(node, route, routerOutput, slot.id);
       return [];
     }
@@ -608,7 +615,7 @@ class ArchitectureGraphRuntime {
     const behavior = node.behavior;
     let selectedNodeIds = selectedOutgoingNodeIds({ schema: this.options.schema, node, outgoingNodeIds });
     let rejectedNodeIds = outgoingNodeIds.filter((nodeId) => !selectedNodeIds.includes(nodeId));
-    let nextNodeId = selectedNodeIds[0];
+    let nextNodeId: string | undefined = selectedNodeIds[0];
     let nextLabel = nextNodeId ? nodesById.get(nextNodeId)?.label ?? nextNodeId : 'end';
     let message = routingMessage(node, nextLabel, selectedNodeIds.length);
     let route: ArchitectureRouteDecision = {
@@ -649,6 +656,14 @@ class ArchitectureGraphRuntime {
         actionTargetNodeId,
       );
     }
+    const routerPause = routerOutput ? isRouterPauseAction(routerOutput.nextAction) : false;
+    if (routerOutput && routerPause) {
+      selectedNodeIds = [];
+      rejectedNodeIds = [...outgoingNodeIds];
+      nextNodeId = undefined;
+      route = this.routerPauseRoute(node, route, outgoingNodeIds, routerOutput);
+      message = routerOutput.mergedDecision || `${node.label} requested human input.`;
+    }
     this.push('router_decision', message, {
       actionSummary: architectureActionSummaryForEvent('router_decision', node.kind),
       nodeId: node.id,
@@ -661,6 +676,7 @@ class ArchitectureGraphRuntime {
         convergeToNodeId: route.convergeToNodeId,
         incomingNodeIds,
         nextNodeId,
+        nextAction: routerOutput?.nextAction,
         outgoingNodeIds,
         rejectedNodeIds,
         rootSessionId: this.options.run.rootSessionId,
@@ -675,7 +691,7 @@ class ArchitectureGraphRuntime {
         route,
         routerOutput,
       });
-      if (isRouterPauseAction(routerOutput.nextAction)) {
+      if (routerPause) {
         this.pushRouterRuntimePause(node, route, routerOutput);
         return [];
       }
@@ -710,6 +726,23 @@ class ArchitectureGraphRuntime {
         unresolvedConflicts: routerOutput.unresolvedConflicts,
       },
     });
+  }
+
+  private routerPauseRoute(
+    node: ArchitectureSchemaNode,
+    route: ArchitectureRouteDecision,
+    outgoingNodeIds: string[],
+    routerOutput: ArchitectureRouterOutput,
+  ): ArchitectureRouteDecision {
+    return {
+      ...route,
+      source: node.kind === 'parallel' ? 'parallel' : 'router',
+      selectedNodeIds: [],
+      rejectedNodeIds: [...outgoingNodeIds],
+      nextNodeId: undefined,
+      convergeToNodeId: undefined,
+      response: routerOutput.response ?? routerOutput.mergedDecision,
+    };
   }
 
   private async executeFinalizerNode(

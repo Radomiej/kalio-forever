@@ -28,6 +28,15 @@ describe('sessionWatchRegistry', () => {
     expect(eventBus.identifySession).toHaveBeenCalledWith('session-1');
   });
 
+  it('allows active session activation to force replay of runtime snapshots and pending HITL', () => {
+    identifyWatchedSession('session-1', 'tree-preload', { sticky: true });
+    identifyWatchedSession('session-1', 'active-selection', { sticky: true, force: true });
+
+    expect(eventBus.identifySession).toHaveBeenCalledTimes(2);
+    expect(eventBus.identifySession).toHaveBeenNthCalledWith(1, 'session-1');
+    expect(eventBus.identifySession).toHaveBeenNthCalledWith(2, 'session-1');
+  });
+
   it('re-identifies baseline and sticky sessions after a new connection epoch starts', () => {
     replaceBaselineWatchedSessions(['root-1'], 'bootstrap');
     identifyWatchedSession('session-2', 'active', { sticky: true });
