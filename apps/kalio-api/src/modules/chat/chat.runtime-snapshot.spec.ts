@@ -247,6 +247,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'failed',
         status: 'failed',
+        revision: 1,
         retryCount: 0,
         safeResume: false,
         startedAt: 111,
@@ -815,6 +816,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 111,
@@ -1002,7 +1004,7 @@ describe('buildRuntimeActivitySnapshot', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('status unavailable'));
   });
 
-  it('falls back to completed for an inactive child subagent that still has run metadata', async () => {
+  it('keeps an inactive child subagent unresolved when run metadata is not terminal', async () => {
     const listChildren = vi.fn().mockImplementation(async (sessionId: string) => {
       if (sessionId === 'session-1') {
         return [{ id: 'child-1', parentSessionId: 'session-1', kind: 'subagent', parentToolCallId: 'call-1', title: 'Child 1', updatedAt: 2 }];
@@ -1050,7 +1052,7 @@ describe('buildRuntimeActivitySnapshot', () => {
     expect(batch.snapshotsBySessionId['session-1'].childExecutions).toEqual([
       expect.objectContaining({
         childSessionId: 'child-1',
-        status: 'completed',
+        status: 'idle',
       }),
     ]);
   });
@@ -1065,6 +1067,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 111,
@@ -1134,6 +1137,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 111,

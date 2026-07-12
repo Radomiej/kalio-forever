@@ -223,9 +223,32 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     setMessages,
     setAgentTurns,
   });
+  const durableWaitingChildExecutions = useMemo(
+    () => activeSessionId
+      ? sessions
+          .filter((session) => session.kind === 'subagent'
+            && session.parentSessionId === activeSessionId
+            && Boolean(session.parentToolCallId)
+            && (pendingConfirmations[session.id]?.length ?? 0) > 0)
+          .map((session) => ({
+            id: `pending:${session.id}`,
+            kind: 'subagent' as const,
+            parentSessionId: activeSessionId,
+            childSessionId: session.id,
+            parentToolCallId: session.parentToolCallId,
+            label: session.title,
+            status: 'waiting' as const,
+            updatedAt: session.updatedAt,
+          }))
+      : [],
+    [activeSessionId, pendingConfirmations, sessions],
+  );
   const graphChildExecutions = useMemo(
-    () => mergeRuntimeChildExecutions(activeRuntimeSnapshot?.childExecutions ?? [], parentAgentFlowChildExecutions),
-    [activeRuntimeSnapshot?.childExecutions, parentAgentFlowChildExecutions],
+    () => mergeRuntimeChildExecutions(
+      mergeRuntimeChildExecutions(activeRuntimeSnapshot?.childExecutions ?? [], parentAgentFlowChildExecutions),
+      durableWaitingChildExecutions,
+    ),
+    [activeRuntimeSnapshot?.childExecutions, durableWaitingChildExecutions, parentAgentFlowChildExecutions],
   );
   const graphSurfaceClassName = 'flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.08),_transparent_42%),linear-gradient(rgba(56,189,248,0.06)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.06)_1px,_transparent_1px)] bg-[length:100%_100%,32px_32px,32px_32px] bg-[#0a1220] p-4';
   const focusedGraph = focusExecutionGraphMessages(activeSessionMessages, focusMode);
@@ -390,9 +413,20 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     personas,
     collapseTools,
   });
-  const model = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
+  const baseModel = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
     ? architectureRootModel
     : messageModel;
+  const waitingSessionIds = new Set(Object.entries(pendingConfirmations)
+    .filter(([, requests]) => requests.length > 0)
+    .map(([sessionId]) => sessionId));
+  const model = waitingSessionIds.size > 0
+    ? {
+        ...baseModel,
+        nodes: baseModel.nodes.map((node) => waitingSessionIds.has(node.sessionId ?? '')
+          ? { ...node, status: 'waiting' as const }
+          : node),
+      }
+    : baseModel;
 
   const effectiveSelectedId = model.nodes.some((node) => node.id === selectedNodeId)
     ? selectedNodeId

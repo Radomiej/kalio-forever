@@ -15,6 +15,8 @@ import type { SessionsService } from '../sessions.service';
 import type { StreamProcessorService } from '../stream-processor.service';
 import type { ToolDispatchService } from '../tool-dispatch.service';
 import type { VFSService } from '../../vfs/vfs.service';
+import type { RunJournalService } from '../run-journal.service';
+import type { SubagentResultReplayService } from '../subagent-result-replay.service';
 
 export function makeToolPolicy(
   personaService: Partial<PersonaService>,
@@ -108,6 +110,8 @@ export function makeSubagentRuntime(params: {
   audit?: Partial<AuditService>;
   skillsService?: SkillsService;
   agentBudgetApprovals?: Partial<AgentBudgetApprovalService>;
+  runJournal?: Partial<RunJournalService>;
+  resultReplay?: Partial<SubagentResultReplayService>;
 }): SubagentRuntimeService {
   const personaService = params.personaService ?? {
     getSessionConfig: vi.fn().mockResolvedValue({
@@ -140,5 +144,7 @@ export function makeSubagentRuntime(params: {
       requestAdditionalBudget: vi.fn().mockResolvedValue(null),
     }) as unknown as AgentBudgetApprovalService,
     params.audit as AuditService,
+    params.runJournal as RunJournalService,
+    params.resultReplay as SubagentResultReplayService,
   );
 }

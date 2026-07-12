@@ -386,12 +386,13 @@ describe('CanvasPanel subagent grouping', () => {
           childSessionId: 'sub-session-1',
           parentToolCallId: 'master-call',
           label: 'Designer sub-agent',
-          status: 'running',
+          status: 'completed',
           updatedAt: 2,
         }],
         updatedAt: 2,
       },
     };
+    agentState.pendingConfirmations = { 'sub-session-1': [{}] };
 
     mockApiGet.mockResolvedValue({
       data: sessionState.sessionMessages['sub-session-1'],
@@ -404,7 +405,7 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByTestId('canvas-subagent-card-sub-session-1')).toHaveAttribute('data-session-id', 'sub-session-1');
     expect(screen.getByTestId('canvas-open-subagent-sub-session-1')).toHaveAttribute('data-session-id', 'sub-session-1');
     expect(screen.getByText('Designer sub-agent')).toBeDefined();
-    expect(screen.getByTestId('canvas-subagent-status-sub-session-1')).toHaveTextContent('running');
+    expect(screen.getByTestId('canvas-subagent-status-sub-session-1')).toHaveAttribute('data-status', 'waiting');
     expect(screen.getByText('Sub-agent tools (1)')).toBeDefined();
     expect(screen.getByText('vfs_write')).toBeDefined();
     expect(screen.queryByText('Tools (1)')).toBeNull();

@@ -614,7 +614,11 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
 
-    expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
+    const promptInput = screen.getByTestId('welcome-prompt-input');
+    expect(promptInput).toBeInTheDocument();
+    expect(promptInput).not.toBeDisabled();
+    fireEvent.change(promptInput, { target: { value: 'Start another chat' } });
+    expect(screen.getByTestId('welcome-run-prompt')).not.toBeDisabled();
     expect(screen.queryByTestId('pending-agent-bubble')).toBeNull();
   });
 

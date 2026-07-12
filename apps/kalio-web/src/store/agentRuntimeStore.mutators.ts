@@ -44,6 +44,20 @@ interface CliProjectionState {
   runtimeActivitySnapshots: Record<string, SocketEvents['session:runtime_snapshot']>;
 }
 
+function isStaleRuntimeSnapshot(
+  current: SocketEvents['session:runtime_snapshot'] | undefined,
+  incoming: SocketEvents['session:runtime_snapshot'],
+): boolean {
+  if (!current?.run || !incoming.run || current.run.id !== incoming.run.id) {
+    return false;
+  }
+  if (typeof current.run.revision !== 'number' || typeof incoming.run.revision !== 'number') {
+    // TODO: legacy fallback. Snapshots written before the revision migration lack a durable order.
+    return false;
+  }
+  return incoming.run.revision <= current.run.revision;
+}
+
 function applyPendingConfirmationEntries(
   state: RuntimePendingState,
   sessionId: string,
@@ -243,6 +257,9 @@ export function applyRuntimeActivitySnapshotSync<TActivity extends { sessionId?:
   snapshot: SocketEvents['session:runtime_snapshot'],
   mapRuntimeActivity: (activity: RuntimeToolActivity) => TActivity,
 ): RuntimeSnapshotSyncState<TActivity> {
+  if (isStaleRuntimeSnapshot(state.runtimeActivitySnapshots[snapshot.sessionId], snapshot)) {
+    return state;
+  }
   const filteredSnapshot: SocketEvents['session:runtime_snapshot'] = {
     ...snapshot,
     pendingConfirmations: snapshot.pendingConfirmations.filter((entry) =>

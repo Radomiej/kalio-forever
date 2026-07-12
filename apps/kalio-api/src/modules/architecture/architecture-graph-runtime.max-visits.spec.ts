@@ -1017,6 +1017,8 @@ describe('createArchitectureGraphEvents max visit guards', () => {
           emit?.('agent:budget_required', {
             requestId: 'budget-1',
             sessionId: branchSessionId,
+            turnId: 'turn-budget-1',
+            promptMessageId: 'prompt-budget-1',
             scope: 'agent-flow-branch',
             usedIterations: 8,
             currentLimit: 8,
@@ -1060,6 +1062,23 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         usedIterations: 8,
         currentLimit: 8,
         requestedBy: 'orchestrator',
+      }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'orchestrator',
+      reasonCode: 'runtime_pause',
+      lifecycle: 'waiting_on_orchestrator',
+      status: 'waiting_on_orchestrator',
+      data: expect.objectContaining({
+        pendingNodeIds: ['orchestrator'],
+        waitEvent: 'agent:budget_required',
+        waitIdentity: {
+          requestId: 'budget-1',
+          childSessionId: 'arch-run-budget-human-gate-orchestrator',
+          childTurnId: 'turn-budget-1',
+          promptMessageId: 'prompt-budget-1',
+        },
       }),
     }));
   });
@@ -1123,6 +1142,8 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         emit?.('tool:confirmation_required', {
           requestId: 'confirm-1',
           sessionId: branchSessionId,
+          turnId: 'turn-confirm-1',
+          promptMessageId: 'prompt-confirm-1',
           toolName: 'vfs_delete',
           args: {
             path: 'C:\\Projekty\\kalio-forever\\tmp\\stale.txt',
@@ -1155,6 +1176,23 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         sessionId: 'arch-run-tool-confirmation-human-gate-orchestrator',
         toolName: 'vfs_delete',
         toolPath: 'C:\\Projekty\\kalio-forever\\tmp\\stale.txt',
+      }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'orchestrator',
+      reasonCode: 'runtime_pause',
+      lifecycle: 'waiting_on_orchestrator',
+      status: 'waiting_on_orchestrator',
+      data: expect.objectContaining({
+        pendingNodeIds: ['orchestrator'],
+        waitEvent: 'tool:confirmation_required',
+        waitIdentity: {
+          requestId: 'confirm-1',
+          childSessionId: 'arch-run-tool-confirmation-human-gate-orchestrator',
+          childTurnId: 'turn-confirm-1',
+          promptMessageId: 'prompt-confirm-1',
+        },
       }),
     }));
   });

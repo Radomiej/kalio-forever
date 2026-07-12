@@ -167,6 +167,22 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    const configuredProvider = this.config.get<string>('EMBEDDING_PROVIDER', '').trim().toLowerCase();
+    if (configuredProvider === 'mock') {
+      this.provider = new MockEmbeddingProvider();
+      this.providerSource = 'mock';
+      this.activeCredentialId = null;
+      this.activeCredentialName = null;
+      this.activeModel = 'mock';
+      this.activeBaseUrl = 'mock';
+      this.activeDimensions = this.provider.getDimensions();
+      this.activeBackend = null;
+      this.activeCacheDir = null;
+      this.activeProfileId = buildProfileId('mock', this.activeModel, this.activeDimensions);
+      this.logger.log('Embedding provider initialized from explicit mock configuration');
+      return;
+    }
+
     // No DB credential — prefer explicit remote embeddings config when present,
     // otherwise fall back to the auto-downloaded local model.
     // We deliberately do NOT fall back to LLM_API_KEY / LLM_BASE_URL:
@@ -245,7 +261,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
         model: 'mock',
         dimensions: this.provider?.getDimensions() ?? DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
         baseUrlMasked: '(mock)',
-        configured: false,
+        configured: this.providerSource === 'mock' && this.provider !== null,
       };
     }
 

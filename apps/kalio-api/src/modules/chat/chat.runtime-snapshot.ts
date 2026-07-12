@@ -14,12 +14,14 @@ import type { AgentBudgetApprovalService } from './agent-budget-approval.service
 import type { SessionPipelineService } from './session-pipeline.service';
 import type { SessionsService } from './sessions.service';
 import type { ToolDispatchService } from './tool-dispatch.service';
+import type { HitlRequestService } from '../hitl/hitl-request.service';
 import type { AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../cli-agent/cli-agent-session-runtime.port';
 import type { ActiveSubagentRunStatus, SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { readPendingRAAppLaunchIntent } from './raapp-launch-intent';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
 import { safeLoadRuntimeSnapshotSessionMetadata } from './chat.runtime-session-metadata';
+import { mergePendingToolConfirmations } from './chat.runtime-hitl';
 
 interface RuntimeSnapshotLogger {
   warn(message: string): void;
@@ -30,6 +32,7 @@ export interface RuntimeActivitySnapshotDeps {
   status?: SocketEvents['session:status'];
   pipeline: Pick<SessionPipelineService, 'getSessionStatusWithRun'>;
   toolDispatch: Pick<ToolDispatchService, 'getPendingConfirmations'>;
+  hitlRequests?: Pick<HitlRequestService, 'listPendingToolConfirmations'>;
   agentBudgetApprovals: Pick<AgentBudgetApprovalService, 'getPendingApprovals'>;
   sessionsService: Pick<SessionsService, 'listChildren' | 'get' | 'getMessages'>;
   agentFlowRuntime?: AgentFlowRuntimePort;
@@ -98,7 +101,7 @@ function mapSubagentStatus(status: SocketEvents['session:status']): RuntimeChild
   if (status.active) {
     return 'running';
   }
-  return 'completed';
+  return 'idle';
 }
 
 function latestUnresolvedToolCall(messages: ChatMessage[]): UnresolvedToolCall | null {
@@ -284,6 +287,7 @@ function activeSubagentStatus(
       id: status.agentRun?.agentRunId ?? status.turnId,
       sessionId: status.sessionId,
       turnId: status.turnId,
+      revision: 1,
       phase: 'llm_streaming',
       status: 'active',
       retryCount: 0,
@@ -416,6 +420,7 @@ export async function buildRuntimeActivitySnapshotBatch({
   rootSessionId,
   pipeline,
   toolDispatch,
+  hitlRequests,
   agentBudgetApprovals,
   sessionsService,
   agentFlowRuntime,
@@ -428,9 +433,15 @@ export async function buildRuntimeActivitySnapshotBatch({
   const resolvedSessionTree = sessionTree ?? await collectRuntimeSnapshotSessionTree(rootSessionId, sessionsService);
   const sessionIds = resolvedSessionTree.sessionIds;
   const statusesBySessionId = await preloadSessionStatuses(sessionIds, pipeline, existingStatusesBySessionId);
-  const pendingConfirmationsBySessionId = Object.fromEntries(
-    sessionIds.map((sessionId) => [sessionId, toolDispatch.getPendingConfirmations(sessionId)]),
-  );
+  const pendingConfirmationsBySessionId = Object.fromEntries(await Promise.all(
+    sessionIds.map(async (sessionId) => [
+      sessionId,
+      mergePendingToolConfirmations(
+        toolDispatch.getPendingConfirmations(sessionId),
+        hitlRequests ? await hitlRequests.listPendingToolConfirmations(sessionId) : [],
+      ),
+    ]),
+  ));
   const pendingBudgetApprovalsBySessionId = Object.fromEntries(
     sessionIds.map((sessionId) => [sessionId, agentBudgetApprovals.getPendingApprovals(sessionId)]),
   );
@@ -578,6 +589,7 @@ export async function buildRuntimeActivitySnapshot({
   status,
   pipeline,
   toolDispatch,
+  hitlRequests,
   agentBudgetApprovals,
   sessionsService,
   agentFlowRuntime,
@@ -590,6 +602,7 @@ export async function buildRuntimeActivitySnapshot({
     statusesBySessionId: status ? { [sessionId]: status } : undefined,
     pipeline,
     toolDispatch,
+    hitlRequests,
     agentBudgetApprovals,
     sessionsService,
     agentFlowRuntime,

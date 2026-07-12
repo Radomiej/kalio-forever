@@ -1653,7 +1653,7 @@ describe('ExecutionGraphView empty-session state', () => {
     };
     sessionState.sessions = [
       { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 12 },
-      { id: 'sub-outer', personaId: 'default', title: 'Outer subagent', kind: 'subagent', parentSessionId: 'session-1', createdAt: 2, updatedAt: 12 },
+      { id: 'sub-outer', personaId: 'default', title: 'Outer subagent', kind: 'subagent', parentSessionId: 'session-1', parentToolCallId: 'call-sub-outer', createdAt: 2, updatedAt: 12 },
       { id: 'sub-nested', personaId: 'default', title: 'Nested subagent', kind: 'subagent', parentSessionId: 'sub-outer', createdAt: 3, updatedAt: 12 },
       { id: 'cli-child-1', personaId: 'default', title: 'Codex CLI', kind: 'cli-agent', parentSessionId: 'sub-nested', createdAt: 4, updatedAt: 12 },
     ];
@@ -1665,12 +1665,23 @@ describe('ExecutionGraphView empty-session state', () => {
       'cli-child-1': cliTurns,
     };
     agentState.toolActivities = [];
+    agentState.pendingConfirmations = {
+      'sub-outer': [{
+        requestId: 'req-sub-outer',
+        toolCallId: 'call-child-write',
+        sessionId: 'sub-outer',
+        toolName: 'vfs_write',
+        args: { path: 'result.txt' },
+        timeoutMs: 0,
+      }],
+    };
 
     await renderExecutionGraphView();
 
-    expect(screen.getByTestId('graph-node-subagent:sub-outer')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-node-subagent:sub-nested')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-node-cli-agent:cli-child-1')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-subagent:sub-outer')).toHaveAttribute('data-session-id', 'sub-outer');
+    expect(screen.getByTestId('graph-node-status-subagent:sub-outer')).toHaveAttribute('aria-label', 'Status: waiting');
+    expect(screen.getByTestId('graph-node-subagent:sub-nested')).toHaveAttribute('data-session-id', 'sub-nested');
+    expect(screen.getByTestId('graph-node-cli-agent:cli-child-1')).toHaveAttribute('data-session-id', 'cli-child-1');
 
     fireEvent.click(screen.getByTestId('graph-node-cli-agent:cli-child-1'));
 

@@ -69,14 +69,17 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     if (abortSignal?.aborted) {
       return [];
     }
+    const requestTools = options.structuredOutput && !this.supportsToolsWithStructuredOutput()
+      ? []
+      : tools;
 
     const body = JSON.stringify({
       model: this.model,
       messages: messages.map((m) => this.buildRequestMessage(m)),
       stream: true,
       stream_options: { include_usage: true },
-      tools: tools.length > 0
-        ? tools.map((t) => ({
+      tools: requestTools.length > 0
+        ? requestTools.map((t) => ({
             type: 'function',
             function: { name: t.name, description: t.description, parameters: t.parameters },
           }))
@@ -368,6 +371,10 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
 
   protected supportsReasoningContentHistory(): boolean {
     return false;
+  }
+
+  protected supportsToolsWithStructuredOutput(): boolean {
+    return true;
   }
 
   private buildRequestMessage(message: ContextManagedLLMMessage): Record<string, unknown> {

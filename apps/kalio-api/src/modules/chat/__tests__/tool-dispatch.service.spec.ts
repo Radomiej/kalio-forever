@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { ToolDispatchService } from '../tool-dispatch.service';
+import { ToolConfirmationService } from '../tool-confirmation.service';
 import { TurnState } from '../turn-state';
 import { TOOL_REGISTRY } from '../chat.tokens';
 import { MCPService } from '../../mcp/mcp.service';
@@ -954,6 +955,77 @@ describe('ToolDispatchService', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('dispatchApproved', () => {
+    it('executes an approved confirmation-required tool without requesting confirmation again', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const confirmations = {
+        approveOrRequestConfirmation: vi.fn(),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: ToolConfirmationService, useValue: confirmations },
+        ],
+      }).compile();
+      const service = moduleRef.get(ToolDispatchService);
+
+      const result = await service.dispatchApproved(
+        'approved-call',
+        'dangerous_tool',
+        { path: 'safe.txt' },
+        makeCtx(),
+        [{ name: 'dangerous_tool', description: 'test', parameters: {}, requiresConfirmation: true }],
+      );
+
+      expect(result).toEqual({ callId: 'approved-call', status: 'success', data: { done: true } });
+      expect(entry.execute).toHaveBeenCalledTimes(1);
+      expect(confirmations.approveOrRequestConfirmation).not.toHaveBeenCalled();
+    });
+
+    it('keeps runtime tool availability enforcement for approved dispatches', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const service = moduleRef.get(ToolDispatchService);
+
+      const result = await service.dispatchApproved(
+        'approved-unavailable',
+        'dangerous_tool',
+        {},
+        makeCtx(),
+        [{ name: 'safe_tool', description: 'test', parameters: {}, requiresConfirmation: false }],
+      );
+
+      expect(result).toMatchObject({ status: 'error', errorCode: 'TOOL_NOT_AVAILABLE' });
+      expect(entry.execute).not.toHaveBeenCalled();
+    });
+
+    it('keeps tool execution errors for approved dispatches', async () => {
+      const entry = makeEntry('dangerous_tool', true, { done: true });
+      entry.execute = vi.fn().mockRejectedValue(new Error('execution failed after approval'));
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+        ],
+      }).compile();
+      const service = moduleRef.get(ToolDispatchService);
+
+      const result = await service.dispatchApproved('approved-error', 'dangerous_tool', {}, makeCtx());
+
+      expect(result).toMatchObject({
+        status: 'error',
+        errorCode: 'TOOL_EXECUTION_FAILED',
+        errorMessage: 'execution failed after approval',
+      });
     });
   });
 

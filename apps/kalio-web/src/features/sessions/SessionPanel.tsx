@@ -85,7 +85,6 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   const sessionAgentTurns = useSessionStore((s) => s.sessionAgentTurns);
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
   const [loading, setLoading] = useState(false);
-  const [creatingSession, setCreatingSession] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [originFilter, setOriginFilter] = useState<SessionOriginFilter>('all');
@@ -194,10 +193,6 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
   }, [getSessionMessages, sessions, setAgentTurns, setMessages, setSessionHistoryMeta]);
 
   const createSession = async () => {
-    if (creatingSession) {
-      return;
-    }
-    setCreatingSession(true);
     try {
       await startPendingSessionFromPanel({
         personaId: newPersonaId,
@@ -207,12 +202,11 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         setMessages,
         setAgentTurns,
         removeSession,
+        getActiveSessionId: () => useSessionStore.getState().activeSessionId,
         onSelect,
       });
     } catch (err) {
       console.error('[SessionPanel] create failed', err);
-    } finally {
-      setCreatingSession(false);
     }
   };
 
@@ -586,7 +580,6 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           <button
             className="btn btn-success btn-xs gap-1 px-2.5 min-h-0 h-6 font-medium"
             onClick={() => void createSession()}
-            disabled={creatingSession}
             title={`New ${personas.find((p) => p.id === newPersonaId)?.name ?? ''} chat`}
             data-testid="new-session-btn"
           >

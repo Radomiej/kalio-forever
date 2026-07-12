@@ -51,12 +51,33 @@ export class ToolDispatchService {
     return [...staticMetas, ...mcpMetas];
   }
 
-  async dispatch(
+  dispatch(
     callId: string,
     toolName: string,
     args: Record<string, unknown>,
     ctx: StreamContext,
     toolMetas?: ToolMeta[],
+  ): Promise<ToolResult> {
+    return this.dispatchInternal(callId, toolName, args, ctx, toolMetas, true);
+  }
+
+  async dispatchApproved(
+    callId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx: StreamContext,
+    toolMetas?: ToolMeta[],
+  ): Promise<ToolResult> {
+    return this.dispatchInternal(callId, toolName, args, ctx, toolMetas, false);
+  }
+
+  private async dispatchInternal(
+    callId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx: StreamContext,
+    toolMetas: ToolMeta[] | undefined,
+    requestConfirmation: boolean,
   ): Promise<ToolResult> {
     if (toolMetas && !toolMetas.some((tool) => tool.name === toolName)) {
       return this.withMeta({
@@ -75,7 +96,7 @@ export class ToolDispatchService {
         if (mcpRef) {
           // Check requiresConfirmation for MCP tools the same way native tools do
           const mcpMeta = this.mcpService.getToolByName(toolName);
-          if (mcpMeta?.requiresConfirmation) {
+          if (requestConfirmation && mcpMeta?.requiresConfirmation) {
             const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
             if (!approval.approved) {
               return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
@@ -99,7 +120,7 @@ export class ToolDispatchService {
       }, toolName, ctx);
     }
 
-    if (entry.meta.requiresConfirmation) {
+    if (requestConfirmation && entry.meta.requiresConfirmation) {
       const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
       if (!approval.approved) {
         return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
@@ -109,6 +130,8 @@ export class ToolDispatchService {
     try {
       const req: ToolCallRequest = {
         sessionId: ctx.sessionId,
+        turnId: ctx.turnId,
+        promptMessageId: ctx.promptMessageId,
         vfsSessionId: ctx.vfsSessionId,
         toolName,
         args,
@@ -139,11 +162,11 @@ export class ToolDispatchService {
     }
   }
 
-  resolveConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
+  async resolveConfirmation(requestId: string, sessionId?: string, message?: string): Promise<ConfirmationResolutionStatus> {
     return this.confirmations.resolveConfirmation(requestId, sessionId, message);
   }
 
-  cancelConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
+  async cancelConfirmation(requestId: string, sessionId?: string, message?: string): Promise<ConfirmationResolutionStatus> {
     return this.confirmations.cancelConfirmation(requestId, sessionId, message);
   }
 

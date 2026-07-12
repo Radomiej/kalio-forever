@@ -127,6 +127,48 @@
       "when": 1782528000000,
       "tag": "0017_mcp_server_origin_source",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1783709580000,
+      "tag": "0018_chat_run_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1783709700000,
+      "tag": "0019_hitl_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1783710000000,
+      "tag": "0020_agent_flow_recovery_lease",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1783710300000,
+      "tag": "0021_chat_run_outcome",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1783710600000,
+      "tag": "0022_unique_parent_tool_result",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1783797000000,
+      "tag": "0023_chat_run_queue_contract",
+      "breakpoints": true
     }
   ]
 }

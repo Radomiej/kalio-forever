@@ -2,7 +2,9 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { io } from 'socket.io-client';
 import { API_BASE, deleteSessionIfExists, isMockLlm, selectSession, selectSessionOriginFilter, sendMessageFromComposer } from './helpers/test-config';
+import { restartPlaywrightBackend } from './helpers/restart-control';
 
 type SeedStatement = {
   run: (...params: unknown[]) => unknown;
@@ -229,6 +231,46 @@ async function waitForAgentFlow(
     throw new Error(`AgentFlow ${runId} returned no snapshot`);
     }
   return snapshot;
+}
+
+async function waitForNestedSubagent(
+  request: APIRequestContext,
+  rootSessionId: string,
+): Promise<{ outerSessionId: string; nestedSessionId: string }> {
+  let match: { outerSessionId: string; nestedSessionId: string } | undefined;
+  await expect.poll(async () => {
+    const outerResponse = await request.get(`${API_BASE}/sessions/${rootSessionId}/children`);
+    if (!outerResponse.ok()) return 'missing-outer';
+    const outerSessions = await outerResponse.json() as Array<{ id: string }>;
+    for (const outer of outerSessions) {
+      const nestedResponse = await request.get(`${API_BASE}/sessions/${outer.id}/children`);
+      if (!nestedResponse.ok()) continue;
+      const nested = (await nestedResponse.json() as Array<{ id: string }>)[0];
+      if (nested) {
+        match = { outerSessionId: outer.id, nestedSessionId: nested.id };
+        return 'found';
+      }
+    }
+    return 'missing-nested';
+  }, { timeout: 30_000 }).toBe('found');
+  if (!match) throw new Error(`No nested subagent found for AgentFlow session ${rootSessionId}`);
+  return match;
+}
+
+async function approvePendingToolConfirmation(sessionId: string): Promise<void> {
+  const socket = io(API_BASE.replace(/\/api\/?$/, ''), { transports: ['websocket'] });
+  try {
+    await new Promise<void>((resolveApproval, reject) => {
+      socket.on('connect_error', reject);
+      socket.on('tool:confirmation_required', (request: { requestId: string }) => {
+        socket.once('tool:result', () => resolveApproval());
+        socket.emit('tool:confirm', { requestId: request.requestId, sessionId });
+      });
+      socket.on('connect', () => socket.emit('session:identify', { sessionId }));
+    });
+  } finally {
+    socket.close();
+  }
 }
 
 async function waitForParentAgentFlowRun(
@@ -1013,6 +1055,57 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).not.toContainText(/Five Minds/i);
+  });
+});
+
+test.describe('AgentFlow restart recovery', () => {
+  test('resumes the owning parent once after nested child HITL and backend restart', async ({ request }) => {
+    test.setTimeout(180_000);
+    test.skip(!(await isMockLlm(request)), 'AgentFlow restart recovery requires the mock LLM stack.');
+
+    const parentSessionId = await createParentSession(request, `AgentFlow nested restart ${Date.now()}`);
+    const startResponse = await request.post(`${API_BASE}/agent-flows/runs`, {
+      data: {
+        flowId: 'goal_guard_delivery_loop',
+        goal: 'Delegate one approval-gated child task. [[mock:tool:run_subagent:hitl]]',
+        parentSessionId,
+        startMode: 'durable',
+        returnMode: 'summary',
+        maxSteps: 4,
+        context: {
+          allowArchitectureOrchestratorSubagents: true,
+          maxArchitectureSteps: 4,
+          maxArchitectureNodeVisits: 2,
+        },
+      },
+    });
+    expect(startResponse.ok()).toBeTruthy();
+    const started = await startResponse.json() as AgentFlowRunSnapshot;
+    const rootSessionId = started.run.childSessionId;
+    expect(rootSessionId).toBeTruthy();
+
+    await waitForAgentFlow(request, started.run.id, (status) => status === 'waiting_on_orchestrator');
+    const nested = await waitForNestedSubagent(request, rootSessionId!);
+
+    await restartPlaywrightBackend();
+    await approvePendingToolConfirmation(nested.nestedSessionId);
+
+    await expect.poll(async () => {
+      const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+      if (!response.ok()) return `http:${response.status()}`;
+      const snapshot = await response.json() as AgentFlowRunSnapshot;
+      return JSON.stringify(snapshot.run.checkpoint?.continuation ?? {}).includes('runtime_pause')
+        ? 'runtime_pause'
+        : snapshot.run.status;
+    }, { timeout: 60_000 }).not.toBe('runtime_pause');
+    const recoveredResponse = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+    expect(recoveredResponse.ok()).toBeTruthy();
+    const recovered = await recoveredResponse.json() as AgentFlowRunSnapshot;
+    expect(JSON.stringify(recovered.run.checkpoint?.continuation ?? {})).not.toContain('runtime_pause');
+    const orchestratorStarts = recovered.events.filter((event) =>
+      (event.type === 'flow:node_start' || event.type === 'node_started')
+      && (event['nodeId'] === 'orchestrator' || event['slotId'] === 'orchestrator'));
+    expect(orchestratorStarts).toHaveLength(1);
   });
 });
 

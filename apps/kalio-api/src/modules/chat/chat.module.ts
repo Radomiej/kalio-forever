@@ -29,6 +29,8 @@ import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
 import { SubagentRuntimeService } from './subagent-runtime.service';
+import { SubagentResultReplayService } from './subagent-result-replay.service';
+import { ChildExecutionContinuationService } from './child-execution-continuation.service';
 import { ToolPolicyService } from './tool-policy.service';
 import { ChatTestSupportService } from './chat-test-support.service';
 import { RunJournalService } from './run-journal.service';
@@ -113,6 +115,8 @@ import {
     LLMServiceAdapter,
     ImageHydratorService,
     SubagentRuntimeService,
+    SubagentResultReplayService,
+    ChildExecutionContinuationService,
 
     // CHUNK_HANDLERS: ordered array injected into StreamProcessorService
     {
@@ -194,10 +198,10 @@ export class ChatModule implements OnModuleInit {
     });
   }
 
-  private resolveTelegramConfirmation(requestId: string, decision: 'approve' | 'cancel', message?: string): string {
+  private async resolveTelegramConfirmation(requestId: string, decision: 'approve' | 'cancel', message?: string): Promise<string> {
     const status = decision === 'approve'
-      ? this.toolDispatch.resolveConfirmation(requestId, undefined, message)
-      : this.toolDispatch.cancelConfirmation(requestId, undefined, message);
+      ? await this.toolDispatch.resolveConfirmation(requestId, undefined, message)
+      : await this.toolDispatch.cancelConfirmation(requestId, undefined, message);
 
     if (status === 'resolved') {
       return `Approved HITL request ${requestId}.`;

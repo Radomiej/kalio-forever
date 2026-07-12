@@ -14,6 +14,8 @@ export async function collectPaidReadinessChecks(options = {}) {
     options.maxRecentProviderFailureMs ?? process.env.AGENTFLOW_RECENT_PROVIDER_FAILURE_AGE_MS ?? 60 * 60 * 1000,
   );
   const requiredHighLevelModel = options.requiredHighLevelModel ?? process.env.AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL;
+  const requiredPersonaId = options.requiredPersonaId ?? process.env.AGENTFLOW_REQUIRED_PERSONA_ID;
+  const requiredPersonaModel = options.requiredPersonaModel ?? process.env.AGENTFLOW_REQUIRED_PERSONA_MODEL;
   const requireWebSearch = options.requireWebSearch ?? readBooleanFlag(
     resolveBooleanFlagFromArgv(options.argv, '--require-web-search') ?? process.env.AGENTFLOW_REQUIRE_WEB_SEARCH,
     false,
@@ -28,6 +30,14 @@ export async function collectPaidReadinessChecks(options = {}) {
   const runs = await checkJson(fetchJson, checks, `${apiBase}/agent-flows/runs`, 'AgentFlow runs endpoint is reachable');
   const sessions = await checkJson(fetchJson, checks, `${apiBase}/sessions`, 'Sessions endpoint is reachable');
   const codexConfig = await checkJson(fetchJson, checks, `${apiBase}/cli-agents/codex/config`, 'Codex CLI config endpoint is reachable');
+  const requiredPersona = typeof requiredPersonaId === 'string' && requiredPersonaId.trim().length > 0
+    ? await checkJson(
+        fetchJson,
+        checks,
+        `${apiBase}/personas/${encodeURIComponent(requiredPersonaId.trim())}`,
+        `Required persona endpoint is reachable (${requiredPersonaId.trim()})`,
+      )
+    : null;
   const searchConfig = requireWebSearch
     ? await checkJson(fetchJson, checks, `${apiBase}/search/config`, 'Web Search config endpoint is reachable')
     : null;
@@ -60,6 +70,27 @@ export async function collectPaidReadinessChecks(options = {}) {
       `LLM model is set (${llmConfig.model})`,
       'LLM model is empty.',
     );
+  }
+
+  if (requiredPersona) {
+    const personaId = requiredPersonaId.trim();
+    const expectedModel = typeof requiredPersonaModel === 'string' && requiredPersonaModel.trim().length > 0
+      ? requiredPersonaModel.trim()
+      : null;
+    passOrFail(
+      checks,
+      expectedModel !== null,
+      `Required persona model is set (${expectedModel})`,
+      `Required persona ${personaId} was selected without AGENTFLOW_REQUIRED_PERSONA_MODEL.`,
+    );
+    if (expectedModel) {
+      passOrFail(
+        checks,
+        requiredPersona.model === expectedModel,
+        `Persona ${personaId} uses required request model ${expectedModel}`,
+        `Persona ${personaId} uses request model ${requiredPersona.model ?? '(empty)'} instead of required ${expectedModel}`,
+      );
+    }
   }
 
   if (Array.isArray(credentials)) {

@@ -264,6 +264,30 @@ test('paid readiness can require a high-level model completion smoke without cha
   )));
 });
 
+test('paid readiness fails when the tested persona overrides the required live model', async () => {
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    requiredPersonaId: 'default',
+    requiredPersonaModel: 'deepseek-v4-flash',
+    fetchJson: fetchFrom({
+      'http://kalio.test/api/llm/config': response({ provider: 'cometapi', source: 'db', model: 'deepseek-v4-flash' }),
+      'http://kalio.test/api/credentials': response([]),
+      'http://kalio.test/api/credentials/active': response({ credentialId: null }),
+      'http://kalio.test/api/agent-flows/runs': response([]),
+      'http://kalio.test/api/sessions': response([]),
+      'http://kalio.test/api/cli-agents/codex/config': response({ enabled: true, model: 'gpt-5.4-mini' }),
+      'http://kalio.test/api/personas/default': response({ id: 'default', model: 'mimo-v2.5' }),
+    }),
+  });
+
+  assert.ok(checks.some((check) => (
+    check.ok === false
+    && check.message === 'Persona default uses request model mimo-v2.5 instead of required deepseek-v4-flash'
+  )));
+});
+
 test('paid readiness honors explicit API base when the managed stack uses random ports', async () => {
   const requestedUrls = [];
 

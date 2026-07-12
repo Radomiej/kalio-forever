@@ -1553,6 +1553,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         exitCode: 0,
         durationMs: 25,
         agentId: 'gemini',
+        outcome: 'completed',
       }),
     };
     const cliAgentSessions = {
@@ -1566,6 +1567,7 @@ describe('SubagentRuntimeService nested subagents', () => {
         createdAt: 1,
         updatedAt: 1,
       }),
+      saveSessionMetadata: vi.fn().mockResolvedValue(undefined),
       persistUserMessage: vi.fn().mockResolvedValue(undefined),
       persistAssistantToolCallMessage: vi.fn().mockResolvedValue(undefined),
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
@@ -1726,9 +1728,9 @@ describe('SubagentRuntimeService nested subagents', () => {
         iteration: 1,
         toolCount: tools.length,
         provider: 'xiaomimimo',
-        model: 'mimo-v2.5',
-        modelSource: 'persona',
-        personaModel: 'mimo-v2.5',
+        model: 'mimo-v2.5-pro',
+        modelSource: 'db',
+        personaModel: '',
       }),
     }));
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -1743,9 +1745,9 @@ describe('SubagentRuntimeService nested subagents', () => {
         parentToolCallId: 'parent-call-1',
         iteration: 1,
         provider: 'xiaomimimo',
-        model: 'mimo-v2.5',
-        modelSource: 'persona',
-        personaModel: 'mimo-v2.5',
+        model: 'mimo-v2.5-pro',
+        modelSource: 'db',
+        personaModel: '',
       }),
       chunkCount: 0,
     }));
@@ -1757,9 +1759,9 @@ describe('SubagentRuntimeService nested subagents', () => {
         architectureRunId: 'architecture-run-1',
         toolCallCount: expect.any(Number),
         provider: 'xiaomimimo',
-        model: 'mimo-v2.5',
-        modelSource: 'persona',
-        personaModel: 'mimo-v2.5',
+        model: 'mimo-v2.5-pro',
+        modelSource: 'db',
+        personaModel: '',
       }),
     }));
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
@@ -2299,5 +2301,45 @@ describe('SubagentRuntimeService nested subagents', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('returns a durable completed turn without starting a second LLM execution', async () => {
+    const llmSource: ILLMSource = { stream: vi.fn(() => neverStream()) };
+    const sessionManager = {
+      persistUserMessage: vi.fn(), persistAssistantMessage: vi.fn(), saveToolResult: vi.fn(),
+      loadHistory: vi.fn().mockResolvedValue([]),
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    } as unknown as SessionManagerService;
+    const sessions = {
+      get: vi.fn().mockResolvedValue({ ...makeSession('child-replay', 'parent-replay'), parentToolCallId: 'architecture:run:implementer' }),
+      updateRuntimeContext: vi.fn(),
+    } as unknown as SessionsService;
+    const toolDispatch = { getToolMetas: vi.fn().mockReturnValue([]) } as unknown as ToolDispatchService;
+    const resultReplay = {
+      replay: vi.fn().mockResolvedValue({
+        result: 'durable child result', structuredOutput: { decision: 'continue' },
+        taskId: 'replay-turn-existing', childSessionId: 'child-replay', parentSessionId: 'parent-replay',
+        status: 'completed', vfsMode: 'shared', vfsSessionId: 'parent-replay', copiedFiles: [], durationMs: 1,
+      }),
+    };
+    const runtime = makeSubagentRuntime({
+      llmSource, streamProcessor: makeProcessor(sessionManager), toolDispatch, sessionManager, sessions,
+      vfs: {} as VFSService, resultReplay,
+    });
+
+    const result = await runtime.runSubagent({
+      parentSessionId: 'parent-replay', parentToolCallId: 'architecture:run:implementer',
+      childSessionId: 'child-replay', resumeTurnId: 'turn-existing', objective: 'Do not execute twice',
+      timeoutMs: 60_000, vfsMode: 'shared', copyOutputs: false,
+    });
+
+    expect(result.result).toBe('durable child result');
+    expect(result.structuredOutput).toEqual({ decision: 'continue' });
+    expect(resultReplay.replay).toHaveBeenCalledWith(
+      expect.objectContaining({ resumeTurnId: 'turn-existing' }),
+      'child-replay', 'parent-replay', expect.any(Number),
+    );
+    expect(llmSource.stream).not.toHaveBeenCalled();
+    expect(sessionManager.persistUserMessage).not.toHaveBeenCalled();
   });
 });

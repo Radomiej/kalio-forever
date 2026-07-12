@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionPipelineService } from '../session-pipeline.service';
 import type { ChatService } from '../chat.service';
-import type { SocketEvents } from '@kalio/types';
+import type { RunJournalService } from '../run-journal.service';
+import type { ChatQueuedPayload, ChatRunSnapshot, SocketEvents } from '@kalio/types';
 import type { EmitFn } from '../interfaces/stream-context.interface';
 
 type ChatSendPayload = SocketEvents['chat:send'];
@@ -86,13 +87,182 @@ const basePayload = (sid: string, content: string, interrupt = false): ChatSendP
   ...(interrupt ? { interrupt: true } : {}),
 });
 
+function makeRunSnapshot(params: {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  phase: ChatRunSnapshot['phase'];
+  status: ChatRunSnapshot['status'];
+  queuedPayload?: ChatQueuedPayload;
+  queueIdempotencyKey?: string;
+  queuedAt?: number;
+  queueClaimedAt?: number;
+  queueCancelledAt?: number;
+  revision?: number;
+}): ChatRunSnapshot {
+  return {
+    id: params.id,
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    phase: params.phase,
+    status: params.status,
+    revision: params.revision ?? 1,
+    retryCount: 0,
+    safeResume: false,
+    ...(params.queuedPayload ? { queuedPayload: params.queuedPayload } : {}),
+    ...(params.queueIdempotencyKey ? { queueIdempotencyKey: params.queueIdempotencyKey } : {}),
+    ...(params.queuedAt !== undefined ? { queuedAt: params.queuedAt } : {}),
+    ...(params.queueClaimedAt !== undefined ? { queueClaimedAt: params.queueClaimedAt } : {}),
+    ...(params.queueCancelledAt !== undefined ? { queueCancelledAt: params.queueCancelledAt } : {}),
+    startedAt: 0,
+    updatedAt: 0,
+    lastHeartbeatAt: 0,
+  };
+}
+
 describe('SessionPipelineService', () => {
   let svc: SessionPipelineService;
   let chatHarness: ReturnType<typeof makeBlockingChatService>;
+  let runJournal: {
+    startRun: ReturnType<typeof vi.fn>;
+    acceptQueuedRun: ReturnType<typeof vi.fn>;
+    claimQueuedRun: ReturnType<typeof vi.fn>;
+    listQueuedRuns: ReturnType<typeof vi.fn>;
+    cancelQueuedRun: ReturnType<typeof vi.fn>;
+    checkpoint: ReturnType<typeof vi.fn>;
+    getCurrentRun: ReturnType<typeof vi.fn>;
+  };
+  let queuedRuns: ChatRunSnapshot[];
+  let queuedRunsByKey: Map<string, ChatRunSnapshot>;
 
   beforeEach(() => {
     chatHarness = makeBlockingChatService();
-    svc = new SessionPipelineService(chatHarness.chat as ChatService);
+    queuedRuns = [];
+    queuedRunsByKey = new Map();
+    runJournal = {
+      startRun: vi.fn().mockImplementation(async ({ sessionId, turnId }: { sessionId: string; turnId: string }) => (
+        makeRunSnapshot({
+          id: `run-${turnId}`,
+          sessionId,
+          turnId,
+          phase: 'started',
+          status: 'active',
+        })
+      )),
+      acceptQueuedRun: vi.fn().mockImplementation(async ({
+        sessionId,
+        turnId,
+        queueIdempotencyKey,
+        queuedPayload,
+      }: {
+        sessionId: string;
+        turnId: string;
+        queueIdempotencyKey: string;
+        queuedPayload: ChatQueuedPayload;
+      }) => {
+        const existing = queuedRunsByKey.get(`${sessionId}:${queueIdempotencyKey}`);
+        if (existing) {
+          return existing;
+        }
+        const run = makeRunSnapshot({
+          id: `run-${turnId}`,
+          sessionId,
+          turnId,
+          phase: 'queued',
+          status: 'queued',
+          queueIdempotencyKey,
+          queuedPayload,
+          queuedAt: queuedRuns.length + 1,
+        });
+        queuedRuns.push(run);
+        queuedRunsByKey.set(`${sessionId}:${queueIdempotencyKey}`, run);
+        return run;
+      }),
+      claimQueuedRun: vi.fn().mockImplementation(async (sessionId: string, runId?: string) => {
+        const idx = queuedRuns.findIndex((run) => (
+          run.sessionId === sessionId && run.status === 'queued' && (!runId || run.id === runId)
+        ));
+        if (idx < 0) {
+          return null;
+        }
+        const current = queuedRuns[idx]!;
+        const claimed = makeRunSnapshot({
+          ...current,
+          phase: 'started',
+          status: 'active',
+          revision: (current.revision ?? 1) + 1,
+          queueClaimedAt: (current.queueClaimedAt ?? 0) + 1,
+        });
+        queuedRuns[idx] = claimed;
+        return claimed;
+      }),
+      listQueuedRuns: vi.fn().mockImplementation(async (sessionId: string) => (
+        queuedRuns.filter((run) => run.sessionId === sessionId && run.status === 'queued')
+      )),
+      cancelQueuedRun: vi.fn().mockImplementation(async (runId: string) => {
+        const idx = queuedRuns.findIndex((run) => run.id === runId);
+        if (idx < 0) {
+          return false;
+        }
+        const current = queuedRuns[idx]!;
+        queuedRuns[idx] = makeRunSnapshot({
+          ...current,
+          status: 'cancelled',
+          queueCancelledAt: (current.queueCancelledAt ?? 0) + 1,
+          revision: (current.revision ?? 1) + 1,
+        });
+        return true;
+      }),
+      checkpoint: vi.fn().mockResolvedValue(undefined),
+      getCurrentRun: vi.fn().mockResolvedValue(null),
+    };
+    svc = new SessionPipelineService(
+      chatHarness.chat as ChatService,
+      runJournal as unknown as RunJournalService,
+    );
+  });
+
+  it('recovers durable queued work with the accepted identity after process restart', async () => {
+    const recovered = makeRunSnapshot({
+      id: 'run-recovered',
+      sessionId: 's1',
+      turnId: 'turn-recovered',
+      phase: 'queued',
+      status: 'queued',
+      queuedPayload: { content: 'recover me', personaId: 'p1', clientMessageId: 'message-recovered' },
+    });
+    queuedRuns.push(recovered);
+    const { emit } = makeEmit();
+
+    await svc.resumeQueuedSession('s1', emit);
+    await flush();
+
+    expect(runJournal.claimQueuedRun).toHaveBeenCalledWith('s1', 'run-recovered');
+    expect(chatHarness.chat.handleTurn).toHaveBeenCalledWith(
+      's1',
+      'recover me',
+      'p1',
+      emit,
+      undefined,
+      'turn-recovered',
+      'run-recovered',
+      'message-recovered',
+    );
+    chatHarness.release('s1');
+    await flush();
+  });
+
+  it('releases the active slot when durable run creation fails', async () => {
+    runJournal.startRun.mockRejectedValueOnce(new Error('journal unavailable'));
+    const { emit, events } = makeEmit();
+
+    await expect(svc.submit(basePayload('s1', 'hello'), emit)).resolves.toBeUndefined();
+
+    expect(svc.getSessionStatus('s1')).toMatchObject({ active: false, queueLength: 0 });
+    expect(events).toContainEqual({
+      event: 'chat:error',
+      data: expect.objectContaining({ code: 'RUNTIME_PERSISTENCE_FAILED', sessionId: 's1' }),
+    });
   });
 
   it('idle submit dispatches immediately', async () => {
@@ -210,6 +380,107 @@ describe('SessionPipelineService', () => {
     expect(chatHarness.callsReceived[0].content).toBe('first');
   });
 
+  it('persists queue acceptance before projection and claims the same durable run before dequeue execution', async () => {
+    const order: string[] = [];
+    runJournal.acceptQueuedRun.mockImplementation(async ({
+      sessionId,
+      turnId,
+      queueIdempotencyKey,
+      queuedPayload,
+    }: {
+      sessionId: string;
+      turnId: string;
+      queueIdempotencyKey: string;
+      queuedPayload: ChatQueuedPayload;
+    }) => {
+      order.push(`journal:${turnId}:accept`);
+      const run = makeRunSnapshot({
+        id: `run-${turnId}`,
+        sessionId,
+        turnId,
+        phase: 'queued',
+        status: 'queued',
+        queueIdempotencyKey,
+        queuedPayload,
+        queuedAt: order.length,
+      });
+      queuedRuns.push(run);
+      queuedRunsByKey.set(`${sessionId}:${queueIdempotencyKey}`, run);
+      return run;
+    });
+    runJournal.claimQueuedRun.mockImplementation(async (sessionId: string) => {
+      const next = queuedRuns.find((run) => run.sessionId === sessionId && run.status === 'queued');
+      if (!next) return null;
+      order.push(`journal:${next.id}:claim`);
+      const claimed = makeRunSnapshot({
+        ...next,
+        phase: 'started',
+        status: 'active',
+        revision: (next.revision ?? 1) + 1,
+        queueClaimedAt: order.length,
+      });
+      queuedRuns = queuedRuns.map((run) => (run.id === claimed.id ? claimed : run));
+      return claimed;
+    });
+    vi.mocked(chatHarness.chat.handleTurn).mockImplementation(async (...args: unknown[]) => {
+      const sessionId = args[0] as string;
+      const content = args[1] as string;
+      const emit = args[3] as EmitFn;
+      const turnId = args[5] as string;
+      const runId = args[6] as string;
+      order.push(`handle:${content}:${turnId}:${runId}`);
+      chatHarness.callsReceived.push({ sessionId, content, personaId: 'p1' });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      emit('agent:done', { sessionId, turnId });
+    });
+    const projected = makeEmit();
+    const emit: EmitFn = (event, data) => {
+      if (event === 'chat:queued') order.push('emit:queued');
+      projected.emit(event, data);
+    };
+
+    const first = svc.submit(basePayload('s1', 'first'), emit);
+    const second = svc.submit(basePayload('s1', 'second'), emit);
+    await Promise.all([first, second]);
+
+    const accepted = runJournal.acceptQueuedRun.mock.calls.map(([input]) => input as { turnId: string });
+    expect(runJournal.startRun).toHaveBeenCalledTimes(1);
+    expect(accepted).toHaveLength(1);
+    const queuedTurnId = accepted[0]!.turnId;
+    expect(order.indexOf(`journal:${queuedTurnId}:accept`)).toBeLessThan(order.indexOf('emit:queued'));
+    expect(order.indexOf(`journal:run-${queuedTurnId}:claim`)).toBeLessThan(
+      order.indexOf(`handle:second:${queuedTurnId}:run-${queuedTurnId}`),
+    );
+  });
+
+  it('stop cancels durable queued work before emitting queue dropped', async () => {
+    const { emit } = makeEmit();
+    const first = svc.submit(basePayload('s1', 'first'), emit);
+    await flush();
+    const queued = makeEmit();
+    await svc.submit(basePayload('s1', 'second'), queued.emit);
+    await flush();
+
+    const queuedTurnId = (runJournal.acceptQueuedRun.mock.calls[0]![0] as { turnId: string }).turnId;
+
+    svc.stop('s1');
+    await flush();
+
+    expect(runJournal.cancelQueuedRun).toHaveBeenCalledWith(`run-${queuedTurnId}`);
+    expect(queued.events).toContainEqual({
+      event: 'chat:error',
+      data: expect.objectContaining({
+        sessionId: 's1',
+        code: 'QUEUE_DROPPED',
+        hadContent: false,
+      }),
+    });
+
+    chatHarness.release('s1');
+    await first;
+    expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['first']);
+  });
+
   it('stopAndDrain aborts the active turn, waits for completion, and drops queued work', async () => {
     const { emit } = makeEmit();
     const first = svc.submit(basePayload('s1', 'first'), emit);
@@ -234,6 +505,7 @@ describe('SessionPipelineService', () => {
 
     expect(drained).toBe(true);
     expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['first']);
+    expect(runJournal.cancelQueuedRun).toHaveBeenCalledTimes(1);
     expect(queued.events).toContainEqual({
       event: 'chat:error',
       data: expect.objectContaining({
@@ -292,11 +564,11 @@ describe('SessionPipelineService', () => {
 
     svc.abortAll('s1');
     await chatHarness.releaseAll();
-    // give microtasks a moment
-    await new Promise((r) => setTimeout(r, 5));
+    await flush();
 
     // After purge, the queued b/c never reach handleTurn
     expect(chatHarness.callsReceived.map((c) => c.content)).toEqual(['a']);
+    expect(runJournal.cancelQueuedRun).toHaveBeenCalledTimes(2);
     for (const queued of [queuedB, queuedC]) {
       expect(queued.events).toContainEqual({
         event: 'chat:error',

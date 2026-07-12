@@ -15,13 +15,16 @@ export interface SubagentCanvasPreview {
   title: string;
   copiedFiles: SubagentCopiedFile[];
   summary: string | null;
-  status: 'idle' | 'running' | 'success' | 'error';
+  status: 'idle' | 'running' | 'waiting' | 'success' | 'error';
   startedAt?: number;
 }
 
 function mapRuntimeSubagentStatus(status: RuntimeChildExecution['status']): SubagentCanvasPreview['status'] {
-  if (status === 'running' || status === 'waiting') {
+  if (status === 'running') {
     return 'running';
+  }
+  if (status === 'waiting') {
+    return 'waiting';
   }
   if (status === 'completed') {
     return 'success';
@@ -104,18 +107,40 @@ export function buildSubagentPreviews(
   toolActivities: ToolActivity[],
   sessions: ChatSession[],
   childExecutions: RuntimeChildExecution[] = [],
+  waitingSessionIds: ReadonlySet<string> = new Set(),
+  parentSessionId?: string,
 ): SubagentCanvasPreview[] {
   const previews = new Map<string, SubagentCanvasPreview>();
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const sessionUpdatedAt = new Map(sessions.map((session) => [session.id, session.updatedAt]));
   const runtimeStatusBySessionId = new Map<string, SubagentCanvasPreview['status']>();
 
+  waitingSessionIds.forEach((sessionId) => runtimeStatusBySessionId.set(sessionId, 'waiting'));
+
+  if (parentSessionId) {
+    sessions
+      .filter((session) => session.kind === 'subagent'
+        && session.parentSessionId === parentSessionId
+        && waitingSessionIds.has(session.id))
+      .forEach((session) => previews.set(session.id, {
+        sessionId: session.id,
+        label: titleFromSessionId(session.id),
+        title: session.title,
+        copiedFiles: [],
+        summary: null,
+        status: 'waiting',
+        startedAt: session.updatedAt,
+      }));
+  }
+
   childExecutions
     .filter((execution) => execution.kind === 'subagent')
     .forEach((execution) => {
       const session = sessionsById.get(execution.childSessionId);
       if (!session) return;
-      const runtimeStatus = mapRuntimeSubagentStatus(execution.status);
+      const runtimeStatus = waitingSessionIds.has(execution.childSessionId)
+        ? 'waiting'
+        : mapRuntimeSubagentStatus(execution.status);
       runtimeStatusBySessionId.set(execution.childSessionId, runtimeStatus);
       const existing = previews.get(execution.childSessionId);
       previews.set(execution.childSessionId, {
@@ -222,9 +247,12 @@ export function SubagentConversationCard({
         </div>
         <span
           data-testid={`canvas-subagent-status-${preview.sessionId}`}
+          data-status={preview.status}
           className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] ${
             preview.status === 'running'
               ? 'border-info/30 bg-info/10 text-info'
+              : preview.status === 'waiting'
+                ? 'border-warning/30 bg-warning/10 text-warning'
               : preview.status === 'error'
                 ? 'border-error/30 bg-error/10 text-error'
                 : 'border-success/25 bg-success/10 text-success'

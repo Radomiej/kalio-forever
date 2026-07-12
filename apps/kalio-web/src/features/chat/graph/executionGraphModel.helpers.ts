@@ -100,8 +100,12 @@ export function extractCLIAgentSessionResult(data: unknown): CLIAgentSessionSnap
     return null;
   }
 
+  const canonicalStatuses = new Set<CLIAgentSessionSnapshot['status']>([
+    'idle', 'running', 'completed', 'failed', 'stopped',
+  ]);
   const derivedStatus = typeof candidate['status'] === 'string'
-    ? candidate['status']
+    && canonicalStatuses.has(candidate['status'] as CLIAgentSessionSnapshot['status'])
+    ? candidate['status'] as CLIAgentSessionSnapshot['status']
     : typeof candidate['exitCode'] === 'number'
       ? candidate['exitCode'] === 0
         ? 'completed'
@@ -227,7 +231,7 @@ function statusFromCliChild(
 
 export function statusFromActivity(
   activity: ToolActivity | null,
-  hasResult: boolean,
+  _hasResult: boolean,
   resultData?: unknown,
   toolName?: string,
 ): ExecutionGraphNodeStatus {
@@ -244,7 +248,7 @@ export function statusFromActivity(
   if (activity?.status === 'awaiting_confirmation') {
     return 'waiting';
   }
-  if (activity?.status === 'success' || hasResult) {
+  if (activity?.status === 'success') {
     return 'success';
   }
   return 'idle';

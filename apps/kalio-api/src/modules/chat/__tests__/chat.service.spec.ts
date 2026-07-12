@@ -18,6 +18,7 @@ import { ContextAssemblyService } from '../context-assembly.service';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
 import { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import { SessionsService } from '../sessions.service';
+import { RunJournalService } from '../run-journal.service';
 import { makeContextAssembly, makeLLMTurnRuntime } from './llm-runtime-test-harness';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
 import { SUBAGENT_SYSTEM_PROMPT } from '../subagent-system-prompt';
@@ -55,6 +56,12 @@ describe('ChatService', () => {
     get: ReturnType<typeof vi.fn>;
     registerRuntimeProjectPathForSession: ReturnType<typeof vi.fn>;
     updateRuntimeContext: ReturnType<typeof vi.fn>;
+  };
+  let runJournal: {
+    checkpoint: ReturnType<typeof vi.fn>;
+    complete: ReturnType<typeof vi.fn>;
+    fail: ReturnType<typeof vi.fn>;
+    interrupt: ReturnType<typeof vi.fn>;
   };
   let auditService: Partial<AuditService>;
   let emit: ReturnType<typeof vi.fn>;
@@ -103,6 +110,12 @@ describe('ChatService', () => {
       registerRuntimeProjectPathForSession: vi.fn().mockResolvedValue(undefined),
       updateRuntimeContext: vi.fn().mockResolvedValue(undefined),
     };
+    runJournal = {
+      checkpoint: vi.fn().mockResolvedValue(undefined),
+      complete: vi.fn().mockResolvedValue(undefined),
+      fail: vi.fn().mockResolvedValue(undefined),
+      interrupt: vi.fn().mockResolvedValue(undefined),
+    };
     auditService = {
       log: vi.fn().mockResolvedValue('audit-id'),
       update: vi.fn().mockResolvedValue(undefined),
@@ -147,6 +160,7 @@ describe('ChatService', () => {
         { provide: AuditService, useValue: auditService },
         { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
         { provide: SessionsService, useValue: sessionsService },
+        { provide: RunJournalService, useValue: runJournal },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
@@ -177,6 +191,7 @@ describe('ChatService', () => {
         { provide: AuditService, useValue: auditService },
         { provide: AgentBudgetApprovalService, useValue: agentBudgetApprovals },
         { provide: SessionsService, useValue: sessionsService },
+        { provide: RunJournalService, useValue: runJournal },
         { provide: ContextAssemblyService, useValue: contextAssembly },
         { provide: LLMTurnRuntimeService, useValue: llmTurnRuntime },
       ],
@@ -715,7 +730,7 @@ describe('ChatService', () => {
     };
 
     await buildCustomService(llmSource, processor);
-    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn, undefined, 'turn-budget', 'run-budget');
 
     expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -731,6 +746,13 @@ describe('ChatService', () => {
         personaId: 'p1',
         runtimeKind: 'chat',
         requestedBy: 'chat-agent',
+      }),
+    );
+    expect(runJournal.checkpoint).toHaveBeenCalledWith(
+      'run-budget',
+      expect.objectContaining({
+        phase: 'tool_pending',
+        status: 'waiting_for_human',
       }),
     );
     expect(llmSource.stream).toHaveBeenCalledTimes(2);

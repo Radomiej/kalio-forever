@@ -58,11 +58,15 @@ export type RuntimeAttentionKind =
 export interface RuntimeAttentionItem {
   id: string;
   sessionId: string;
+  navigationSessionId: string;
+  sourceSessionIds: string[];
+  groupId?: string;
   kind: RuntimeAttentionKind;
   label: string;
   detail: string;
   actionable: boolean;
   priority: number;
+  occurredAt: number;
 }
 
 export interface RuntimeContinuationAction {
@@ -102,6 +106,61 @@ function setRuntimeAttentionItem(
   if (!current || nextItem.priority < current.priority) {
     itemsBySessionId.set(nextItem.sessionId, nextItem);
   }
+}
+
+function attentionOccurrence(params: {
+  evidenceUpdatedAt?: number;
+  snapshot?: RuntimeActivitySnapshot;
+}): number {
+  return params.evidenceUpdatedAt
+    ?? params.snapshot?.run?.completedAt
+    ?? params.snapshot?.run?.updatedAt
+    ?? 0;
+}
+
+function groupArchitectureRuntimeItems(
+  items: RuntimeAttentionItem[],
+  sessionsById: Map<string, ChatSession>,
+): RuntimeAttentionItem[] {
+  const architectureRootsByRunId = new Map<string, string>();
+  sessionsById.forEach((session) => {
+    const runId = session.runtimeContext?.architectureContext?.architectureRunId;
+    if (runId && session.runtimeContext?.runtimeKind === 'agent-flow-root') {
+      architectureRootsByRunId.set(runId, session.id);
+    }
+  });
+
+  const grouped = new Map<string, RuntimeAttentionItem>();
+  items.forEach((item) => {
+    const session = sessionsById.get(item.sessionId);
+    const runId = session?.runtimeContext?.architectureContext?.architectureRunId;
+    if (!runId) {
+      grouped.set(`session:${item.sessionId}`, item);
+      return;
+    }
+
+    const groupId = `architecture:${runId}`;
+    const rootSessionId = architectureRootsByRunId.get(runId) ?? item.sessionId;
+    const current = grouped.get(groupId);
+    const primary = !current || item.priority < current.priority ? item : current;
+    const sourceSessionIds = [...new Set([
+      ...(current?.sourceSessionIds ?? []),
+      ...item.sourceSessionIds,
+    ])].sort();
+
+    grouped.set(groupId, {
+      ...primary,
+      id: `${primary.kind}:${groupId}`,
+      sessionId: rootSessionId,
+      navigationSessionId: rootSessionId,
+      sourceSessionIds,
+      groupId,
+      label: sessionAttentionLabel(rootSessionId, sessionsById),
+      occurredAt: Math.max(current?.occurredAt ?? 0, item.occurredAt),
+    });
+  });
+
+  return [...grouped.values()];
 }
 
 function recoveredRunDetail(snapshot: RuntimeActivitySnapshot): string | null {
@@ -236,6 +295,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: 'Awaiting confirmation',
         actionable: true,
         priority: 0,
+        occurredAt: 0,
+        navigationSessionId: confirmation.sessionId,
+        sourceSessionIds: [confirmation.sessionId],
       });
       actionableSessionIds.add(confirmation.sessionId);
     });
@@ -251,6 +313,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: 'Budget approval required',
         actionable: true,
         priority: 0,
+        occurredAt: 0,
+        navigationSessionId: approval.sessionId,
+        sourceSessionIds: [approval.sessionId],
       });
       actionableSessionIds.add(approval.sessionId);
     });
@@ -268,6 +333,9 @@ export function selectRuntimeAttentionItems(params: {
       detail: approval.displayLabel,
       actionable: true,
       priority: 0,
+      occurredAt: 0,
+      navigationSessionId: approval.sessionId,
+      sourceSessionIds: [approval.sessionId],
     });
     actionableSessionIds.add(approval.sessionId);
   });
@@ -315,6 +383,12 @@ export function selectRuntimeAttentionItems(params: {
         detail: classifiedEvidence.detail,
         actionable: false,
         priority: classifiedEvidence.priority,
+        occurredAt: attentionOccurrence({
+          evidenceUpdatedAt: evidence?.updatedAt,
+          snapshot,
+        }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
       return;
     }
@@ -328,6 +402,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: recoveredDetail,
         actionable: false,
         priority: 18,
+        occurredAt: attentionOccurrence({ snapshot }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
       return;
     }
@@ -341,6 +418,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: 'Runtime error',
         actionable: false,
         priority: 20,
+        occurredAt: attentionOccurrence({ snapshot }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
       return;
     }
@@ -354,6 +434,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: waitingDetail(snapshot),
         actionable: false,
         priority: 30,
+        occurredAt: attentionOccurrence({ snapshot }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
     }
   });
@@ -378,6 +461,9 @@ export function selectRuntimeAttentionItems(params: {
           detail: execution.status === 'blocked' ? 'Child execution blocked' : 'Child execution failed',
           actionable: false,
           priority: 15,
+          occurredAt: execution.updatedAt,
+          navigationSessionId: targetSessionId,
+          sourceSessionIds: [targetSessionId],
         });
         return;
       }
@@ -393,6 +479,9 @@ export function selectRuntimeAttentionItems(params: {
             : waitingDetail(undefined, execution.label),
           actionable: false,
           priority: 30,
+          occurredAt: execution.updatedAt,
+          navigationSessionId: targetSessionId,
+          sourceSessionIds: [targetSessionId],
         });
       }
     });
@@ -400,7 +489,10 @@ export function selectRuntimeAttentionItems(params: {
 
   return [
     ...approvalItems.sort((left, right) => left.id.localeCompare(right.id)),
-    ...[...runtimeItemsBySessionId.values()].sort((left, right) => {
+    ...groupArchitectureRuntimeItems(
+      [...runtimeItemsBySessionId.values()],
+      sessionsById,
+    ).sort((left, right) => {
       if (left.priority === right.priority) {
         return left.label.localeCompare(right.label);
       }

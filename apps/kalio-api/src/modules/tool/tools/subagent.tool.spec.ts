@@ -92,12 +92,15 @@ describe('SubagentTool', () => {
       durationMs: 12,
     });
 
-    const result = await tool.execute(
-      makeRequest({ objective: 'Refine the page', childSessionId: 'sub-existing' }, 'master-session'),
-    );
+    const request = makeRequest({ objective: 'Refine the page', childSessionId: 'sub-existing' }, 'master-session');
+    request.turnId = 'parent-turn-1';
+    request.promptMessageId = 'parent-prompt-1';
+    const result = await tool.execute(request);
 
     expect(runtime.runSubagent).toHaveBeenCalledWith(expect.objectContaining({
       parentSessionId: 'master-session',
+      parentTurnId: 'parent-turn-1',
+      parentPromptMessageId: 'parent-prompt-1',
       objective: 'Refine the page',
       childSessionId: 'sub-existing',
     }));

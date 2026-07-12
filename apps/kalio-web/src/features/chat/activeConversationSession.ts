@@ -54,6 +54,7 @@ interface CreateAndActivateEmptyHostSessionParams {
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   onActivated?: (sessionId: string, reason: ConversationActivationReason) => void | Promise<void>;
+  canActivate?: () => boolean;
   reason: ConversationActivationReason;
 }
 
@@ -151,20 +152,31 @@ export async function createAndActivateEmptyHostSession({
   setMessages,
   setAgentTurns,
   onActivated,
+  canActivate,
   reason,
 }: CreateAndActivateEmptyHostSessionParams): Promise<ChatSession> {
+  let activated = !canActivate;
+  const activateIfOwned = (sessionId: string | null) => {
+    if (canActivate && !canActivate()) {
+      return;
+    }
+    activated = true;
+    setActiveSession(sessionId);
+  };
   const session = await createAndActivateHostSession({
     personaId,
     ...(title ? { title } : {}),
     ...(runtimeContext ? { runtimeContext } : {}),
     addSession,
-    setActiveSession,
+    setActiveSession: canActivate ? activateIfOwned : setActiveSession,
     setMessages,
     setAgentTurns,
   });
-  persistActiveConversationSessionId(session.id);
   useSessionStore.getState().markSessionHydrated(session.id);
-  await onActivated?.(session.id, reason);
+  if (activated) {
+    persistActiveConversationSessionId(session.id);
+    await onActivated?.(session.id, reason);
+  }
   return session;
 }
 

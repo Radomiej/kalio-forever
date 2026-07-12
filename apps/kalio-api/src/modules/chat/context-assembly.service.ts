@@ -146,8 +146,10 @@ export class ContextAssemblyService {
     const effectiveSystemPrompt = `${basePrompt}${branchAdditions}`
       + buildSkillsSection(activeSkills)
       + buildToolsSection(toolPolicy.tools, { compact: true, includeCount: false });
+    // Persona config stores only a model name, not a provider/model pair. AgentFlow
+    // must not combine that name with an unrelated active provider implicitly.
     const model = profile.runtimeKind === 'agent-flow-branch'
-      ? (profile.modelOverride?.trim() || personaConfig?.model || '')
+      ? (profile.modelOverride?.trim() || '')
       : (personaConfig?.model ?? '');
 
     return {

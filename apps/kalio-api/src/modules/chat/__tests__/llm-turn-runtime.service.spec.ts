@@ -248,6 +248,51 @@ describe('LLMTurnRuntimeService', () => {
     expect(onBeforeIteration).toHaveBeenCalledWith(1, 'first-message', 7);
   });
 
+  it('continues from a typed resume state without resetting the tool budget', async () => {
+    const llmSource: ILLMSource = {
+      stream: vi.fn(() => streamFrom([
+        { type: 'text_delta', delta: 'resumed' },
+        { type: 'done' },
+      ])),
+    };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async (chunk: InternalLLMChunk, ctx: { state: { appendText: (delta: string) => void } }) => {
+        if (chunk.type === 'text_delta') ctx.state.appendText(chunk.delta);
+      }),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+    );
+    const onBeforeIteration = vi.fn().mockResolvedValue(undefined);
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [],
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 30,
+      resumeState: { iteration: 2, currentLimit: 30 },
+      callbacks: { onBeforeIteration },
+    });
+
+    expect(onBeforeIteration).toHaveBeenCalledWith(3, expect.any(String), 30);
+    expect(result.iterationCount).toBe(3);
+    expect(result.finalLimit).toBe(30);
+  });
+
   it('logs typed runtime events for empty no-tool retries without raw prompt data', async () => {
     const llmSource: ILLMSource = {
       stream: vi.fn()
@@ -533,7 +578,8 @@ describe('LLMTurnRuntimeService', () => {
     expect(seenRawXmlToolNames).toEqual([undefined]);
   });
 
-  it('persists tool results with the opening prompt linkage for the turn', async () => {
+  it('persists tool results before emitting them to the live client', async () => {
+    const resultOrder: string[] = [];
     const llmSource: ILLMSource = {
       stream: vi.fn(() => streamFrom([
         { type: 'tool_call', callId: 'call-1', name: 'memory_search', args: { q: 'x' } },
@@ -545,7 +591,9 @@ describe('LLMTurnRuntimeService', () => {
         history: [{ role: 'system', content: 'prompt' }],
         unboundedHistoryCount: 1,
       }),
-      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn().mockImplementation(async () => {
+        resultOrder.push('persist');
+      }),
     } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
     const processor = {
       process: vi.fn(async (chunk: InternalLLMChunk, ctx: StreamContext) => {
@@ -573,7 +621,9 @@ describe('LLMTurnRuntimeService', () => {
       effectiveSystemPrompt: 'prompt',
       toolMetas: [],
       abortSignal: new AbortController().signal,
-      emit: vi.fn() as EmitFn,
+      emit: vi.fn((event: string) => {
+        if (event === 'tool:result') resultOrder.push('emit');
+      }) as EmitFn,
       maxIterations: 1,
     });
 
@@ -583,6 +633,7 @@ describe('LLMTurnRuntimeService', () => {
       JSON.stringify({ hits: [] }),
       { turnId: 'turn-1', promptMessageId: 'user-1' },
     );
+    expect(resultOrder).toEqual(['persist', 'emit']);
   });
 
   it('logs tool audit rows using typed ToolMeta domains', async () => {
@@ -604,7 +655,7 @@ describe('LLMTurnRuntimeService', () => {
         history: [{ role: 'system', content: 'prompt' }],
         unboundedHistoryCount: 1,
       }),
-      saveToolResult: vi.fn().mockResolvedValue(undefined),
+      saveToolResult: vi.fn(),
     } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
     const processor = {
       process: vi.fn(async (chunk: InternalLLMChunk, ctx: StreamContext) => {

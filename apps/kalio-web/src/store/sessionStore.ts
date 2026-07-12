@@ -62,7 +62,7 @@ interface SessionState {
   // Agent turn management
   startAgentTurn: (turnId: ID, sessionId: ID, agentRun?: AgentRunContext, promptMessageId?: ID) => void;
   addTurnItem: (item: AgentTurnItem, sessionId?: string | null) => void;
-  finalizeAgentTurn: (sessionId?: string | null) => void;
+  finalizeAgentTurn: (sessionId?: string | null, expectedTurnId?: ID | null) => void;
   clearAgentTurns: (sessionId?: string | null) => void;
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   updateAgentTurn: (turnId: ID, patch: Partial<AgentTurn>, sessionId?: string | null) => void;
@@ -520,13 +520,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
     }),
 
-  finalizeAgentTurn: (sessionId) =>
+  finalizeAgentTurn: (sessionId, expectedTurnId) =>
     set((s) => ({
       ...(sessionId ?? s.activeSessionId)
         ? (() => {
             const targetSessionId = sessionId ?? s.activeSessionId;
             if (!targetSessionId) return {};
             const targetTurnId = getStoredSessionActiveTurnId(s, targetSessionId);
+            if (expectedTurnId !== undefined && targetTurnId !== expectedTurnId) return {};
             const nextSessionTurns = getStoredSessionTurns(s, targetSessionId).map((turn) =>
               turn.id === targetTurnId ? { ...turn, done: true } : turn,
             );

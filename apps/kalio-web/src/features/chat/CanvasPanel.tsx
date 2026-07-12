@@ -79,11 +79,24 @@ export function CanvasPanel() {
   const activeRuntimeSnapshot = getRuntimeActivitySnapshot(activeSessionId);
   const activeSessionToolActivities = getToolActivitiesForSession(activeSessionId);
   const activeChildExecutions = activeRuntimeSnapshot?.childExecutions ?? [];
+  const waitingChildSessionIds = useMemo(
+    () => new Set(Object.entries(pendingConfirmations)
+      .filter(([, requests]) => requests.length > 0)
+      .map(([sessionId]) => sessionId)),
+    [pendingConfirmations],
+  );
   const masterActivities = activeSessionToolActivities.filter((activity) => activity.agentRun?.agentType !== 'subagent');
   const subagentActivities = activeSessionToolActivities.filter((activity) => activity.agentRun?.agentType === 'subagent');
   const subagentPreviews = useMemo(
-    () => buildSubagentPreviews(messages, activeSessionToolActivities, sessions, activeChildExecutions),
-    [activeChildExecutions, activeSessionToolActivities, messages, sessions],
+    () => buildSubagentPreviews(
+      messages,
+      activeSessionToolActivities,
+      sessions,
+      activeChildExecutions,
+      waitingChildSessionIds,
+      activeSessionId ?? undefined,
+    ),
+    [activeChildExecutions, activeSessionId, activeSessionToolActivities, messages, sessions, waitingChildSessionIds],
   );
   const agentFlowPreviews = useMemo(
     () => buildAgentFlowPreviews(messages, activeSessionToolActivities, sessions, activeChildExecutions),

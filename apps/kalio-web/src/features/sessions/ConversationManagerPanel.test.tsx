@@ -557,7 +557,7 @@ describe('ConversationManagerPanel', () => {
           toolResultErrorCode: 'SUBAGENT_TIMEOUT',
           toolResultErrorMessage: 'Sub-agent timed out after 300000ms.',
         }),
-        createdAt: 2,
+        createdAt: Date.now(),
       }],
     };
     agentState.runtimeActivitySnapshots = {
@@ -609,7 +609,7 @@ describe('ConversationManagerPanel', () => {
           toolResultErrorCode: 'TOOL_RUNTIME_ERROR',
           toolResultErrorMessage: longDetail,
         }),
-        createdAt: 2,
+        createdAt: Date.now(),
       }],
     };
     agentState.runtimeActivitySnapshots = {

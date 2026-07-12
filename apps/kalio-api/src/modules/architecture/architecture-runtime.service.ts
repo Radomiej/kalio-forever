@@ -866,6 +866,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
           architectureRunId: run.id,
           schemaId: schema.id,
           executionMode: run.executionMode,
+          rootSessionId: run.rootSessionId,
           eventId: event.id,
           eventType: event.type,
           sequence: event.sequence,
@@ -994,7 +995,13 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     const createdAt = Math.min(...rows.map((row) => row.createdAt));
     const updatedAt = Math.max(...rows.map((row) => row.createdAt));
     const executionMode = architectureAuditExecutionMode(source);
-    const rootSessionId = architectureAuditStringField(source, 'rootSessionId') ?? rows.find((row) => row.sessionId)?.sessionId ?? undefined;
+    const candidateRootSessionId = architectureAuditStringField(source, 'rootSessionId') ?? rows.find((row) => row.sessionId)?.sessionId ?? undefined;
+    const auditedBranchSessionIds = architectureAuditStringRecordField(source, 'branchSessionIds');
+    const recoveredOwnership = auditedBranchSessionIds && Object.keys(auditedBranchSessionIds).length > 0
+      ? { rootSessionId: candidateRootSessionId, branchSessionIds: auditedBranchSessionIds }
+      : await this.reconstructSessionOwnership(runId, candidateRootSessionId);
+    const rootSessionId = recoveredOwnership.rootSessionId ?? candidateRootSessionId;
+    const branchSessionIds = recoveredOwnership.branchSessionIds;
 
     return {
       id: runId,
@@ -1002,12 +1009,53 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       prompt: architectureAuditPromptFromRecords(records) ?? `Recovered architecture run ${runId}`,
       executionMode,
       rootSessionId,
-      branchSessionIds: architectureAuditStringRecordField(source, 'branchSessionIds'),
+      branchSessionIds,
       status,
       createdAt,
       updatedAt,
       completedAt: status === 'running' ? undefined : updatedAt,
     };
+  }
+
+  private async reconstructSessionOwnership(
+    runId: string,
+    candidateRootSessionId: string | undefined,
+  ): Promise<{ rootSessionId?: string; branchSessionIds?: Record<string, string> }> {
+    if (!candidateRootSessionId) return {};
+
+    const candidateChildren = await this.sessions.listChildren(candidateRootSessionId);
+    const directBranches = this.branchSessionIdsFromSessions(runId, candidateChildren);
+    if (directBranches) {
+      return { rootSessionId: candidateRootSessionId, branchSessionIds: directBranches };
+    }
+
+    const durableRoot = candidateChildren.find((session) =>
+      session.runtimeContext?.runtimeKind === 'agent-flow-root'
+      && session.runtimeContext.architectureContext?.architectureRunId === runId);
+    if (!durableRoot) return { rootSessionId: candidateRootSessionId };
+
+    const branchSessions = await this.sessions.listChildren(durableRoot.id);
+    return {
+      rootSessionId: durableRoot.id,
+      branchSessionIds: this.branchSessionIdsFromSessions(runId, branchSessions),
+    };
+  }
+
+  private branchSessionIdsFromSessions(
+    runId: string,
+    sessions: Awaited<ReturnType<SessionsService['listChildren']>>,
+  ): Record<string, string> | undefined {
+    const pairs = sessions.flatMap((session) => {
+      const context = session.runtimeContext;
+      const architectureContext = context?.architectureContext;
+      if (context?.runtimeKind !== 'agent-flow-branch') return [];
+      if (architectureContext?.architectureRunId !== runId) return [];
+
+      const slotId = context.architectureSlotId ?? architectureContext.roleSlotId;
+      return slotId ? [[slotId, session.id] as const] : [];
+    });
+
+    return pairs.length > 0 ? Object.fromEntries(pairs) : undefined;
   }
 
   private async reconstructEventsFromAudit(runId: string): Promise<ArchitectureExecutionEvent[]> {

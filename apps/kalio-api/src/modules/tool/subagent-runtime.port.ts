@@ -17,12 +17,15 @@ export type SubagentEmit = <K extends keyof SocketEvents>(event: K, data: Socket
 
 export interface RunSubagentRequest {
   parentSessionId: string;
+  parentTurnId?: string;
+  parentPromptMessageId?: string;
   parentToolCallId: string;
   objective: string;
   attachments?: string[];
   auditContext?: Record<string, unknown>;
   autoApproveTools?: string[];
   childSessionId?: string;
+  resumeTurnId?: string;
   personaId?: string;
   model?: string;
   availableTools?: ToolMeta[];

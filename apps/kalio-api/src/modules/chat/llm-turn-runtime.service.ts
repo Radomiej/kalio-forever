@@ -44,8 +44,8 @@ export class LLMTurnRuntimeService {
 
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
     const maxEmptyNoToolRetries = request.maxEmptyNoToolRetries ?? 0;
-    let iteration = 0;
-    let currentLimit = request.maxIterations;
+    let iteration = request.resumeState?.iteration ?? 0;
+    let currentLimit = request.resumeState?.currentLimit ?? request.maxIterations;
     let emptyNoToolRetries = 0;
     let emptyNoToolRetriesExhausted = false;
     let latestText = '';
@@ -82,9 +82,15 @@ export class LLMTurnRuntimeService {
       let state = new TurnState();
       let ctx: StreamContext = {
         sessionId: request.sessionId,
+        runId: request.runId,
         turnId: request.turnId,
         promptMessageId: request.promptMessageId,
         vfsSessionId: request.vfsSessionId,
+        historySessionId: request.historySessionId,
+        runtimeKind: request.runtimeKind,
+        iteration,
+        currentLimit,
+        markWaitingForHuman: request.callbacks?.onWaitingForHuman,
         messageId,
         abortSignal: request.abortSignal,
         state,
@@ -275,6 +281,11 @@ export class LLMTurnRuntimeService {
             ctx,
             request.toolMetas,
           );
+          const content = serializeToolResultContent(effectiveToolCall.name, result);
+          await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
+            turnId: request.turnId,
+            promptMessageId: request.promptMessageId,
+          });
           request.emit('tool:result', result);
           await this.audit?.log({
             sessionId: request.sessionId,
@@ -289,11 +300,6 @@ export class LLMTurnRuntimeService {
               request.callbacks?.onEscalation?.(message);
             }
           }
-          const content = serializeToolResultContent(effectiveToolCall.name, result);
-          await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
-            turnId: request.turnId,
-            promptMessageId: request.promptMessageId,
-          });
         }
       }
 
@@ -347,7 +353,11 @@ export class LLMTurnRuntimeService {
     });
     if (approvedLimit && approvedLimit > currentLimit) {
       currentLimit = approvedLimit;
-      return this.runAgentLoop({ ...request, maxIterations: currentLimit });
+      return this.runAgentLoop({
+        ...request,
+        maxIterations: currentLimit,
+        resumeState: { iteration, currentLimit },
+      });
     }
     if (request.runtimeKind !== 'chat') {
       this.logger.warn(`Subagent exceeded ${currentLimit} iterations session=${request.sessionId}`);
@@ -539,7 +549,7 @@ function workflowErrorCodeFromThrown(error: unknown): WorkflowErrorCode {
   }
 }
 
-function serializeToolResultContent(toolName: string, result: ToolResult): string {
+export function serializeToolResultContent(toolName: string, result: ToolResult): string {
   const fallbackErrorMessage = result.errorMessage ?? (
     result.status === 'cancelled' ? `Tool ${toolName} was cancelled or not approved.` : ''
   );

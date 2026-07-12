@@ -46,6 +46,7 @@ export interface ArchitectureRoleExecutionInput {
   node?: ArchitectureSchemaNode;
   incomingEvents?: ArchitectureExecutionEvent[];
   outgoingNodeIds?: string[];
+  resumeChildTurnId?: string;
   emit?: SubagentEmit;
 }
 
@@ -131,6 +132,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         parentSessionId: input.run.rootSessionId ?? input.branchSessionId,
         parentToolCallId: `architecture:${input.run.id}:${input.slot.id}`,
         childSessionId: input.branchSessionId,
+        resumeTurnId: input.resumeChildTurnId,
         personaId: input.personaId,
         model: this.modelForSlot(input),
         objective: this.buildObjective(input),

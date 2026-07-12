@@ -803,4 +803,29 @@ describe('@kalio/types contract shape', () => {
     expect(architectureSessionIdForRunSlot('arch-run-1', 'router')).toBe('arch-run-1-router');
     expect(architectureSessionIdForRunSlot('arch-run-1', undefined)).toBeUndefined();
   });
+
+  it('keeps durable chat lifecycle explicit for workflow projection', () => {
+    expectTypeOf<import('../index.js').ChatRunStatus>().toEqualTypeOf<
+      | 'queued'
+      | 'active'
+      | 'waiting_for_human'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted'
+      | 'interrupted_needs_retry'
+    >();
+  });
+
+  it('exposes durable queued payload metadata on chat run snapshots', () => {
+    expectTypeOf<import('../index.js').ChatRunSnapshot['queuedPayload']>().toEqualTypeOf<
+      | {
+        content: string;
+        personaId: string;
+        attachments?: import('../index.js').ChatAttachment[] | undefined;
+        clientMessageId?: string | undefined;
+      }
+      | undefined
+    >();
+  });
 });

@@ -104,6 +104,7 @@ export function ExecutionGraphNodeCard({
   return (
     <div
       data-testid={`graph-node-${node.id}`}
+      data-session-id={node.sessionId ?? undefined}
       data-graph-node-card="true"
       data-graph-connector-drop-target={connectorDropTargetDirection ?? undefined}
       className={`absolute cursor-grab overflow-visible text-left rounded-md border px-3 py-2.5 shadow-[0_8px_18px_rgba(2,12,27,0.22)] transition-[border-color,background-color,box-shadow,opacity,filter] active:cursor-grabbing ${nodeTone.card} ${selected ? 'ring-2 ring-sky-200/90 shadow-[0_0_0_1px_rgba(125,211,252,0.45),0_12px_24px_rgba(8,47,73,0.28)]' : 'hover:border-white/35 hover:bg-opacity-100'} ${related ? '' : 'opacity-70 saturate-75'}`}

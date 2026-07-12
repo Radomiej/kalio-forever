@@ -111,6 +111,8 @@ function branchStreamEventData(event: string, payload: Record<string, unknown>):
     kind: 'branch_stream',
     event,
     sessionId: stringField(payload, 'sessionId'),
+    turnId: stringField(payload, 'turnId'),
+    promptMessageId: stringField(payload, 'promptMessageId'),
     callId: stringField(payload, 'callId'),
     requestId: stringField(payload, 'requestId'),
     toolName: stringField(payload, 'toolName'),

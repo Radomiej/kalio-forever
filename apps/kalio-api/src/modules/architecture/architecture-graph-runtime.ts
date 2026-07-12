@@ -128,14 +128,16 @@ class ArchitectureGraphRuntime {
       steps += executableBatch.length;
 
       const batchResults = await Promise.all(executableBatch.map(async (node) => {
-        this.push('node_started', `${node.label} started.`, {
-          actionSummary: architectureActionSummaryForEvent('node_started', node.kind),
-          lifecycle: 'node_started',
-          status: 'running',
-          nodeId: node.id,
-          roleSlotId: node.roleSlotId,
-          data: { kind: node.kind, behavior: node.behavior ? { ...node.behavior } : undefined },
-        });
+        if (!this.resumesIncompleteNode(node.id)) {
+          this.push('node_started', `${node.label} started.`, {
+            actionSummary: architectureActionSummaryForEvent('node_started', node.kind),
+            lifecycle: 'node_started',
+            status: 'running',
+            nodeId: node.id,
+            roleSlotId: node.roleSlotId,
+            data: { kind: node.kind, behavior: node.behavior ? { ...node.behavior } : undefined },
+          });
+        }
         const outgoingNodeIds = outgoing.get(node.id) ?? [];
         let selectedNodeIds: string[];
         try {
@@ -245,6 +247,21 @@ class ArchitectureGraphRuntime {
     }
 
     return this.events;
+  }
+
+  private resumesIncompleteNode(nodeId: string): boolean {
+    if (this.options.resumeFrom?.reason !== 'runtime_pause' || this.options.resumeFrom.waitingNodeId !== nodeId) {
+      return false;
+    }
+    let lastStarted = -1;
+    let lastCompleted = -1;
+    for (let index = 0; index < this.events.length; index += 1) {
+      const event = this.events[index];
+      if (event?.nodeId !== nodeId) continue;
+      if (event.type === 'node_started') lastStarted = index;
+      if (event.type === 'node_completed') lastCompleted = index;
+    }
+    return lastStarted >= 0 && lastCompleted < lastStarted;
   }
 
   private seedPriorEvents(): void {
@@ -409,6 +426,9 @@ class ArchitectureGraphRuntime {
       node,
       incomingEvents: this.incomingEventsForSlot(slot, this.incomingNodeIdsFor(node.id)),
       outgoingNodeIds,
+      resumeChildTurnId: this.options.resumeFrom?.waitingNodeId === node.id
+        ? this.options.resumeFrom.waitIdentity?.childTurnId
+        : undefined,
       emit: this.branchEventEmit(node, slot),
     });
     const toolContract = architectureToolExecutorContract({
@@ -883,6 +903,41 @@ class ArchitectureGraphRuntime {
   ): NonNullable<ArchitectureRoleExecutionInput['emit']> {
     return (event, data) => {
       this.pushBranchStreamEvent(node, slot, event, data);
+      if (event === 'tool:confirmation_required' || event === 'agent:budget_required') {
+        const payload: Record<string, unknown> = this.isRecord(data)
+          ? data as Record<string, unknown>
+          : {};
+        const parentExecution = this.isRecord(payload['architectureParentExecution'])
+          ? payload['architectureParentExecution'] as Record<string, unknown>
+          : {};
+        const requestId = typeof payload['requestId'] === 'string' ? payload['requestId'] : undefined;
+        const childSessionId = typeof parentExecution['childSessionId'] === 'string'
+          ? parentExecution['childSessionId']
+          : typeof payload['sessionId'] === 'string' ? payload['sessionId'] : undefined;
+        const childTurnId = typeof parentExecution['childTurnId'] === 'string'
+          ? parentExecution['childTurnId']
+          : typeof payload['turnId'] === 'string' ? payload['turnId'] : undefined;
+        const promptMessageId = typeof parentExecution['promptMessageId'] === 'string'
+          ? parentExecution['promptMessageId']
+          : typeof payload['promptMessageId'] === 'string' ? payload['promptMessageId'] : undefined;
+        this.push('router_decision', `${slot.label} paused for human input.`, {
+          actionSummary: architectureActionSummaryForEvent('router_decision', node.kind),
+          lifecycle: 'waiting_on_orchestrator',
+          status: 'waiting_on_orchestrator',
+          nodeId: node.id,
+          roleSlotId: slot.id,
+          reasonCode: 'runtime_pause',
+          data: {
+            reasonCode: 'runtime_pause',
+            pendingNodeIds: [node.id],
+            visitCounts: Object.fromEntries(this.nodeVisitCounts.entries()),
+            waitEvent: event,
+            waitIdentity: requestId && childSessionId && childTurnId
+              ? { requestId, childSessionId, childTurnId, promptMessageId }
+              : undefined,
+          },
+        });
+      }
       this.options.emit?.(event, data);
     };
   }

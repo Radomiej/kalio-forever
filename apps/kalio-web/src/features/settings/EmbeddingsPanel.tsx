@@ -404,17 +404,20 @@ export function EmbeddingsPanel() {
             ))}
           </div>
 
-          {(status?.source === 'local' || status?.source === 'disabled' || status?.source === 'env') && !activeId && (
+          {(status?.source === 'local' || status?.source === 'disabled' || status?.source === 'env' || status?.source === 'mock') && !activeId && (
             <div className="border border-sky-500/20 bg-sky-500/5 rounded-lg p-3 flex flex-col gap-1" data-testid="embedding-env-card">
               <div className="flex items-center gap-2">
                 <Info size={13} className="text-sky-400 shrink-0" />
-                <span className="text-sm font-medium flex-1">{status.source === 'env' ? 'Env Provider' : 'Local embeddings'}</span>
+                <span className="text-sm font-medium flex-1">
+                  {status.source === 'env' ? 'Env Provider' : status.source === 'mock' ? 'Mock embeddings' : 'Local embeddings'}
+                </span>
                 <span className={`badge badge-xs ${status.source === 'disabled' ? 'badge-warning' : 'badge-ghost'}`}>
-                  {status.source === 'disabled' ? 'disabled' : 'active'}
+                  {status.source === 'disabled' ? 'disabled' : status.source === 'mock' ? 'test' : 'active'}
                 </span>
               </div>
               <div className="text-xs text-base-content/60 pl-5 flex flex-col gap-0.5">
                 <span>Model: <span className="font-mono">{status.model}</span></span>
+                {status.source === 'mock' && <span>Deterministic test provider; no remote model is used.</span>}
                 {status.modelParameters && <span>Parameters: <span className="font-mono">{status.modelParameters}</span></span>}
                 {status.backend && (
                   <span>

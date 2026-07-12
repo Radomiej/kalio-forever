@@ -9,6 +9,7 @@ import {
   restoreActiveCredential,
   selectSession,
 } from './helpers/test-config';
+import { restartPlaywrightBackend } from './helpers/restart-control';
 
 const MANUAL_CHILD_TRIGGER = '[[mock:tool:run_subagent:hitl]]';
 const AUTO_APPROVE_CHILD_TRIGGER = '[[mock:tool:run_subagent:auto-approve]]';
@@ -141,8 +142,39 @@ async function sendPrompt(page: Page, content: string): Promise<void> {
   await sendButton.click();
 }
 
+async function expectChildHitlAcrossRuntimeSurfaces(
+  page: Page,
+  parentSessionId: string,
+  parentTitle: string,
+  childSessionId: string,
+): Promise<void> {
+  await expect(page.getByTestId(`session-pending-confirmation-${childSessionId}`)).toBeVisible({ timeout: 20_000 });
+
+  await selectSession(page, parentSessionId, parentTitle);
+  await page.getByTestId('talk-sidebar-conversation-entry').click();
+  if (!(await page.getByTestId('canvas-panel').isVisible().catch(() => false))) {
+    const canvasToggle = page.getByTestId('canvas-toggle');
+    if (await canvasToggle.isVisible().catch(() => false)) {
+      await canvasToggle.click();
+    } else {
+      const openSubagentCanvas = page.getByTestId('open-subagent-canvas');
+      await expect(openSubagentCanvas).toBeVisible({ timeout: 10_000 });
+      await openSubagentCanvas.click();
+    }
+  }
+  await expect(page.getByTestId(`canvas-subagent-status-${childSessionId}`)).toHaveAttribute('data-status', 'waiting', { timeout: 20_000 });
+
+  await page.getByTestId('talk-sidebar-graph-entry').click();
+  const graphNode = page.getByTestId(`graph-node-subagent:${childSessionId}`);
+  await expect(graphNode).toBeVisible({ timeout: 20_000 });
+  await expect(graphNode.locator('[aria-label="Status: waiting"]')).toBeVisible({ timeout: 20_000 });
+
+  await openChildSession(page, parentSessionId, childSessionId);
+  await expect(page.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
+}
+
 test.describe('Subconversation live HITL', () => {
-  test('child session receives live HITL and confirms without reload', async ({ page, request }) => {
+  test('child session restores pending HITL after backend restart and then continues', async ({ page, request }) => {
     test.setTimeout(180_000);
     const previousHitlConfig = await getHitlConfig(request);
     const previousActiveCredentialId = await getActiveCredentialId(request);
@@ -167,14 +199,19 @@ test.describe('Subconversation live HITL', () => {
 
       const confirmButton = page.getByTestId('confirmation-confirm-btn');
       await expect(confirmButton).toBeVisible({ timeout: 20_000 });
+      await expectChildHitlAcrossRuntimeSurfaces(page, session.id, title, childSessionId);
+
+      await restartPlaywrightBackend();
+      await page.reload();
+      await page.getByTestId('nav-talk').click();
+      await openChildSession(page, session.id, childSessionId);
+      await expect(confirmButton).toBeVisible({ timeout: 20_000 });
+      await expectChildHitlAcrossRuntimeSurfaces(page, session.id, title, childSessionId);
+
       await confirmButton.click();
       await expect(confirmButton).toHaveCount(0, { timeout: 15_000 });
 
       await expectVfsContent(request, session.id, CHILD_VFS_PATH, CHILD_VFS_CONTENT);
-
-      await page.reload();
-      await page.getByTestId('nav-talk').click();
-      await openChildSession(page, session.id, childSessionId);
       await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
       await expect(page.getByTestId('confirmation-confirm-btn')).toHaveCount(0);
     } finally {

@@ -85,7 +85,7 @@ export function registerSessionLifecycleHandlers({
   const offRuntimeSnapshot = eventBus.onRuntimeActivitySnapshot((payload) => {
     setRuntimeActivitySnapshot(payload);
     if (!runtimeSnapshotKeepsSessionLive(payload)) {
-      finalizeAgentTurn(payload.sessionId);
+      finalizeAgentTurn(payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId);
       setStreaming(false, undefined, payload.sessionId);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {

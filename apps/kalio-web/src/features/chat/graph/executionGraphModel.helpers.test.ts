@@ -55,6 +55,14 @@ describe('executionGraphModel.helpers', () => {
     });
   });
 
+  it('does not trust an unknown persisted CLI lifecycle value', () => {
+    expect(extractCLIAgentSessionResult({
+      childSessionId: 'cli-child-legacy',
+      agentId: 'codex',
+      status: 'looks_done',
+    })).toMatchObject({ status: 'idle' });
+  });
+
   it('extracts file artifacts from raw tool payloads and keeps the preview text', () => {
     expect(extractArtifactFromData('call-1', {
       path: 'sub-agents/child-session-1/wireframe.txt',
@@ -101,6 +109,10 @@ describe('executionGraphModel.helpers', () => {
 
     expect(statusFromActivity(cancelled, false)).toBe('error');
     expect(statusFromActivity(expired, false)).toBe('error');
+  });
+
+  it('does not infer tool success from an untyped result alone', () => {
+    expect(statusFromActivity(null, true, { output: 'unclassified' })).toBe('idle');
   });
 
   it('keeps waiting child executions distinct from active running work', () => {

@@ -589,6 +589,7 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
 
+      await expect(page.getByTestId(`session-done-${session.id}`)).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(5, { timeout: 30_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router');

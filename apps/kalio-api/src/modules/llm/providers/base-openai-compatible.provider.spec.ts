@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BaseOpenAICompatibleProvider } from './base-openai-compatible.provider';
 import { OpenRouterProvider } from './openrouter.provider';
 import { XiaomiMiMoProvider } from './xiaomimimo.provider';
+import { CometAPIProvider } from './cometapi.provider';
 import type { LLMMessage, LLMStreamChunk } from '@kalio/types';
 
 // Regression test for: Silent JSON parse error in streaming
@@ -151,6 +152,45 @@ describe('BaseOpenAICompatibleProvider', () => {
         nextAction: 'route_to',
         targetNodeId: 'implementer',
       });
+    });
+
+    it('omits tools when Comet structured output capability forbids combining them', async () => {
+      const comet = new CometAPIProvider('test-key', 'deepseek-v4-flash', 'https://api.test.com');
+      const structuredOutput = {
+        name: 'architecture_router_output',
+        schema: {
+          type: 'object',
+          properties: { nextAction: { const: 'finalize' } },
+          required: ['nextAction'],
+        },
+        strict: true,
+      };
+      const mockStream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"nextAction\\":\\"finalize\\"}"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: mockStream });
+
+      await comet.streamChat(
+        [{ role: 'user', content: 'route this' }],
+        [{ name: 'route', description: 'Route work', parameters: { type: 'object' } }],
+        {
+          sessionId: 'sess-comet',
+          messageId: 'msg-comet',
+          onChunk: vi.fn(),
+          structuredOutput,
+          onStructuredOutput: vi.fn(),
+        },
+      );
+
+      const requestInit = mockFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+      const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
+      expect(body['response_format']).toEqual({ type: 'json_schema', json_schema: structuredOutput });
+      expect(body['tools']).toBeUndefined();
     });
 
     it('extracts fenced structured JSON from model prose when it matches the requested schema', async () => {

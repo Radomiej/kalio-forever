@@ -513,6 +513,22 @@ describe('MockLLMProvider', () => {
     expect(toolCalls[0]?.args['autoApproveTools']).toBeUndefined();
   });
 
+  it('lets a structured architecture router execute run_subagent before returning its decision', async () => {
+    const provider = new MockLLMProvider();
+    const onStructuredOutput = vi.fn();
+    const toolCalls = await provider.streamChat(
+      [{ role: 'user', content: 'Slot: Orchestrator [[mock:tool:run_subagent:hitl]]' }],
+      [{ name: 'run_subagent', description: 'Run a reasoning child', parameters: {} }],
+      {
+        sessionId: 'router-session', messageId: 'router-message', onChunk: vi.fn(),
+        onStructuredOutput, structuredOutput: { name: 'architecture_router_output', schema: {} },
+      },
+    );
+
+    expect(toolCalls).toEqual([expect.objectContaining({ name: 'run_subagent' })]);
+    expect(onStructuredOutput).not.toHaveBeenCalled();
+  });
+
   it('returns a deterministic run_subagent tool call that auto-approves child vfs_write', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

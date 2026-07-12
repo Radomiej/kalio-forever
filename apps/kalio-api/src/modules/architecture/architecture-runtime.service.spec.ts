@@ -4741,6 +4741,80 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
+  it('reconstructs branch session ownership from durable session metadata when audit has no terminal summary', async () => {
+    const { service, audit, sessions } = createService();
+    const runId = 'durable-paused-run';
+    const hostSessionId = 'durable-host';
+    const rootSessionId = 'durable-paused-root';
+    const createdAt = 1_780_001_500_000;
+    audit.listEntries.mockResolvedValue([
+      auditRow({
+        id: 'audit-1',
+        createdAt,
+        sessionId: hostSessionId,
+        label: 'architecture_event:run_created:runtime',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'goal-guard-delivery-loop',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:1`,
+          eventType: 'run_created',
+          sequence: 1,
+          messagePreview: 'Architecture run created.',
+        },
+      }),
+    ]);
+    const rootSession: ChatSession = {
+      id: rootSessionId,
+      personaId: 'default',
+      title: 'Goal Guard',
+      kind: 'agent-flow',
+      parentSessionId: hostSessionId,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root',
+        architectureContext: {
+          architectureRunId: runId,
+          schemaId: 'goal-guard-delivery-loop',
+        },
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+    const branchSession: ChatSession = {
+        id: 'opaque-branch-session',
+        personaId: 'orchestrator',
+        title: 'Goal Guard: Orchestrator',
+        kind: 'subagent',
+        parentSessionId: rootSessionId,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          parentSessionId: rootSessionId,
+          architectureSlotId: 'orchestrator',
+          architectureContext: {
+            architectureRunId: runId,
+            schemaId: 'goal-guard-delivery-loop',
+            roleSlotId: 'orchestrator',
+          },
+        },
+        createdAt,
+        updatedAt: createdAt,
+    };
+    sessions.listChildren.mockImplementation(async (parentSessionId: string) =>
+      parentSessionId === hostSessionId ? [rootSession] : parentSessionId === rootSessionId ? [branchSession] : []);
+
+    await expect(service.findRunDurable(runId)).resolves.toMatchObject({
+      id: runId,
+      rootSessionId,
+      branchSessionIds: { orchestrator: 'opaque-branch-session' },
+      status: 'running',
+    });
+    expect(sessions.listChildren).toHaveBeenNthCalledWith(1, hostSessionId);
+    expect(sessions.listChildren).toHaveBeenNthCalledWith(2, rootSessionId);
+  });
+
   it('reconstructs failed architecture runs from max-step guard audit rows after runtime memory is gone', async () => {
     const { service, audit } = createService();
     const runId = 'durable-failed-run';
@@ -5453,10 +5527,11 @@ function auditRow(params: {
   data: Record<string, unknown>;
   createdAt: number;
   type?: AuditLogEntry['type'];
+  sessionId?: string;
 }): AuditLogEntry {
   return {
     id: params.id,
-    sessionId: 'arch-durable-run-root',
+    sessionId: params.sessionId ?? 'arch-durable-run-root',
     type: params.type ?? 'architecture_event',
     label: params.label,
     data: params.data,
@@ -5472,9 +5547,10 @@ function createService(options: {
 } = {}): {
   service: ArchitectureRuntimeService;
   executor: ArchitectureRoleExecutor;
-  sessions: Pick<SessionsService, 'createWithId' | 'list' | 'getMessages' | 'get'> & {
+  sessions: Pick<SessionsService, 'createWithId' | 'list' | 'listChildren' | 'getMessages' | 'get'> & {
     created: Array<{ id: string; dto: CreateSessionDto }>;
     list: ReturnType<typeof vi.fn>;
+    listChildren: ReturnType<typeof vi.fn>;
     getMessages: ReturnType<typeof vi.fn>;
     get: ReturnType<typeof vi.fn>;
   };
@@ -5511,6 +5587,7 @@ function createService(options: {
       };
     }),
     list: vi.fn().mockResolvedValue([]),
+    listChildren: vi.fn().mockResolvedValue([]),
     getMessages: vi.fn().mockResolvedValue([]),
     get: vi.fn(async (id: string): Promise<ChatSession> => {
       const explicit = options.sessionById?.[id];

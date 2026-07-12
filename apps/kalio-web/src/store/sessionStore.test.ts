@@ -97,6 +97,20 @@ describe('sessionStore — AgentTurn actions', () => {
       expect(agentTurns[0].done).toBe(true);
       expect(activeTurnId).toBeNull();
     });
+
+    it('does not finalize a newer turn for a delayed terminal event', () => {
+      useSessionStore.getState().startAgentTurn('turn-a', 's1');
+      useSessionStore.getState().finalizeAgentTurn('s1');
+      useSessionStore.getState().startAgentTurn('turn-b', 's1');
+
+      useSessionStore.getState().finalizeAgentTurn('s1', 'turn-a');
+
+      expect(useSessionStore.getState().getSessionActiveTurnId('s1')).toBe('turn-b');
+      expect(useSessionStore.getState().getSessionAgentTurns('s1')).toMatchObject([
+        { id: 'turn-a', done: true },
+        { id: 'turn-b', done: false },
+      ]);
+    });
   });
 
   describe('markAgentTurnError', () => {

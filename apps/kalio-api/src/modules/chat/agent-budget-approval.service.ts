@@ -37,6 +37,8 @@ export class AgentBudgetApprovalService {
     const payload: AgentBudgetApprovalRequest = {
       requestId,
       sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      promptMessageId: ctx.promptMessageId,
       scope: input.runtimeKind,
       usedIterations: input.usedIterations,
       currentLimit: input.currentLimit,

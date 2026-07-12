@@ -210,6 +210,7 @@ export function createRunSubagentToolCall(autoApproveChildTools = false): LLMToo
       name: 'run_subagent',
       args: {
         inputPrompt: `${MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER} Use exactly the vfs_write tool and nothing else.`,
+        personaId: 'builder',
         vfsMode: 'shared',
       },
     };
@@ -220,6 +221,7 @@ export function createRunSubagentToolCall(autoApproveChildTools = false): LLMToo
     name: 'run_subagent',
     args: {
       inputPrompt: `${MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER} Use exactly the vfs_write tool and nothing else.`,
+      personaId: 'builder',
       vfsMode: 'isolated',
       autoApproveTools: ['vfs_write'],
     },

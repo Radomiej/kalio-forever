@@ -2412,7 +2412,7 @@ describe('SessionPanel', () => {
     });
   });
 
-  it('activates a pending New Chat shell immediately while session creation is still in flight', async () => {
+  it('keeps New usable while a pending New Chat session is still being persisted', async () => {
     let resolvePost!: (value: { data: ChatSession }) => void;
     mockApiPost.mockReturnValue(new Promise((resolve) => {
       resolvePost = resolve;
@@ -2425,7 +2425,7 @@ describe('SessionPanel', () => {
     await waitFor(() => expect(newBtn).toHaveAttribute('title', 'New Dev Assistant chat'));
     fireEvent.click(newBtn);
 
-    expect(newBtn).toBeDisabled();
+    expect(newBtn).not.toBeDisabled();
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(mockAddSession).toHaveBeenCalledWith(expect.objectContaining({
       id: expect.stringMatching(/^pending-host-session:/),
@@ -2451,6 +2451,36 @@ describe('SessionPanel', () => {
     });
 
     expect(mockSetActiveSession).toHaveBeenCalledWith('s3');
+    expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
+  });
+
+  it('does not let a delayed New Chat response steal selection after navigation', async () => {
+    let resolvePost!: (value: { data: ChatSession }) => void;
+    mockApiPost.mockReturnValue(new Promise((resolve) => {
+      resolvePost = resolve;
+    }));
+
+    render(<SessionPanel />);
+
+    const newBtn = await screen.findByTestId('new-session-btn');
+    fireEvent.click(newBtn);
+    const pendingSessionId = mockSetActiveSession.mock.calls.at(-1)?.[0];
+    expect(pendingSessionId).toMatch(/^pending-host-session:/);
+
+    act(() => {
+      mockSetActiveSession('s2');
+    });
+
+    await act(async () => {
+      resolvePost({
+        data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 },
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockAddSession).toHaveBeenCalledWith(expect.objectContaining({ id: 's3' }));
+    expect(mockSetActiveSession).not.toHaveBeenCalledWith('s3');
+    expect(mockState.activeSessionId).toBe('s2');
     expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
   });
 

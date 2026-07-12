@@ -53,6 +53,17 @@ export class MockLLMProvider implements ILLMProvider {
   ): Promise<LLMToolCall[]> {
     const { sessionId, messageId, onChunk, abortSignal } = options;
     const lastMessage = getLastUserMessageText(messages);
+    if (
+      options.structuredOutput?.name === 'architecture_router_output'
+      && lastMessage.includes(MOCK_RUN_SUBAGENT_HITL_TRIGGER)
+      && hasTool(tools, 'run_subagent')
+      && !hasPriorToolResult(messages, 'run_subagent')
+      && !hasPriorAssistantToolCall(messages, 'run_subagent')
+    ) {
+      const toolCall = createRunSubagentToolCall(false);
+      emitMockToolArgProgress(options, toolCall);
+      return [toolCall];
+    }
     if (options.structuredOutput?.name === 'architecture_router_output') {
       if (lastMessage.includes(MOCK_ARCHITECTURE_ROUTER_MALFORMED_OUTPUT_TRIGGER)) {
         options.onStructuredOutput?.({

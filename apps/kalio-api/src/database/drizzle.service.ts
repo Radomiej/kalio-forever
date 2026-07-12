@@ -44,12 +44,21 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Migration warning (non-fatal): ${errorMessage}`);
       }
     }
+    this.ensureHitlRequestsTable();
     this.ensureAgentFlowTables();
     this.ensurePersonaColumns();
     this.ensureMcpServerColumns();
     this.ensureSessionColumn('runtime_context', 'text');
     this.ensureMessageColumn('turn_id', 'text');
     this.ensureMessageColumn('prompt_message_id', 'text');
+    this.ensureChatRunColumn('revision', 'integer NOT NULL DEFAULT 1');
+    this.ensureChatRunColumn('outcome', 'text');
+    this.ensureChatRunColumn('queue_idempotency_key', 'text');
+    this.ensureChatRunColumn('queued_payload', 'text');
+    this.ensureChatRunColumn('queued_at', 'integer');
+    this.ensureChatRunColumn('queue_claimed_at', 'integer');
+    this.ensureChatRunColumn('queue_cancelled_at', 'integer');
+    this.ensureChatRunIndexes();
 
     this.logger.log(`Database connected: ${dbPath}`);
   }
@@ -57,6 +66,31 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy(): void {
     this.sqlite?.close();
     this.logger.log('Database connection closed');
+  }
+
+  private ensureHitlRequestsTable(): void {
+    this.sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS hitl_requests (
+        id text PRIMARY KEY NOT NULL,
+        kind text NOT NULL,
+        status text NOT NULL DEFAULT 'pending',
+        session_id text NOT NULL,
+        turn_id text,
+        run_id text,
+        tool_call_id text,
+        payload text NOT NULL,
+        continuation text,
+        outcome text,
+        revision integer NOT NULL DEFAULT 1,
+        created_at integer NOT NULL,
+        updated_at integer NOT NULL,
+        resolved_at integer
+      );
+      CREATE INDEX IF NOT EXISTS hitl_requests_session_status_idx
+        ON hitl_requests (session_id, status);
+      CREATE INDEX IF NOT EXISTS hitl_requests_run_status_idx
+        ON hitl_requests (run_id, status);
+    `);
   }
 
   private ensureAgentFlowTables(): void {
@@ -120,6 +154,9 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     this.ensureAgentFlowRunColumn('result', 'text');
     this.ensureAgentFlowRunColumn('summary', 'text');
     this.ensureAgentFlowRunColumn('finished_at', 'integer');
+    this.ensureAgentFlowRunColumn('revision', 'integer NOT NULL DEFAULT 1');
+    this.ensureAgentFlowRunColumn('lease_owner', 'text');
+    this.ensureAgentFlowRunColumn('lease_expires_at', 'integer');
   }
 
   private ensureAgentFlowRunColumn(name: string, definition: string): void {
@@ -220,6 +257,31 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
     const columns = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
     if (columns.some((column) => column.name === name)) return;
     this.sqlite.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
+  }
+
+  private ensureChatRunColumn(name: string, definition: string): void {
+    const columns = this.sqlite.prepare('PRAGMA table_info(chat_runs)').all() as Array<{ name: string }>;
+    if (columns.some((column) => column.name === name)) return;
+    this.sqlite.exec(`ALTER TABLE chat_runs ADD COLUMN ${name} ${definition}`);
+  }
+
+  private ensureChatRunIndexes(): void {
+    const columns = new Set(
+      (this.sqlite.prepare('PRAGMA table_info(chat_runs)').all() as Array<{ name: string }>)
+        .map((column) => column.name),
+    );
+
+    if (columns.has('session_id') && columns.has('status') && columns.has('queued_at')) {
+      this.sqlite.exec(
+        'CREATE INDEX IF NOT EXISTS chat_runs_session_status_queued_at_idx ON chat_runs (session_id, status, queued_at)',
+      );
+    }
+
+    if (columns.has('session_id') && columns.has('queue_idempotency_key')) {
+      this.sqlite.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS chat_runs_session_queue_idempotency_key_idx ON chat_runs (session_id, queue_idempotency_key)',
+      );
+    }
   }
 
   private ensureMessageColumn(name: string, definition: string): void {

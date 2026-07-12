@@ -20,6 +20,22 @@ function createMigrationsFolder(journalTags: string[]): string {
 }
 
 describe('DrizzleService AgentFlow bootstrap repair', () => {
+  it('creates the durable HITL table when an older migration chain stopped early', () => {
+    const sqlite = new Database(':memory:');
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    (service as unknown as { ensureHitlRequestsTable: () => void }).ensureHitlRequestsTable();
+
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'hitl_requests'").get())
+      .toEqual({ name: 'hitl_requests' });
+    expect(sqlite.prepare('PRAGMA index_list(hitl_requests)').all()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'hitl_requests_session_status_idx' }),
+      expect.objectContaining({ name: 'hitl_requests_run_status_idx' }),
+    ]));
+    sqlite.close();
+  });
+
   it('backfills new agent_flow_runs columns on an existing older table', () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(`
@@ -119,6 +135,72 @@ describe('DrizzleService AgentFlow bootstrap repair', () => {
     const columns = sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       'origin_source',
+    ]));
+    sqlite.close();
+  });
+
+  it('backfills the chat run revision on an existing database', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE chat_runs (
+        id text PRIMARY KEY NOT NULL,
+        session_id text NOT NULL,
+        turn_id text NOT NULL,
+        status text
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('revision', 'integer NOT NULL DEFAULT 1');
+
+    const columns = sqlite.prepare('PRAGMA table_info(chat_runs)').all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain('revision');
+    sqlite.close();
+  });
+
+  it('backfills queued chat run contract columns on an existing database', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE chat_runs (
+        id text PRIMARY KEY NOT NULL,
+        session_id text NOT NULL,
+        turn_id text NOT NULL,
+        status text
+      );
+    `);
+    const service = new DrizzleService(null as never);
+    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('outcome', 'text');
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('queue_idempotency_key', 'text');
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('queued_payload', 'text');
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('queued_at', 'integer');
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('queue_claimed_at', 'integer');
+    (service as unknown as { ensureChatRunColumn: (name: string, definition: string) => void })
+      .ensureChatRunColumn('queue_cancelled_at', 'integer');
+    (service as unknown as { ensureChatRunIndexes: () => void }).ensureChatRunIndexes();
+
+    const columns = sqlite.prepare('PRAGMA table_info(chat_runs)').all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'outcome',
+      'queue_idempotency_key',
+      'queued_payload',
+      'queued_at',
+      'queue_claimed_at',
+      'queue_cancelled_at',
+    ]));
+
+    const indexes = sqlite.prepare('PRAGMA index_list(chat_runs)').all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining([
+      'chat_runs_session_status_queued_at_idx',
+      'chat_runs_session_queue_idempotency_key_idx',
     ]));
     sqlite.close();
   });

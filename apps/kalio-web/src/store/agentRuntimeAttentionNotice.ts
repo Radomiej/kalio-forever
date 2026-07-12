@@ -1,6 +1,5 @@
 import type { ChatMessage, ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import type { RuntimeAttentionItem } from './agentRuntimeSelectors';
-import { extractLatestVisibleRuntimeEvidence } from './agentRuntimeEvidence';
 
 export const RUNTIME_ATTENTION_NOTICE_LIMIT = 3;
 export const RUNTIME_ATTENTION_NOTICE_WINDOW_MS = 5 * 60 * 1000;
@@ -18,23 +17,6 @@ export function runtimeAttentionReviewKey(item: RuntimeAttentionItem, updatedAt:
   return `${item.id}:${updatedAt}`;
 }
 
-function itemUpdatedAt(params: {
-  item: RuntimeAttentionItem;
-  sessionMessages?: Record<string, ChatMessage[]> | null;
-  runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot> | null;
-  sessionsById: Map<string, ChatSession>;
-}): number {
-  const evidence = extractLatestVisibleRuntimeEvidence(
-    params.sessionMessages?.[params.item.sessionId],
-    params.runtimeActivitySnapshots?.[params.item.sessionId],
-  );
-  return Math.max(
-    evidence?.updatedAt ?? 0,
-    params.runtimeActivitySnapshots?.[params.item.sessionId]?.updatedAt ?? 0,
-    params.sessionsById.get(params.item.sessionId)?.updatedAt ?? 0,
-  );
-}
-
 export function selectRuntimeAttentionNotice(params: {
   items: RuntimeAttentionItem[];
   sessionMessages?: Record<string, ChatMessage[]> | null;
@@ -49,17 +31,11 @@ export function selectRuntimeAttentionNotice(params: {
   const limit = params.limit ?? RUNTIME_ATTENTION_NOTICE_LIMIT;
   const windowMs = params.windowMs ?? RUNTIME_ATTENTION_NOTICE_WINDOW_MS;
   const dismissedThroughUpdatedAt = params.dismissedThroughUpdatedAt ?? 0;
-  const sessionsById = new Map((params.sessions ?? []).map((session) => [session.id, session]));
   const recentItems = params.items
     .filter((item) => !item.actionable)
     .map((item) => ({
       item,
-      updatedAt: itemUpdatedAt({
-        item,
-        sessionMessages: params.sessionMessages,
-        runtimeActivitySnapshots: params.runtimeActivitySnapshots,
-        sessionsById,
-      }),
+      updatedAt: item.occurredAt,
     }))
     .filter(({ item, updatedAt }) => (
       updatedAt > dismissedThroughUpdatedAt

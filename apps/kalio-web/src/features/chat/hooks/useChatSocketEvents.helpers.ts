@@ -143,7 +143,7 @@ interface LiveSessionStatusMaterializationDeps {
   addActiveAgentLoop: (sessionId: string, turnId: string) => void;
   startAgentTurn: (turnId: string, sessionId: string) => void;
   getActiveSessionId?: () => string | null;
-  finalizeAgentTurn?: (sessionId: string) => void;
+  finalizeAgentTurn?: (sessionId: string, expectedTurnId?: string) => void;
   removeActiveAgentLoop?: (sessionId: string) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
   setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
@@ -201,9 +201,10 @@ export function materializeToolStartTurn(
 
 function releaseLiveTurn(
   sessionId: string,
+  expectedTurnId: string | undefined,
   deps: LiveSessionStatusMaterializationDeps,
 ): void {
-  deps.finalizeAgentTurn?.(sessionId);
+  deps.finalizeAgentTurn?.(sessionId, expectedTurnId);
   deps.removeActiveAgentLoop?.(sessionId);
   deps.setStreaming?.(false, undefined, sessionId);
   if (deps.getActiveSessionId?.() === sessionId) {
@@ -320,7 +321,7 @@ export function handleSessionStatusEvent(
     setRecoveryNotice: (value: string) => void;
     addActiveAgentLoop: (sessionId: string, turnId: string) => void;
     startAgentTurn: (turnId: string, sessionId: string) => void;
-    finalizeAgentTurn?: (sessionId: string) => void;
+    finalizeAgentTurn?: (sessionId: string, expectedTurnId?: string) => void;
     removeActiveAgentLoop: (sessionId: string) => void;
     setAwaitingFirstChunk: (value: boolean) => void;
     setStreaming: (value: boolean, messageId?: string, sessionId?: string | null) => void;
@@ -347,7 +348,7 @@ export function handleSessionStatusEvent(
       materializeLiveTurnFromSessionStatusSnapshot(payload, deps);
       return;
     }
-    releaseLiveTurn(payload.sessionId, deps);
+    releaseLiveTurn(payload.sessionId, payload.turnId, deps);
   }
 }
 

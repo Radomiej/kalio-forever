@@ -32,6 +32,20 @@ describe('ChatInput', () => {
     expect(input).toBeEnabled();
   });
 
+  it('does not time-throttle distinct queued sends while streaming', () => {
+    const onSend = vi.fn();
+    render(<ChatInput onSend={onSend} disabled={false} isStreaming={true} onStop={vi.fn()} />);
+    const input = screen.getByTestId('chat-input');
+
+    fireEvent.change(input, { target: { value: 'queued one' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(input, { target: { value: 'queued two' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onSend).toHaveBeenNthCalledWith(1, 'queued one', 'default', { interrupt: false });
+    expect(onSend).toHaveBeenNthCalledWith(2, 'queued two', 'default', { interrupt: false });
+  });
+
   it('sends interrupt flag from interrupt button', () => {
     const onSend = vi.fn();
     render(<ChatInput onSend={onSend} disabled={false} isStreaming={true} onStop={vi.fn()} />);

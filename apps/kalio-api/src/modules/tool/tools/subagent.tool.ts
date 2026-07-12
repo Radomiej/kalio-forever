@@ -181,6 +181,8 @@ export class SubagentTool {
     const runtime = this.getRuntime();
     return runtime.runSubagent({
       parentSessionId: sessionId,
+      parentTurnId: request.turnId,
+      parentPromptMessageId: request.promptMessageId,
       parentToolCallId: request.callId,
       objective,
       attachments,

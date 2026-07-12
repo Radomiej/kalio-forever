@@ -41,6 +41,7 @@ describe('ChatGateway', () => {
 
     pipeline = {
       submit: vi.fn().mockResolvedValue(undefined),
+      resumeQueuedSession: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
       stopAndDrain: vi.fn().mockResolvedValue(undefined),
       abortAll: vi.fn(),
@@ -1049,6 +1050,29 @@ describe('ChatGateway', () => {
       expect(client.emit).toHaveBeenCalledWith('tool:confirmation_required', pending);
     });
 
+    it('REGRESSION: replays a durable confirmation after the in-memory runtime is gone', async () => {
+      const pending: ToolConfirmationRequest = {
+        requestId: 'req-durable', toolCallId: 'call-durable', sessionId: 'session-2',
+        toolName: 'fs_write', args: { path: 'report.md' }, timeoutMs: 0,
+      };
+      const hitlRequests = { listPendingToolConfirmations: vi.fn().mockResolvedValue([pending]) };
+      gateway = new ChatGateway(
+        toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
+        agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
+        hitlRequests,
+      );
+      gateway.handleConnection(client as never);
+
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-2' });
+
+      expect(client.emit.mock.calls.filter(([event]) => event === 'tool:confirmation_required'))
+        .toEqual([['tool:confirmation_required', pending]]);
+      expect(client.emit).toHaveBeenCalledWith(
+        'session:runtime_snapshot',
+        expect.objectContaining({ pendingConfirmations: [pending] }),
+      );
+    });
+
     it('REGRESSION: replays active runtime status for the re-identified session', async () => {
       (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockResolvedValue({
         sessionId: 'session-2',
@@ -1218,6 +1242,36 @@ describe('ChatGateway', () => {
       expect(toolDispatch.resolveConfirmation).toHaveBeenCalledWith('req-1', 'session-1', 'Looks safe, continue.');
     });
 
+    it('atomically approves and resumes a durable tool when the in-memory confirmation was lost', async () => {
+      const chatService = {
+        approveAndResumeTool: vi.fn().mockResolvedValue(true),
+        cancelPendingTool: vi.fn().mockResolvedValue(false),
+      };
+      (toolDispatch.resolveConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
+      gateway = new ChatGateway(
+        toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
+        agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
+        undefined, chatService,
+      );
+      gateway.handleConnection(client as never);
+      (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+        .get(client.id)
+        ?.add('session-1');
+
+      await gateway.handleToolConfirm(client as never, { requestId: 'durable-request', sessionId: 'session-1' });
+
+      expect(chatService.approveAndResumeTool).toHaveBeenCalledWith(
+        'durable-request',
+        'session-1',
+        undefined,
+        expect.any(Function),
+      );
+      expect(client.emit).not.toHaveBeenCalledWith(
+        'tool:confirmation_invalidated',
+        expect.anything(),
+      );
+    });
+
     it('rejects tool cancel when socket does not own the session', () => {
       const handleToolCancel = (gateway as unknown as { handleToolCancel: ConfirmHandler }).handleToolCancel.bind(gateway);
 
@@ -1247,6 +1301,39 @@ describe('ChatGateway', () => {
         'req-1',
         'session-1',
         'Do not write files; explain the plan instead.',
+      );
+    });
+
+    it('atomically cancels a durable tool when the in-memory confirmation was lost', async () => {
+      const chatService = {
+        approveAndResumeTool: vi.fn().mockResolvedValue(false),
+        cancelPendingTool: vi.fn().mockResolvedValue(true),
+      };
+      (toolDispatch.cancelConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
+      gateway = new ChatGateway(
+        toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
+        agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
+        undefined, chatService,
+      );
+      gateway.handleConnection(client as never);
+      (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
+        .get(client.id)
+        ?.add('session-1');
+
+      await gateway.handleToolCancel(client as never, {
+        requestId: 'durable-request',
+        sessionId: 'session-1',
+        message: 'Do not continue.',
+      });
+
+      expect(chatService.cancelPendingTool).toHaveBeenCalledWith(
+        'durable-request',
+        'session-1',
+        'Do not continue.',
+      );
+      expect(client.emit).toHaveBeenCalledWith(
+        'tool:confirmation_invalidated',
+        expect.objectContaining({ requestId: 'durable-request', reason: 'cancelled' }),
       );
     });
   });

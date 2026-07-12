@@ -318,7 +318,7 @@ export function useChatSocketEvents({
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
       clearToolBudgetProgress?.(payload.sessionId);
       clearToolArgProgressTracking(payload.sessionId);
-      finalizeAgentTurn(payload.sessionId);
+      finalizeAgentTurn(payload.sessionId, payload.turnId);
       if (hasPendingChunksForSession(payload.sessionId)) {
         flushThinkingChunks(payload.sessionId);
         flushStreamingChunks(payload.sessionId);

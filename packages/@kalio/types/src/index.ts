@@ -658,6 +658,12 @@ export interface AgentFlowContinuationCursor {
   visitCounts: Record<ID, number>;
   lastCompletedNodeId?: ID;
   lastRoute?: AgentFlowRouteCheckpoint;
+  waitIdentity?: {
+    requestId: ID;
+    childSessionId: ID;
+    childTurnId: ID;
+    promptMessageId?: ID;
+  };
   message?: string;
 }
 
@@ -728,6 +734,8 @@ export interface AgentFlowRunSnapshot {
 
 export interface ToolCallRequest {
   sessionId: ID;
+  turnId?: ID;
+  promptMessageId?: ID;
   vfsSessionId?: ID;
   toolName: string;
   args: Record<string, unknown>;
@@ -765,6 +773,8 @@ export interface ToolConfirmationRequest {
   requestId: string;          // unique per confirmation instance
   toolCallId: string;         // the LLM tool call ID (matches ToolResult.callId)
   sessionId: ID;
+  turnId?: ID;
+  promptMessageId?: ID;
   toolName: string;
   args: Record<string, unknown>;
   timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
@@ -785,6 +795,8 @@ export type AgentBudgetApprovalDecision = 'block' | 'allow_one' | 'allow_ten' | 
 export interface AgentBudgetApprovalRequest {
   requestId: string;
   sessionId: ID;
+  turnId?: ID;
+  promptMessageId?: ID;
   scope: Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
   usedIterations: number;
   currentLimit: number;
@@ -1059,11 +1071,21 @@ export type ChatRunPhase =
   | 'failed';
 
 export type ChatRunStatus =
+  | 'queued'
   | 'active'
+  | 'waiting_for_human'
   | 'completed'
   | 'failed'
+  | 'cancelled'
   | 'interrupted'
   | 'interrupted_needs_retry';
+
+export interface ChatQueuedPayload {
+  content: string;
+  personaId: ID;
+  attachments?: ChatAttachment[];
+  clientMessageId?: ID;
+}
 
 export interface ChatRunSnapshot {
   id: ID;
@@ -1073,10 +1095,22 @@ export interface ChatRunSnapshot {
   status: ChatRunStatus;
   provider?: string;
   model?: string;
+  /** Backend-owned monotonic order for projections of this run. Required after the revision migration. */
+  revision?: number;
   retryCount: number;
   safeResume: boolean;
   errorCode?: string;
   errorMessage?: string;
+  queueIdempotencyKey?: string;
+  queuedPayload?: ChatQueuedPayload;
+  queuedAt?: Timestamp;
+  queueClaimedAt?: Timestamp;
+  queueCancelledAt?: Timestamp;
+  outcome?: {
+    finalText: string;
+    structuredOutput?: unknown;
+    messageId?: ID;
+  };
   startedAt: Timestamp;
   updatedAt: Timestamp;
   lastHeartbeatAt: Timestamp;
@@ -1223,6 +1257,7 @@ export interface SocketEvents {
       | 'INTERRUPTED'
       | 'QUEUE_FULL'
       | 'QUEUE_DROPPED'
+      | 'RUNTIME_PERSISTENCE_FAILED'
       | 'MAX_ITERATIONS_REACHED';
     message: string;
     agentRun?: AgentRunContext;
