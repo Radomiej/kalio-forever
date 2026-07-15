@@ -252,6 +252,35 @@ describe('SessionPipelineService', () => {
     await flush();
   });
 
+  it('drops the recovered queue head when the durable claim returns null', async () => {
+    const recovered = makeRunSnapshot({
+      id: 'run-recovered',
+      sessionId: 's1',
+      turnId: 'turn-recovered',
+      phase: 'queued',
+      status: 'queued',
+      queuedPayload: { content: 'recover me', personaId: 'p1', clientMessageId: 'message-recovered' },
+    });
+    queuedRuns.push(recovered);
+    runJournal.claimQueuedRun.mockResolvedValueOnce(null);
+    const { emit, events } = makeEmit();
+
+    await svc.resumeQueuedSession('s1', emit);
+    await flush();
+
+    expect(runJournal.claimQueuedRun).toHaveBeenCalledWith('s1', 'run-recovered');
+    expect(chatHarness.chat.handleTurn).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      event: 'chat:error',
+      data: expect.objectContaining({
+        sessionId: 's1',
+        code: 'RUNTIME_PERSISTENCE_FAILED',
+        message: 'Unable to recover queued runtime state. The queued turn was dropped.',
+      }),
+    });
+    expect(svc.getSessionStatus('s1')).toMatchObject({ active: false, queueLength: 0 });
+  });
+
   it('releases the active slot when durable run creation fails', async () => {
     runJournal.startRun.mockRejectedValueOnce(new Error('journal unavailable'));
     const { emit, events } = makeEmit();
