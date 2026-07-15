@@ -14,17 +14,20 @@ const personaConfig: PersonaSessionConfig = {
   kv: {},
 };
 
-function createService(): ContextAssemblyService {
-  return new ContextAssemblyService(
+function createService(): { service: ContextAssemblyService; decide: ReturnType<typeof vi.fn> } {
+  const decide = vi.fn().mockResolvedValue({ tools: [], warnings: [] });
+  const service = new ContextAssemblyService(
     { getSessionConfig: vi.fn().mockResolvedValue(personaConfig) } as unknown as PersonaService,
     { findByIds: vi.fn().mockResolvedValue([]) } as unknown as SkillsService,
-    { decide: vi.fn().mockResolvedValue({ tools: [], warnings: [] }) } as unknown as ToolPolicyService,
+    { decide } as unknown as ToolPolicyService,
   );
+  return { service, decide };
 }
 
 describe('ContextAssemblyService AgentFlow model contract', () => {
   it('inherits the active provider model instead of applying a persona-only model', async () => {
-    const assembled = await createService().assembleForRuntime({
+    const { service } = createService();
+    const assembled = await service.assembleForRuntime({
       runtimeKind: 'agent-flow-branch',
       personaId: 'agent-orchestrator',
       toolPolicyRequest: { runtimeKind: 'agent-flow-branch', personaId: 'agent-orchestrator' },
@@ -34,7 +37,8 @@ describe('ContextAssemblyService AgentFlow model contract', () => {
   });
 
   it('keeps an explicit run-level model override', async () => {
-    const assembled = await createService().assembleForRuntime({
+    const { service } = createService();
+    const assembled = await service.assembleForRuntime({
       runtimeKind: 'agent-flow-branch',
       personaId: 'agent-orchestrator',
       modelOverride: 'workflow-model',
@@ -45,7 +49,8 @@ describe('ContextAssemblyService AgentFlow model contract', () => {
   });
 
   it('keeps the branch model blank on the session-runtime path when no override is provided', async () => {
-    const assembled = await createService().assembleForSessionRuntime('agent-orchestrator', {
+    const { service } = createService();
+    const assembled = await service.assembleForSessionRuntime('agent-orchestrator', {
       runtimeKind: 'agent-flow-branch',
       explicitToolNames: [],
       architectureContext: { architectureRunId: 'run-1' },
@@ -53,5 +58,25 @@ describe('ContextAssemblyService AgentFlow model contract', () => {
 
     expect(assembled.runtimeKind).toBe('agent-flow-branch');
     expect(assembled.model).toBe('');
+  });
+
+  it('forwards architectureSlotPolicy through the session-runtime branch path', async () => {
+    const { service, decide } = createService();
+    const slotPolicy = { allowedToolNames: ['vfs_read'] };
+
+    await service.assembleForSessionRuntime('agent-orchestrator', {
+      runtimeKind: 'agent-flow-branch',
+      explicitToolNames: ['vfs_read'],
+      architectureContext: { architectureRunId: 'run-1' },
+      architectureSlotPolicy: slotPolicy,
+    });
+
+    expect(decide).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeKind: 'agent-flow-branch',
+      personaId: 'agent-orchestrator',
+      explicitToolNames: ['vfs_read'],
+      architectureContext: { architectureRunId: 'run-1' },
+      slotPolicy,
+    }));
   });
 });
