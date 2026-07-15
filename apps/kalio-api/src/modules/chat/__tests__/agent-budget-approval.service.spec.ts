@@ -106,14 +106,28 @@ describe('AgentBudgetApprovalService', () => {
     }));
   });
 
-  it('resolves an approval with the next limit and emits an approved invalidation', async () => {
+  it.each([
+    ['allow_one', 6],
+    ['allow_ten', 15],
+    ['allow_unlimited', 1000],
+  ] as const)('resolves %s approvals with the expected limit and runtime payload', async (decision, expectedLimit) => {
     const service = new AgentBudgetApprovalService();
     const abortController = new AbortController();
     const events: Array<{ event: string; data: unknown }> = [];
+    const agentRun = {
+      agentRunId: 'run-1',
+      runId: 'run-1',
+      role: 'pragmatist',
+      agentType: 'subagent',
+      parentSessionId: 'parent-session-1',
+    } as StreamContext['agentRun'];
 
     const approvalPromise = service.requestAdditionalBudget({
       sessionId: 'session-approved',
       messageId: 'message-1',
+      turnId: 'turn-1',
+      promptMessageId: 'prompt-1',
+      agentRun,
       abortSignal: abortController.signal,
       state: {} as StreamContext['state'],
       emit: (event, data) => {
@@ -123,21 +137,32 @@ describe('AgentBudgetApprovalService', () => {
       currentLimit: 5,
       usedIterations: 5,
       runtimeKind: 'agent-flow-branch',
+      nodeId: 'node-1',
+      roleSlotId: 'role-1',
+      requestedBy: 'pragmatist',
     });
 
     const budgetRequired = events.find(({ event }) => event === 'agent:budget_required');
     expect(budgetRequired?.data).toEqual(expect.objectContaining({
       sessionId: 'session-approved',
+      turnId: 'turn-1',
+      promptMessageId: 'prompt-1',
+      scope: 'agent-flow-branch',
       currentLimit: 5,
       suggestedNextLimit: 15,
+      usedIterations: 5,
+      agentRun,
+      nodeId: 'node-1',
+      roleSlotId: 'role-1',
+      requestedBy: 'pragmatist',
     }));
     const request = budgetRequired?.data as AgentBudgetApprovalRequest | undefined;
     if (!request) {
       throw new Error('Expected budget approval request to be emitted');
     }
 
-    expect(service.resolveApproval(request.requestId, 'session-approved', 'allow_ten')).toBe('resolved');
-    await expect(approvalPromise).resolves.toBe(15);
+    expect(service.resolveApproval(request.requestId, 'session-approved', decision)).toBe('resolved');
+    await expect(approvalPromise).resolves.toBe(expectedLimit);
     expect(service.getPendingApprovals('session-approved')).toEqual([]);
     expect(events).toContainEqual({
       event: 'agent:budget_invalidated',
@@ -145,8 +170,8 @@ describe('AgentBudgetApprovalService', () => {
         requestId: request.requestId,
         sessionId: 'session-approved',
         reason: 'approved',
-        decision: 'allow_ten',
-        approvedLimit: 15,
+        decision,
+        approvedLimit: expectedLimit,
       }),
     });
   });

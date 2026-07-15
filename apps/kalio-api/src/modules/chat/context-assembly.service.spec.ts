@@ -43,4 +43,15 @@ describe('ContextAssemblyService AgentFlow model contract', () => {
 
     expect(assembled.model).toBe('workflow-model');
   });
+
+  it('keeps the branch model blank on the session-runtime path when no override is provided', async () => {
+    const assembled = await createService().assembleForSessionRuntime('agent-orchestrator', {
+      runtimeKind: 'agent-flow-branch',
+      explicitToolNames: [],
+      architectureContext: { architectureRunId: 'run-1' },
+    });
+
+    expect(assembled.runtimeKind).toBe('agent-flow-branch');
+    expect(assembled.model).toBe('');
+  });
 });
