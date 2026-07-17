@@ -23,6 +23,8 @@ export interface StreamChatOptions {
   onToolArgChunk?: (toolName: string, deltaChars: number) => void;
   /** Optional per-request model override. Does not mutate the active provider config. */
   modelOverride?: string;
+  /** Optional hard cap for provider-generated output tokens. */
+  maxOutputTokens?: number;
   /** Optional provider-native JSON-schema response contract. */
   structuredOutput?: LLMStructuredOutputRequest;
   /** Called once with parsed provider-native structured output when requested. */

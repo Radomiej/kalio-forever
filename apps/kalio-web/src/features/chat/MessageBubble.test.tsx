@@ -43,6 +43,7 @@ describe('MessageBubble layout', () => {
     );
 
     expect(screen.getByTestId('message-bubble').firstElementChild).toHaveClass('max-w-none');
+    expect(screen.getByTestId('message-content')).toHaveClass('max-w-[78ch]');
 
     rerender(<MessageBubble message={makeMessage({ role: 'user', content: 'user prompt' })} />);
 

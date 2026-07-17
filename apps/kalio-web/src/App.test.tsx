@@ -730,21 +730,21 @@ describe('App view state persistence', () => {
     expect(screen.queryByTestId('nav-talk-activity-count')).not.toBeInTheDocument();
   });
 
-  it('opens the Architect section from the app rail', () => {
+  it('opens the Architect section from the app rail', async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTestId('nav-architect'));
 
-    expect(screen.getByTestId('architect-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('architect-page')).toBeInTheDocument();
     expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
   });
 
-  it('opens the Observability section from the app rail', () => {
+  it('opens the Observability section from the app rail', async () => {
     render(<App />);
 
     fireEvent.click(screen.getByTestId('nav-observe'));
 
-    expect(screen.getByTestId('observability-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('observability-page')).toBeInTheDocument();
     expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
   });
 

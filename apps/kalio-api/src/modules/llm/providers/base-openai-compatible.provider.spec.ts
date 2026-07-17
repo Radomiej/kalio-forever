@@ -365,6 +365,28 @@ describe('BaseOpenAICompatibleProvider', () => {
       expect(body['provider']).toEqual({ require_parameters: true });
     });
 
+    it('sends the per-request output token limit to OpenAI-compatible providers', async () => {
+      const messages: LLMMessage[] = [{ role: 'user', content: 'return ok' }];
+      const mockStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: mockStream });
+
+      await provider.streamChat(messages, [], {
+        sessionId: 'paid-canary-session',
+        messageId: 'paid-canary-message',
+        maxOutputTokens: 128,
+        onChunk: vi.fn(),
+      });
+
+      const requestInit = mockFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+      const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
+      expect(body['max_tokens']).toBe(128);
+    });
+
     it('REGRESSION: omits Authorization when the API key is empty', async () => {
       const messages: LLMMessage[] = [{ role: 'user', content: 'test' }];
       const tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }> = [];

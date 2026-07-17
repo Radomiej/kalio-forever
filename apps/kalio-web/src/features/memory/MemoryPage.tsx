@@ -45,9 +45,9 @@ function ScopeCard({
   return (
     <button
       type="button"
-      className={`min-h-20 rounded-lg border px-4 py-3 text-left transition ${
+      className={`min-h-20 rounded-xl border px-4 py-3 text-left transition ${
         selected
-          ? 'border-primary bg-primary/15 text-base-content shadow-[0_0_0_1px_rgba(14,165,233,0.35)]'
+          ? 'border-primary/60 bg-primary/12 text-base-content'
           : 'border-base-300 bg-base-200/40 hover:border-primary/50 hover:bg-base-200/70'
       }`}
       onClick={onClick}
@@ -61,7 +61,7 @@ function ScopeCard({
         <span className="badge badge-sm badge-ghost">{stat.count}</span>
       </span>
       <span className="mt-3 flex items-center gap-3 text-xs text-base-content/55">
-        <span>{stat.count} entries</span>
+        <span>Stored memory</span>
         <span>{formatKb(stat.size)}</span>
       </span>
     </button>

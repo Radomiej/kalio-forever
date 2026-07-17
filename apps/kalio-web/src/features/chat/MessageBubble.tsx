@@ -123,7 +123,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
           {isStreaming && !displayContent && !hasThinking ? (
             <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
           ) : displayContent ? (
-            <div data-testid="message-content">
+            <div className="max-w-[78ch]" data-testid="message-content">
               <MarkdownViewer content={displayContent} />
               {isStreaming && (
                 <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current" />

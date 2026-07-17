@@ -377,9 +377,8 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-persona-select'), {
-      target: { value: 'persona-child' },
-    });
+    fireEvent.click(screen.getByTestId('graph-empty-persona-select'));
+    fireEvent.click(screen.getByRole('option', { name: 'UX Designer' }));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Start with the specialist' },
     });

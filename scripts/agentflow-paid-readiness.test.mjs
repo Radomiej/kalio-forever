@@ -103,6 +103,86 @@ test('paid readiness passes only when live provider, active credential, fresh ru
   assert.equal(exitCode, 0);
 });
 
+test('static-only readiness validates the credential without spending a completion or search call', async () => {
+  const requestedUrls = [];
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    argv: ['--static-only'],
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: async (url) => {
+      requestedUrls.push(url);
+      if (url.endsWith('/llm/config')) return response({ provider: 'openrouter', source: 'db', model: 'tencent/hy3' });
+      if (url.endsWith('/credentials')) return response([{ id: 'cred-openrouter' }]);
+      if (url.endsWith('/credentials/active')) return response({ credentialId: 'cred-openrouter' });
+      if (url.endsWith('/credentials/cred-openrouter/test')) return response({ ok: true, modelCount: 100 });
+      if (url.endsWith('/agent-flows/runs')) return response([]);
+      if (url.endsWith('/sessions')) return response([]);
+      if (url.endsWith('/cli-agents/codex/config')) return response({ enabled: true, model: 'gpt-5.4-mini' });
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.ok(checks.every((check) => check.ok));
+  assert.ok(requestedUrls.some((url) => url.endsWith('/credentials/cred-openrouter/test')));
+  assert.ok(!requestedUrls.some((url) => url.endsWith('/test-completion')));
+  assert.ok(!requestedUrls.some((url) => url.endsWith('/search/test')));
+  assert.ok(checks.some((check) => check.message === 'Completion smoke is disabled for this static-only readiness profile'));
+});
+
+test('static-only readiness never spends a Web Search smoke even when search configuration is required', async () => {
+  const requestedUrls = [];
+  const checks = await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    staticOnly: true,
+    requireWebSearch: true,
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: async (url) => {
+      requestedUrls.push(url);
+      if (url.endsWith('/llm/config')) return response({ provider: 'openrouter', source: 'db', model: 'tencent/hy3' });
+      if (url.endsWith('/credentials')) return response([{ id: 'cred-openrouter' }]);
+      if (url.endsWith('/credentials/active')) return response({ credentialId: 'cred-openrouter' });
+      if (url.endsWith('/credentials/cred-openrouter/test')) return response({ ok: true, modelCount: 100 });
+      if (url.endsWith('/agent-flows/runs')) return response([]);
+      if (url.endsWith('/sessions')) return response([]);
+      if (url.endsWith('/cli-agents/codex/config')) return response({ enabled: true, model: 'gpt-5.4-mini' });
+      if (url.endsWith('/search/config')) return response({ provider: 'perplexity', configured: true });
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.ok(checks.every((check) => check.ok));
+  assert.ok(requestedUrls.some((url) => url.endsWith('/search/config')));
+  assert.ok(!requestedUrls.some((url) => url.endsWith('/search/test')));
+  assert.ok(checks.some((check) => check.message === 'Web Search smoke is disabled for this static-only readiness profile'));
+});
+
+test('completion readiness caps the paid smoke response at 64 output tokens', async () => {
+  const completionBodies = [];
+  await collectPaidReadinessChecks({
+    apiBase: 'http://kalio.test/api',
+    now: 10_000,
+    maxRunningAgeMs: 1_000,
+    fetchJson: async (url, init) => {
+      if (url.endsWith('/llm/config')) return response({ provider: 'openrouter', source: 'db', model: 'tencent/hy3' });
+      if (url.endsWith('/credentials')) return response([{ id: 'cred-openrouter' }]);
+      if (url.endsWith('/credentials/active')) return response({ credentialId: 'cred-openrouter' });
+      if (url.endsWith('/credentials/cred-openrouter/test')) return response({ ok: true, modelCount: 100 });
+      if (url.endsWith('/credentials/cred-openrouter/test-completion')) {
+        completionBodies.push(JSON.parse(init.body));
+        return response({ ok: true, provider: 'openrouter', model: 'tencent/hy3', source: 'db' });
+      }
+      if (url.endsWith('/agent-flows/runs')) return response([]);
+      if (url.endsWith('/sessions')) return response([]);
+      if (url.endsWith('/cli-agents/codex/config')) return response({ enabled: true, model: 'gpt-5.4-mini' });
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+
+  assert.deepEqual(completionBodies, [{ maxOutputTokens: 64 }]);
+});
+
 test('paid readiness blocks when the completion smoke diverges from the effective Xiaomi provider config', async () => {
   const checks = await collectPaidReadinessChecks({
     apiBase: 'http://kalio.test/api',
@@ -257,7 +337,11 @@ test('paid readiness can require a high-level model completion smoke without cha
     },
   });
 
-  assert.deepEqual(completionBodies, [null, { model: 'mimo-v2.5-pro' }, { model: 'mimo-v2.5-pro' }]);
+  assert.deepEqual(completionBodies, [
+    { maxOutputTokens: 64 },
+    { model: 'mimo-v2.5-pro', maxOutputTokens: 64 },
+    { model: 'mimo-v2.5-pro', maxOutputTokens: 64 },
+  ]);
   assert.ok(checks.some((check) => (
     check.ok === false
     && check.message === 'Required high-level model completion smoke failed for mimo-v2.5-pro: 451 Unavailable For Legal Reasons'

@@ -160,6 +160,7 @@ describe('MemoryPage', () => {
     await screen.findByTestId('memory-scope-overview');
 
     expect(screen.getByTestId('memory-scope-all')).toHaveTextContent('All memory');
+    expect(screen.getByTestId('memory-scope-all')).not.toHaveTextContent('2 entries');
     expect(screen.getByTestId('memory-scope-web_search')).toHaveTextContent('Web search');
     expect(screen.getByTestId(`memory-scope-persona-${PERSONA.id}`)).toHaveTextContent('Default persona');
     expect(screen.getByTestId('memory-ingest-btn')).toBeDisabled();

@@ -50,6 +50,19 @@ describe('SettingsModal', () => {
     expect(screen.getByText('LLM panel')).toBeInTheDocument();
   });
 
+  it('keeps desktop scrolling in the active panel instead of the settings navigation', () => {
+    render(<SettingsModal onClose={() => undefined} />);
+
+    expect(screen.getByTestId('settings-navigation')).toHaveClass('lg:overflow-visible');
+    expect(screen.getByTestId('settings-panel-scroll')).toHaveClass('overflow-y-auto');
+  });
+
+  it('moves focus into the modal when it opens', () => {
+    render(<SettingsModal onClose={() => undefined} />);
+
+    expect(screen.getByTestId('settings-close')).toHaveFocus();
+  });
+
   it('consumes runtime tab requests from the settings store', async () => {
     useSettingsStore.getState().requestSettingsTab('runtime');
 

@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-07-10
+Last updated: 2026-07-16
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -133,3 +133,11 @@ classDiagram
 - No release-ready claim without focused regressions, typecheck/build where affected, and FE-first workflow proof.
 - Fixed waits are not architecture fixes. Tests may use bounded waits only as diagnostics or web-first waiting; production runtime correctness must use typed state, explicit lifecycle events, durable snapshots, or ack/drain barriers.
 - Live-provider proof must use system Node on Windows and record effective provider/model evidence.
+- Comprehensive workflow release coverage runs only against the mock provider. Paid proof is a separate, explicit single-node/no-tool canary with no project path or project memory/browser/prior-decision context, an exact provider/model guard, temporary output-token cap, settings restore, FE-first Talk start, and reconnect/F5 verification.
+- Live tool proof is a second, separately confirmed canary limited to one manually approved `fs_write` under an explicit disposable allowed path. It must cap model iterations, block hidden title generation, verify the real file and F5 hydration, remove its own artifact, and restore allowed-path, HITL, and generation settings.
+
+## Primary Database Migration Boundary
+
+- The primary Kalio SQLite schema changes only through ordered Drizzle migrations.
+- Migration or required-schema validation failure is fatal to API startup; bootstrap must never run compatibility `ALTER TABLE` or silently repair primary database state.
+- A stale, interrupted, or manually altered primary database requires an explicit backup-and-reset operation or a separately invoked one-time upgrade tool. Runtime startup must not decide or perform that recovery.

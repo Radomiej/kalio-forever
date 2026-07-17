@@ -169,6 +169,13 @@
       "when": 1783797000000,
       "tag": "0023_chat_run_queue_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1783948909409,
+      "tag": "0024_primary-schema-backfill",
+      "breakpoints": true
     }
   ]
 }

@@ -18,9 +18,8 @@ import { SkillEditorPanel } from './features/skills/SkillEditorPanel';
 import { MemoryPage } from './features/memory/MemoryPage';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
-import { ObservabilityPage } from './features/observability/ObservabilityPage';
-import { ArchitectPage } from './features/architect';
 import { AppNavRail } from './AppNavRail';
+import { AppSecondarySections } from './AppSecondarySections';
 import type { ActiveSection, AppViewState, MindTab, TalkTab, TalkView, ToolsTab } from './App.types';
 import {
   APP_VIEW_STATE_STORAGE_KEY,
@@ -261,7 +260,6 @@ export function App() {
     <div data-testid="app-root" className="flex h-screen w-screen overflow-hidden bg-base-100">
       <div
         className={`flex min-w-0 flex-1 ${settingsOpen ? 'invisible pointer-events-none' : ''}`}
-        aria-hidden={settingsOpen ? true : undefined}
         inert={settingsOpen ? true : undefined}
       >
 
@@ -466,13 +464,7 @@ export function App() {
           </div>
         )}
 
-        {activeSection === 'observe' && (
-          <ObservabilityPage />
-        )}
-
-        {activeSection === 'architect' && (
-          <ArchitectPage />
-        )}
+        <AppSecondarySections activeSection={activeSection} />
 
       </main>
       </div>

@@ -236,6 +236,10 @@ flowchart TB
 | `pnpm --filter kalio-web test:cov` | Frontend coverage (CI thresholds) |
 | `pnpm turbo run test` | All workspace `test` scripts (CI `tests` job) |
 | `pnpm agentflow:paid-readiness` | Gate before paid/live AgentFlow runs |
+| `pnpm release:workflow-gate -- --project-path <path>` | Comprehensive mock workflow/edge gate (no paid completion) |
+| `pnpm release:paid-canary -- --confirm-paid --expected-provider <provider> --expected-model <model>` | One capped live workflow canary without project context |
+| `pnpm release:paid-tool-canary -- --safe-project-path <disposable-path> --confirm-paid --expected-provider <provider> --expected-model <model>` | One manually confirmed live `fs_write` canary with cleanup |
+| `pnpm release:demo-gate -- ...` | Mock gate, persistent live QA restart, then paid canary |
 
 ### Focused iteration
 
@@ -425,7 +429,8 @@ sequenceDiagram
 3. **Pre-PR** → `pnpm test` + `pnpm typecheck`
 4. **Manual QA** → `pnpm qa:rebuild`
 5. **Full E2E** → `pnpm test:e2e`
-6. **Push** → CI on PR
+6. **Demo release proof** → mock `release:workflow-gate`, explicit `release:paid-canary`, then optional disposable-path `release:paid-tool-canary`
+7. **Push** → CI on PR
 
 ---
 

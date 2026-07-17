@@ -181,11 +181,10 @@ describe('AgentBudgetApprovalService', () => {
     const payload: AgentBudgetApprovalRequest = {
       requestId: 'synthetic-1',
       sessionId: 'session-synthetic',
-      messageId: 'message-1',
       currentLimit: 3,
       suggestedNextLimit: 9,
       usedIterations: 3,
-      runtimeKind: 'agent-flow-branch',
+      scope: 'agent-flow-branch',
     };
 
     service.seedPendingApproval(payload);

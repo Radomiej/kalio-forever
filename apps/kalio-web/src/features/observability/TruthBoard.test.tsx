@@ -18,6 +18,14 @@ function entry(overrides: Partial<AuditLogEntry> & { type: AuditType; label: str
 }
 
 describe('TruthBoard', () => {
+  it('uses a quiet hierarchy instead of equal bordered cards for every metric', () => {
+    render(<TruthBoard entries={[]} />);
+
+    expect(screen.getByTestId('truth-overview-sessions')).not.toHaveClass('border');
+    expect(screen.getByTestId('truth-lane-llm')).not.toHaveClass('border');
+    expect(screen.getByTestId('truth-lane-llm')).toHaveClass('text-left');
+  });
+
   it('routes typed runtime events to stable observability lanes', () => {
     expect(laneForEntry(entry({
       type: 'runtime_event',

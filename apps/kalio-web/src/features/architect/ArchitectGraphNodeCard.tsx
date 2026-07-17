@@ -23,7 +23,7 @@ interface ArchitectGraphNodeCardProps {
 }
 
 function slotButtonClass(slot: ArchitectSlot, selectedSlotId: string | null): string {
-  return `min-h-10 min-w-12 rounded-md border px-2 py-1.5 text-[9px] font-medium leading-tight transition-colors ${
+  return `min-h-10 min-w-12 rounded-md border px-2 py-1.5 text-[10px] font-medium leading-tight transition-colors ${
     selectedSlotId === slot.id
       ? 'border-sky-400 bg-sky-500/20 text-sky-100'
       : 'border-base-300 bg-base-100/70 text-base-content/65 hover:border-sky-500/40 hover:text-base-content'
@@ -58,10 +58,10 @@ function nodeSurfaceClass(node: ArchitectNode): string {
 }
 
 function nodeIcon(node: ArchitectNode) {
-  if (node.kind === 'router') return Route;
-  if (node.kind === 'parallel') return GitBranch;
-  if (node.kind === 'artifact') return Box;
-  return Bot;
+  if (node.kind === 'router') return <Route size={13} />;
+  if (node.kind === 'parallel') return <GitBranch size={13} />;
+  if (node.kind === 'artifact') return <Box size={13} />;
+  return <Bot size={13} />;
 }
 
 export function ArchitectGraphNodeCard({
@@ -82,7 +82,6 @@ export function ArchitectGraphNodeCard({
   onDragMove,
   onDragEnd,
 }: ArchitectGraphNodeCardProps) {
-  const KindIcon = nodeIcon(node);
   const outputPinClass = node.kind === 'router'
     ? 'border-amber-100/80 shadow-[0_0_12px_rgba(251,191,36,0.46)]'
     : 'border-emerald-100/75 shadow-[0_0_12px_rgba(16,185,129,0.38)]';
@@ -171,7 +170,7 @@ export function ArchitectGraphNodeCard({
           title="Drag node"
           data-testid={`architect-node-drag-${node.id}`}
         >
-          <KindIcon size={13} />
+          {nodeIcon(node)}
         </span>
         <button
           type="button"
@@ -179,24 +178,24 @@ export function ArchitectGraphNodeCard({
           onClick={() => onNodeClick(node.id)}
           data-testid={`architect-node-${node.id}`}
         >
-          <span className="block truncate text-[11px] font-semibold text-base-content">{node.label}</span>
+          <span className="block truncate text-xs font-semibold text-base-content">{node.label}</span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1">
             <span
-              className={`rounded border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide ${kindBadgeClass(node)}`}
+              className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${kindBadgeClass(node)}`}
               data-testid={`architect-node-kind-${node.id}`}
             >
               {node.kind}
             </span>
             {behaviorLabel(node) && (
               <span
-                className="rounded border border-sky-500/25 bg-sky-500/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-sky-200"
+                className="rounded border border-sky-500/25 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-200"
                 data-testid={`architect-node-behavior-${node.id}`}
               >
                 {behaviorLabel(node)}
               </span>
             )}
             {node.role && (
-              <span className="truncate text-[9px] uppercase tracking-wide text-base-content/60">
+              <span className="truncate text-[10px] uppercase tracking-wide text-base-content/60">
                 {node.role}
               </span>
             )}

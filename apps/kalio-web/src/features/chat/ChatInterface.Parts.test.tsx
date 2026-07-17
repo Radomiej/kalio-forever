@@ -441,9 +441,8 @@ describe('ChatWelcomeScreen', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('welcome-persona-select'), {
-      target: { value: 'qa' },
-    });
+    fireEvent.click(screen.getByTestId('welcome-persona-select'));
+    fireEvent.click(screen.getByRole('option', { name: 'QA' }));
     expect(onPersonaChange).toHaveBeenCalledWith('qa');
 
     fireEvent.click(screen.getByTestId('welcome-mode-workflow'));

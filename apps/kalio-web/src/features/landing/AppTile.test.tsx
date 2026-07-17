@@ -20,9 +20,12 @@ describe('AppTile', () => {
     const tile = screen.getByTestId('app-tile-cats-suite');
     const openButton = screen.getByTestId('app-tile-open-cats-suite');
     expect(tile).toHaveClass('col-span-2');
+    expect(tile).toHaveClass('min-h-40');
+    expect(tile).not.toHaveClass('aspect-[2/1]');
     expect(tile).toHaveAttribute('title', 'A cat tools pack');
     expect(tile).toHaveTextContent('Cats Suite');
     expect(tile).toHaveTextContent('A cat tools pack');
+    expect(screen.getByText('A cat tools pack')).toHaveClass('text-xs');
 
     fireEvent.click(openButton);
 

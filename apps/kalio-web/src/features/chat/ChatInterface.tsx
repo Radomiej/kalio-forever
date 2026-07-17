@@ -13,6 +13,7 @@ import { useContextPreview } from './hooks/useContextPreview';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
 import { useChatSocketEvents } from './hooks/useChatSocketEvents';
 import { useChatComposerActions } from './hooks/useChatComposerActions';
+import { useAwaitingFirstChunk } from './hooks/useAwaitingFirstChunk';
 import { buildTurnsFromHistory, computeAnsweredCallIds, buildConversationTimeline, mergeFetchedMessages } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
@@ -130,7 +131,7 @@ export function ChatInterface() {
     eventBus.connected ? 'connected' : 'connecting',
   );
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
-  const [awaitingFirstChunk, setAwaitingFirstChunk] = useState(false);
+  const [awaitingFirstChunk, setAwaitingFirstChunk] = useAwaitingFirstChunk();
   const lastSentContentRef = useRef<string>('');
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
@@ -301,7 +302,7 @@ export function ChatInterface() {
     setToolArgProgress(null);
     setDraftUserMessage('');
     invalidateContextPreview();
-  }, [activeSessionId, invalidateContextPreview, setToolArgProgress]);
+  }, [activeSessionId, invalidateContextPreview, setAwaitingFirstChunk, setToolArgProgress]);
 
   useEffect(() => {
     if (activeSessionId && connectionState === 'connected') {

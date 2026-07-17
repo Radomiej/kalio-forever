@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.meta.url), 'utf8');
 const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
@@ -13,6 +13,23 @@ const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url)
 const ac13QaStackSource = readFileSync(new URL('./run-ac13-qa-stack.mjs', import.meta.url), 'utf8');
 const workflowReleaseGateSource = readFileSync(new URL('./workflow-release-gate.mjs', import.meta.url), 'utf8');
 const webViteConfigSource = readFileSync(new URL('../apps/kalio-web/vite.config.ts', import.meta.url), 'utf8');
+const releaseManifestUrls = [
+  '../package.json',
+  '../apps/kalio-api/package.json',
+  '../apps/kalio-web/package.json',
+  '../apps/e2e/package.json',
+  '../apps/kalio-video/package.json',
+  '../apps/kalio-demo/package.json',
+  '../packages/@kalio/types/package.json',
+  '../packages/@kalio/sdk/package.json',
+];
+
+test('all workspace manifests publish the 1.0.0 release version', () => {
+  for (const manifestPath of releaseManifestUrls) {
+    const manifest = JSON.parse(readFileSync(new URL(manifestPath, import.meta.url), 'utf8'));
+    assert.equal(manifest.version, '1.0.0', `${manifestPath} has a mismatched release version`);
+  }
+});
 
 test('prod stack fallback paths use prod defaults when --data-root is omitted', () => {
   assert.match(
@@ -135,7 +152,7 @@ test('workflow release gate passes managed QA database path to Playwright tests'
 });
 
 test('workflow release gate starts a fresh mock QA stack by default', () => {
-  assert.match(workflowReleaseGateSource, /const reuseStack = args\.has\('--reuse-stack'\) \|\| requireLive;/);
+  assert.match(workflowReleaseGateSource, /const reuseStack = args\.has\('--reuse-stack'\);/);
   assert.match(workflowReleaseGateSource, /async function ensureFreshMockStackUnlessReusing\(\)/);
   assert.match(workflowReleaseGateSource, /'start',\s*'--backend-port',\s*'0',\s*'--frontend-port',\s*'0'/s);
   assert.match(workflowReleaseGateSource, /'--provider',\s*'mock',\s*'--model',\s*'mock'/s);
@@ -162,20 +179,67 @@ test('workflow release gate does not use fixed quiet-time waits as runtime proof
   assert.notEqual(groupIndex, -1, 'group run call not found');
 });
 
-test('live workflow release gate runs paid readiness before browser workflow checks', () => {
-  assert.match(workflowReleaseGateSource, /async function runLiveReadinessGate\(apiOrigin\)/);
-  assert.match(workflowReleaseGateSource, /scripts\/agentflow-paid-readiness\.mjs/);
-  assert.match(workflowReleaseGateSource, /'--api',\s*`\$\{apiOrigin\}\/api`/s);
+test('workflow release gate cannot run the comprehensive mock suite on a live provider', () => {
+  assert.doesNotMatch(workflowReleaseGateSource, /const requireLive/);
+  assert.doesNotMatch(workflowReleaseGateSource, /runLiveReadinessGate/);
+  assert.match(workflowReleaseGateSource, /--require-live is removed/);
+  assert.match(workflowReleaseGateSource, /llmConfig\.provider !== 'mock'/);
+  assert.match(workflowReleaseGateSource, /workflow release gate requires the mock provider/);
+});
 
-  const liveGuardIndex = workflowReleaseGateSource.indexOf('if (requireLive) {');
-  const readinessIndex = workflowReleaseGateSource.indexOf('await runLiveReadinessGate(apiOrigin);');
-  const groupIndex = workflowReleaseGateSource.indexOf('await runPlaywrightGroup(group, baseUrl, apiOrigin, status.state);');
+test('paid live canary uses static readiness and one dedicated Playwright spec', () => {
+  const paidCanaryUrl = new URL('./paid-live-canary.mjs', import.meta.url);
+  assert.equal(existsSync(paidCanaryUrl), true, 'paid-live-canary.mjs is missing');
+  const paidCanarySource = readFileSync(paidCanaryUrl, 'utf8');
+  assert.match(paidCanarySource, /--confirm-paid/);
+  assert.match(paidCanarySource, /agentflow-paid-readiness\.mjs/);
+  assert.match(paidCanarySource, /'--api', `\$\{apiOrigin\}\/api`/);
+  assert.match(paidCanarySource, /--static-only/);
+  assert.match(paidCanarySource, /paid-live-canary\.spec\.ts/);
+  assert.doesNotMatch(paidCanarySource, /for \(const group of groups\)/);
+  assert.doesNotMatch(paidCanarySource, /KALIO_E2E_PROJECT_PATH|requireProjectPath|--project-path/);
+  assert.match(paidCanarySource, /projectContext: 'disabled'/);
+});
 
-  assert.notEqual(liveGuardIndex, -1, 'live guard not found');
-  assert.notEqual(readinessIndex, -1, 'live readiness call not found');
-  assert.notEqual(groupIndex, -1, 'Playwright gate call not found');
-  assert.ok(liveGuardIndex < readinessIndex, 'live readiness must run only inside the live guard');
-  assert.ok(readinessIndex < groupIndex, 'live readiness must pass before browser workflow checks start');
+test('paid tool canary is bounded to one confirmed fs_write under an explicit safe path', () => {
+  const runnerUrl = new URL('./paid-live-tool-canary.mjs', import.meta.url);
+  const specUrl = new URL('../apps/e2e/tests/paid-live-tool-canary.spec.ts', import.meta.url);
+  assert.equal(existsSync(runnerUrl), true, 'paid-live-tool-canary.mjs is missing');
+  assert.equal(existsSync(specUrl), true, 'paid-live-tool-canary.spec.ts is missing');
+
+  const runnerSource = readFileSync(runnerUrl, 'utf8');
+  const specSource = readFileSync(specUrl, 'utf8');
+  assert.match(runnerSource, /--confirm-paid/);
+  assert.match(runnerSource, /--safe-project-path/);
+  assert.match(runnerSource, /agentflow-paid-readiness\.mjs/);
+  assert.match(runnerSource, /--static-only/);
+  assert.match(runnerSource, /settings\/max-tool-attempts/);
+  assert.match(runnerSource, /KALIO_SAFE_TOOL_PATH/);
+  assert.match(runnerSource, /paid-live-tool-canary\.spec\.ts/);
+
+  assert.match(specSource, /allowed-paths/);
+  assert.match(specSource, /fs_write/);
+  assert.match(specSource, /confirmation-confirm-btn/);
+  assert.match(specSource, /KALIO_RUN_PAID_TOOL_CANARY/);
+  assert.match(specSource, /readFileSync/);
+  assert.match(specSource, /unlinkSync/);
+  assert.doesNotMatch(specSource, /terminal_spawn|terminal_exec|run_cli_agent/);
+});
+
+test('demo release gate runs the free workflow gate before the explicit paid canary', () => {
+  const demoGateUrl = new URL('./demo-release-gate.mjs', import.meta.url);
+  assert.equal(existsSync(demoGateUrl), true, 'demo-release-gate.mjs is missing');
+  const demoGateSource = readFileSync(demoGateUrl, 'utf8');
+  const workflowIndex = demoGateSource.indexOf("'scripts/workflow-release-gate.mjs'");
+  const paidIndex = demoGateSource.indexOf("'scripts/paid-live-canary.mjs'");
+  assert.notEqual(workflowIndex, -1, 'free workflow gate call is missing');
+  assert.notEqual(paidIndex, -1, 'paid canary call is missing');
+  assert.ok(workflowIndex < paidIndex, 'free workflow proof must run before the paid canary');
+  assert.doesNotMatch(
+    demoGateSource,
+    /'--backend-port', '0', '--frontend-port', '0',[\s\S]*'--skip-build'/,
+    'random-port persistent stack restart must rebuild runtime-config.js',
+  );
 });
 
 test('workflow release gate includes recent runtime regression proof groups', () => {
@@ -191,6 +255,11 @@ test('workflow release gate includes recent runtime regression proof groups', ()
   assert.match(workflowReleaseGateSource, /renders parent run_sub_agentflow history bubble/);
   assert.match(workflowReleaseGateSource, /starts a two-agent Goal Guard AgentFlow/);
   assert.match(workflowReleaseGateSource, /keeps a Talk-started durable AgentFlow result fresh after child completion and reload/);
+  assert.match(workflowReleaseGateSource, /requires strict Implementer evidence/);
+  assert.match(workflowReleaseGateSource, /Implementer write evidence is missing/);
+  assert.match(workflowReleaseGateSource, /rejects unknown AgentFlow schemas/);
+  assert.match(workflowReleaseGateSource, /resumes a bounded waiting AgentFlow/);
+  assert.match(workflowReleaseGateSource, /failing structured QA evidence/);
 
   assert.match(workflowReleaseGateSource, /name: 'workflow failure projection gate'/);
   assert.match(workflowReleaseGateSource, /malformed router structured output becomes terminal failed graph state/);

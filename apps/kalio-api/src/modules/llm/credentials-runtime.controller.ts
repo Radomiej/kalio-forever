@@ -83,7 +83,7 @@ export class CredentialsRuntimeController {
   @Post(':id/test-completion')
   async testCompletionById(
     @Param('id') id: string,
-    @Body() body?: { model?: string },
+    @Body() body?: { model?: string; maxOutputTokens?: number },
   ): Promise<{
     ok: boolean;
     latencyMs: number;
@@ -113,6 +113,18 @@ export class CredentialsRuntimeController {
       smokeProvider = cred.provider;
       const requestedModel = typeof body?.model === 'string' ? body.model.trim() : '';
       smokeModel = requestedModel || cred.model || '';
+      const maxOutputTokens = body?.maxOutputTokens ?? 64;
+      if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 256) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          mode: 'runtime_smoke',
+          provider: smokeProvider,
+          model: smokeModel,
+          source: 'db',
+          error: 'maxOutputTokens must be an integer between 1 and 256',
+        };
+      }
 
       const isLocal = isLocalLlmProvider(cred.provider, cred.baseUrl ?? undefined);
       const apiKey = await this.credentialsService.getApiKey(id);
@@ -149,7 +161,12 @@ export class CredentialsRuntimeController {
         providerConfig,
         this.runtimeSmokeMessages(),
         this.runtimeSmokeTools(),
-        { sessionId: 'credential-completion-test-session', messageId: 'credential-completion-test-msg', onChunk: () => { /* drain chunks */ } },
+        {
+          sessionId: 'credential-completion-test-session',
+          messageId: 'credential-completion-test-msg',
+          maxOutputTokens,
+          onChunk: () => { /* drain chunks */ },
+        },
       );
       return {
         ok: true,

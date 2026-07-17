@@ -96,7 +96,7 @@ export class LLMService {
     tools: LLMToolDef[],
     options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
-    return this.runStreamChatWithConfig(config, messages, tools, options);
+    return this.runStreamChatWithConfig(config, messages, tools, await this.withGenerationDefaults(options));
   }
 
   async streamChat(
@@ -105,7 +105,21 @@ export class LLMService {
     options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
     const active = await this.getActiveProvider();
-    return this.runStreamChatWithConfig(active.config, messages, tools, options, active.provider);
+    return this.runStreamChatWithConfig(
+      active.config,
+      messages,
+      tools,
+      await this.withGenerationDefaults(options),
+      active.provider,
+    );
+  }
+
+  private async withGenerationDefaults(options: StreamChatOptions): Promise<StreamChatOptions> {
+    if (options.maxOutputTokens !== undefined) {
+      return options;
+    }
+    const { maxTokens } = await this.credentialsService.getGenerationSettings();
+    return { ...options, maxOutputTokens: maxTokens };
   }
 
   async getConfig(): Promise<LLMConfig & { source: 'db' | 'env' }> {

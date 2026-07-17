@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,9 +10,29 @@ const e2eDir = resolve(repoRoot, 'apps/e2e');
 const webDistDir = resolve(repoRoot, 'apps/kalio-web/dist');
 const playwrightCli = resolve(e2eDir, 'node_modules/@playwright/test/cli.js');
 
-const args = new Set(process.argv.slice(2));
-const requireLive = args.has('--require-live');
-const reuseStack = args.has('--reuse-stack') || requireLive;
+const rawArgs = process.argv.slice(2);
+const args = new Set(rawArgs);
+if (args.has('--require-live')) {
+  throw new Error('--require-live is removed; use the explicit release:paid-canary command after the mock gate passes.');
+}
+const reuseStack = args.has('--reuse-stack');
+
+function requireProjectPath() {
+  const projectPathIndex = rawArgs.indexOf('--project-path');
+  const projectPath = (projectPathIndex >= 0
+    ? rawArgs[projectPathIndex + 1]
+    : process.env.KALIO_E2E_PROJECT_PATH)?.trim();
+  if (!projectPath) {
+    throw new Error('Provide an existing project directory with --project-path <path> or KALIO_E2E_PROJECT_PATH.');
+  }
+  const resolvedProjectPath = resolve(projectPath);
+  if (!existsSync(resolvedProjectPath) || !statSync(resolvedProjectPath).isDirectory()) {
+    throw new Error(`Project path is not an existing directory: ${resolvedProjectPath}`);
+  }
+  return resolvedProjectPath;
+}
+
+const projectPath = requireProjectPath();
 
 function normalizedWindowsEnv(baseEnv) {
   if (process.platform !== 'win32') {
@@ -148,22 +168,6 @@ function writeFrontendRuntimeConfig(backendUrl) {
   );
 }
 
-async function runLiveReadinessGate(apiOrigin) {
-  console.log('[workflow-release-gate] live paid-readiness gate');
-  const result = await run(process.execPath, [
-    'scripts/agentflow-paid-readiness.mjs',
-    '--api',
-    `${apiOrigin}/api`,
-  ], {
-    cwd: repoRoot,
-    env: normalizedWindowsEnv(process.env),
-    stdio: 'inherit',
-  });
-  if (result.code !== 0) {
-    throw new Error(`live paid-readiness gate failed with exit code ${result.code}`);
-  }
-}
-
 async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin, stackState) {
   console.log(`[workflow-release-gate] ${name}`);
   const env = normalizedWindowsEnv({
@@ -173,6 +177,7 @@ async function runPlaywrightGroup({ name, grep }, baseUrl, apiOrigin, stackState
     PLAYWRIGHT_API_ORIGIN: apiOrigin,
     TEST_API_URL: `${apiOrigin}/api`,
     DATABASE_PATH: stackState.databasePath,
+    KALIO_E2E_PROJECT_PATH: projectPath,
   });
   const result = await run(process.execPath, [playwrightCli, 'test', '--project=chromium', '--grep', grep], {
     cwd: e2eDir,
@@ -215,7 +220,11 @@ const groups = [
   },
   {
     name: 'AgentFlow Goal Guard gate',
-    grep: 'renders parent run_sub_agentflow history bubble|starts a two-agent Goal Guard AgentFlow|keeps a Talk-started durable AgentFlow result fresh after child completion and reload',
+    grep: 'renders parent run_sub_agentflow history bubble|starts a two-agent Goal Guard AgentFlow|keeps a Talk-started durable AgentFlow result fresh after child completion and reload|requires strict Implementer evidence|Implementer write evidence is missing|rejects unknown AgentFlow schemas|resumes a bounded waiting AgentFlow|failing structured QA evidence',
+  },
+  {
+    name: 'single-node paid-budget mock canary gate',
+    grep: 'runs a single-node no-tool canary from Talk and restores it after reload',
   },
   {
     name: 'workflow failure projection gate',
@@ -255,16 +264,8 @@ try {
   console.log(`[workflow-release-gate] active credential=${originalActiveCredentialId ?? 'none'}`);
   writeFrontendRuntimeConfig(apiOrigin);
 
-  if (requireLive) {
-    const liveFailures = [
-      llmConfig.provider === 'mock' ? 'provider is mock' : null,
-      llmConfig.source !== 'db' ? `source is ${llmConfig.source}` : null,
-      originalActiveCredentialId === null ? 'active credential is missing' : null,
-    ].filter(Boolean);
-    if (liveFailures.length > 0) {
-      throw new Error(`live workflow gate requires a saved live credential: ${liveFailures.join(', ')}`);
-    }
-    await runLiveReadinessGate(apiOrigin);
+  if (llmConfig.provider !== 'mock') {
+    throw new Error(`workflow release gate requires the mock provider; received ${llmConfig.provider ?? 'unknown'}`);
   }
 
   try {

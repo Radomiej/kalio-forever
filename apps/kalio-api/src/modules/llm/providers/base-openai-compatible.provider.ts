@@ -65,7 +65,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     tools: LLMToolDef[],
     options: StreamChatOptions,
   ): Promise<LLMToolCall[]> {
-    const { sessionId, messageId, onChunk, onToolArgChunk, abortSignal } = options;
+    const { sessionId, messageId, onChunk, onToolArgChunk, abortSignal, maxOutputTokens } = options;
     if (abortSignal?.aborted) {
       return [];
     }
@@ -78,6 +78,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       messages: messages.map((m) => this.buildRequestMessage(m)),
       stream: true,
       stream_options: { include_usage: true },
+      max_tokens: maxOutputTokens,
       tools: requestTools.length > 0
         ? requestTools.map((t) => ({
             type: 'function',

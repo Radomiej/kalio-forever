@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { SETTINGS_BLOCKS } from './registry';
 import { useSettingsStore } from './settingsStore';
@@ -11,6 +11,7 @@ interface SettingsModalProps {
 export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
   const [tabId, setTabId] = useState(initialTab ?? SETTINGS_BLOCKS[0]?.id ?? 'llm');
   const contentRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const pendingRuntimeFocusRequestRef = useRef(false);
   const requestedSettingsTab = useSettingsStore((state) => state.requestedSettingsTab);
   const clearRequestedSettingsTab = useSettingsStore((state) => state.clearRequestedSettingsTab);
@@ -21,6 +22,10 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  useLayoutEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (!requestedSettingsTab) {
@@ -66,6 +71,7 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
         <div className="flex shrink-0 items-center justify-between border-b border-base-300 bg-base-200/50 px-5 py-4 sm:px-6">
           <h2 data-testid="settings-title" className="text-xl font-bold">Settings</h2>
           <button
+            ref={closeButtonRef}
             className="btn btn-ghost btn-circle btn-sm"
             onClick={onClose}
             aria-label="Close settings"
@@ -79,12 +85,15 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
 
           {/* Sidebar Tabs */}
-          <div className="grid shrink-0 grid-cols-2 gap-2 overflow-y-auto border-b border-base-300 bg-base-200/30 p-3 sm:grid-cols-3 sm:p-4 lg:w-72 lg:grid-cols-1 lg:border-b-0 lg:border-r">
+          <div
+            className="grid shrink-0 grid-cols-2 gap-1.5 overflow-y-auto border-b border-base-300 bg-base-200/30 p-3 sm:grid-cols-3 lg:w-64 lg:grid-cols-1 lg:content-start lg:overflow-visible lg:border-b-0 lg:border-r"
+            data-testid="settings-navigation"
+          >
             {SETTINGS_BLOCKS.map((block) => (
               <button
                 key={block.id}
                 type="button"
-                className={`btn btn-sm h-auto min-h-11 justify-start gap-3 whitespace-normal px-3 py-2 text-left font-medium shadow-none transition-colors ${
+                className={`btn btn-sm h-10 min-h-10 justify-start gap-3 whitespace-normal px-3 py-2 text-left font-medium shadow-none transition-colors ${
                   tabId === block.id
                     ? 'border-none bg-sky-500/10 text-sky-400 ring-1 ring-inset ring-sky-500/30 hover:bg-sky-500/15'
                     : 'border-none bg-transparent text-base-content/70 hover:bg-base-300 hover:text-base-content'
@@ -100,7 +109,7 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
 
           {/* Panel */}
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div ref={contentRef} className="absolute inset-0 overflow-y-auto p-4 sm:p-6">
+            <div ref={contentRef} className="absolute inset-0 overflow-y-auto p-4 sm:p-6" data-testid="settings-panel-scroll">
               <div className="mx-auto w-full max-w-4xl">
                 {ActiveComponent && <ActiveComponent />}
               </div>

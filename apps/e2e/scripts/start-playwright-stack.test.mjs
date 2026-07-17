@@ -937,7 +937,14 @@ test('playwright config rejects mismatched explicit API URLs', async () => {
 
   try {
     await createSandboxRepo(sandboxRoot);
-    const child = spawn(process.execPath, ['-e', `import(${JSON.stringify(pathToFileURL(resolve(sandboxRoot, 'apps/e2e/playwright.config.ts')).href)})`], {
+    const configPath = resolve(sandboxRoot, 'apps/e2e/playwright.config.ts');
+    const configUrl = pathToFileURL(configPath).href;
+    const configDir = dirname(configPath);
+    const child = spawn(process.execPath, [
+      '--experimental-strip-types',
+      '-e',
+      `globalThis.__dirname = ${JSON.stringify(configDir)}; await import(${JSON.stringify(configUrl)})`,
+    ], {
       env: {
         ...process.env,
         PLAYWRIGHT_API_ORIGIN: 'http://127.0.0.1:24116',

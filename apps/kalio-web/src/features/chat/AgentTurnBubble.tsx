@@ -400,7 +400,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                 {isStreaming && !displayContent ? (
                   <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
                 ) : displayContent ? (
-                  <div>
+                  <div className="max-w-[78ch]">
                     <MarkdownViewer content={displayContent} />
                     {isStreaming && <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current" />}
                   </div>

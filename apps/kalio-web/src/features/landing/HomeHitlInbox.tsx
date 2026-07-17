@@ -126,7 +126,7 @@ export function HomeHitlInbox({
   };
 
   return (
-    <section className="mb-4 rounded-2xl border border-base-300/70 bg-base-100/70 p-3" data-testid="home-hitl-inbox">
+    <section className="mb-5" data-testid="home-hitl-inbox">
       <div className="mb-3 flex items-center gap-2">
         <AlertTriangle size={16} className={pendingActionCount > 0 ? 'text-warning animate-pulse' : 'text-base-content/35'} />
         <div>
@@ -140,7 +140,7 @@ export function HomeHitlInbox({
       </div>
 
       {pendingActionCount === 0 ? (
-        <div className="rounded-xl border border-dashed border-base-300/70 bg-base-200/35 px-3 py-4 text-sm text-base-content/45">
+        <div className="px-1 py-2 text-sm text-base-content/50" data-testid="home-hitl-empty">
           Nothing to do. Waiting for agents that need your approval.
         </div>
       ) : (

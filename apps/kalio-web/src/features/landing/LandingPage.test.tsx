@@ -193,6 +193,7 @@ describe('LandingPage', () => {
     expect(screen.getByTestId('home-hitl-inbox')).toBeInTheDocument();
     expect(screen.getByText('Ongoing actions')).toBeInTheDocument();
     expect(screen.getByText('Nothing to do. Waiting for agents that need your approval.')).toBeInTheDocument();
+    expect(screen.getByTestId('home-hitl-empty')).not.toHaveClass('border', 'border-dashed');
     expect(screen.getByTestId('quick-chat-widget')).toBeInTheDocument();
 
     await waitFor(() => {

@@ -2,6 +2,7 @@ import { Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Persona } from '@kalio/types';
 import type { ArchitectSchema } from '../../architect/architect.types';
+import { PersonaCombobox } from './PersonaCombobox';
 
 const WELCOME_PROMPTS = [
   'What can you do?',
@@ -140,19 +141,19 @@ export function NewChatScreen({
   };
 
   return (
-    <section className="flex min-h-full w-full items-stretch justify-stretch px-3 py-3 sm:px-4 sm:py-4" data-testid={`${testIdPrefix}-screen`}>
-      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col rounded-2xl border border-base-300/80 bg-base-100/96 px-4 py-5 shadow-[0_24px_60px_rgba(2,12,27,0.24)] backdrop-blur sm:px-6 sm:py-6 lg:px-8">
-        <p className="text-[10px] uppercase tracking-[0.24em] text-base-content/45">{heading}</p>
+    <section className="flex min-h-full w-full items-stretch justify-stretch px-4 py-4" data-testid={`${testIdPrefix}-screen`}>
+      <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col rounded-2xl bg-base-100/70 px-5 py-5 sm:px-7 lg:px-8">
+        <p className="text-[11px] uppercase tracking-[0.2em] text-base-content/50">{heading}</p>
 
-        <div className="mt-6 flex flex-col items-center gap-2 text-center select-none">
-          <div className="text-primary font-black text-5xl drop-shadow-[0_0_12px_oklch(0.60_0.176_232.6/0.6)]">K</div>
+        <div className="mt-4 flex flex-col items-center gap-1.5 text-center select-none">
+          <div className="text-primary font-black text-4xl drop-shadow-[0_0_10px_oklch(0.60_0.176_232.6/0.5)]">K</div>
           <h2 className="text-base font-semibold text-base-content/80">KALIO</h2>
           <p className="max-w-2xl text-sm leading-relaxed text-base-content/65">{subtitle}</p>
         </div>
 
-        <div className="mt-8">
-          <p className="mb-1 pl-1 text-[10px] uppercase tracking-wider text-base-content/65">Mode</p>
-          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-base-300/80 bg-base-200/60 p-1" data-testid={`${testIdPrefix}-mode-switcher`}>
+        <div className="mt-6">
+          <p className="mb-1.5 pl-1 text-[11px] uppercase tracking-wider text-base-content/65">Mode</p>
+          <div className="inline-grid min-w-72 grid-cols-2 gap-1 rounded-xl bg-base-200/70 p-1 ring-1 ring-inset ring-base-300/65" data-testid={`${testIdPrefix}-mode-switcher`}>
             {[
               { id: 'chat' as const, label: 'Chat mode', disabled: false },
               { id: 'workflow' as const, label: 'Workflow mode', disabled: workflowOptions.length === 0 },
@@ -175,30 +176,25 @@ export function NewChatScreen({
           </div>
         </div>
 
-        <div className="mt-8 grid gap-4 lg:grid-cols-2">
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
           <div>
             {launchMode === 'chat' ? (
               <>
-                <label htmlFor={`${testIdPrefix}-persona-select`} className="mb-1 block pl-1 text-[10px] uppercase tracking-wider text-base-content/65">
+                <label htmlFor={`${testIdPrefix}-persona-select`} className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
                   Persona
                 </label>
-                <select
+                <PersonaCombobox
                   id={`${testIdPrefix}-persona-select`}
-                  aria-label="Persona"
-                  className="select select-bordered select-sm w-full text-sm"
+                  options={personaOptions}
                   value={selectedPersonaId}
-                  onChange={(event) => onPersonaChange(event.target.value)}
+                  onChange={onPersonaChange}
                   disabled={isBusy}
-                  data-testid={`${testIdPrefix}-persona-select`}
-                >
-                  {personaOptions.map((persona) => (
-                    <option key={persona.id} value={persona.id}>{persona.label}</option>
-                  ))}
-                </select>
+                  testId={`${testIdPrefix}-persona-select`}
+                />
               </>
             ) : (
               <>
-                <label htmlFor={`${testIdPrefix}-architecture-select`} className="mb-1 block pl-1 text-[10px] uppercase tracking-wider text-base-content/65">
+                <label htmlFor={`${testIdPrefix}-architecture-select`} className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
                   Workflow
                 </label>
                 <select
@@ -223,7 +219,7 @@ export function NewChatScreen({
           </div>
 
           <div>
-            <label htmlFor={`${testIdPrefix}-project-path-input`} className="mb-1 block pl-1 text-[10px] uppercase tracking-wider text-base-content/65">
+            <label htmlFor={`${testIdPrefix}-project-path-input`} className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
               Project folder
             </label>
             <input
@@ -238,14 +234,14 @@ export function NewChatScreen({
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-base-300/80 bg-base-200/70 p-3">
+        <div className="mt-4 rounded-xl border border-base-300/70 bg-base-200/45 p-2.5">
           <label htmlFor={`${testIdPrefix}-prompt-input`} className="sr-only">
             Prompt
           </label>
           <textarea
             id={`${testIdPrefix}-prompt-input`}
             aria-label="Prompt"
-            className="textarea textarea-ghost min-h-32 w-full resize-none text-sm leading-6 focus:outline-none"
+            className="textarea textarea-ghost min-h-28 w-full resize-none text-sm leading-6 focus:outline-none"
             value={prompt}
             onChange={(event) => {
               setPrompt(event.target.value);
@@ -282,7 +278,7 @@ export function NewChatScreen({
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap justify-center gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           {WELCOME_PROMPTS.map((quickPrompt) => (
             <button
               key={quickPrompt}

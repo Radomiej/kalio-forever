@@ -194,6 +194,34 @@ describe('CredentialsController', () => {
       );
     });
 
+    it('passes a bounded output token limit to the provider runtime', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openrouter', model: 'tencent/hy3' })]);
+      mockService.getApiKey.mockResolvedValue('openrouter-test-key');
+
+      const result = await runtimeController.testCompletionById('cred-1', { maxOutputTokens: 64 });
+
+      expect(result.ok).toBe(true);
+      expect(mockLLMService.streamChatWithConfig).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Array),
+        expect.any(Array),
+        expect.objectContaining({ maxOutputTokens: 64 }),
+      );
+    });
+
+    it('rejects an unbounded completion smoke token limit before calling the provider', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openrouter', model: 'tencent/hy3' })]);
+      mockService.getApiKey.mockResolvedValue('openrouter-test-key');
+
+      const result = await runtimeController.testCompletionById('cred-1', { maxOutputTokens: 4096 });
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        error: 'maxOutputTokens must be an integer between 1 and 256',
+      }));
+      expect(mockLLMService.streamChatWithConfig).not.toHaveBeenCalled();
+    });
+
     it('can smoke-test a requested model even when the saved credential model is empty', async () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: '', baseUrl: undefined })]);
       mockService.getApiKey.mockResolvedValue('xiao-completion-key');

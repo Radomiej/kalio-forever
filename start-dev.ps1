@@ -27,7 +27,20 @@ $FE_PORT = $FrontendPort
 # Singleton lock — must run before port cleanup or stack startup.
 $script:devStackMutex = $null
 $script:devStackMutexOwned = $false
+$script:devStackMutexBypassed = $false
 $devStackMutexName = "Global\KalioForever-DevStack-$BE_PORT-$FE_PORT"
+
+function Get-PortOwners {
+    param([int[]]$Ports)
+
+    @(
+        foreach ($port in $Ports) {
+            Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
+                Where-Object { $_.State -eq 'Listen' -and $_.OwningProcess -gt 0 } |
+                Select-Object -ExpandProperty OwningProcess
+        }
+    ) | Sort-Object -Unique
+}
 
 function Get-DevLauncherProcessIds {
     param([int]$CurrentProcessId)
@@ -76,9 +89,21 @@ try {
             }
             Start-Sleep -Milliseconds 400
             $script:devStackMutexOwned = Try-AcquireDevStackMutex
+            if (-not $script:devStackMutexOwned) {
+                $portOwners = @(Get-PortOwners -Ports @($BE_PORT, $FE_PORT))
+                if ($portOwners.Count -eq 0) {
+                    # A killed launcher can leave an unrecoverable Global mutex behind.
+                    Write-Host "  Force restart bypassing orphaned dev stack mutex; ports are free." -ForegroundColor DarkYellow
+                    if ($script:devStackMutex) {
+                        try { $script:devStackMutex.Dispose() } catch { }
+                        $script:devStackMutex = $null
+                    }
+                    $script:devStackMutexBypassed = $true
+                }
+            }
         }
     }
-    if (-not $script:devStackMutexOwned) {
+    if (-not $script:devStackMutexOwned -and -not $script:devStackMutexBypassed) {
         $beHealthy = $false
         $feHealthy = $false
         try {
@@ -290,18 +315,6 @@ $env:VITE_PORT = "$FE_PORT"
 $env:VITE_HMR_HOST = $devOriginHost
 $env:VITE_HMR_CLIENT_PORT = "$FE_PORT"
 
-function Get-PortOwners {
-    param([int[]]$Ports)
-
-    @(
-        foreach ($port in $Ports) {
-            Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
-                Where-Object { $_.State -eq 'Listen' -and $_.OwningProcess -gt 0 } |
-                Select-Object -ExpandProperty OwningProcess
-        }
-    ) | Sort-Object -Unique
-}
-
 # Recursively collect a PID and all its descendants
 function Get-ProcessTree {
     param([int]$ParentId)
@@ -479,7 +492,7 @@ $feArgs = @(
     '--strictPort'
 )
 $feProcess = Start-Process -FilePath $nodeCmd.Source -ArgumentList $feArgs `
-    -WorkingDirectory $web -NoNewWindow -PassThru
+    -WorkingDirectory $web -WindowStyle Hidden -PassThru
 
 Write-Host "  Frontend -> http://localhost:$FE_PORT  (PID $($feProcess.Id))" -ForegroundColor Green
 Write-Host "  Ctrl+C to stop both" -ForegroundColor Yellow

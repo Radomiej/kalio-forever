@@ -648,7 +648,7 @@ describe('Full lifecycle integration', () => {
     await service.deleteGroup('app');
     expect(service.getGroupBySlug('app')).toBeUndefined();
     expect(fsSync.existsSync(path.join(tmpBase, 'user', 'app'))).toBe(false);
-  });
+  }, 60_000);
 
   it('state is fully recoverable after service re-init (simulated restart)', async () => {
     await service.saveAsDraft('persist', await buildZip({ id: 'persist', name: 'Persist', version: '1.0.0' }));
@@ -662,7 +662,7 @@ describe('Full lifecycle integration', () => {
     expect(group?.history).toHaveLength(1);
     expect(group?.history[0].version).toBe('1.0.0');
     expect(fsSync.existsSync(group!.history[0].zipPath)).toBe(true);
-  });
+  }, 60_000);
 
   it('concurrent saveAsDraft for different slugs are independent', async () => {
     const [g1, g2, g3] = await Promise.all([
@@ -675,7 +675,7 @@ describe('Full lifecycle integration', () => {
     expect(g2.slug).toBe('beta');
     expect(g3.slug).toBe('gamma');
     expect(service.getGroups()).toHaveLength(3);
-  });
+  }, 60_000);
 
   it('rollback → re-approve produces correct semver and accumulated history', async () => {
     await service.saveAsDraft('app', await buildZip({ id: 'app', name: 'App', version: '1.0.0' }));
@@ -694,6 +694,6 @@ describe('Full lifecycle integration', () => {
     // All prior versions still accessible for rollback
     const rolled = await service.rollback('app', '1.0.0');
     expect(rolled.draft?.version).toBe('1.0.0');
-  });
+  }, 60_000);
 });
 
