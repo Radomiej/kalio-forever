@@ -2,27 +2,49 @@
 
 # Kalio
 
-**Local-first agent architecture runtime — design, run, and inspect multi-agent workflows with real tools, memory, and files.**
+**Local-first runtime for designing, running, and inspecting agent workflows.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![CI](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml)
-[![Backend coverage](https://img.shields.io/badge/BE%20coverage-81.02%25-brightgreen.svg)](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml)
-[![Frontend coverage](https://img.shields.io/badge/FE%20coverage-67.57%25-yellowgreen.svg)](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![pnpm](https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 
+[Install](#quick-start) · [Develop](#for-contributors) · [Architecture](docs/agentflow-architecture-and-workflow.md) · [Docs](#documentation)
+
 </div>
 
----
+Kalio is a **self-hosted agent architecture runtime**. It combines streaming
+chat, tools, memory, files, MCP servers, and multi-agent workflows in one
+local-first application.
 
-Kalio is a **self-hosted agent architecture runtime**. It still has a streaming chat interface, but chat is now only one projection of a deeper system: versioned architecture schemas, role slots, personas, routers, context policies, execution events, tool calls, VFS state, memory, and graph-based run inspection.
+The key idea is simple: an agent workflow is not only a prompt and a model.
+It is an editable architecture with roles, personas, routing, context policy,
+tool access, durable execution events, and an inspectable result.
 
-The product direction is **Agent Architecture as Runtime Configuration**:
+> **Local-first by design.** Kalio sends LLM traffic from your backend to the
+> provider you configure. Session files, memory, credentials, and execution
+> history stay in your local data directory.
 
-```mermaid
+## At a glance
+
+| Surface | What it gives you |
+| --- | --- |
+| **Talk** | Streaming chat with a multi-step tool loop, queues, attachments, and session history. |
+| **Architect** | Versioned architecture schemas, role slots, personas, graph nodes, edges, and routing policies. |
+| **Inspect** | Timeline, graph, chat, tool calls, runtime events, and audit evidence for each run. |
+| **Own your data** | Sandboxed session workspaces, semantic memory, SQLite persistence, and encrypted provider secrets. |
+
+## See it in action
+
+Kalio keeps two graphs separate but connected:
+
+- **Architecture Graph** - how a workflow is designed to think and route.
+- **Execution Graph** - what actually happened in a specific run.
+
+~~~mermaid
 flowchart LR
   Editor["Architecture Editor"]
   Registry["Architecture Registry"]
@@ -33,465 +55,291 @@ flowchart LR
   Registry -->|load schema or variant| Runtime
   Runtime -->|events and projections| Viewer
   Viewer -->|timeline, graph, chat| Editor
-```
-
-That distinction matters. Kalio tracks both the **Architecture Graph** ("how this workflow should think and route") and the **Execution Graph** ("what actually happened in this run"). A user does not only choose a model; they choose a thinking architecture such as Single Chat, Five Minds Council, Strategic Decision Council, Visual QA Flow, or a custom schema variant.
-
-See [AgentFlow Architecture And Workflow](docs/agentflow-architecture-and-workflow.md) for the full Mermaid architecture, work-flow, and delegation diagrams.
-For day-to-day graph editing, see the [Architect User Guide](docs/architect-user-guide.md).
-
-Every chat or architecture run gets sandboxed files, isolated persona behavior, tool access rules, and semantic memory. Any MCP (Model Context Protocol) server can be connected and its tools appear in the runtime toolbox instantly.
-
-> **No cloud relay.** LLM traffic goes directly from your backend to the API. Nothing else leaves your machine.
-
----
-
-## Features
-
-<table>
-<tr>
-<td width="50%">
-
-**🤖 Agentic loop**  
-Configurable multi-step tool loop per turn. The backend keeps iterating LLM -> tools -> LLM until no tool calls remain, the user interrupts, or the max-attempt guard is reached.
-
-**Architecture Runtime**  
-Run schema-driven multi-agent protocols with role slots, routers, finalizers, graph nodes, edge routing, context policies, and persisted execution events.
-
-**⚡ Sub-second streaming**  
-Every token arrives live via Socket.IO. The first chunk appears before the full response is generated.
-
-**🛡️ Human-in-the-Loop (HITL)**  
-Confirmed tools pause on `tool:confirmation_required`; confirm and cancel are enforced against the owning `sessionId`. Manual timeout pauses by default, or can fall back to a configured representative persona. Telegram can send approval prompts to the registered relay chat and resolve them through `/approve <requestId>` or `/cancel <requestId>`.
-
-**📁 Virtual File System**  
-Each session gets a sandboxed workspace at `sessions/{id}/files/`. Agents read, write, list, and search files without ever leaving the sandbox.
-
-**🧠 Semantic memory**  
-Per-persona vector store powered by `sqlite-vec`. Agents embed episodic memories and retrieve them by meaning, not just keyword.
-
-</td>
-<td width="50%">
-
-**🎭 Personas**  
-Fully isolated system prompts, default models, MCP policies, skills, and tool access per persona.
-
-**Architecture Registry**  
-Store seed schemas and user-created variants. Current built-in flows include Strategic Decision Council and Five Minds Council, with per-slot persona overrides.
-
-**🔌 MCP — dynamic tool discovery**  
-Connect any Model Context Protocol server (stdio or HTTP). Connected tools are merged into the runtime tool list immediately and exposed under prefixed names like `mcp_<serverId>_<toolName>`.
-
-**📺 RA-App renderer**  
-Agents can produce interactive mini-apps: raw HTML iframes with `postMessage` bridge back to chat, or a declarative GUI DSL that renders as structured UI.
-
-**🖼️ Image generation + vision**  
-Attach images to messages. Generate images via any compatible API. Agents can inspect and describe image content.
-
-**🤖 CLI agent runner**  
-Invoke Copilot, Claude Code, Gemini CLI, or any subprocess-based agent directly from chat. Live streaming output captured in real time.
-
-</td>
-</tr>
-</table>
-
----
-
-## Architecture
+~~~
 
 <p align="center">
-  <img src="docs/kalio_module_architecture.svg" alt="Kalio module architecture — Frontend thin client communicates with NestJS backend via Socket.IO"/>
+  <img src="docs/kalio_module_architecture.svg" alt="Kalio frontend and backend module architecture" />
 </p>
 
-The frontend is a **thin client** — it renders state, tracks live UI progress, and dispatches session-scoped socket events. The backend owns queueing, tool execution, memory, persistence, and I/O. `ChatSession` is the real isolation unit across chat history, VFS, KV state, approvals, and sub-agent lineage.
+The frontend is a thin projection client. The backend owns queueing, tool
+execution, memory, persistence, and I/O. ChatSession is the isolation unit for
+chat history, VFS state, approvals, and sub-agent lineage.
 
----
+Read the [AgentFlow architecture guide](docs/agentflow-architecture-and-workflow.md)
+for the full runtime model, or the [Architect User Guide](docs/architect-user-guide.md)
+for day-to-day graph editing.
 
-## Agent Architecture Runtime
+## Quick start
 
-Kalio's architecture layer turns multi-agent workflows into editable runtime configuration rather than hardcoded orchestration functions.
+### Install Kalio on Windows
 
-```mermaid
-flowchart TD
-  Draft["Editor draft\nnodes, edges, personas, context"]
-  Save{"Save variant?"}
-  Variant["Versioned architecture variant"]
-  Run["Run selected schema"]
-  Observe["Runtime viewer\nactive nodes, visits, tools, timeline"]
-  Guard{"Goal Guard / router"}
-  Done["Final artifact"]
+The fastest first run uses the local production profile and the mock provider;
+no API key is required.
 
-  Draft --> Save
-  Save -- yes --> Variant
-  Save -- no --> Run
-  Variant --> Run
-  Run --> Observe
-  Observe --> Guard
-  Guard -- route_to(next node) --> Observe
-  Guard -- accepted --> Done
-```
-
-Current runtime building blocks:
-
-| Layer | Current role |
-|---|---|
-| Architecture Schema | Versioned JSON contract with `roleSlots`, graph `nodes`, `edges`, `routerPolicy`, `contextPolicy`, `memoryPolicy`, and `outputArtifactSchema`. |
-| Architecture Registry | Lists built-in schemas, persists user-created variants, and supports persona/context/node graph overrides. |
-| Architecture Runtime | Executes a selected schema by creating branch sessions, running role slots, routing through graph nodes, and producing execution events. |
-| Execution Viewer | Projects the same run into timeline, graph, and chat views. The chat view is a projection, not the source of truth. |
-| Audit Truth Board | Correlates architecture runs, child branches, VFS hydration, file-tool evidence, runtime events, and tool calls. |
-
-Built-in schemas include:
-
-- `strategic-decision-council`: Pragmatist, Innovator, Analyst, User Advocate, Shadow, Router, Finalizer.
-- `five-minds-council`: Five-perspective debate adapted from Agent Architecture Lab, followed by synthesis and decision artifact generation.
-
-The intended MVP architecture surface is:
-
-```txt
-Run this task with:
-[Single Chat]
-[Five Minds Council]
-[Strategic Decision Council]
-[Bugfix Council]
-[Research Swarm]
-[Visual QA Flow]
-[Custom Architecture Variant]
-```
-
-The next important hardening step is to make router outputs fully structured: accepted inputs, rejected inputs, unresolved conflicts, risks, confidence, and next action. That will make architecture runs auditable as decisions, not just readable transcripts.
-
----
-
-## How It Works — Streaming Event Flow
-
-Every user message triggers this pipeline:
-
-```mermaid
-sequenceDiagram
-  participant U as User
-  participant FE as ChatInterface
-  participant GW as ChatGateway
-  participant P as SessionPipelineService
-  participant CS as ChatService
-  participant LLM as ILLMSource
-  participant TD as ToolDispatchService
-
-  U->>FE: type + send message
-  FE->>GW: chat:send {sessionId, content, attachments}
-  GW->>P: submit(payload, emit)
-
-  alt session already has an active turn
-    P-->>FE: chat:queued
-  else dispatch now
-    P->>CS: handleTurn(...)
-    CS-->>FE: agent:start
-    CS-->>FE: chat:context {systemPrompt, toolNames}
-
-    loop each LLM iteration
-      CS->>LLM: stream(messages, toolMetas)
-      loop streaming chunks
-        LLM-->>CS: chunk
-        CS-->>FE: chat:chunk
-      end
-
-      alt tool calls emitted
-        loop each tool call
-          CS-->>FE: tool:start {callId, toolName, args}
-          CS->>TD: dispatch(callId, toolName, args, ctx)
-
-          alt requiresConfirmation = true
-            TD-->>FE: tool:confirmation_required
-            FE-->>GW: tool:confirm or tool:cancel
-          end
-
-          TD-->>CS: ToolResult
-          CS-->>FE: tool:result
-          CS->>CS: persist non-cancelled tool_result message
-        end
-      else no tool calls remain
-        CS-->>FE: chat:complete
-      end
-    end
-
-    CS-->>FE: agent:done
-  end
-```
-
----
-
-## Human-in-the-Loop Gate
-
-<p align="center">
-  <img src="docs/kalio_hitl_gate_flow.svg" alt="HITL confirmation gate flow"/>
-</p>
-
-Tools marked `requiresConfirmation: true` are paused before execution. The frontend receives `tool:confirmation_required`, shows the tool name and arguments inline, and responds with `tool:confirm` or `tool:cancel`. Confirmation is session-bound in both the gateway and dispatch layer, so another socket cannot resolve a pending request for a different session.
-
----
-
-## Quick Start
-
-### Run Kalio (Windows users)
-
-One-line install — production stack, autostart after reboot, mock LLM by default:
-
-```powershell
+~~~powershell
 irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
-```
+~~~
 
-Open **http://localhost:6188** (API on `http://localhost:4016`).
+Open **http://localhost:6188**. The API health endpoint is
+**http://localhost:4016/api/health**.
 
-Full user guide: **[docs/quickstart-user.md](docs/quickstart-user.md)** (upgrade, uninstall, troubleshooting).
+1. Open **Settings**.
+2. Keep mock for a fully offline first run, or add a provider.
+3. Create a session in **Talk**.
+4. Send a message and approve tool calls when the HITL prompt appears.
 
----
+See the [Windows user guide](docs/quickstart-user.md) for upgrades,
+uninstall, data locations, and troubleshooting.
 
-### Develop Kalio (contributors)
+### Develop from a clone
 
 #### Requirements
 
-- Node.js ≥ 22
-- pnpm ≥ 9
+- Node.js >= 22
+- pnpm >= 9
+- On Windows, use system Node from C:\Program Files\nodejs for installs and
+  native modules such as better-sqlite3.
 
-#### 1. Install
-
-```bash
+~~~bash
 git clone https://github.com/Radomiej/kalio-forever.git
 cd kalio-forever
 pnpm install
-```
+~~~
 
-#### 2. Configure
+Create a local configuration:
 
-```bash
+~~~bash
 cp .env.example .env
-```
+~~~
 
-Open `.env` and set at minimum:
+For an offline development run, use:
 
-```env
-LLM_PROVIDER=openai          # or: mock | openai | openrouter | cometapi | xiaomimimo | deepseek | ollama | bitnet | custom
-LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
+~~~env
+LLM_PROVIDER=mock
 WORKSPACE_ROOT=./data
-CREDENTIALS_MASTER_KEY=replace-with-a-long-random-secret   # required in production to decrypt stored secrets
-```
+CREDENTIALS_MASTER_KEY=replace-with-a-long-random-secret
+~~~
 
-> Use `LLM_PROVIDER=mock` to run fully offline with no API key — great for development and testing.
-> `CREDENTIALS_MASTER_KEY` is used to encrypt stored provider secrets at rest. In local development, Kalio falls back to a dev-only key if this variable is missing; in production it must be set explicitly.
+CREDENTIALS_MASTER_KEY encrypts stored provider secrets. A development-only
+fallback exists when the variable is absent; production requires an explicit
+value.
 
-### 3. Run
+Start the hot-reload stack on Windows:
 
-```bash
-# Preferred (all platforms, uses start-dev.ps1 on Windows)
+~~~powershell
 pnpm dev
+# or
+.\start-dev.ps1
+~~~
 
-# macOS / Linux
-cd apps/kalio-api && pnpm dev &
-cd apps/kalio-web && pnpm dev
-```
+Start the two development processes directly on macOS/Linux:
 
-Open **http://localhost:5188** and start chatting.
+~~~bash
+(cd apps/kalio-api && pnpm dev) &
+(cd apps/kalio-web && pnpm dev)
+~~~
 
-#### 4. What success looks like
+| Service | URL |
+| --- | --- |
+| Web UI | http://localhost:5188 |
+| API health | http://localhost:3016/api/health |
+| Effective LLM config | http://localhost:3016/api/llm/config |
 
-After `pnpm dev` (or `./start-dev.ps1`) boots cleanly you should have:
+Built QA and production profiles are available when you need a non-hot-reload
+stack:
 
-- API listening on `http://localhost:3016`
-- Web UI ready on `http://localhost:5188`
-- a working Settings page where you can add or activate an LLM provider
-- the ability to create a session and send a first message without reloading
+| Profile | Command | UI |
+| --- | --- | --- |
+| Fixed QA | pnpm qa or pnpm qa:rebuild | http://localhost:5288 |
+| Managed QA | pnpm stack:start | random port; use pnpm stack:status |
+| Local production profile | pnpm prod or pnpm prod:rebuild | http://localhost:6188 |
 
-#### 5. Run Tests
+See the [local development guide](docs/local-dev-guide.md) for the complete
+stack, CI, release, and test command map.
 
-```bash
-pnpm test           # local gate: preflight + Vitest + script tests
-pnpm test:e2e       # Playwright E2E (starts its own stack on random ports)
-pnpm typecheck      # turbo typecheck across workspaces
-```
+## Core capabilities
 
-#### 6. QA / prod stacks (built dist, no hot reload)
+| Capability | What it does |
+| --- | --- |
+| **Agentic loop** | Iterates LLM and tool calls until the turn completes, is interrupted, or reaches its guard. |
+| **Architecture Runtime** | Runs schema-driven protocols with role slots, routers, finalizers, graph nodes, context policies, and persisted events. |
+| **Streaming** | Delivers live response chunks and tool progress over Socket.IO. |
+| **Human-in-the-loop** | Pauses confirmed tools before execution and binds approval/cancel actions to the owning session. |
+| **Virtual File System** | Gives every session a sandboxed workspace for reading, writing, listing, and searching files. |
+| **Semantic memory** | Stores per-persona vector memory with sqlite-vec retrieval. |
+| **Personas** | Isolates system prompts, model defaults, MCP policies, skills, and tool access. |
+| **MCP** | Discovers tools from stdio or HTTP servers and exposes them under stable prefixed names. |
+| **RA-Apps** | Renders interactive mini-apps through HTML iframes or a declarative GUI DSL. |
+| **Vision and images** | Accepts image attachments and supports compatible image-generation providers. |
+| **CLI agents** | Streams output from subprocess-based agents such as Copilot, Claude Code, or Gemini CLI. |
 
-| Stack | Command | UI |
-|---|---|---|
-| QA (contributor testing) | `pnpm qa` / `pnpm qa:rebuild` | http://localhost:5288 |
-| Prod profile (local test) | `pnpm prod` / `pnpm prod:rebuild` | http://localhost:6188 |
+## How the runtime works
 
-See **[Local Dev & QA Guide](docs/local-dev-guide.md)** for the full command map, CI/release flow, and test entry points.
+Every user message follows the same high-level path:
 
----
+~~~mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as Web client
+  participant GW as Chat gateway
+  participant P as Session pipeline
+  participant LLM as Configured provider
+  participant T as Tool dispatch
 
-## Daily Use
+  U->>FE: Send message
+  FE->>GW: chat:send(sessionId, content)
+  GW->>P: Submit turn
 
-1. Start the stack with `pnpm dev` (or `./start-dev.ps1` on Windows).
-2. Open `http://localhost:5188`.
-3. Go to Settings once and either:
-  use `mock` for offline development, or
-  add a real provider key and activate it.
-4. Create a session, pick a persona, and send a message.
-5. Approve destructive tool calls when the HITL prompt appears.
-6. Inspect results directly in chat: files, tool output, RA-Apps, images, and memory hits all show up inline.
+  alt Active turn exists
+    P-->>FE: chat:queued
+  else Dispatch now
+    loop LLM and tool iterations
+      P->>LLM: Stream response
+      LLM-->>FE: Live chunks
+      opt Tool call emitted
+        P->>T: Dispatch tool
+        T-->>FE: Progress or confirmation
+        T-->>P: Tool result
+      end
+    end
+    P-->>FE: chat:complete and agent:done
+  end
+~~~
 
-### Where To Change Things
+Tools with requiresConfirmation=true pause before execution. The frontend shows
+the tool name and arguments, then sends tool:confirm or tool:cancel. Both
+gateway and dispatch layers enforce the owning sessionId.
 
-- Persona prompts and policies: `apps/kalio-api/src/modules/persona/`
-- Native tools: `apps/kalio-api/src/modules/tool/tools/`
-- Chat orchestration and streaming: `apps/kalio-api/src/modules/chat/`
-- Runtime settings UI: `apps/kalio-web/src/features/settings/`
-- Memory UI: `apps/kalio-web/src/features/memory/`
+### Architecture Runtime
 
-### Troubleshooting
+Built-in architecture flows include:
 
-| Problem | What to check |
-|---|---|
-| API does not start | Confirm Node 22+, `pnpm install`, and that port `3016` is free |
-| Web cannot reach backend | Confirm API is on `http://localhost:3016` and the browser opened `http://localhost:5188` |
-| Provider saves fail | Check `CREDENTIALS_MASTER_KEY` and the provider base URL/API key in Settings |
-| Secrets cannot be decrypted in production | Set `CREDENTIALS_MASTER_KEY` explicitly; dev fallback keys are only for local development |
-| Socket events seem stuck | Check browser console, API logs, and whether the current session was recreated after a restart |
+- strategic-decision-council - Pragmatist, Innovator, Analyst, User Advocate,
+  Shadow, Router, and Finalizer roles.
+- five-minds-council - a five-perspective debate followed by synthesis and
+  decision artifact generation.
 
----
+The registry stores seed schemas and user-created variants. The execution
+viewer projects one run into timeline, graph, and chat views; chat is a view of
+the run, not its source of truth.
 
-## LLM Providers
+Read the [runtime stack guide](docs/architecture-runtime-stack.md) and
+[chat/streaming architecture](docs/chat-streaming-tools-architecture.md) for
+implementation detail.
 
-Any OpenAI-compatible endpoint works out of the box.
+## Providers
 
-| Provider | `LLM_PROVIDER` | Notes |
-|---|---|---|
-| **Mock** | `mock` | Fully offline. Echoes back messages. Ideal for tests. |
-| **OpenAI** | `openai` | GPT-4o, GPT-4.1, o3-mini, … |
-| **CometAPI** | `cometapi` | OpenAI-compatible aggregator. Set `LLM_BASE_URL=https://api.cometapi.com/v1` if needed. |
-| **Xiaomi MiMo** | `xiaomimimo` | MiMo reasoning/chat models. Default base URL is `https://token-plan-ams.xiaomimimo.com/v1`. |
-| **DeepSeek** | `deepseek` | OpenAI-compatible DeepSeek endpoint. Default base URL is `https://api.deepseek.com/v1`. |
-| **OpenRouter** | `openrouter` | 200+ models via one key. Set `LLM_BASE_URL=https://openrouter.ai/api/v1`. |
-| **Ollama** | `ollama` | Local models (llama3, qwen3, deepseek-r2, …). Set `LLM_BASE_URL=http://localhost:11434/v1`. |
-| **BitNet** | `bitnet` | Local BitNet-compatible OpenAI endpoint. Default base URL is `http://localhost:8080/v1`. |
-| **Custom** | `custom` | Any OpenAI-compatible endpoint. Set `LLM_BASE_URL` to your server URL. |
+Kalio supports OpenAI-compatible providers through the configured backend.
+Use mock for offline development and tests.
 
-Local providers (`ollama`, `bitnet`, and `custom` endpoints on `localhost` / `.local`) can be saved and tested without an API key. Remote providers still require one.
+| Provider | LLM_PROVIDER | Notes |
+| --- | --- | --- |
+| Mock | mock | Offline provider for development and tests. |
+| OpenAI | openai | OpenAI models through the default API shape. |
+| CometAPI | cometapi | OpenAI-compatible aggregator. |
+| Xiaomi MiMo | xiaomimimo | MiMo reasoning/chat models. |
+| DeepSeek | deepseek | OpenAI-compatible DeepSeek endpoint. |
+| OpenRouter | openrouter | Multiple models through one key. |
+| Ollama | ollama | Local models through http://localhost:11434/v1. |
+| BitNet | bitnet | Local BitNet-compatible endpoint. |
+| Custom | custom | Any compatible endpoint configured by the user. |
 
-For image generation, set `IMAGE_PROVIDER` and `IMAGE_API_KEY` separately (same format).
+Local providers can be saved and tested without a remote API key. Remote
+providers require the credentials expected by that provider.
 
----
+For image generation, configure IMAGE_PROVIDER and IMAGE_API_KEY separately.
 
-## Data Storage
+## Data and safety
 
-| Storage | Purpose | Default path |
-|---|---|---|
-| `kalio.db` | Sessions, messages, personas, credentials, audit log | `$WORKSPACE_ROOT/kalio.db` |
-| `memory/{personaId}.db` | Vector embeddings per persona (sqlite-vec RAG) | `$WORKSPACE_ROOT/memory/` |
-| `sessions/{id}/files/` | Per-session sandboxed file workspace | `$WORKSPACE_ROOT/sessions/` |
-| `sessions/{id}/_kv.json` | Per-session key-value store | (same root) |
-| `ra-apps/` | Stored RA-App catalog (core + user apps, versioned groups) | `$WORKSPACE_ROOT/ra-apps` or `RA_APPS_PATH` |
+| Data | Default location | Purpose |
+| --- | --- | --- |
+| SQLite database | $WORKSPACE_ROOT/kalio.db | Sessions, messages, personas, credentials, and audit log. |
+| Semantic memory | $WORKSPACE_ROOT/memory/ | Per-persona vector stores. |
+| Session files | $WORKSPACE_ROOT/sessions/{id}/ | Sandboxed workspace for one chat session. |
+| Session KV | $WORKSPACE_ROOT/sessions/{id}/_kv.json | Session-scoped key-value state. |
+| RA-App catalog | $WORKSPACE_ROOT/ra-apps or RA_APPS_PATH | Versioned stored apps. |
 
-Provider secrets stored in `kalio.db` and image provider settings are encrypted at rest with `CREDENTIALS_MASTER_KEY`. This is field-level secret encryption, not a password on the SQLite database file itself.
+Provider secrets are encrypted at rest with CREDENTIALS_MASTER_KEY. This is
+field-level secret encryption, not a password on the SQLite file itself.
 
-Each session sandbox is isolated. Agents can only read and write inside `WORKSPACE_ROOT/sessions/{sessionId}/` and the KV namespace attached to that same session. Stored RA-Apps are separate from session VFS and live in the RA-App catalog path.
+Agents can read and write only inside the workspace assigned to their session.
+The RA-App catalog is separate from session VFS data.
 
----
+## Project structure
 
-## Project Structure
-
-```
+~~~text
 kalio-forever/
 ├── apps/
-│   ├── kalio-api/          # NestJS 11 backend
-│   │   └── src/
-│   │       ├── modules/    # one folder per domain (chat, persona, vfs, tool, …)
-│   │       └── database/   # schema.ts + migrations/
-│   ├── kalio-web/          # React 19 frontend
-│   │   └── src/
-│   │       ├── features/   # React feature folders
-│   │       ├── store/      # Zustand stores
-│   │       └── services/   # eventBus, apiClient
-│   └── e2e/                # Playwright E2E tests
+│   ├── kalio-api/          # NestJS backend and database
+│   ├── kalio-web/          # React/Vite frontend
+│   └── e2e/                # Playwright tests
 ├── packages/
-│   ├── @kalio/types/       # Shared type contracts (DTOs, Socket events)
-│   └── @kalio/sdk/         # Socket.IO client wrapper
-├── docs/                   # Architecture diagrams and specs
-├── scripts/code-audit/     # Automated LOC and architecture health audit
-├── AGENTS.md               # Architecture rules for AI coding agents
-├── CONTRIBUTING.md         # Developer guide
-├── CODE_OF_CONDUCT.md
-└── .env.example
-```
+│   ├── @kalio/types/       # Shared DTO and Socket.IO contracts
+│   └── @kalio/sdk/         # Shared client SDK
+├── docs/                   # Architecture, setup, QA, and session docs
+├── scripts/                # Dev, QA, release, audit, and installer tools
+├── AGENTS.md               # AI and contributor operating rules
+├── CONTRIBUTING.md         # Contribution workflow
+└── .env.example            # Local configuration template
+~~~
 
----
+## For contributors
+
+Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md).
+The most useful local gates are:
+
+~~~powershell
+pnpm test
+pnpm test:e2e
+pnpm typecheck
+pnpm lint
+pnpm audit:report
+~~~
+
+The repository keeps backend logic in services, shared contracts in
+@kalio/types, frontend state rebuildable from backend snapshots, and
+destructive tools behind confirmation. TypeScript must remain strict: no any,
+no empty catches, and no cross-module imports outside the shared contract
+boundary.
+
+For targeted work, use the feature folders under
+apps/kalio-api/src/modules/ and apps/kalio-web/src/features/. Do not grow
+files past the repository's 500 LOC limit; split a touched slice first.
 
 ## Documentation
 
-If you're contributing code or using an AI coding agent, start with [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md) before changing implementation details.
-
-| Doc | What it covers |
-|---|---|
-| [docs/quickstart-user.md](./docs/quickstart-user.md) | Windows one-line install, autostart, uninstall |
-| [docs/local-dev-guide.md](./docs/local-dev-guide.md) | Dev vs QA vs prod stacks, commands, CI/release, test entry points |
-| [AGENTS.md](./AGENTS.md) | Architecture invariants enforced in every PR (AI-readable) |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Setup, TDD workflow, tool registration, PR checklist |
-| [scripts/README.md](./scripts/README.md) | Root script surface (`dev`, `qa`, `stack:*`, `test`, `preflight`) |
-| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community expectations, moderation scope, and reporting path |
-| [scripts/code-audit/README.md](./scripts/code-audit/README.md) | What the automated audit checks and how to run it |
-| [docs/sessions/](./docs/sessions/) | Chronological engineering session logs and implementation decisions |
-| [docs/application-architecture-current.md](./docs/application-architecture-current.md) | Current top-level runtime model across backend, storage, and runtime boundaries |
-| [docs/frontend-model-current.md](./docs/frontend-model-current.md) | FE state ownership, store relations, and projection model |
-| [docs/UI-Flow.md](./docs/UI-Flow.md) | Current shell navigation and interaction flow |
-| [docs/architecture-runtime-stack.md](./docs/architecture-runtime-stack.md) | Architecture Registry, Architecture Runtime, branch execution, and graph/chat projections |
-| [docs/chat-streaming-tools-architecture.md](./docs/chat-streaming-tools-architecture.md) | LLM streaming + tool dispatch deep-dive |
-| [docs/mcp-architecture.md](./docs/mcp-architecture.md) | MCP integration: discovery, lifecycle, per-persona policy |
-| [docs/raapp-design-current.md](./docs/raapp-design-current.md) | Inline RA-App blocks, stored catalog apps, iframe bridge, and approvals |
-| [docs/database-schema-diagram.md](./docs/database-schema-diagram.md) | Full ERD with all 13 tables |
-| [docs/tool-architecture.md](./docs/tool-architecture.md) | Tool registration pattern and dispatch pipeline |
-| [docs/cli-agent-module-architecture.md](./docs/cli-agent-module-architecture.md) | CLI agent module: adapters, config schema, output streaming |
-
----
+| Document | Purpose |
+| --- | --- |
+| [Quick start for users](docs/quickstart-user.md) | Windows install, autostart, upgrades, uninstall, and troubleshooting. |
+| [Local development guide](docs/local-dev-guide.md) | Dev, QA, prod, CI, release, and test entry points. |
+| [AgentFlow architecture](docs/agentflow-architecture-and-workflow.md) | Architecture schemas, workflow execution, and delegation. |
+| [Runtime stack](docs/architecture-runtime-stack.md) | Registry, runtime, branch execution, and projections. |
+| [MCP architecture](docs/mcp-architecture.md) | Server discovery, lifecycle, and persona policy. |
+| [RA-App design](docs/raapp-design-current.md) | Inline apps, catalog apps, iframe bridge, and approvals. |
+| [Agent skills index](docs/agent-skills/README.md) | Repo-visible skills for AI-assisted work. |
+| [Scripts overview](scripts/README.md) | Root command surface and helper scripts. |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community expectations and reporting path. |
 
 ## Roadmap
 
-- [x] Streaming chat with sub-second latency (Socket.IO)
-- [x] Agentic loop with tool execution (up to 8 hops)
-- [x] Human-in-the-Loop confirmation gate
-- [x] Virtual File System (per-session sandboxed)
-- [x] Persona system (system prompts, model configs, skills)
-- [x] MCP dynamic tool discovery (stdio + HTTP transport)
-- [x] RA-App renderer (HTML iframes + GUI DSL)
-- [x] Semantic memory (sqlite-vec RAG + episodic)
-- [x] Image generation and multimodal input
-- [x] CLI agent subprocess runner (Copilot, Claude Code, …)
-- [x] Full audit log with token usage and timing
-- [x] Architecture Registry with schema variants
-- [x] Architecture Runtime with Five Minds and Strategic Council flows
-- [x] Execution Graph, timeline, and chat projections for architecture runs
-- [ ] Structured router output contracts with accepted/rejected inputs and explicit confidence
-- [ ] First-class registry resources for router policies, output schemas, and architecture packages
-- [ ] Architecture simulation, token estimate, and JSON/Mermaid/Markdown export
-- [ ] Auth / JWT session management (post-MVP)
-- [ ] PostgreSQL migration path (Drizzle adapter ready)
-- [ ] Remote VFS / S3 offload
-- [ ] Multi-user / team workspace features
+### Shipped
 
----
+- Streaming chat with tool execution and HITL confirmation.
+- Sandboxed VFS, semantic memory, personas, and MCP discovery.
+- RA-App rendering, image/vision support, and CLI agent streaming.
+- Architecture Registry, Architecture Runtime, and Execution Graph views.
 
-## Contributing
+### Planned
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a PR. Key rules:
+- Structured router output with accepted/rejected inputs, risks, confidence,
+  and explicit next actions.
+- First-class registry resources for router policies, output schemas, and
+  architecture packages.
+- Architecture simulation, token estimates, and JSON/Mermaid/Markdown export.
+- Auth/JWT sessions, a PostgreSQL migration path, remote VFS offload, and
+  multi-user workspaces.
 
-1. **TDD** — write a failing test that reproduces the bug, then fix it
-2. **500 LOC hard limit** per file (tests exempt)
-3. **Zero cross-module imports** — all shared contracts go through `@kalio/types`
-4. **No `any`** in TypeScript — use `unknown` + narrowing
-5. **No empty catch blocks** — always log with context
-6. **Run `pnpm audit:report`** when you touch shared tooling, contributor docs, or architecture guidance
-7. **Do not grow existing god objects** — if a file is already past its hard limit, extract or split the touched slice before adding more behavior
+## License and Code of Conduct
 
----
-
-## License
-
-[MIT](./LICENSE)
-
----
-
-## Code of Conduct
-
-See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md). We follow the Contributor Covenant 2.1.
+Kalio is released under the [MIT License](./LICENSE). Contributions also
+follow the [Contributor Covenant 2.1](./CODE_OF_CONDUCT.md).
