@@ -1,7 +1,14 @@
-import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Inject, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import { eq, desc, isNull } from 'drizzle-orm';
-import type { ChatSession, ChatMessage, ChatSessionKind, CreateSessionDto, SessionRuntimeContext } from '@kalio/types';
+import { eq, desc, inArray, isNull } from 'drizzle-orm';
+import type {
+  AssignSessionProjectDto,
+  ChatSession,
+  ChatMessage,
+  ChatSessionKind,
+  CreateSessionDto,
+  SessionRuntimeContext,
+} from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
@@ -11,7 +18,9 @@ import { SessionEventsService } from './session-events.service';
 import { LLMService } from '../llm/llm.service';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
+import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
+import { ActiveSessionRegistry } from './active-session-registry.service';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
@@ -53,6 +62,8 @@ export class SessionsService {
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
     private readonly llm: LLMService,
     private readonly allowedPaths: AllowedPathsService,
+    private readonly projects: ProjectsService,
+    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -76,7 +87,8 @@ export class SessionsService {
     dto: CreateSessionDto,
     options: SessionRuntimeScopeOptions = {},
   ): Promise<ChatSession> {
-    await this.registerRuntimeProjectPathIfRequested(dto.runtimeContext, options);
+    const scope = await this.resolveProjectScope(dto);
+    await this.registerRuntimeProjectPathIfRequested(scope.runtimeContext ?? undefined, options);
     const now = new Date();
     const row = {
       id,
@@ -86,7 +98,8 @@ export class SessionsService {
       parentSessionId: dto.parentSessionId ?? null,
       parentTurnId: dto.parentTurnId ?? null,
       parentToolCallId: dto.parentToolCallId ?? null,
-      runtimeContext: dto.runtimeContext ?? null,
+      projectId: scope.projectId,
+      runtimeContext: scope.runtimeContext ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -152,6 +165,63 @@ export class SessionsService {
 
   async update(id: string, patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
     return this.updateWithOptions(id, patch);
+  }
+
+
+  async assignProject(id: string, dto: AssignSessionProjectDto): Promise<ChatSession> {
+    await this.assertExists(id);
+    const projectId = dto.projectId.trim();
+    if (!projectId) {
+      throw new BadRequestException('Project id is required.');
+    }
+    const project = projectId === SYSTEM_PROJECT_IDS.none
+      ? undefined
+      : await this.projects.assertAssignable(projectId);
+    if (projectId === SYSTEM_PROJECT_IDS.none && dto.pathOverride?.trim()) {
+      throw new BadRequestException('The no-project session cannot have a path override.');
+    }
+    const current = await this.get(id);
+    const hasPathChange = dto.pathOverride !== undefined;
+    const path = hasPathChange
+      ? (dto.pathOverride?.trim() || project?.path) ?? null
+      : undefined;
+    if (path && hasPathChange) {
+      await this.allowedPaths.ensurePath(path);
+    }
+
+    const descendants = await this.collectDescendantIds(id);
+    const activeSessionId = descendants.find((sessionId) => this.activeSessionRegistry?.isActive(sessionId));
+    if (activeSessionId) {
+      throw new ConflictException({
+        message: 'Project cannot be changed while this conversation is generating.',
+        sessionId: activeSessionId,
+      });
+    }
+    const runtimeContext = hasPathChange
+      ? this.applyProjectPath(current.runtimeContext, path ?? null)
+      : undefined;
+    const affectedSessions = hasPathChange
+      ? await Promise.all(descendants.map((sessionId) => this.get(sessionId)))
+      : [];
+    this.drizzle.db.transaction((tx) => {
+      tx.update(sessions)
+        .set({ projectId })
+        .where(inArray(sessions.id, descendants))
+        .run();
+      if (runtimeContext !== undefined) {
+        for (const affectedSession of affectedSessions) {
+          tx.update(sessions)
+            .set({ runtimeContext: this.applyProjectPath(affectedSession.runtimeContext, path ?? null) })
+            .where(eq(sessions.id, affectedSession.id))
+            .run();
+        }
+      }
+    });
+    for (const descendantId of descendants) {
+      const session = await this.get(descendantId);
+      this.sessionEvents.emitSessionUpdated(session);
+    }
+    return this.get(id);
   }
 
   async updateWithOptions(
@@ -242,6 +312,99 @@ export class SessionsService {
     return normalized;
   }
 
+  private async resolveProjectScope(dto: CreateSessionDto): Promise<{
+    projectId: string;
+    runtimeContext: SessionRuntimeContext | null | undefined;
+  }> {
+    const requestedProjectId = dto.projectId?.trim() || undefined;
+    const hostSessionId = dto.runtimeContext?.architectureContext?.hostSessionId;
+    const parentSessionId = dto.parentSessionId ?? hostSessionId;
+    const parent = parentSessionId ? await this.get(parentSessionId) : undefined;
+    const inheritedProjectId = parent?.projectId ?? SYSTEM_PROJECT_IDS.none;
+    if (parent && requestedProjectId && requestedProjectId !== inheritedProjectId) {
+      throw new BadRequestException('A child session must use its host project.');
+    }
+
+    const projectId = inheritedProjectId !== SYSTEM_PROJECT_IDS.none && parent
+      ? inheritedProjectId
+      : requestedProjectId ?? inheritedProjectId;
+    if (projectId === SYSTEM_PROJECT_IDS.none) {
+      if (requestedProjectId === SYSTEM_PROJECT_IDS.none && dto.projectPathOverride?.trim()) {
+        throw new BadRequestException('The no-project session cannot have a path override.');
+      }
+      return {
+        projectId,
+        runtimeContext: requestedProjectId === SYSTEM_PROJECT_IDS.none
+          ? this.clearProjectPath(dto.runtimeContext)
+          : dto.runtimeContext,
+      };
+    }
+
+    const project = await this.projects.assertAssignable(projectId);
+    const path = dto.projectPathOverride === undefined ? project.path : dto.projectPathOverride.trim() || null;
+    if (dto.projectPathOverride !== undefined && path) {
+      await this.allowedPaths.ensurePath(path);
+    }
+    return {
+      projectId,
+      runtimeContext: this.applyProjectPath(dto.runtimeContext, path),
+    };
+  }
+
+  private applyProjectPath(
+    runtimeContext: SessionRuntimeContext | null | undefined,
+    path: string | null,
+  ): SessionRuntimeContext | null | undefined {
+    if (!path) return this.clearProjectPath(runtimeContext);
+    const architectureContext = {
+      ...(runtimeContext?.architectureContext ?? {}),
+      projectPath: path,
+      executionCwd: path,
+    };
+    return {
+      ...(runtimeContext ?? { runtimeKind: 'chat' }),
+      architectureContext,
+    };
+  }
+
+  private clearProjectPath(
+    runtimeContext: SessionRuntimeContext | null | undefined,
+  ): SessionRuntimeContext | null | undefined {
+    if (!runtimeContext?.architectureContext) return runtimeContext;
+    const architectureContext = { ...runtimeContext.architectureContext };
+    delete architectureContext.projectPath;
+    delete architectureContext.executionCwd;
+    return {
+      ...runtimeContext,
+      architectureContext,
+    };
+  }
+
+  private async collectDescendantIds(id: string): Promise<string[]> {
+    const rows = await this.drizzle.db
+      .select({ id: sessions.id, parentSessionId: sessions.parentSessionId })
+      .from(sessions);
+    const childrenByParent = new Map<string, string[]>();
+    for (const row of rows) {
+      if (!row.parentSessionId) continue;
+      childrenByParent.set(row.parentSessionId, [
+        ...(childrenByParent.get(row.parentSessionId) ?? []),
+        row.id,
+      ]);
+    }
+    const result: string[] = [];
+    const pending = [id];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const currentId = pending.shift();
+      if (!currentId || visited.has(currentId)) continue;
+      visited.add(currentId);
+      result.push(currentId);
+      pending.push(...(childrenByParent.get(currentId) ?? []));
+    }
+    return result;
+  }
+
   private async assertExists(id: string): Promise<void> {
     await this.getRow(id);
   }
@@ -254,6 +417,7 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
+    projectId?: string | null;
     runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
@@ -289,6 +453,7 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
+    projectId?: string | null;
     runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
@@ -301,6 +466,7 @@ export class SessionsService {
       parentSessionId: row.parentSessionId ?? undefined,
       parentTurnId: row.parentTurnId ?? undefined,
       parentToolCallId: row.parentToolCallId ?? undefined,
+      ...(row.projectId ? { projectId: row.projectId } : {}),
       runtimeContext: row.runtimeContext ?? undefined,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),

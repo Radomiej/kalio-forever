@@ -60,7 +60,14 @@ const {
 }));
 
 vi.mock('./features/chat/ChatInterface', () => ({
-  ChatInterface: () => <div data-testid="chat-interface">Chat</div>,
+  ChatInterface: ({ onTalkViewChange }: { onTalkViewChange?: (view: 'conversation' | 'graph') => void }) => (
+    <div data-testid="chat-interface">
+      Chat
+      <button type="button" data-testid="mock-switch-graph" onClick={() => onTalkViewChange?.('graph')}>
+        Graph
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('./features/chat/CanvasPanel', () => ({
@@ -377,14 +384,7 @@ describe('App view state persistence', () => {
   });
 
   it('hydrates the stored talk graph view on first mount', () => {
-    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
-      activeSection: 'talk',
-      talkTab: 'conversations',
-      talkView: 'graph',
-      toolsTab: 'native',
-      mindTab: 'memory',
-      selectedSkillId: null,
-    }));
+    localStorage.setItem('kalio:talk-view', 'graph');
 
     render(<App />);
 
@@ -397,7 +397,7 @@ describe('App view state persistence', () => {
     const firstRender = render(<App />);
 
     fireEvent.click(screen.getByTestId('landing-to-chat'));
-    fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
+    fireEvent.click(screen.getByTestId('mock-switch-graph'));
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
 
@@ -409,25 +409,18 @@ describe('App view state persistence', () => {
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
-  it('shows a dedicated graph entry in the Talk sidebar and switches views without creating a session first', () => {
+  it('switches views from the conversation surface without creating a session first', () => {
     render(<App />);
 
     fireEvent.click(screen.getByTestId('landing-to-chat'));
-    fireEvent.click(screen.getByTestId('talk-sidebar-graph-entry'));
+    fireEvent.click(screen.getByTestId('mock-switch-graph'));
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
   it('collapses and restores the Talk sidebar so the graph can use the full workspace', () => {
-    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
-      activeSection: 'talk',
-      talkTab: 'conversations',
-      talkView: 'graph',
-      toolsTab: 'native',
-      mindTab: 'memory',
-      selectedSkillId: null,
-    }));
+    localStorage.setItem('kalio:talk-view', 'graph');
 
     render(<App />);
 
@@ -443,23 +436,14 @@ describe('App view state persistence', () => {
     expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
   });
 
-  it('switches to the graph view from the collapsed Talk sidebar rail', () => {
-    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
-      activeSection: 'talk',
-      talkTab: 'conversations',
-      talkView: 'conversation',
-      toolsTab: 'native',
-      mindTab: 'memory',
-      selectedSkillId: null,
-    }));
+  it('does not expose the graph switcher in the collapsed Talk sidebar rail', () => {
 
     render(<App />);
 
     fireEvent.click(screen.getByTestId('talk-sidebar-collapse'));
     const collapsedRail = screen.getByTestId('talk-sidebar-collapsed');
-    fireEvent.click(collapsedRail.querySelector('[data-testid="talk-sidebar-graph-entry"]')!);
 
-    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
+    expect(collapsedRail.querySelector('[data-testid="talk-sidebar-graph-entry"]')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
   });
 
@@ -482,14 +466,7 @@ describe('App view state persistence', () => {
   });
 
   it('keeps the graph view active for an empty New Chat session', () => {
-    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
-      activeSection: 'talk',
-      talkTab: 'conversations',
-      talkView: 'graph',
-      toolsTab: 'native',
-      mindTab: 'memory',
-      selectedSkillId: null,
-    }));
+    localStorage.setItem('kalio:talk-view', 'graph');
     sessionStoreState.activeSessionId = 'new-chat-session';
     sessionStoreState.messages = [];
     sessionStoreState.agentTurns = [];
@@ -501,14 +478,7 @@ describe('App view state persistence', () => {
   });
 
   it('opens graph child sessions in the conversation view', () => {
-    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
-      activeSection: 'talk',
-      talkTab: 'conversations',
-      talkView: 'graph',
-      toolsTab: 'native',
-      mindTab: 'memory',
-      selectedSkillId: null,
-    }));
+    localStorage.setItem('kalio:talk-view', 'graph');
 
     render(<App />);
 
@@ -519,34 +489,27 @@ describe('App view state persistence', () => {
     expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
   });
 
-  it('returns to the conversation view when the sidebar selects a conversation while graph is active', () => {
-    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
-      activeSection: 'talk',
-      talkTab: 'conversations',
-      talkView: 'graph',
-      toolsTab: 'native',
-      mindTab: 'memory',
-      selectedSkillId: null,
-    }));
+  it('keeps the graph view active when the sidebar selects a conversation', () => {
+    localStorage.setItem('kalio:talk-view', 'graph');
 
     render(<App />);
 
     expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('mock-select-conversation'));
 
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
-    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
   });
 
-  it('opens agent-run sessions in the conversation view from the agent sidebar', () => {
+  it('keeps the selected view when opening agent-run sessions from the agent sidebar', () => {
     sessionStorage.setItem('kalio:app-view-state', JSON.stringify({
       activeSection: 'talk',
       talkTab: 'agents',
-      talkView: 'graph',
       toolsTab: 'native',
       mindTab: 'memory',
       selectedSkillId: null,
     }));
+    localStorage.setItem('kalio:talk-view', 'graph');
 
     render(<App />);
 
@@ -554,8 +517,8 @@ describe('App view state persistence', () => {
     fireEvent.click(screen.getByTestId('mock-open-agent-session'));
 
     expect(setActiveSession).toHaveBeenCalledWith('agent-child-1');
+    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
     expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
-    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
   });
 
   it('shows recent completed talk activity badge instead of total conversation count', () => {

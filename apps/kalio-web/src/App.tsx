@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  MessageSquare, GitBranch, Gauge, PanelLeftClose, PanelLeftOpen,
+  MessageSquare, Gauge, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { ChatInterface } from './features/chat/ChatInterface';
 import { CanvasPanel } from './features/chat/CanvasPanel';
@@ -25,6 +25,8 @@ import {
   APP_VIEW_STATE_STORAGE_KEY,
   LAST_TALK_ACTIVE_STORAGE_KEY,
   loadAppViewState,
+  loadTalkViewPreference,
+  persistTalkViewPreference,
   loadLastTalkActiveAt,
   recentTalkBadgeCount,
 } from './App.viewState';
@@ -46,16 +48,11 @@ import { preloadRuntimeWatchSessionHistory } from './features/chat/runtimeWatchH
 import { selectRuntimeAttentionItems } from './store/agentRuntimeSelectors';
 import { mergeSessionsPreservingLocal } from './features/sessions/mergeSessionsPreservingLocal';
 
-const TALK_VIEW_OPTIONS: ReadonlyArray<{ id: TalkView; label: string; icon: React.ReactNode }> = [
-  { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
-  { id: 'graph', label: 'Execution graph', icon: <GitBranch size={14} /> },
-];
-
 export function App() {
   const initialViewState = loadAppViewState();
   const [activeSection, setActiveSection] = useState<ActiveSection>(initialViewState.activeSection);
   const [talkTab, setTalkTab] = useState<TalkTab>(initialViewState.talkTab);
-  const [talkView, setTalkView] = useState<TalkView>(initialViewState.talkView);
+  const [talkView, setTalkView] = useState<TalkView>(() => loadTalkViewPreference());
   const [toolsTab, setToolsTab] = useState<ToolsTab>(initialViewState.toolsTab);
   const [mindTab, setMindTab] = useState<MindTab>(initialViewState.mindTab);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
@@ -91,6 +88,10 @@ export function App() {
   const bootstrapFetchSeqRef = useRef(0);
 
   // Initialize on app mount
+  useEffect(() => {
+    persistTalkViewPreference(talkView);
+  }, [talkView]);
+
   useEffect(() => {
     backendHealth.start();
     void apiClient
@@ -203,7 +204,7 @@ export function App() {
     setTalkView('conversation');
     setActiveSection('talk');
   };
-  const openSessionInConversation = (sessionId: string) => {
+  const openSessionInConversation = (sessionId: string, forceChat = false) => {
     void activateConversationSession({
       sessionId,
       sessions,
@@ -211,51 +212,9 @@ export function App() {
       reason: 'app-open',
     });
     setTalkTab('conversations');
-    setTalkView('conversation');
+    if (forceChat) setTalkView('conversation');
     setActiveSection('talk');
   };
-  const talkViewSwitcher = (
-    <div className="flex gap-1" data-testid="talk-sidebar-view-switcher" aria-label="Talk view mode">
-      {TALK_VIEW_OPTIONS.map((view) => (
-        <button
-          key={view.id}
-          type="button"
-          data-testid={`talk-sidebar-${view.id}-entry`}
-          className={`btn btn-ghost btn-xs h-7 min-h-0 w-7 p-0 rounded-md ${
-            talkView === view.id
-              ? 'bg-sky-500/15 text-sky-300'
-              : 'text-base-content/45 hover:text-base-content/80'
-          }`}
-          onClick={() => setTalkView(view.id)}
-          aria-label={view.label}
-          title={view.label}
-        >
-          {view.icon}
-        </button>
-      ))}
-    </div>
-  );
-  const collapsedTalkViewSwitcher = (
-    <div className="flex flex-col gap-1" data-testid="talk-sidebar-view-switcher" aria-label="Talk view mode">
-      {TALK_VIEW_OPTIONS.map((view) => (
-        <button
-          key={view.id}
-          type="button"
-          data-testid={`talk-sidebar-${view.id}-entry`}
-          className={`btn btn-ghost btn-xs h-8 min-h-0 w-8 p-0 rounded-md ${
-            talkView === view.id
-              ? 'bg-sky-500/15 text-sky-300'
-              : 'text-base-content/45 hover:text-base-content/80'
-          }`}
-          onClick={() => setTalkView(view.id)}
-          aria-label={view.label}
-          title={view.label}
-        >
-          {view.icon}
-        </button>
-      ))}
-    </div>
-  );
   return (
     <div data-testid="app-root" className="flex h-screen w-screen overflow-hidden bg-base-100">
       <div
@@ -298,7 +257,6 @@ export function App() {
                   >
                     <PanelLeftOpen size={15} />
                   </button>
-                  {collapsedTalkViewSwitcher}
                 </div>
               </div>
             ) : (
@@ -350,14 +308,13 @@ export function App() {
               <div className="flex-1 overflow-hidden">
                 {talkTab === 'conversations' && (
                   <ConversationPanel
-                    onSelect={() => setTalkView('conversation')}
-                    viewSwitcher={talkViewSwitcher}
+                    onSelect={() => undefined}
                   />
                 )}
                 {talkTab === 'agents' && (
                   <ConversationManagerPanel
                     onNavigate={() => setTalkTab('conversations')}
-                    onOpenSession={openSessionInConversation}
+                     onOpenSession={(sessionId) => openSessionInConversation(sessionId)}
                   />
                 )}
               </div>
@@ -367,9 +324,9 @@ export function App() {
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-hidden min-h-0">
                   <div className={talkView === 'conversation' ? 'h-full' : 'hidden'}>
-                    <ChatInterface />
+                    <ChatInterface talkView={talkView} onTalkViewChange={setTalkView} />
                   </div>
-                  {talkView === 'graph' && <ExecutionGraphView onOpenSessionInConversation={openSessionInConversation} />}
+                  {talkView === 'graph' && <ExecutionGraphView onOpenSessionInConversation={(sessionId) => openSessionInConversation(sessionId, true)} talkView={talkView} onTalkViewChange={setTalkView} />}
                 </div>
               </div>
 

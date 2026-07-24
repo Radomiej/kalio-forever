@@ -176,6 +176,13 @@
       "when": 1783948909409,
       "tag": "0024_primary-schema-backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1783949000000,
+      "tag": "0025_projects",
+      "breakpoints": true
     }
   ]
 }

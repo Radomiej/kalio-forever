@@ -1,8 +1,9 @@
 import { Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { Persona } from '@kalio/types';
+import type { Persona, Project } from '@kalio/types';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import { PersonaCombobox } from './PersonaCombobox';
+import { ProjectPicker } from '../../projects/ProjectPicker';
 
 const WELCOME_PROMPTS = [
   'What can you do?',
@@ -20,9 +21,11 @@ export interface NewChatScreenProps {
   onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
+  onProjectChange?: (project: Project) => void;
   onRunPrompt: (content: string) => void;
   personas: Persona[];
   projectPath: string;
+  projectId?: string;
   selectedPersonaId: string;
   selectedArchitectureId: string;
   testIdPrefix: string;
@@ -59,9 +62,11 @@ export function NewChatScreen({
   onDraftChange,
   onPersonaChange,
   onProjectPathChange,
+  onProjectChange,
   onRunPrompt,
   personas,
   projectPath,
+  projectId = 'system:none',
   selectedPersonaId,
   selectedArchitectureId,
   testIdPrefix,
@@ -219,18 +224,32 @@ export function NewChatScreen({
           </div>
 
           <div>
-            <label htmlFor={`${testIdPrefix}-project-path-input`} className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
-              Project folder
-            </label>
-            <input
-              id={`${testIdPrefix}-project-path-input`}
-              aria-label="Project path"
-              className="input input-bordered input-sm w-full text-sm"
-              value={projectPath}
-              onChange={(event) => onProjectPathChange(event.target.value)}
-              disabled={isBusy}
-              data-testid={`${testIdPrefix}-project-path-input`}
-            />
+            {onProjectChange ? (
+              <ProjectPicker
+                value={projectId}
+                onChange={(project) => {
+                  onProjectChange(project);
+                  onProjectPathChange(project.path ?? '');
+                }}
+                disabled={isBusy}
+                testId={`${testIdPrefix}-project-picker`}
+              />
+            ) : (
+              <>
+                <label htmlFor={`${testIdPrefix}-project-path-input`} className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
+                  Project folder
+                </label>
+                <input
+                  id={`${testIdPrefix}-project-path-input`}
+                  aria-label="Project path"
+                  className="input input-bordered input-sm w-full text-sm"
+                  value={projectPath}
+                  onChange={(event) => onProjectPathChange(event.target.value)}
+                  disabled={isBusy}
+                  data-testid={`${testIdPrefix}-project-path-input`}
+                />
+              </>
+            )}
           </div>
         </div>
 

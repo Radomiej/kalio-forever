@@ -61,6 +61,7 @@ const {
   sessionState,
   agentState,
   apiGetMock,
+  getProjectsMock,
   getSessionVfsFilesMock,
   apiPostMock,
   apiPatchMock,
@@ -120,6 +121,7 @@ const {
       Object.values(agentState.activeAgentLoops).some((loop) => loop.sessionId === sessionId),
   },
   apiGetMock: vi.fn(),
+  getProjectsMock: vi.fn(),
   getSessionVfsFilesMock: vi.fn().mockResolvedValue({ files: [] }),
   apiPostMock: vi.fn(),
   apiPatchMock: vi.fn(),
@@ -150,6 +152,7 @@ vi.mock('../../../services/apiClient', () => ({
     patch: apiPatchMock,
   },
   getSessionVfsFiles: getSessionVfsFilesMock,
+  getProjects: getProjectsMock,
 }));
 
 vi.mock('../../architect/architect.api', async () => {
@@ -191,6 +194,11 @@ async function renderExecutionGraphView(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+function selectGraphProject(): void {
+  fireEvent.click(screen.getByTestId('graph-empty-project-picker-trigger'));
+  fireEvent.click(screen.getByRole('option', { name: /Kalio Forever/ }));
 }
 
 function openGraphControlsMenu(): void {
@@ -266,6 +274,26 @@ describe('ExecutionGraphView empty-session state', () => {
       }
       return Promise.resolve({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
     });
+    getProjectsMock.mockResolvedValue([
+      {
+        id: 'project-1',
+        name: 'Kalio Forever',
+        path: 'C:\\Projekty\\kalio-forever',
+        kind: 'workspace',
+        isSystem: false,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'system:none',
+        name: 'Bez projektu',
+        path: null,
+        kind: 'none',
+        isSystem: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
     apiPostMock.mockReset();
     apiPatchMock.mockReset();
     startArchitectureRunMock.mockReset();
@@ -335,7 +363,7 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(screen.getByTestId('graph-empty-screen')).toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-persona-select')).toBeInTheDocument();
     expect(screen.queryByTestId('graph-empty-architecture-select')).not.toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-project-path-input')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-project-picker-trigger')).toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Chat runtime: RaBuilder');
     expect(screen.queryByTestId('execution-graph-live-sidebar')).not.toBeInTheDocument();
   });
@@ -353,6 +381,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
+      projectId: 'system:none',
       title: 'New Chat',
     }));
     expect(sessionState.addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-graph-session' }));
@@ -386,6 +415,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'persona-child',
+      projectId: 'system:none',
       title: 'New Chat',
     }));
     expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -403,9 +433,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
-      target: { value: 'C:\\Projekty\\kalio-forever' },
-    });
+    selectGraphProject();
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Start scoped graph' },
     });
@@ -413,6 +441,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
+      projectId: 'project-1',
       runtimeContext: {
         runtimeKind: 'chat',
         architectureContext: {
@@ -519,9 +548,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
-      target: { value: 'C:\\Projekty\\kalio-forever' },
-    });
+    selectGraphProject();
     fireEvent.click(screen.getByTestId('graph-empty-mode-workflow'));
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument());
     fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
@@ -536,6 +563,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
+      projectId: 'project-1',
       runtimeContext: {
         runtimeKind: 'chat',
         architectureContext: {
@@ -631,9 +659,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
-      target: { value: 'C:\\Projekty\\kalio-forever' },
-    });
+    selectGraphProject();
     fireEvent.click(screen.getByTestId('graph-empty-mode-workflow'));
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument());
     fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {

@@ -93,6 +93,7 @@ const mockApiGet = vi.fn();
 const mockApiPost = vi.fn();
 const mockApiDelete = vi.fn();
 const mockApiPatch = vi.fn();
+const mockGetProjects = vi.fn();
 
 vi.mock('../../services/apiClient', () => ({
   apiClient: {
@@ -115,6 +116,7 @@ vi.mock('../../services/apiClient', () => ({
     delete: (...args: unknown[]) => mockApiDelete(...args),
     patch: (...args: unknown[]) => mockApiPatch(...args),
   },
+  getProjects: (...args: unknown[]) => mockGetProjects(...args),
 }));
 
 // â”€â”€ agentStore mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -193,7 +195,17 @@ describe('formatRelativeTime', () => {
 describe('SessionPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetProjects.mockResolvedValue([{
+      id: 'system:none',
+      name: 'Bez projektu',
+      path: null,
+      kind: 'none',
+      isSystem: true,
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
     sessionStorage.clear();
+    localStorage.clear();
     const originalConsoleError = console.error;
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       const [firstArg] = args;
@@ -303,6 +315,19 @@ describe('SessionPanel', () => {
     expect(screen.getByText('New Chat')).toBeTruthy();
     expect(screen.getByTestId('session-kind-icon-s1')).toHaveAttribute('aria-label', 'Root chat');
     expect(screen.getByTestId('session-kind-icon-s2')).toHaveAttribute('aria-label', 'Root chat');
+  });
+
+  it('switches between project and history grouping and persists the preference', async () => {
+    const firstRender = render(<SessionPanel />);
+    await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));
+
+    fireEvent.click(screen.getByTestId('talk-grouping-history'));
+    expect(screen.getByTestId('talk-grouping-history')).toHaveAttribute('aria-pressed', 'true');
+    expect(localStorage.getItem('kalio:talk-grouping')).toBe('history');
+
+    firstRender.unmount();
+    render(<SessionPanel />);
+    expect(screen.getByTestId('talk-grouping-history')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows persona badge for non-default persona', async () => {
@@ -2310,6 +2335,7 @@ describe('SessionPanel', () => {
       return Promise.resolve({ data: [] });
     });
 
+    localStorage.setItem('kalio:talk-grouping', 'history');
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(architectureSessions));
 

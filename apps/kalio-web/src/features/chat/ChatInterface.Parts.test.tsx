@@ -549,6 +549,8 @@ describe('ChatSessionHeader', () => {
     );
 
     expect(screen.queryByTestId('conversation-files-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('talk-conversation-switcher')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('talk-graph-switcher')).toBeInTheDocument();
   });
 
   it('shows architecture label from runtimeContext when the active session is an architecture session', () => {

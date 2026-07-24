@@ -20,6 +20,8 @@ import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
+import { ProjectsController } from './projects.controller';
+import { ProjectsService } from './projects.service';
 import { ChatTestSupportAgentBudgetController } from './chat-test-support-agent-budget.controller';
 import { ChatTestSupportController } from './chat-test-support.controller';
 import { ChatTestSupportRaAppController } from './chat-test-support-raapp.controller';
@@ -39,6 +41,7 @@ import { SessionEventsService } from './session-events.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
+import { ActiveSessionRegistry } from './active-session-registry.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -77,6 +80,7 @@ import {
   imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, AllowedPathsModule, HitlModule, RelayModule],
   controllers: [
     SessionsController,
+    ProjectsController,
     ContextController,
     AuditLogController,
     ChatTestSupportController,
@@ -104,7 +108,9 @@ import {
     AgentBudgetApprovalService,
     SessionRuntimeWatchlistService,
     SessionRuntimeStopService,
+    ActiveSessionRegistry,
     SessionsService,
+    ProjectsService,
     ChatTestSupportService,
     RunJournalService,
     RuntimeAuditLogger,
@@ -161,7 +167,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
+  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(

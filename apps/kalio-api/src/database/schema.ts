@@ -14,6 +14,7 @@ import type {
   ChatRunStatus,
   LLMToolCall,
   MCPPolicy,
+  ProjectKind,
   SessionRuntimeContext,
   SubAgentFlowResult,
 } from '@kalio/types';
@@ -35,6 +36,20 @@ export const personas = sqliteTable('personas', {
   updatedAt:    integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+export const projects = sqliteTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  path: text('path'),
+  normalizedPath: text('normalized_path'),
+  kind: text('kind').$type<ProjectKind>().notNull(),
+  isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+}, (table) => ({
+  normalizedPathIdx: uniqueIndex('projects_normalized_path_unique').on(table.normalizedPath),
+  kindIdx: index('projects_kind_idx').on(table.kind),
+}));
+
 // ─── sessions ─────────────────────────────────────────────────────────────────
 export const sessions = sqliteTable('sessions', {
   id:          text('id').primaryKey(),
@@ -44,6 +59,7 @@ export const sessions = sqliteTable('sessions', {
   parentSessionId: text('parent_session_id'),
   parentTurnId: text('parent_turn_id'),
   parentToolCallId: text('parent_tool_call_id'),
+  projectId: text('project_id').notNull().default('system:none').references(() => projects.id),
   runtimeContext: text('runtime_context', { mode: 'json' }).$type<SessionRuntimeContext | null>(),
   archivedAt:  integer('archived_at', { mode: 'timestamp_ms' }),
   createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),

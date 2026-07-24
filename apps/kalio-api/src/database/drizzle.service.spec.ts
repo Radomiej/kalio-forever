@@ -25,6 +25,8 @@ const requiredColumns = [
   ['hitl_requests', 'revision'],
   ['messages', 'turn_id'],
   ['messages', 'prompt_message_id'],
+  ['sessions', 'project_id'],
+  ['projects', 'normalized_path'],
 ] as const;
 const temporaryDirectories: string[] = [];
 
@@ -58,6 +60,7 @@ function createMigrationFixtureAt(index: number): string {
 function migrateDatabase(dbPath: string, folder: string): void {
   const sqlite = new Database(dbPath);
   try {
+    sqlite.pragma('foreign_keys = ON');
     migrate(drizzle(sqlite), { migrationsFolder: folder });
   } finally {
     sqlite.close();
@@ -103,6 +106,42 @@ describe('DrizzleService fail-fast migrations', () => {
       expect(afterUpgrade.prepare('SELECT origin_source FROM mcp_servers WHERE id = ?').get('mcp-1')).toEqual({
         origin_source: 'manual',
       });
+    } finally {
+      afterUpgrade.close();
+    }
+  });
+
+  it('backfills project membership from the root runtime path with foreign keys enabled', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, createMigrationFixtureAt(24));
+
+    const beforeUpgrade = new Database(dbPath);
+    beforeUpgrade.prepare(
+      "INSERT INTO personas (id, name, model, created_at, updated_at) VALUES ('persona-1', 'Test', 'test', 1, 1)",
+    ).run();
+    beforeUpgrade.prepare(
+      "INSERT INTO sessions (id, persona_id, title, kind, runtime_context, created_at, updated_at) VALUES ('root-1', 'persona-1', 'Root', 'chat', ?, 1, 1)",
+    ).run(JSON.stringify({ architectureContext: { projectPath: 'C:\\Work\\Kalio' } }));
+    beforeUpgrade.prepare(
+      "INSERT INTO sessions (id, persona_id, title, kind, parent_session_id, created_at, updated_at) VALUES ('child-1', 'persona-1', 'Child', 'subagent', 'root-1', 2, 2)",
+    ).run();
+    beforeUpgrade.close();
+
+    migrateDatabase(dbPath, migrationsFolder);
+
+    const afterUpgrade = new Database(dbPath, { readonly: true });
+    try {
+      const projects = afterUpgrade.prepare(
+        "SELECT id, normalized_path FROM projects WHERE kind = 'workspace'",
+      ).all() as Array<{ id: string; normalized_path: string }>;
+      expect(projects).toEqual([{ id: 'legacy:c:/work/kalio', normalized_path: 'c:/work/kalio' }]);
+      expect(afterUpgrade.prepare(
+        'SELECT id, project_id FROM sessions ORDER BY id',
+      ).all()).toEqual([
+        { id: 'child-1', project_id: 'legacy:c:/work/kalio' },
+        { id: 'root-1', project_id: 'legacy:c:/work/kalio' },
+      ]);
+      expect(afterUpgrade.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       afterUpgrade.close();
     }

@@ -21,6 +21,8 @@ import {
 interface CreateAndActivateHostSessionParams {
   personaId: string;
   title?: string;
+  projectId?: string;
+  projectPathOverride?: string | null;
   runtimeContext?: ChatSession['runtimeContext'];
   addSession: (session: ChatSession) => void;
   setActiveSession: (sessionId: string | null) => void;
@@ -172,6 +174,8 @@ async function resolveWorkflowSourceFiles(sessionId: string): Promise<VFSFile[]>
 export async function createAndActivateHostSession({
   personaId,
   title = 'New Chat',
+  projectId,
+  projectPathOverride,
   runtimeContext,
   addSession,
   setActiveSession,
@@ -181,6 +185,8 @@ export async function createAndActivateHostSession({
   const response = await apiClient.post<ChatSession>('/api/sessions', {
     personaId,
     title,
+    ...(projectId ? { projectId } : {}),
+    ...(projectPathOverride !== undefined ? { projectPathOverride } : {}),
     ...(runtimeContext ? { runtimeContext } : {}),
   });
   addSession(response.data);

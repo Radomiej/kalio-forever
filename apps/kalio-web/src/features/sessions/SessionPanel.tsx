@@ -35,6 +35,9 @@ import {
 import { loadConversationSessions } from '../../services/sessionBootstrap';
 import { mergeSessionsPreservingLocal } from './mergeSessionsPreservingLocal';
 import { startPendingSessionFromPanel } from './sessionPanelCreateSession';
+import { ProjectHistorySwitcher } from './ProjectHistorySwitcher';
+import { ProjectSessionGroups } from './ProjectSessionGroups';
+import { useProjectSessionGrouping } from './useProjectSessionGrouping';
 
 function hasTypedArchitectureRunDescendant(
   sessionId: string,
@@ -59,7 +62,7 @@ function hasTypedArchitectureRunDescendant(
   return false;
 }
 
-export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void; viewSwitcher?: ReactNode } = {}) {
+export function SessionPanel({ onSelect }: { onSelect?: () => void } = {}) {
   const {
     sessions,
     activeSessionId,
@@ -285,6 +288,16 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     const p = personas.find((p) => p.id === personaId);
     return p?.name ?? (personaId === 'default' ? null : personaId);
   };
+
+  const {
+    groupingMode,
+    setGroupingMode,
+    projectGroups,
+  } = useProjectSessionGrouping({
+    sessions: sidebarSessions,
+    activeSessionId,
+    originFilter,
+  });
 
   useEffect(() => {
     const shouldAutoExpandActiveHost = (
@@ -566,6 +579,23 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
     onToggleRootExpansion: toggleRootExpansion,
   };
 
+  const renderSessionList = (entries: typeof sessionListEntries, emptyState?: ReactNode) => (
+    <SessionPanelList
+      activeSessionId={activeSessionId}
+      childSessionsByParent={childSessionsByParent}
+      descendantCountByParent={descendantCountByParent}
+      emptyState={emptyState ?? null}
+      expandedRoots={expandedRoots}
+      getPersonaName={getPersonaName}
+      itemProps={itemProps}
+      loading={loading}
+      originFilter={originFilter}
+      sessionById={sessionById}
+      sessionListEntries={entries}
+      visibleSessionsCount={entries.length}
+    />
+  );
+
   return (
     <div data-testid="session-panel" className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -573,9 +603,9 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
         <span className="rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1 text-[10px] font-medium text-sky-300">
           {visibleSessions.length} chat{visibleSessions.length !== 1 ? 's' : ''}
         </span>
-        <div className="ml-auto flex items-center gap-1">
-          {viewSwitcher}
-        </div>
+         <div className="ml-auto flex items-center gap-1">
+           <ProjectHistorySwitcher value={groupingMode} onChange={setGroupingMode} />
+         </div>
         {originFilter !== 'agent' && originFilter !== 'archived' && (
           <button
             className="btn btn-success btn-xs gap-1 px-2.5 min-h-0 h-6 font-medium"
@@ -628,24 +658,17 @@ export function SessionPanel({ onSelect, viewSwitcher }: { onSelect?: () => void
           </div>
         )}
       </div>
-      <SessionPanelList
-        activeSessionId={activeSessionId}
-        childSessionsByParent={childSessionsByParent}
-        descendantCountByParent={descendantCountByParent}
-        emptyState={(
-          <div className="text-xs text-base-content/40 text-center py-6">
-            {originFilter === 'archived' ? 'No archived agent runs' : 'No conversations yet'}
-          </div>
-        )}
-        expandedRoots={expandedRoots}
-        getPersonaName={getPersonaName}
-        itemProps={itemProps}
-        loading={loading}
-        originFilter={originFilter}
-        sessionById={sessionById}
-        sessionListEntries={sessionListEntries}
-        visibleSessionsCount={visibleSessions.length}
-      />
+      {groupingMode === 'project' ? (
+        <div className="flex-1 overflow-y-auto">
+          <ProjectSessionGroups groups={projectGroups}>
+            {(entries) => renderSessionList(entries)}
+          </ProjectSessionGroups>
+        </div>
+      ) : renderSessionList(sessionListEntries, (
+        <div className="text-xs text-base-content/40 text-center py-6">
+          {originFilter === 'archived' ? 'No archived agent runs' : 'No conversations yet'}
+        </div>
+      ))}
     </div>
   );
 }

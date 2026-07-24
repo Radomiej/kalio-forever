@@ -376,6 +376,32 @@ export interface ChatMessage {
 
 export type ChatSessionKind = 'chat' | 'subagent' | 'cli-agent' | 'agent-flow';
 
+export type ProjectKind = 'workspace' | 'none' | 'external' | 'audit' | 'other';
+
+export interface Project {
+  id: ID;
+  name: string;
+  path: string | null;
+  kind: ProjectKind;
+  isSystem: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CreateProjectDto {
+  name: string;
+  path: string;
+}
+
+export interface UpdateProjectDto {
+  name: string;
+}
+
+export interface AssignSessionProjectDto {
+  projectId: ID;
+  pathOverride?: string | null;
+}
+
 export interface ChatSession {
   id: ID;
   personaId: ID;
@@ -384,6 +410,7 @@ export interface ChatSession {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  projectId?: ID;
   runtimeContext?: SessionRuntimeContext;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -396,6 +423,8 @@ export interface CreateSessionDto {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  projectId?: ID;
+  projectPathOverride?: string;
   runtimeContext?: SessionRuntimeContext;
 }
 

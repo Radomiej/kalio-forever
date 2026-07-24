@@ -25,9 +25,11 @@ export interface ExecutionGraphLaunchState {
   isBusy: boolean;
   personas: Persona[];
   projectPath: string;
+  projectId: string;
   selectedPersonaId: string;
   selectedArchitectureId: string;
   setProjectPath: Dispatch<SetStateAction<string>>;
+  setProjectId: Dispatch<SetStateAction<string>>;
   setSelectedPersonaId: Dispatch<SetStateAction<string>>;
   setSelectedArchitectureId: Dispatch<SetStateAction<string>>;
   sendEmptyGraphPrompt: (content: string) => void;
@@ -59,9 +61,13 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
   const [projectPath, setProjectPath] = useState('');
+  const [projectId, setProjectId] = useState('system:none');
   const [emptyPromptError, setEmptyPromptError] = useState<string | null>(null);
   const [creatingGraphSession, setCreatingGraphSession] = useState(false);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  useEffect(() => {
+    setProjectId(activeSession?.projectId ?? 'system:none');
+  }, [activeSession?.projectId, activeSessionId]);
   const {
     personas,
     selectedPersonaId,
@@ -119,6 +125,7 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     try {
       return await createAndActivateEmptyHostSession({
         personaId,
+        projectId,
         runtimeContext: buildSessionLaunchRuntimeContext(undefined, projectPath) ?? undefined,
         addSession,
         setActiveSession,
@@ -222,9 +229,11 @@ export function useExecutionGraphLaunch(): ExecutionGraphLaunchState {
     isBusy: isStreamingForActiveSession || creatingGraphSession,
     personas,
     projectPath,
+    projectId,
     selectedPersonaId,
     selectedArchitectureId,
     setProjectPath,
+    setProjectId,
     setSelectedPersonaId,
     setSelectedArchitectureId,
     sendEmptyGraphPrompt,

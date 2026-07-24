@@ -5,6 +5,7 @@ import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { PerKeyMutex } from './per-key-mutex';
 import { RunJournalService } from './run-journal.service';
+import { ActiveSessionRegistry } from './active-session-registry.service';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -66,7 +67,18 @@ export class SessionPipelineService {
   constructor(
     private readonly chat: ChatService,
     @Optional() private readonly runJournal?: RunJournalService,
+    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
   ) {}
+
+  private setActive(sessionId: string, slot: ActiveSlot): void {
+    this.active.set(sessionId, slot);
+    this.activeSessionRegistry?.markActive(sessionId);
+  }
+
+  private deleteActive(sessionId: string): void {
+    this.active.delete(sessionId);
+    this.activeSessionRegistry?.markInactive(sessionId);
+  }
 
   private createActiveSlot(turnId: string, options?: { seeded?: boolean }): ActiveSlot {
     let resolveDone!: () => void;
@@ -170,7 +182,7 @@ export class SessionPipelineService {
       // Idle session: claim the active slot before releasing the lock so
       // any concurrent submit will see us as active.
       const turnId = nanoid();
-      this.active.set(sid, this.createActiveSlot(turnId));
+      this.setActive(sid, this.createActiveSlot(turnId));
       return { kind: 'dispatch', turnId };
     });
 
@@ -188,7 +200,7 @@ export class SessionPipelineService {
       // Re-claim the slot atomically before dispatching the interrupting
       // payload (the prior turn just released it).
       await this.mutex.runExclusive(sid, async () => {
-        this.active.set(sid, this.createActiveSlot(decision.turnId));
+        this.setActive(sid, this.createActiveSlot(decision.turnId));
       });
     }
 
@@ -214,7 +226,7 @@ export class SessionPipelineService {
       }));
       const head = items.shift()!;
       if (items.length > 0) this.queues.set(sessionId, items);
-      this.active.set(sessionId, this.createActiveSlot(head.turnId));
+      this.setActive(sessionId, this.createActiveSlot(head.turnId));
       return head;
     });
 
@@ -222,7 +234,7 @@ export class SessionPipelineService {
     const dispatch = await this.toDispatchItem(sessionId, first);
     if (!dispatch) {
       await this.mutex.runExclusive(sessionId, async () => {
-        this.active.delete(sessionId);
+        this.deleteActive(sessionId);
       });
       return;
     }
@@ -247,7 +259,7 @@ export class SessionPipelineService {
     void this.mutex.runExclusive(sessionId, async () => {
       if (this.active.has(sessionId)) {
         this.chat.abort(sessionId);
-        this.active.delete(sessionId);
+        this.deleteActive(sessionId);
       }
       // Drop queued items too — user explicitly stopped this session
       await this.dropQueuedItems(sessionId);
@@ -281,7 +293,7 @@ export class SessionPipelineService {
     }
 
     await this.mutex.runExclusive(sessionId, async () => {
-      this.active.delete(sessionId);
+      this.deleteActive(sessionId);
       await this.dropQueuedItems(sessionId);
     });
   }
@@ -311,11 +323,11 @@ export class SessionPipelineService {
   }
 
   seedActiveTurn(sessionId: string, turnId: string): void {
-    this.active.set(sessionId, this.createActiveSlot(turnId, { seeded: true }));
+    this.setActive(sessionId, this.createActiveSlot(turnId, { seeded: true }));
   }
 
   clearSeededActiveTurn(sessionId: string): void {
-    this.active.delete(sessionId);
+    this.deleteActive(sessionId);
     this.queues.delete(sessionId);
   }
 
@@ -378,11 +390,11 @@ export class SessionPipelineService {
             continue;
           }
           // Keep `active` set so concurrent submits enqueue rather than dispatch.
-          this.active.set(sid, this.createActiveSlot(dispatch.turnId));
+          this.setActive(sid, this.createActiveSlot(dispatch.turnId));
           return dispatch;
         }
         this.queues.delete(sid);
-        this.active.delete(sid);
+        this.deleteActive(sid);
         return null;
       });
     }

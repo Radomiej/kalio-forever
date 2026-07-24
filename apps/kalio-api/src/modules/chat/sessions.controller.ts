@@ -5,6 +5,7 @@ import type {
   ChatSession,
   ContextPreviewRequest,
   CreateSessionDto,
+  AssignSessionProjectDto,
   LLMContextPreview,
   RuntimeWatchTarget,
   SessionRuntimeContext,
@@ -148,6 +149,11 @@ export class SessionsController {
       ...body,
       runtimeContext: sanitizePublicRuntimeContext(body.runtimeContext),
     });
+  }
+
+  @Patch(':id/project')
+  async assignProject(@Param('id') id: string, @Body() body: AssignSessionProjectDto): Promise<ChatSession> {
+    return this.sessions.assignProject(id, body);
   }
 
   @Post(':id/generate-title')

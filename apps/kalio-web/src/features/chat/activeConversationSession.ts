@@ -48,6 +48,8 @@ interface ActivateConversationSessionParams {
 interface CreateAndActivateEmptyHostSessionParams {
   personaId: string;
   title?: string;
+  projectId?: string;
+  projectPathOverride?: string | null;
   runtimeContext?: ChatSession['runtimeContext'];
   addSession: (session: ChatSession) => void;
   setActiveSession: (sessionId: string | null) => void;
@@ -146,6 +148,8 @@ export async function activateConversationSession({
 export async function createAndActivateEmptyHostSession({
   personaId,
   title,
+  projectId,
+  projectPathOverride,
   runtimeContext,
   addSession,
   setActiveSession,
@@ -166,6 +170,8 @@ export async function createAndActivateEmptyHostSession({
   const session = await createAndActivateHostSession({
     personaId,
     ...(title ? { title } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(projectPathOverride !== undefined ? { projectPathOverride } : {}),
     ...(runtimeContext ? { runtimeContext } : {}),
     addSession,
     setActiveSession: canActivate ? activateIfOwned : setActiveSession,

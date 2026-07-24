@@ -35,6 +35,7 @@ function makeService() {
     archive: vi.fn().mockResolvedValue(undefined),
     restore: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue(undefined),
+    assignProject: vi.fn().mockResolvedValue({ id: 'sess-1', projectId: 'project-1' }),
     generateTitle: vi.fn().mockResolvedValue({ title: 'Generated Title' }),
   };
 }
@@ -343,6 +344,15 @@ describe('SessionsController', () => {
           },
         },
       });
+    });
+  });
+
+  describe('assignProject()', () => {
+    it('delegates project assignment to the session service', async () => {
+      const result = await controller.assignProject('sess-1', { projectId: 'project-1' });
+
+      expect(svc.assignProject).toHaveBeenCalledWith('sess-1', { projectId: 'project-1' });
+      expect(result).toEqual({ id: 'sess-1', projectId: 'project-1' });
     });
   });
 

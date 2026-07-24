@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import type { Project } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
+import { assignSessionProject } from '../../../services/apiClient';
 import { useSessionStore } from '../../../store/sessionStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { hydrateActiveConversationSession } from '../activeConversationSession';
@@ -16,6 +18,7 @@ import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './exe
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 import { useExecutionGraphLaunch } from './useExecutionGraphLaunch';
+import type { TalkView } from '../../../App.types';
 import {
   mergeRuntimeChildExecutions,
   useArchitectureRootGraph,
@@ -34,9 +37,11 @@ const DEFAULT_INSPECTOR_WIDTH = 280;
 
 interface ExecutionGraphViewProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
+  talkView?: TalkView;
+  onTalkViewChange?: (view: TalkView) => void;
 }
 
-export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGraphViewProps = {}) {
+export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'graph', onTalkViewChange = () => undefined }: ExecutionGraphViewProps = {}) {
   const {
     activeSessionId,
     messages,
@@ -51,6 +56,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     setMessages,
     setAgentTurns,
     setPendingMessage,
+    updateSession,
   } = useSessionStore();
   const {
     toolActivities,
@@ -65,9 +71,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     isBusy,
     personas,
     projectPath,
+    projectId,
     selectedPersonaId,
     selectedArchitectureId,
     setProjectPath,
+    setProjectId,
     setSelectedPersonaId,
     setSelectedArchitectureId,
     sendEmptyGraphPrompt,
@@ -107,6 +115,23 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       .finally(() => {
         hydrationInFlightRef.current.delete(sessionId);
       });
+  };
+
+  const handleProjectChange = async (project: Project) => {
+    setProjectId(project.id);
+    setProjectPath(project.path ?? '');
+    if (!activeSessionId || !activeSession || activeSession.projectId === project.id) {
+      return;
+    }
+    try {
+      const response = await assignSessionProject(activeSessionId, {
+        projectId: project.id,
+        pathOverride: project.path,
+      });
+      updateSession(response.id, response);
+    } catch (error: unknown) {
+      console.error('[ExecutionGraphView] project assignment failed', error instanceof Error ? error : new Error(String(error)));
+    }
   };
 
   useEffect(() => {
@@ -364,6 +389,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       sessionTitleById={sessionTitleById}
       showFocusToggle={focusedGraph.architectureRunCount > 1}
       zoom={zoom}
+      talkView={talkView}
+      onTalkViewChange={onTalkViewChange}
+      projectId={activeSession ? projectId : undefined}
+      onProjectChange={activeSession ? handleProjectChange : undefined}
+      projectPickerDisabled={isBusy}
     />
   );
 
@@ -382,9 +412,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
             onDraftChange={() => undefined}
             onPersonaChange={setSelectedPersonaId}
             onProjectPathChange={setProjectPath}
+            onProjectChange={(project) => void handleProjectChange(project)}
             onRunPrompt={sendEmptyGraphPrompt}
             personas={personas}
             projectPath={projectPath}
+            projectId={projectId}
             screenKey="graph-empty-root"
             selectedPersonaId={selectedPersonaId}
             selectedArchitectureId={selectedArchitectureId}
@@ -476,9 +508,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
             onDraftChange={() => undefined}
             onPersonaChange={setSelectedPersonaId}
             onProjectPathChange={setProjectPath}
+            onProjectChange={(project) => void handleProjectChange(project)}
             onRunPrompt={sendEmptyGraphPrompt}
             personas={personas}
             projectPath={projectPath}
+            projectId={projectId}
             screenKey={activeSession?.id ?? 'graph-empty-session'}
             selectedPersonaId={selectedPersonaId}
             selectedArchitectureId={selectedArchitectureId}
