@@ -19,4 +19,5 @@ C:\Users\Radomiej\.codex\skills\<skill-name>\SKILL.md
 - `kalio-architecture-runtime-guard`
 - `kalio-browser-mcp-qa`
 - `kalio-manual-qa`
+- `kalio-readme-maintainer`
 - `serena-kalio-code-navigation`
