@@ -4,7 +4,6 @@
 
 **Local-first runtime for designing, running, and inspecting agent workflows.**
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![CI](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -339,7 +338,8 @@ files past the repository's 500 LOC limit; split a touched slice first.
 - Auth/JWT sessions, a PostgreSQL migration path, remote VFS offload, and
   multi-user workspaces.
 
-## License and Code of Conduct
+## Community and licensing
 
-Kalio is released under the [MIT License](./LICENSE). Contributions also
+This checkout does not currently contain a tracked `LICENSE` file. Add the
+project's chosen license before redistributing the repository. Contributions
 follow the [Contributor Covenant 2.1](./CODE_OF_CONDUCT.md).
