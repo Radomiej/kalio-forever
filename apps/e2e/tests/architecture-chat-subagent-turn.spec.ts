@@ -1,10 +1,13 @@
+import { existsSync, statSync } from 'node:fs';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import {
   API_BASE,
   deleteSessionIfExists,
+  ensureProjectForPath,
   getJsonWithTransportRetry,
   isRetryableApiTransportError,
   selectArchitectureInComposer,
+  selectProjectInWelcome,
   selectSession,
   selectSessionOriginFilter,
   sendMessageFromComposer,
@@ -21,6 +24,19 @@ type ArchitectureSessionListItem = {
     };
   };
 };
+
+const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+
+function requireProjectPath(): string {
+  const projectPath = PROCESS_ENV?.KALIO_E2E_PROJECT_PATH?.trim();
+  if (!projectPath) {
+    throw new Error('KALIO_E2E_PROJECT_PATH must point to an existing project directory.');
+  }
+  if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) {
+    throw new Error(`KALIO_E2E_PROJECT_PATH is not an existing project directory: ${projectPath}`);
+  }
+  return projectPath;
+}
 
 type ArchitectureGraphResponse = {
   status?: string;
@@ -640,7 +656,7 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('canvas-subagents-section')).toHaveCount(0);
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.locator('[data-testid^="graph-node-architecture-run:"]').first()).toBeVisible({ timeout: 10_000 });
       await expect.poll(
@@ -662,7 +678,7 @@ test.describe('Architecture chat turn projection', () => {
           .toBe(branchSessionId);
         await expect(page.getByTestId('message-list')).toContainText(label);
         await selectSession(page, session.id, title);
-        await page.getByTestId('talk-sidebar-graph-entry').click();
+        await page.getByTestId('talk-graph-switcher').click();
         await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       }
     } finally {
@@ -718,18 +734,19 @@ test.describe('Architecture chat turn projection', () => {
 
   test('launches Architecture Debate from the welcome screen with projectPath and keeps child transcripts repo-scoped after reload', async ({ page, request }) => {
     test.setTimeout(420_000);
-    const projectPath = 'C:\\Projekty\\kalio-forever';
+    const projectPath = requireProjectPath();
     let sessionId: string | null = null;
     let title = '';
 
     try {
+      await ensureProjectForPath(request, projectPath);
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
-      await page.getByTestId('welcome-project-path-input').fill(projectPath);
+      await selectProjectInWelcome(page, projectPath);
       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
       await page.getByTestId('welcome-run-prompt').click();
 
@@ -746,7 +763,7 @@ test.describe('Architecture chat turn projection', () => {
       expect(title.length).toBeGreaterThan(0);
 
       const rootSession = await getSession(request, sessionId);
-      expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath);
+      expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath.replaceAll('\\', '/'));
 
       const currentWorkflowSessions = await getSessionDescendants(request, sessionId);
       const architectureRunId = currentWorkflowSessions

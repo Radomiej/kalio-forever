@@ -20,10 +20,18 @@ type ArchitectureBranchSessionContextArgs = ArchitectureSessionContextArgs & {
   slot: ArchitectureRoleSlot;
 };
 
+const SYNTHETIC_ARCHITECTURE_SESSION_IDS = new Set(['architect-ui']);
+
 export function getArchitectureParentSessionId(
   context: Record<string, unknown> | undefined,
 ): string | undefined {
   return stringField(context, 'parentSessionId');
+}
+
+export function getPersistedArchitectureParentSessionId(
+  context: Record<string, unknown> | undefined,
+): string | undefined {
+  return persistedSessionId(getArchitectureParentSessionId(context));
 }
 
 export function getArchitectureParentToolCallId(
@@ -44,12 +52,24 @@ export function getArchitectureHostSessionId(
   return stringField(context, 'hostSessionId') ?? getArchitectureParentSessionId(context);
 }
 
+export function getPersistedArchitectureHostSessionId(
+  context: Record<string, unknown> | undefined,
+): string | undefined {
+  return persistedSessionId(getArchitectureHostSessionId(context));
+}
+
 export function getArchitectureHistorySessionId(
   context: Record<string, unknown> | undefined,
 ): string | undefined {
   return stringField(context, 'historySessionId')
     ?? getArchitectureHostSessionId(context)
     ?? getArchitectureParentSessionId(context);
+}
+
+export function getPersistedArchitectureHistorySessionId(
+  context: Record<string, unknown> | undefined,
+): string | undefined {
+  return persistedSessionId(getArchitectureHistorySessionId(context));
 }
 
 export function createArchitectureRootSessionRuntimeContext(
@@ -108,4 +128,9 @@ function stringField(
 ): string | undefined {
   const value = context?.[key];
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function persistedSessionId(sessionId: string | undefined): string | undefined {
+  // TODO: legacy fallback: Architect UI uses this non-persisted surface id.
+  return sessionId && !SYNTHETIC_ARCHITECTURE_SESSION_IDS.has(sessionId) ? sessionId : undefined;
 }

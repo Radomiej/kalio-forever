@@ -3,7 +3,9 @@ import { expect, test, type APIRequestContext, type Browser } from '@playwright/
 import {
   API_BASE,
   deleteSessionIfExists,
+  ensureProjectForPath,
   selectArchitectureInComposer,
+  selectProjectInWelcome,
   selectSession,
   selectSessionOriginFilter,
 } from './helpers/test-config';
@@ -110,13 +112,14 @@ test.describe('Architecture workflow replay across a new UI session', () => {
     let hostTitle = '';
 
     try {
+      await ensureProjectForPath(request, projectPath);
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
-      await page.getByTestId('welcome-project-path-input').fill(projectPath);
+      await selectProjectInWelcome(page, projectPath);
       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
       await page.getByTestId('welcome-run-prompt').click();
       await expect
@@ -151,7 +154,7 @@ test.describe('Architecture workflow replay across a new UI session', () => {
       expect(sessionsResponse.ok()).toBeTruthy();
       const persistedSessions = await sessionsResponse.json() as SessionListItem[];
       const hostSession = persistedSessions.find((candidate) => candidate.id === hostSessionId);
-      expect(hostSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath);
+      expect(hostSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath.replaceAll('\\', '/'));
 
       const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
       const workflowSessions = persistedSessions.filter((candidate) => isWorkflowDescendant(sessionById, hostSessionId!, candidate));

@@ -34,7 +34,10 @@ jobs:
         run: pnpm --filter @kalio/types --filter @kalio/sdk build
 
       - name: Run workspace tests
-        run: pnpm turbo run test
+        run: pnpm turbo run test --filter=!@kalio/e2e
+
+      - name: Run Playwright launcher tests
+        run: pnpm --filter @kalio/e2e test
 
   backend:
     runs-on: ubuntu-latest
@@ -121,6 +124,7 @@ jobs:
       CI: 'true'
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
+      KALIO_E2E_PROJECT_PATH: ${{ github.workspace }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

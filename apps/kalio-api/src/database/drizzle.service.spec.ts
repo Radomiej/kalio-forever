@@ -79,6 +79,19 @@ function expectRequiredColumns(dbPath: string): void {
   }
 }
 
+function expectSessionProjectDefault(dbPath: string): void {
+  const sqlite = new Database(dbPath, { readonly: true });
+  try {
+    const sessions = sqlite.prepare('PRAGMA table_info(sessions)').all() as Array<{
+      name: string;
+      dflt_value: string | null;
+    }>;
+    expect(sessions.find((column) => column.name === 'project_id')?.dflt_value).toBe("'system:none'");
+  } finally {
+    sqlite.close();
+  }
+}
+
 describe('DrizzleService fail-fast migrations', () => {
   it('creates a fresh database with every schema column from the migration journal', () => {
     const dbPath = createTemporaryDatabasePath();
@@ -86,6 +99,7 @@ describe('DrizzleService fail-fast migrations', () => {
     migrateDatabase(dbPath, migrationsFolder);
 
     expectRequiredColumns(dbPath);
+    expectSessionProjectDefault(dbPath);
   });
 
   it('upgrades a legal database at migration 0016 without relying on runtime repairs', () => {

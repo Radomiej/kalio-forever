@@ -77,6 +77,9 @@ import {
   getArchitectureHistorySessionId,
   getArchitectureHostSessionId,
   getArchitectureParentSessionId,
+  getPersistedArchitectureHistorySessionId,
+  getPersistedArchitectureHostSessionId,
+  getPersistedArchitectureParentSessionId,
   getArchitectureParentToolCallId,
 } from './architecture-session-context';
 import type { ArchitectureRuntimeStopPort } from '../chat/architecture-runtime-stop.port';
@@ -693,13 +696,13 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     dto: CreateArchitectureRunDto,
   ): Promise<Record<string, string>> {
     const isAgentFlowRoot = this.isAgentFlowContext(dto.context);
-    const hostSessionId = getArchitectureHostSessionId(dto.context);
-    const historySessionId = getArchitectureHistorySessionId(dto.context);
+    const hostSessionId = getPersistedArchitectureHostSessionId(dto.context);
+    const historySessionId = getPersistedArchitectureHistorySessionId(dto.context);
     await this.sessions.createWithId(rootSessionId, {
       personaId: 'default',
       title: this.toRunSessionTitle(dto.prompt),
       kind: isAgentFlowRoot ? 'agent-flow' : 'chat',
-      parentSessionId: getArchitectureParentSessionId(dto.context),
+      parentSessionId: getPersistedArchitectureParentSessionId(dto.context),
       parentToolCallId: getArchitectureParentToolCallId(dto.context),
       runtimeContext: createArchitectureRootSessionRuntimeContext({
         runId,

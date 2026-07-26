@@ -14,6 +14,47 @@ function requireEnv(name: 'PLAYWRIGHT_BASE_URL' | 'TEST_API_URL'): string {
 export const APP_BASE = requireEnv('PLAYWRIGHT_BASE_URL');
 export const API_BASE = requireEnv('TEST_API_URL');
 
+type E2EProject = {
+	id: string;
+	path: string | null;
+};
+
+function comparableProjectPath(path: string): string {
+	return path.trim().replace(/[\\/]+$/, '').replaceAll('\\', '/').toLocaleLowerCase();
+}
+
+export async function ensureProjectForPath(
+	request: APIRequestContext,
+	projectPath: string,
+): Promise<E2EProject> {
+	const projectsResponse = await request.get(`${API_BASE}/projects`);
+	expect(projectsResponse.ok()).toBeTruthy();
+	const projects = await projectsResponse.json() as E2EProject[];
+	let project = projects.find((candidate) => (
+		typeof candidate.path === 'string'
+		&& comparableProjectPath(candidate.path) === comparableProjectPath(projectPath)
+	));
+
+	if (!project) {
+		const createResponse = await request.post(`${API_BASE}/projects`, {
+			data: { name: 'E2E Architecture Project', path: projectPath },
+		});
+		expect(createResponse.ok()).toBeTruthy();
+		project = await createResponse.json() as E2EProject;
+	}
+	return project;
+}
+
+export async function selectProjectInWelcome(page: Page, projectPath: string): Promise<void> {
+	await page.getByTestId('welcome-project-picker-trigger').click();
+	const projectOption = page
+		.getByTestId('welcome-project-picker')
+		.getByRole('option')
+		.filter({ hasText: projectPath.replaceAll('\\', '/') });
+	await expect(projectOption).toHaveCount(1);
+	await projectOption.click();
+}
+
 export function isRetryableApiTransportError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
 	return /ECONNRESET|ECONNREFUSED|socket hang up|ERR_CONNECTION_RESET|Timeout \d+ms exceeded/i.test(message);
@@ -100,6 +141,13 @@ export async function selectSession(page: Page, sessionId: string, title: string
 
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		await expectChatTransportReady(page);
+		for (let groupAttempt = 0; groupAttempt < 10; groupAttempt += 1) {
+			const collapsedGroup = page.locator('[data-testid^="project-group-"][aria-expanded="false"]').first();
+			if (!(await collapsedGroup.isVisible().catch(() => false))) {
+				break;
+			}
+			await collapsedGroup.click();
+		}
 
 		const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
 		if (await sessionItem.isVisible().catch(() => false)) {

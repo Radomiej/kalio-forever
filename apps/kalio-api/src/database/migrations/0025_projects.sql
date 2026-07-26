@@ -109,7 +109,7 @@ CREATE TABLE `sessions` (
   `parent_session_id` text,
   `parent_turn_id` text,
   `parent_tool_call_id` text,
-  `project_id` text NOT NULL REFERENCES `projects`(`id`),
+  `project_id` text NOT NULL DEFAULT 'system:none' REFERENCES `projects`(`id`),
   `runtime_context` text,
   `archived_at` integer,
   `created_at` integer NOT NULL,

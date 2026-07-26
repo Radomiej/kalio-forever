@@ -122,14 +122,17 @@ test.describe('LLMPanel E2E', () => {
 
       await row.locator('button').first().click();
       await expect(row.getByText('active')).toBeVisible({ timeout: 5000 });
+      await page.getByTestId('settings-tab-runtime').click();
       await expect(page.getByTestId('model-selector')).toHaveValue('e2e-saved-model-switch-check');
 
+      await page.getByTestId('settings-tab-llm').click();
       const envFallbackRow = page.getByTestId('provider-row-env');
       await expect(envFallbackRow).toBeVisible();
       await page.getByTestId('provider-activate-env').click();
 
       await expect(envFallbackRow).toContainText('active', { timeout: 5000 });
       await expect(row).not.toContainText('active');
+      await page.getByTestId('settings-tab-runtime').click();
       await expect(page.getByTestId('model-selector')).toHaveValue(envModel);
     } finally {
       await restoreActiveCredential(page.request, previousActiveId);
@@ -154,6 +157,7 @@ test.describe('LLMPanel E2E', () => {
 
   test('context window slider updates the badge value', async ({ page }) => {
     await openLLMPanel(page);
+    await page.getByTestId('settings-tab-runtime').click();
     const slider = page.getByTestId('context-window-slider');
     await expect(slider).toBeVisible();
 

@@ -67,7 +67,7 @@ test.describe('AC-16: Memory Hybrid Search', () => {
     await openMemoryPage(page);
     const personaScope = page.locator('[data-testid^="memory-scope-persona-"]').first();
     await personaScope.click();
-    await expect(personaScope).toContainText(/entries/i);
+    await expect(personaScope).toContainText(/stored memory/i);
     await expect(personaScope).toContainText(/KB/i);
     await expect(page.getByTestId('memory-freshness')).toBeVisible();
   });

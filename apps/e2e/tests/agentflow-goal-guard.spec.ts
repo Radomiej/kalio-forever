@@ -409,7 +409,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('agentflow-canvas-section')).toContainText('Goal Guard is waiting for external QA evidence');
       await expect(page.getByTestId('agentflow-canvas-section').getByText('Resume AgentFlow')).toBeVisible();
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
       await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
@@ -417,6 +417,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await page.reload();
       await page.getByTestId('nav-talk').click();
       await selectSession(page, fixture.sessionId, fixture.title);
+      await page.locator('[data-testid="talk-conversation-switcher"]:visible').click();
 
       const reloadedAgentFlowCall = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]');
       await expect(reloadedAgentFlowCall).toBeVisible({ timeout: 10_000 });
@@ -430,7 +431,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('agentflow-canvas-section')).toContainText('waiting_on_orchestrator');
       await expect(page.getByTestId('agentflow-canvas-section').getByText('Resume AgentFlow')).toBeVisible();
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
       await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
@@ -486,7 +487,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('architecture-run-canvas-section')).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText(/Goal Guard|AgentFlow/i);
       await expect(page.getByTestId('execution-graph-view')).not.toContainText('Five Minds');
@@ -540,7 +541,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(parentTimeline).toContainText(/completed|done/i, { timeout: 45_000 });
       await expect(parentTimeline).not.toContainText('waiting_on_orchestrator');
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop / completed', { timeout: 30_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Final response', { timeout: 30_000 });
@@ -550,14 +551,14 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
       await page.getByTestId('nav-talk').click();
       await selectSession(page, sessionId, title);
-      await page.getByTestId('talk-sidebar-conversation-entry').click();
+      await page.getByTestId('execution-graph-view').getByTestId('talk-conversation-switcher').click();
       const timelineAfterReload = page.getByTestId('architecture-run-timeline').last();
       await expect(timelineAfterReload).toBeVisible({ timeout: 20_000 });
       await expect(timelineAfterReload).toContainText(/completed|done/i);
       await expect(timelineAfterReload).not.toContainText('waiting_on_orchestrator');
       await expect(timelineAfterReload).not.toContainText('Five Minds');
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop / completed', { timeout: 20_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Final response', { timeout: 20_000 });
@@ -743,7 +744,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(talkRootLocator).toContainText(GOAL_FLOW_ROOT_LABEL);
     await expect(talkRootLocator).not.toContainText(/Five Minds/i);
     await talkRootLocator.click();
-    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await page.getByTestId('talk-graph-switcher').click();
     await openDetailedExecutionGraph(page);
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard accepted strict Implementer-owned VFS evidence', { timeout: 10_000 });
@@ -955,7 +956,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('architect-graph-status')).not.toContainText('Five Minds');
     const stopButton = page.getByRole('button', { name: /^Stop$/ });
     if (await stopButton.isVisible().catch(() => false)) {
-      await stopButton.click();
+      await stopButton.click({ timeout: 5_000 }).catch((error: unknown) => {
+        console.warn(`AgentFlow stop cleanup skipped: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }
   });
 
@@ -1050,7 +1053,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(talkRootLocator).toContainText(GOAL_FLOW_ROOT_LABEL);
     await expect(talkRootLocator).not.toContainText(/Five Minds/i);
     await talkRootLocator.click();
-    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await page.getByTestId('talk-graph-switcher').click();
     await openDetailedExecutionGraph(page);
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop', { timeout: 10_000 });

@@ -151,7 +151,7 @@ async function expectChildHitlAcrossRuntimeSurfaces(
   await expect(page.getByTestId(`session-pending-confirmation-${childSessionId}`)).toBeVisible({ timeout: 20_000 });
 
   await selectSession(page, parentSessionId, parentTitle);
-  await page.getByTestId('talk-sidebar-conversation-entry').click();
+  await page.locator('[data-testid="talk-conversation-switcher"]:visible').click();
   if (!(await page.getByTestId('canvas-panel').isVisible().catch(() => false))) {
     const canvasToggle = page.getByTestId('canvas-toggle');
     if (await canvasToggle.isVisible().catch(() => false)) {
@@ -164,13 +164,14 @@ async function expectChildHitlAcrossRuntimeSurfaces(
   }
   await expect(page.getByTestId(`canvas-subagent-status-${childSessionId}`)).toHaveAttribute('data-status', 'waiting', { timeout: 20_000 });
 
-  await page.getByTestId('talk-sidebar-graph-entry').click();
+  await page.getByTestId('talk-graph-switcher').click();
   const graphNode = page.getByTestId(`graph-node-subagent:${childSessionId}`);
   await expect(graphNode).toBeVisible({ timeout: 20_000 });
   await expect(graphNode.locator('[aria-label="Status: waiting"]')).toBeVisible({ timeout: 20_000 });
 
   await openChildSession(page, parentSessionId, childSessionId);
-  await expect(page.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
+  await page.locator('[data-testid="talk-conversation-switcher"]:visible').click();
+  await expect(page.locator('[data-testid="confirmation-confirm-btn"]:visible')).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe('Subconversation live HITL', () => {
@@ -197,7 +198,7 @@ test.describe('Subconversation live HITL', () => {
       childSessionId = await findChildSessionId(request, session.id);
       await openChildSession(page, session.id, childSessionId);
 
-      const confirmButton = page.getByTestId('confirmation-confirm-btn');
+      const confirmButton = page.locator('[data-testid="confirmation-confirm-btn"]:visible');
       await expect(confirmButton).toBeVisible({ timeout: 20_000 });
       await expectChildHitlAcrossRuntimeSurfaces(page, session.id, title, childSessionId);
 
@@ -213,7 +214,7 @@ test.describe('Subconversation live HITL', () => {
 
       await expectVfsContent(request, session.id, CHILD_VFS_PATH, CHILD_VFS_CONTENT);
       await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
-      await expect(page.getByTestId('confirmation-confirm-btn')).toHaveCount(0);
+      await expect(page.locator('[data-testid="confirmation-confirm-btn"]:visible')).toHaveCount(0);
     } finally {
       if (childSessionId) {
         await deleteSessionIfExists(request, childSessionId);
