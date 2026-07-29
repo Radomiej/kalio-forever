@@ -74,6 +74,84 @@ describe('RAAppService', () => {
       }
     });
 
+    it('installs an uploaded plugin under meta.id and keeps its renderable content', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-upload-'));
+      const pluginDir = path.join(tempRoot, 'plugin-source');
+      const zipPath = path.join(tempRoot, 'plugin.zip');
+      await fs.mkdir(pluginDir, { recursive: true });
+      await fs.writeFile(
+        path.join(pluginDir, 'meta.yml'),
+        [
+          'id: custom-calculator',
+          'name: Custom Calculator',
+          'version: "1.0.0"',
+          'description: User plugin upload regression fixture',
+        ].join('\n'),
+        'utf8',
+      );
+      await fs.writeFile(
+        path.join(pluginDir, 'main.html'),
+        '<main data-testid="custom-calculator">Custom calculator</main>',
+        'utf8',
+      );
+      await archiveDirectoryToZip({ sourceDir: pluginDir, zipPath });
+
+      try {
+        const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+        await isolatedService.init();
+        const app = await isolatedService.saveUpload(await fs.readFile(zipPath), 'different-file-name.zip');
+
+        expect(app.id).toBe('custom-calculator');
+        expect(app.htmlContent).toContain('Custom calculator');
+        expect(isolatedService.getAll().map((item) => item.id)).toContain('custom-calculator');
+        expect(await fs.readdir(path.join(tempRoot, 'user'))).toEqual(['custom-calculator.zip']);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects an invalid upload and removes the temporary archive', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-invalid-upload-'));
+      const pluginDir = path.join(tempRoot, 'plugin-source');
+      const zipPath = path.join(tempRoot, 'plugin.zip');
+      await fs.mkdir(pluginDir, { recursive: true });
+      await fs.writeFile(path.join(pluginDir, 'meta.yml'), 'id: invalid-plugin\nname: Invalid Plugin\n', 'utf8');
+      await fs.writeFile(path.join(pluginDir, 'README.txt'), 'unsupported root file', 'utf8');
+      await archiveDirectoryToZip({ sourceDir: pluginDir, zipPath });
+
+      try {
+        const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+        await isolatedService.init();
+
+        await expect(isolatedService.saveUpload(await fs.readFile(zipPath), 'invalid.zip')).rejects.toThrow(
+          'ZIP entry is not supported: README.txt',
+        );
+        await expect(fs.readdir(path.join(tempRoot, 'user'))).resolves.toEqual([]);
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('loads versioned user archives from current.zip during application bootstrap', async () => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-versioned-'));
+      const sourceDir = path.join(tempRoot, 'plugin-source');
+      const currentZip = path.join(tempRoot, 'user', 'versioned-plugin', 'current.zip');
+      await fs.mkdir(path.dirname(currentZip), { recursive: true });
+      await fs.mkdir(sourceDir, { recursive: true });
+      await fs.writeFile(path.join(sourceDir, 'meta.yml'), 'id: versioned-plugin\nname: Versioned Plugin\n', 'utf8');
+      await fs.writeFile(path.join(sourceDir, 'main.html'), '<main>Versioned</main>', 'utf8');
+      await archiveDirectoryToZip({ sourceDir, zipPath: currentZip });
+
+      try {
+        const isolatedService = await createService({ RA_APPS_PATH: tempRoot });
+        await isolatedService.onApplicationBootstrap();
+
+        expect(isolatedService.getById('versioned-plugin')?.htmlContent).toContain('Versioned');
+      } finally {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
     it('does not let a partial runtime core directory hide shipped core apps', async () => {
       const originalCwd = process.cwd();
       const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kalio-raapp-partial-core-'));

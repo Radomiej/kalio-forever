@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Delete,
+  HttpException,
   Param,
   NotFoundException,
   ForbiddenException,
@@ -20,6 +21,7 @@ import { RAAppService } from './raapp.service';
 import { RAAppVersioningService, deriveSlug } from './raapp-versioning.service';
 import { RAAppHITLService } from './raapp-hitl.service';
 import type { LoadedRAApp } from './raapp.service';
+import { RAAPP_ZIP_LIMITS, RAAppPackageError } from './raapp-package-validation';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
 
 @Controller('ra-apps')
@@ -128,23 +130,30 @@ export class RAAppController {
   }
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: RAAPP_ZIP_LIMITS.maxCompressedBytes } }))
   async upload(@UploadedFile() file: Express.Multer.File): Promise<RAAppSummary> {
     if (!file) throw new BadRequestException('No file uploaded');
-    if (!file.originalname.endsWith('.zip')) throw new BadRequestException('Only .zip files are accepted');
-    const app = await this.raAppService.saveUpload(file.buffer, file.originalname);
-    return {
-      id: app.id,
-      name: app.meta.name,
-      description: app.meta.description ?? '',
-      version: app.meta.version ?? '1.0',
-      tags: app.meta.tags ?? [],
-      expose_as_tool: app.meta.expose_as_tool ?? false,
-      tool_description: app.meta.tool_description ?? '',
-      source: app.source,
-      createdAt: app.createdAt,
-      updatedAt: app.updatedAt,
-    };
+    if (!/\.zip$/i.test(file.originalname)) throw new BadRequestException('Only .zip files are accepted');
+    try {
+      const app = await this.raAppService.saveUpload(file.buffer, file.originalname);
+      return {
+        id: app.id,
+        name: app.meta.name,
+        description: app.meta.description ?? '',
+        version: app.meta.version ?? '1.0',
+        tags: app.meta.tags ?? [],
+        expose_as_tool: app.meta.expose_as_tool ?? false,
+        tool_description: app.meta.tool_description ?? '',
+        source: app.source,
+        createdAt: app.createdAt,
+        updatedAt: app.updatedAt,
+      };
+    } catch (error) {
+      if (error instanceof RAAppPackageError) {
+        throw new HttpException(error.message, error.statusCode);
+      }
+      throw error;
+    }
   }
 
   @Delete(':id')

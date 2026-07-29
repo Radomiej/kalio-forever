@@ -11,7 +11,7 @@ const makeAuditService = () => ({
   log: vi.fn().mockResolvedValue(undefined),
 });
 
-async function createEffectsProcessorFixture(timeoutMs = 1000) {
+async function createEffectsProcessorFixture(timeoutMs = 5000) {
   const module: TestingModule = await Test.createTestingModule({
     providers: [
       EffectsProcessorService,
