@@ -4,6 +4,7 @@ import { useSessionStore } from './sessionStore';
 
 function resetStore() {
   useSessionStore.setState({
+    sessions: [],
     agentTurns: [],
     sessionAgentTurns: {},
     activeTurnId: null,
@@ -11,7 +12,11 @@ function resetStore() {
     activeSessionId: null,
     messages: [],
     sessionMessages: {},
+    sessionHistoryMeta: {},
     hydratedSessionIds: {},
+    pendingMessage: null,
+    pendingRAAppLaunchIntent: null,
+    pendingUserActions: [],
     streamingChunks: {},
     thinkingChunks: {},
     chunkSessionIds: {},
@@ -385,5 +390,195 @@ describe('REGRESSION: session lifecycle updates can arrive before session creati
       parentSessionId: 'arch-root',
       kind: 'subagent',
     }));
+  });
+});
+
+describe('sessionStore lifecycle, streaming, and queue actions', () => {
+  beforeEach(resetStore);
+
+  it('adds sessions and merges repeated additions by id', () => {
+    const first = { id: 's1', personaId: 'default', title: 'First', createdAt: 1, updatedAt: 1 };
+    useSessionStore.getState().addSession(first);
+    useSessionStore.getState().addSession({ ...first, title: 'Updated', updatedAt: 2 });
+
+    expect(useSessionStore.getState().sessions).toEqual([{ ...first, title: 'Updated', updatedAt: 2 }]);
+  });
+
+  it('creates a session and exposes null-safe history and hydration helpers', () => {
+    const id = useSessionStore.getState().createSession('Created');
+
+    expect(id).toEqual(expect.any(String));
+    expect(useSessionStore.getState().sessions[0]).toMatchObject({ id, title: 'Created' });
+    expect(useSessionStore.getState().getSessionHistoryMeta(null)).toBeNull();
+    expect(useSessionStore.getState().isSessionHydrated(null)).toBe(false);
+
+    useSessionStore.getState().markSessionHydrated(id);
+    useSessionStore.getState().markSessionHydrated(id);
+    expect(useSessionStore.getState().isSessionHydrated(id)).toBe(true);
+  });
+
+  it('sets and removes session history metadata without mutating a missing entry', () => {
+    const meta = { totalCount: 10, hasMoreBefore: true, oldestLoadedMessageId: 'oldest-1' };
+
+    useSessionStore.getState().setSessionHistoryMeta(null, meta);
+    useSessionStore.getState().setSessionHistoryMeta('s1', meta);
+    expect(useSessionStore.getState().getSessionHistoryMeta('s1')).toEqual(meta);
+    useSessionStore.getState().setSessionHistoryMeta('s1', null);
+    expect(useSessionStore.getState().getSessionHistoryMeta('s1')).toBeNull();
+    useSessionStore.getState().setSessionHistoryMeta('s1', null);
+    expect(useSessionStore.getState().sessionHistoryMeta).toEqual({});
+  });
+
+  it('keeps global messages when setMessages has no active target', () => {
+    const message = { id: 'm1', sessionId: 's1', role: 'user' as const, content: 'hello', createdAt: 1 };
+
+    useSessionStore.getState().setMessages([message]);
+
+    expect(useSessionStore.getState().messages).toEqual([message]);
+    expect(useSessionStore.getState().sessionMessages).toEqual({});
+  });
+
+  it('isolates streaming chunks and flushes thinking before text', () => {
+    useSessionStore.setState({ activeSessionId: 's1' });
+    useSessionStore.getState().appendChunk('m1', 'thinking', true, 's1');
+    useSessionStore.getState().appendChunk('m1', 'answer', false, 's1');
+
+    const message = useSessionStore.getState().getSessionMessages('s1')[0];
+    expect(message).toMatchObject({ content: 'answer', thinking: 'thinking', streaming: true });
+    expect(useSessionStore.getState().thinkingChunks).toEqual({});
+    expect(useSessionStore.getState().streamingChunks).toEqual({ m1: 'answer' });
+
+    useSessionStore.getState().finalizeChunk('m1');
+    expect(useSessionStore.getState().getSessionMessages('s1')[0]).toMatchObject({
+      content: 'answer',
+      thinking: 'thinking',
+      streaming: false,
+    });
+    expect(useSessionStore.getState().streamingChunks).toEqual({});
+    expect(useSessionStore.getState().chunkSessionIds).toEqual({});
+  });
+
+  it('handles existing messages, missing targets, and pending chunk cleanup', () => {
+    const message = { id: 'm1', sessionId: 's1', role: 'assistant' as const, content: 'old', createdAt: 1 };
+    useSessionStore.setState({ activeSessionId: 's1', sessionMessages: { s1: [message] } });
+
+    useSessionStore.getState().appendChunk('m1', 'new', false, 's1');
+    expect(useSessionStore.getState().getSessionMessages('s1')[0]).toMatchObject({ content: 'new', streaming: true });
+    useSessionStore.getState().clearPendingChunks('s1');
+    expect(useSessionStore.getState().streamingChunks).toEqual({});
+    useSessionStore.getState().appendChunk('m2', 'discard', false, 's1');
+    useSessionStore.getState().clearPendingChunks('s1');
+    expect(useSessionStore.getState().streamingChunks).toEqual({});
+
+    useSessionStore.setState({ activeSessionId: null });
+    useSessionStore.getState().appendChunk('missing', 'ignored');
+    expect(useSessionStore.getState().chunkSessionIds).toEqual({});
+  });
+
+  it('flushes thinking and text chunks when a tool starts', () => {
+    const message = { id: 'm1', sessionId: 's1', role: 'assistant' as const, content: '', createdAt: 1, streaming: true };
+    useSessionStore.setState({
+      activeSessionId: 's1',
+      sessionMessages: { s1: [message] },
+      messages: [message],
+      thinkingChunks: { m1: 'thought' },
+      streamingChunks: { m1: 'partial' },
+      chunkSessionIds: { m1: 's1' },
+    });
+
+    useSessionStore.getState().flushThinkingChunks('s1');
+    expect(useSessionStore.getState().getSessionMessages('s1')[0]).toMatchObject({ thinking: 'thought' });
+    useSessionStore.getState().flushStreamingChunks('s1');
+    expect(useSessionStore.getState().sessionMessages.s1[0]).toMatchObject({ content: 'partial', streaming: false });
+    expect(useSessionStore.getState().streamingChunks).toEqual({});
+    useSessionStore.getState().flushThinkingChunks(null);
+    useSessionStore.getState().flushStreamingChunks(null);
+  });
+
+  it('supports pending message and FIFO user actions', () => {
+    useSessionStore.getState().setPendingMessage('draft');
+    useSessionStore.getState().enqueueUserAction('first');
+    useSessionStore.getState().enqueueUserAction('second');
+
+    expect(useSessionStore.getState().pendingMessage).toBe('draft');
+    expect(useSessionStore.getState().dequeueUserAction()).toBe('first');
+    expect(useSessionStore.getState().dequeueUserAction()).toBe('second');
+    expect(useSessionStore.getState().dequeueUserAction()).toBeUndefined();
+    useSessionStore.getState().setPendingMessage(null);
+    expect(useSessionStore.getState().pendingMessage).toBeNull();
+  });
+
+  it('removes active and inactive session projections', () => {
+    useSessionStore.setState({
+      activeSessionId: 's1',
+      sessions: [
+        { id: 's1', personaId: 'default', title: 'One', createdAt: 1, updatedAt: 1 },
+        { id: 's2', personaId: 'default', title: 'Two', createdAt: 1, updatedAt: 1 },
+      ],
+      messages: [{ id: 'm1', sessionId: 's1', role: 'user', content: 'one', createdAt: 1 }],
+      sessionMessages: { s1: [], s2: [] },
+      sessionHistoryMeta: { s1: { totalCount: 1, hasMoreBefore: false, oldestLoadedMessageId: 'm1' } },
+      hydratedSessionIds: { s1: true },
+      sessionAgentTurns: { s1: [], s2: [] },
+      sessionActiveTurnIds: { s1: null, s2: null },
+      agentTurns: [],
+    });
+
+    useSessionStore.getState().removeSession('s2');
+    expect(useSessionStore.getState().sessions).toHaveLength(1);
+    useSessionStore.getState().removeSession('s1');
+    expect(useSessionStore.getState()).toMatchObject({ activeSessionId: null, messages: [], agentTurns: [], activeTurnId: null });
+  });
+
+  it('keeps turn actions isolated and handles no active turn targets', () => {
+    useSessionStore.getState().addTurnItem({ kind: 'text', messageId: 'm1' });
+    useSessionStore.getState().clearAgentTurns();
+    useSessionStore.getState().setAgentTurns([], null);
+    useSessionStore.getState().updateAgentTurn('missing', { done: true });
+    useSessionStore.getState().markAgentTurnError('missing', { code: 'ERR', message: 'missing' });
+    expect(useSessionStore.getState().agentTurns).toEqual([]);
+
+    useSessionStore.setState({ activeSessionId: 's1' });
+    useSessionStore.getState().startAgentTurn('t1', 's1');
+    useSessionStore.getState().addTurnItem({ kind: 'text', messageId: 'm1' }, 's1');
+    useSessionStore.getState().updateAgentTurn('t1', { done: true }, 's1');
+    expect(useSessionStore.getState().getSessionAgentTurns('s1')[0]).toMatchObject({ done: true, items: [{ kind: 'text', messageId: 'm1' }] });
+  });
+
+  it('covers session projection no-ops and inactive-session updates', () => {
+    const activeMessage = { id: 'active-message', sessionId: 's1', role: 'user' as const, content: 'active', createdAt: 1 };
+    const backgroundMessage = { id: 'background-message', sessionId: 's2', role: 'assistant' as const, content: 'background', createdAt: 2 };
+    useSessionStore.getState().setSessions([{ id: 's1', personaId: 'default', title: 'One', createdAt: 1, updatedAt: 1 }]);
+    useSessionStore.setState({ activeSessionId: 's1' });
+    useSessionStore.getState().addMessage(activeMessage);
+    useSessionStore.getState().addMessage(backgroundMessage);
+    expect(useSessionStore.getState().messages).toEqual([activeMessage]);
+    expect(useSessionStore.getState().getSessionMessages('s2')).toEqual([backgroundMessage]);
+
+    useSessionStore.getState().setActiveSession('s1');
+    useSessionStore.getState().updateSession('s1', { title: 'Renamed' });
+    useSessionStore.getState().updateSession('missing', { title: 'Not enough data' });
+    expect(useSessionStore.getState().sessions).toEqual([{ id: 's1', personaId: 'default', title: 'Renamed', createdAt: 1, updatedAt: 1 }]);
+
+    useSessionStore.getState().appendChunk('background-chunk', 'background', false, 's2');
+    expect(useSessionStore.getState().messages).toEqual([activeMessage]);
+    useSessionStore.getState().finalizeChunk('unknown-message');
+    useSessionStore.getState().clearPendingChunks('s2');
+    useSessionStore.getState().clearPendingChunks('s2');
+    useSessionStore.getState().flushThinkingChunks('s2');
+    useSessionStore.getState().flushStreamingChunks('s2');
+    useSessionStore.getState().setPendingRAAppLaunchIntent(null);
+
+    useSessionStore.getState().startAgentTurn('background-turn', 's2');
+    useSessionStore.getState().addTurnItem({ kind: 'tool', callId: 'call-1' }, 's2');
+    useSessionStore.getState().finalizeAgentTurn('s2', 'wrong-turn');
+    useSessionStore.getState().clearAgentTurns('s2');
+    useSessionStore.getState().setAgentTurns([
+      { id: 'done-turn', sessionId: 's1', items: [], done: true },
+      { id: 'active-turn', sessionId: 's1', items: [], done: false },
+    ]);
+    expect(useSessionStore.getState().getSessionActiveTurnId('s1')).toBe('active-turn');
+    useSessionStore.getState().updateAgentTurn('active-turn', { error: { code: 'TEST', message: 'test' } }, 's2');
+    useSessionStore.getState().markAgentTurnError('active-turn', { code: 'TEST', message: 'test' }, 's2');
   });
 });

@@ -299,7 +299,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const nextSessionMessages = targetSessionId
         ? getStoredSessionMessages(s, targetSessionId).map((message) =>
             message.id === messageId
-              ? { ...message, content: finalContent, thinking: finalThinking || undefined, streaming: false }
+              ? { ...message, content: finalContent, thinking: finalThinking || message.thinking || undefined, streaming: false }
               : message,
           )
         : [];
