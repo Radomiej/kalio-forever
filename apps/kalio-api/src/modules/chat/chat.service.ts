@@ -14,7 +14,11 @@ import { HitlRequestService } from '../hitl/hitl-request.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { TurnState } from './turn-state';
 import { SessionsService } from './sessions.service';
-import { readPendingRAAppLaunchIntent, stripPendingRAAppLaunchRuntimeContext } from './raapp-launch-intent';
+import {
+  readPendingRAAppLaunchInputs,
+  readPendingRAAppLaunchIntent,
+  stripPendingRAAppLaunchRuntimeContext,
+} from './raapp-launch-intent';
 
 type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
 
@@ -227,6 +231,7 @@ export class ChatService {
         systemPromptProfile: 'default-chat' as const,
       };
       const pendingRAAppLaunchIntent = readPendingRAAppLaunchIntent(sessionId, personaId, runtimeContext);
+      const pendingRAAppInputs = readPendingRAAppLaunchInputs(runtimeContext);
       let consumedPendingRAAppLaunchIntent = false;
 
       if (!this.contextAssembly) {
@@ -281,12 +286,14 @@ export class ChatService {
                   `Overriding run_raapp target for session ${sessionId} from "${requestedId}" to "${pendingRAAppLaunchIntent.appId}"`,
                 );
               }
+              const args: Record<string, unknown> = {
+                ...toolCall.args,
+                id: pendingRAAppLaunchIntent.appId,
+              };
+              if (pendingRAAppInputs) args.inputs = pendingRAAppInputs;
               return {
                 ...toolCall,
-                args: {
-                  ...toolCall.args,
-                  id: pendingRAAppLaunchIntent.appId,
-                },
+                args,
               };
             }
           : undefined,

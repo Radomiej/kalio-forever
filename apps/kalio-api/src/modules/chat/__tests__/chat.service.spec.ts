@@ -898,6 +898,7 @@ describe('ChatService', () => {
           raAppLaunchId: 'tictactoe',
           raAppLaunchName: 'TicTacToe',
           raAppLaunchSource: 'home_tile',
+          raAppLaunchInputs: JSON.stringify({ boardSize: 3 }),
         },
       },
       createdAt: 1,
@@ -914,7 +915,7 @@ describe('ChatService', () => {
     expect(toolDispatch.dispatch).toHaveBeenCalledWith(
       'call-1',
       'run_raapp',
-      { id: 'tictactoe' },
+      { id: 'tictactoe', inputs: { boardSize: 3 } },
       expect.any(Object),
       expect.any(Array),
     );

@@ -23,6 +23,8 @@ export function CatalogView({
   coreApps,
   userStandaloneApps,
   onRun,
+  runInputsJson,
+  onRunInputsChange,
   onGroupDelete,
   onGroupApprove,
   onGroupDiscard,
@@ -34,7 +36,9 @@ export function CatalogView({
   groups: RAAppGroup[];
   coreApps: RAAppSummary[];
   userStandaloneApps: RAAppSummary[];
-  onRun: (target: CatalogRunTarget) => void;
+  onRun: (target: CatalogRunTarget, inputsJson: string) => void;
+  runInputsJson: string;
+  onRunInputsChange: (value: string) => void;
   onGroupDelete: (slug: string) => void;
   onGroupApprove: (slug: string, bumpType: 'patch' | 'minor' | 'major') => Promise<void>;
   onGroupDiscard: (slug: string) => Promise<void>;
@@ -47,6 +51,21 @@ export function CatalogView({
         <h2 className="text-sm font-semibold text-base-content">Catalog ({catalogCount})</h2>
         <p className="text-xs text-base-content/45">Installed user and core RAApps ready to run.</p>
       </div>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-base-content/70">Run inputs (optional JSON)</span>
+        <textarea
+          value={runInputsJson}
+          onChange={(event) => onRunInputsChange(event.target.value)}
+          placeholder={'{"value": 5}'}
+          rows={2}
+          data-testid="raapp-run-inputs"
+          className="textarea textarea-bordered w-full font-mono text-xs"
+          aria-describedby="raapp-run-inputs-help"
+        />
+        <span id="raapp-run-inputs-help" className="text-[11px] text-base-content/45">
+          Passed to the first run_raapp call. Leave empty when the app has no inputs.
+        </span>
+      </label>
       {catalogLoading && catalogCount === 0 && (
         <p className="rounded-lg border border-base-300 bg-base-200/40 p-6 text-center text-sm text-base-content/45">
           Loading catalog...
@@ -69,7 +88,7 @@ export function CatalogView({
                 onRun({
                   id: g.current.meta.id,
                   name: g.current.meta.name,
-                });
+                }, runInputsJson);
               }
             }}
             onDelete={onGroupDelete}
@@ -79,8 +98,8 @@ export function CatalogView({
             onDownloadVersion={onGroupDownload}
           />
         ))}
-        {coreApps.map((app, index) => <RAAppCoreCard key={`core:${app.id}:${index}`} app={app} onRun={onRun} />)}
-        {userStandaloneApps.map((app, index) => <RAAppCoreCard key={`user:${app.id}:${index}`} app={app} onRun={onRun} />)}
+        {coreApps.map((app, index) => <RAAppCoreCard key={`core:${app.id}:${index}`} app={app} onRun={(target) => onRun(target, runInputsJson)} />)}
+        {userStandaloneApps.map((app, index) => <RAAppCoreCard key={`user:${app.id}:${index}`} app={app} onRun={(target) => onRun(target, runInputsJson)} />)}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import type { RAAppLaunchIntent, SessionRuntimeContext } from '@kalio/types';
 const RAAPP_LAUNCH_ID_KEY = 'raAppLaunchId';
 const RAAPP_LAUNCH_NAME_KEY = 'raAppLaunchName';
 const RAAPP_LAUNCH_SOURCE_KEY = 'raAppLaunchSource';
+const RAAPP_LAUNCH_INPUTS_KEY = 'raAppLaunchInputs';
 
 function readArchitectureString(
   runtimeContext: SessionRuntimeContext | null | undefined,
@@ -45,6 +46,22 @@ export function readPendingRAAppLaunchIntent(
   };
 }
 
+export function readPendingRAAppLaunchInputs(
+  runtimeContext: SessionRuntimeContext | null | undefined,
+): Record<string, unknown> | undefined {
+  const raw = readArchitectureString(runtimeContext, RAAPP_LAUNCH_INPUTS_KEY);
+  if (!raw) return undefined;
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    void error;
+    return undefined;
+  }
+}
+
 export function stripPendingRAAppLaunchRuntimeContext(
   runtimeContext: SessionRuntimeContext | null | undefined,
 ): SessionRuntimeContext {
@@ -53,6 +70,7 @@ export function stripPendingRAAppLaunchRuntimeContext(
   delete architectureContext[RAAPP_LAUNCH_ID_KEY];
   delete architectureContext[RAAPP_LAUNCH_NAME_KEY];
   delete architectureContext[RAAPP_LAUNCH_SOURCE_KEY];
+  delete architectureContext[RAAPP_LAUNCH_INPUTS_KEY];
 
   return Object.keys(architectureContext).length > 0
     ? { ...baseRuntimeContext, architectureContext }
