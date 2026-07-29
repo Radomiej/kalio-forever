@@ -357,7 +357,7 @@ export function selectRuntimeAttentionItems(params: {
       ? sessionStatusSnapshotToRuntimeState(runtimeSnapshotToSessionStatus(snapshot))
       : null;
     const architectureState = architectureSessionRuntimeStates.get(session.id) ?? null;
-    const evidence = extractLatestVisibleRuntimeEvidence(sessionMessages[session.id], snapshot);
+    const evidence = extractLatestVisibleRuntimeEvidence(sessionMessages[session.id]);
     const classifiedEvidence = classifyRuntimeEvidence(evidence);
     const label = sessionAttentionLabel(session.id, sessionsById);
     const persistedRuntimeEvidence = canProjectPersistedRuntimeEvidence(session);

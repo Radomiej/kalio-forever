@@ -174,7 +174,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     const emit = request.emit;
     let hadContent = false;
     let streamedText = '';
-    let promptMessageId: string | undefined;
     const trackingEmit: EmitFn | undefined = emit
       ? (event, data) => {
           if (event === 'chat:chunk') {
@@ -199,7 +198,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       undefined,
       { turnId },
     );
-    promptMessageId = promptMessage?.id;
+    const promptMessageId = promptMessage?.id;
     trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, promptMessageId, agentRun });
     if (!requestedChildSessionId) {
       trackingEmit?.('session:created', childSession);

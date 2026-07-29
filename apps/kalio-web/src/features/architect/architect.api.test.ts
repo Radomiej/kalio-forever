@@ -841,8 +841,7 @@ describe('resumeGoalGuardAgentFlowRunWithQualityGate', () => {
         summary: 'Needs follow-up',
       },
     ],
-  ] satisfies Array<[ExternalQualityGateInput, { source: string; summary: string; artifacts?: string[] }]>)
-    ('normalizes external QA evidence before resuming the AgentFlow', async (
+  ] satisfies Array<[ExternalQualityGateInput, { source: string; summary: string; artifacts?: string[] }]>)('normalizes external QA evidence before resuming the AgentFlow', async (
     gate: ExternalQualityGateInput,
     expectedGate: { source: string; summary: string; artifacts?: string[] },
   ) => {

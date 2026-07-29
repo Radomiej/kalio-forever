@@ -337,6 +337,8 @@ export class RAAppHITLService {
     _now = new Date(),
     _timeoutMs?: number,
   ): Promise<SavedApproval[]> {
+    void _now;
+    void _timeoutMs;
     this.logger.debug(`RA-App HITL approvals do not auto-expire session=${sessionId}`);
     return [];
   }

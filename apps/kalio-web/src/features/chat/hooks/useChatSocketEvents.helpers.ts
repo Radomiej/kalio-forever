@@ -364,8 +364,6 @@ export function handleConnectionStateEvent(
 ): void {
   const previousState = deps.getConnectionState();
   const reconnectUiState = deps.getReconnectUiState();
-  let nextReconnectUiState = reconnectUiState;
-
   deps.setConnectionState(state.status);
 
   if (state.status === 'connected') {
@@ -377,11 +375,10 @@ export function handleConnectionStateEvent(
     ) {
       deps.setRecoveryNotice('Recovered missed stream events after reconnect.');
     }
-    nextReconnectUiState = {
+    deps.setReconnectUiState({
       hasConnectedOnce: true,
       hadRealDisconnect: false,
-    };
-    deps.setReconnectUiState(nextReconnectUiState);
+    });
     return;
   }
 
@@ -389,11 +386,10 @@ export function handleConnectionStateEvent(
     (state.status === 'reconnecting' || state.status === 'disconnected')
     && reconnectUiState.hasConnectedOnce
   ) {
-    nextReconnectUiState = {
+    deps.setReconnectUiState({
       hasConnectedOnce: true,
       hadRealDisconnect: true,
-    };
-    deps.setReconnectUiState(nextReconnectUiState);
+    });
   }
 
   if (state.status === 'reconnecting' && reconnectUiState.hasConnectedOnce) {

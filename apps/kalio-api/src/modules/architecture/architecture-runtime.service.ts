@@ -7,10 +7,7 @@ import type {
   ArchitectureRoleSlot,
   ArchitectureSchema,
   ArchitectureRun,
-  ArchitectureSchemaEdge,
-  ArchitectureSchemaNode,
   CreateArchitectureRunDto,
-  WorkflowFailure,
 } from '@kalio/types';
 import { SessionsService } from '../chat/sessions.service';
 import { SessionManagerService } from '../chat/session-manager.service';

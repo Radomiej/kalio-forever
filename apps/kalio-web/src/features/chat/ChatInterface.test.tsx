@@ -229,7 +229,10 @@ const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
 const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
-const getSessionMessages = vi.fn((_sessionId: string | null) => [] as ChatMessage[]);
+const getSessionMessages = vi.fn((sessionId: string | null) => {
+  void sessionId;
+  return [] as ChatMessage[];
+});
 const updateSession = vi.fn((sessionId: string, patch: { title?: string; personaId?: string }) => {
   mockSessions = mockSessions.map((session) =>
     session.id === sessionId ? { ...session, ...patch } : session,
@@ -1264,9 +1267,10 @@ describe('ChatInterface event wiring', () => {
       'branch-1': mockMessages,
       'host-1': [],
     };
-    getSessionMessages.mockImplementation((sessionId: string | null) =>
-      sessionId === 'branch-1' ? mockMessages : [],
-    );
+    getSessionMessages.mockImplementation((sessionId: string | null) => {
+      const messages = sessionId === 'branch-1' ? mockMessages : [];
+      return messages;
+    });
 
     await renderChatInterface();
 

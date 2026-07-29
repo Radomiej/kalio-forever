@@ -52,7 +52,9 @@ export function buildSessionLaunchRuntimeContext(
       return runtimeContext;
     }
 
-    const { projectPath: _projectPath, executionCwd: _executionCwd, ...nextArchitectureContext } = architectureContext;
+    const nextArchitectureContext = { ...architectureContext };
+    delete nextArchitectureContext.projectPath;
+    delete nextArchitectureContext.executionCwd;
     return Object.keys(nextArchitectureContext).length > 0
       ? { ...rest, architectureContext: nextArchitectureContext }
       : rest;

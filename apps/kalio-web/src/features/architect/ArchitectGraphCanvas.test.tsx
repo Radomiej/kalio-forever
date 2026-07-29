@@ -11,7 +11,7 @@ describe('ArchitectGraphCanvas', () => {
     const edge = screen.getByTestId('architect-edge-start-end');
     expect(edge.tagName.toLowerCase()).toBe('path');
     expect(edge.getAttribute('d')).toMatch(/^M 309\.6 178 C /);
-    expect(edge.getAttribute('d')).toContain(', 346\.4 221');
+    expect(edge.getAttribute('d')).toContain(', 346.4 221');
     expect(edge.getAttribute('d')).toContain(' C ');
     expect(edge).toHaveAttribute('marker-end');
     expect(screen.getByTestId('architect-node-behavior-end')).toHaveTextContent('rank then merge');

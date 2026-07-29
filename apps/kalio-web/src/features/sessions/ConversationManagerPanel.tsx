@@ -112,7 +112,7 @@ export function ConversationManagerPanel({
     runtimeActivitySnapshots,
     sessions,
     sessionMessages,
-    nowMs: Math.max(runtimeAttentionNowMs, Date.now()),
+    nowMs: runtimeAttentionNowMs,
     reviewedItemKeys: reviewedRuntimeAttentionKeys,
   });
   const pendingConfirmationCount = selectPendingApprovalCount({
