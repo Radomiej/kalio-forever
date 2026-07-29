@@ -4,7 +4,6 @@ import type {
   ArchitectureChatProjection,
   ArchitectureChildAgentProjection,
   ArchitectureExecutionEvent,
-  ChatMessage,
   ArchitectureGraphProjection,
   ArchitectureRoleSlot,
   ArchitectureSchema,
@@ -32,8 +31,6 @@ import { buildArchitectureGraphProjection } from './architecture-graph-projectio
 import { shouldOverlayPersistedChildAgents } from './architecture-graph-overlay.utils';
 import { reconstructDurableArchitectureGraph } from './architecture-durable-graph';
 import { architectureActionSummaryForEvent } from './architecture-action-summary';
-import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
-import { buildArchitectureRuntimeChatProjection } from './architecture-runtime-chat-projection.utils';
 import {
   statusFromArchitectureEvents,
 } from './architecture-runtime-audit-recovery.utils';
@@ -57,6 +54,7 @@ import {
   ArchitectureRuntimeAuditRecoveryService,
   type ArchitectureRuntimeAuditRecovery,
 } from './architecture-runtime-audit-recovery.service';
+import { ArchitectureRuntimeChatProjectionService } from './architecture-runtime-chat-projection.service';
 
 const PERSISTED_GRAPH_RECOVERY_TIMEOUT_MS = 1500;
 
@@ -71,6 +69,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   private readonly preparation: ArchitectureRunPreparationService;
   private readonly auditWriter: ArchitectureRuntimeAuditWriter;
   private readonly auditRecovery: ArchitectureRuntimeAuditRecovery;
+  private readonly chatProjection: ArchitectureRuntimeChatProjectionService;
 
   constructor(
     private readonly registry: ArchitectureRegistryService,
@@ -84,6 +83,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     @Optional() preparation?: ArchitectureRunPreparationService,
     @Optional() @Inject(ArchitectureRuntimeAuditWriterService) auditWriter?: ArchitectureRuntimeAuditWriter,
     @Optional() @Inject(ArchitectureRuntimeAuditRecoveryService) auditRecovery?: ArchitectureRuntimeAuditRecovery,
+    @Optional() chatProjection?: ArchitectureRuntimeChatProjectionService,
   ) {
     // TODO: legacy fallback: preserve direct-construction compatibility for existing tests and integrations.
     this.preparation = preparation ?? new ArchitectureRunPreparationService(registry, sessions, vfs, cliAgentConfig);
@@ -91,6 +91,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.auditWriter = auditWriter ?? new ArchitectureRuntimeAuditWriterService(audit, runtimeAudit);
     // TODO: legacy fallback: preserve direct-construction compatibility until all callers use Nest DI.
     this.auditRecovery = auditRecovery ?? new ArchitectureRuntimeAuditRecoveryService(sessions, audit);
+    // TODO: legacy fallback: preserve direct-construction compatibility until all callers use Nest DI.
+    this.chatProjection = chatProjection ?? new ArchitectureRuntimeChatProjectionService(sessions, sessionManager);
   }
 
   async createRun(dto: CreateArchitectureRunDto, emit?: ArchitectureRoleExecutionInput['emit']): Promise<ArchitectureRun> {
@@ -104,7 +106,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.runs.set(prepared.run.id, prepared.run);
     this.schemasByRunId.set(prepared.run.id, cloneArchitectureRuntimeSchema(prepared.schema));
     this.eventsByRunId.set(prepared.run.id, liveEvents);
-    await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
+    await this.chatProjection.persistParentSafely(prepared.schema, prepared.run, liveEvents);
 
     const execution = this.executePreparedRun(prepared, emit, liveEvents).catch(async (error: unknown) => {
       if (prepared.run.status !== 'running' || this.stoppedRunIds.has(prepared.run.id)) {
@@ -137,7 +139,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       this.eventsByRunId.set(prepared.run.id, liveEvents);
       this.auditWriter.logFailure(prepared.schema, prepared.run, failure);
       this.auditWriter.logRun(prepared.schema, prepared.run, liveEvents);
-      await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
+      await this.chatProjection.persistParentSafely(prepared.schema, prepared.run, liveEvents);
       return prepared.run;
     }).finally(() => {
       if (this.activeRunExecutions.get(prepared.run.id) === execution) {
@@ -235,7 +237,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       this.eventsByRunId.set(run.id, events);
       this.auditWriter.logHydration(run, hydration);
       this.auditWriter.logRun(schema, run, events, liveEvents === undefined);
-      await this.persistParentChatProjection(schema, run, events);
+      await this.chatProjection.persistParent(schema, run, events);
       return run;
     }
     if (this.stoppedRunIds.has(run.id) || run.status !== 'running') {
@@ -255,7 +257,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.eventsByRunId.set(run.id, events);
     this.auditWriter.logHydration(run, hydration);
     this.auditWriter.logRun(schema, run, events, liveEvents === undefined);
-    await this.persistParentChatProjection(schema, run, events);
+    await this.chatProjection.persistParent(schema, run, events);
     return run;
   }
 
@@ -305,7 +307,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     if (schema) {
       this.auditWriter.logEvent(schema, stoppedRun, stopEvent);
       this.auditWriter.logRun(schema, stoppedRun, nextEvents);
-      await this.persistParentChatProjectionSafely(schema, stoppedRun, nextEvents);
+      await this.chatProjection.persistParentSafely(schema, stoppedRun, nextEvents);
     }
     return stoppedRun;
   }
@@ -522,7 +524,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
 
   getChat(runId: string): ArchitectureChatProjection | null {
     if (!this.findRun(runId)) return null;
-    return buildArchitectureRuntimeChatProjection(runId, this.getEvents(runId));
+    return this.chatProjection.build(runId, this.getEvents(runId));
   }
 
   async getChatDurable(runId: string): Promise<ArchitectureChatProjection | null> {
@@ -532,54 +534,11 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     const run = await this.findRunDurable(runId);
     if (!run) return null;
     const events = await this.getEventsDurable(runId);
-    return buildArchitectureRuntimeChatProjection(runId, events);
+    return this.chatProjection.build(runId, events);
   }
 
   private personaForRunSlot(run: ArchitectureRun, slot: ArchitectureRoleSlot): string {
     return this.preparation.resolveArchitecturePersonaId(run.slotOverrides?.[slot.id] ?? slot.defaultPersonaId);
-  }
-
-  private async persistParentChatProjection(
-    schema: ArchitectureSchema,
-    run: ArchitectureRun,
-    events: ArchitectureExecutionEvent[],
-  ): Promise<void> {
-    const projectionSessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId;
-    if (!projectionSessionId) {
-      return;
-    }
-    let targetSessionId = projectionSessionId;
-    let existingMessages: ChatMessage[];
-    try {
-      existingMessages = await this.sessions.getMessages(targetSessionId);
-    } catch (error) {
-      if (!run.rootSessionId || targetSessionId === run.rootSessionId) {
-        throw error;
-      }
-      targetSessionId = run.rootSessionId;
-      existingMessages = await this.sessions.getMessages(targetSessionId);
-    }
-    const messages = buildArchitectureParentChatMessages(schema, run, targetSessionId, events, Date.now());
-    const existingMessageIds = new Set(existingMessages.map((message) => message.id));
-    await Promise.all(
-      messages
-        .filter((message) => !existingMessageIds.has(message.id))
-        .map((message) => this.sessionManager.persistMessage(message)),
-    );
-  }
-
-  private async persistParentChatProjectionSafely(
-    schema: ArchitectureSchema,
-    run: ArchitectureRun,
-    events: ArchitectureExecutionEvent[],
-  ): Promise<void> {
-    try {
-      await this.persistParentChatProjection(schema, run, events);
-    } catch (error) {
-      this.logger.warn(
-        `Failed to persist architecture failure projection for run ${run.id}: ${this.errorMessage(error)}`,
-      );
-    }
   }
 
   private errorMessage(error: unknown): string {
