@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { buildSpawnCommand, extractSilentCatchHits } from './run-audit.mjs';
-import { classifySizeFinding, collectKnipRows } from './aggregate.mjs';
+import { buildNextActions, classifySizeFinding, collectKnipRows } from './aggregate.mjs';
 import { extractRegressionReviewLeads } from './regression-checks.mjs';
 import { extractStringBusinessLogicHits } from './string-business-logic-checks.mjs';
 
@@ -90,6 +90,21 @@ test('size findings keep architecture debt visible without making it a release b
   assert.equal(soft.category, 'architecture-debt');
   assert.equal(soft.conformance, 'soft-limit');
   assert.equal(soft.limit, 300);
+});
+
+test('next actions do not recommend nonexistent critical blockers', () => {
+  const actions = buildNextActions({
+    counts: { critical: 0, high: 75 },
+    architectureDebtSummary: { hard: 75 },
+    criticalCircularCount: 0,
+    criticalSilentCount: 0,
+    anyCount: 0,
+  });
+
+  assert.deepEqual(actions, [
+    'No active CRITICAL release blockers remain; keep CRITICAL reserved for active blockers.',
+    'Schedule 75 hard-limit architecture debt items for focused refactoring.',
+  ]);
 });
 
 test('extractRegressionReviewLeads detects Portal-style review leads', () => {

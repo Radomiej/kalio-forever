@@ -146,6 +146,43 @@ export function collectKnipRows(report, pkg) {
   return rows;
 }
 
+export function buildNextActions({
+  counts,
+  architectureDebtSummary,
+  criticalCircularCount,
+  criticalSilentCount,
+  anyCount,
+}) {
+  const actions = [];
+
+  if (counts.critical > 0) {
+    actions.push('Tackle the top-3 CRITICAL rows in the Prioritized refactor queue.');
+    if (criticalCircularCount > 0) {
+      actions.push('Break CRITICAL circular dependencies before further extraction.');
+    }
+    if (criticalSilentCount > 0) {
+      actions.push('Fix CRITICAL silent catches on the critical path.');
+    }
+  } else {
+    actions.push('No active CRITICAL release blockers remain; keep CRITICAL reserved for active blockers.');
+  }
+
+  if (architectureDebtSummary.hard > 0) {
+    actions.push(`Schedule ${architectureDebtSummary.hard} hard-limit architecture debt items for focused refactoring.`);
+  }
+
+  const nonArchitectureHigh = Math.max(0, counts.high - architectureDebtSummary.hard);
+  if (nonArchitectureHigh > 0) {
+    actions.push(`Triage ${nonArchitectureHigh} HIGH findings outside the size-debt backlog.`);
+  }
+
+  if (anyCount > 0) {
+    actions.push('Opportunistically reduce any usage using @kalio/types.');
+  }
+
+  return actions;
+}
+
 async function main() {
   const fileStats = await readJson('file-stats.json', { rows: [], silentCatchHits: [], anyHits: [], regressionReviewLeads: [], stringBusinessLogicHits: [] });
   const governance = await readJson('docs-governance.json', { docs: {}, findings: [] });
@@ -336,6 +373,14 @@ async function main() {
     });
   }
 
+  const nextActions = buildNextActions({
+    counts,
+    architectureDebtSummary,
+    criticalCircularCount: circularRows.filter((r) => r.Severity.includes('CRITICAL')).length,
+    criticalSilentCount: silentRows.filter((r) => r.Severity.includes('CRITICAL')).length,
+    anyCount: anyRows.length,
+  });
+
   // --- Write JSON ------------------------------------------------------------
   const jsonOut = {
     date,
@@ -353,6 +398,7 @@ async function main() {
     deadRows,
     governanceRows,
     prio,
+    nextActions,
   };
   await writeFile(path.join(OUT_DIR, `${date}-report.json`), JSON.stringify(jsonOut, null, 2));
 
@@ -422,11 +468,7 @@ ${governanceRows.length ? mdTable(['Severity', 'Target', 'Check', 'Message', 'Fi
 
 ## Next actions (suggested order)
 
-1. Tackle top-3 CRITICAL rows in the **Prioritized refactor queue**.
-2. Break CRITICAL circular deps before further extraction (prevents re-introducing cycles).
-3. Fix CRITICAL silent catches on critical path — highest incident risk.
-4. Schedule HIGH-severity God Objects for next-touch refactor.
-5. Opportunistically reduce \`any\` usage using \`@kalio/types\`.
+${nextActions.map((action, index) => `${index + 1}. ${action}`).join('\n')}
 `;
 
   await writeFile(path.join(OUT_DIR, `${date}-report.md`), md, 'utf8');
