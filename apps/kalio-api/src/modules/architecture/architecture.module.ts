@@ -9,6 +9,7 @@ import { ArchitectureRunsController } from './architecture-runs.controller';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
 import { ArchitectureRunPreparationService } from './architecture-run-preparation.service';
 import { ArchitectureRuntimeAuditWriterService } from './architecture-runtime-audit.service';
+import { ArchitectureRuntimeAuditRecoveryService } from './architecture-runtime-audit-recovery.service';
 import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.port';
 
 @Module({
@@ -18,6 +19,7 @@ import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.por
     ArchitectureRegistryService,
     ArchitectureRunPreparationService,
     ArchitectureRuntimeAuditWriterService,
+    ArchitectureRuntimeAuditRecoveryService,
     ArchitectureRuntimeService,
     {
       provide: ARCHITECTURE_RUNTIME_STOP,
