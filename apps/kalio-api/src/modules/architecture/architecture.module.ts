@@ -7,6 +7,7 @@ import { ArchitectureRegistryService } from './architecture-registry.service';
 import { ARCHITECTURE_ROLE_EXECUTOR, ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRunsController } from './architecture-runs.controller';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { ArchitectureRunPreparationService } from './architecture-run-preparation.service';
 import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.port';
 
 @Module({
@@ -14,6 +15,7 @@ import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.por
   controllers: [ArchitectureRegistryController, ArchitectureRunsController],
   providers: [
     ArchitectureRegistryService,
+    ArchitectureRunPreparationService,
     ArchitectureRuntimeService,
     {
       provide: ARCHITECTURE_RUNTIME_STOP,
