@@ -2,7 +2,6 @@ import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs
 import type {
   AgentFlowContinuationCursor,
   ArchitectureChatProjection,
-  ArchitectureChildAgentProjection,
   ArchitectureExecutionEvent,
   ArchitectureGraphProjection,
   ArchitectureRoleSlot,
@@ -25,11 +24,8 @@ import {
   type ArchitectureRoleExecutor,
 } from './architecture-role-executor';
 import { CLIAgentConfigService } from '../cli-agent/cli-agent-config.service';
-import { mergeChildAgentStatus } from './architecture-cli-child-status';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
-import { buildArchitectureGraphProjection } from './architecture-graph-projection';
 import { shouldOverlayPersistedChildAgents } from './architecture-graph-overlay.utils';
-import { reconstructDurableArchitectureGraph } from './architecture-durable-graph';
 import { architectureActionSummaryForEvent } from './architecture-action-summary';
 import {
   statusFromArchitectureEvents,
@@ -55,8 +51,7 @@ import {
   type ArchitectureRuntimeAuditRecovery,
 } from './architecture-runtime-audit-recovery.service';
 import { ArchitectureRuntimeChatProjectionService } from './architecture-runtime-chat-projection.service';
-
-const PERSISTED_GRAPH_RECOVERY_TIMEOUT_MS = 1500;
+import { ArchitectureRuntimeGraphProjectionService } from './architecture-runtime-graph-projection.service';
 
 @Injectable()
 export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
@@ -70,6 +65,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   private readonly auditWriter: ArchitectureRuntimeAuditWriter;
   private readonly auditRecovery: ArchitectureRuntimeAuditRecovery;
   private readonly chatProjection: ArchitectureRuntimeChatProjectionService;
+  private readonly graphProjection: ArchitectureRuntimeGraphProjectionService;
 
   constructor(
     private readonly registry: ArchitectureRegistryService,
@@ -84,6 +80,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     @Optional() @Inject(ArchitectureRuntimeAuditWriterService) auditWriter?: ArchitectureRuntimeAuditWriter,
     @Optional() @Inject(ArchitectureRuntimeAuditRecoveryService) auditRecovery?: ArchitectureRuntimeAuditRecovery,
     @Optional() chatProjection?: ArchitectureRuntimeChatProjectionService,
+    @Optional() graphProjection?: ArchitectureRuntimeGraphProjectionService,
   ) {
     // TODO: legacy fallback: preserve direct-construction compatibility for existing tests and integrations.
     this.preparation = preparation ?? new ArchitectureRunPreparationService(registry, sessions, vfs, cliAgentConfig);
@@ -93,6 +90,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.auditRecovery = auditRecovery ?? new ArchitectureRuntimeAuditRecoveryService(sessions, audit);
     // TODO: legacy fallback: preserve direct-construction compatibility until all callers use Nest DI.
     this.chatProjection = chatProjection ?? new ArchitectureRuntimeChatProjectionService(sessions, sessionManager);
+    // TODO: legacy fallback: preserve direct-construction compatibility until all callers use Nest DI.
+    this.graphProjection = graphProjection ?? new ArchitectureRuntimeGraphProjectionService(sessions, registry);
   }
 
   async createRun(dto: CreateArchitectureRunDto, emit?: ArchitectureRoleExecutionInput['emit']): Promise<ArchitectureRun> {
@@ -410,7 +409,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     const schema = this.schemasByRunId.get(runId) ?? this.registry.findOne(run.schemaId);
     if (!schema) return null;
 
-    return buildArchitectureGraphProjection(runId, schema, this.getEvents(runId), run.status);
+    return this.graphProjection.build(runId, schema, this.getEvents(runId), run.status);
   }
 
   async getGraphDurable(runId: string): Promise<ArchitectureGraphProjection | null> {
@@ -424,18 +423,18 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       if (!shouldOverlayPersistedChildAgents(liveSchema, liveGraph)) {
         return liveGraph;
       }
-      const persistedGraph = await this.reconstructPersistedGraphSafely(runId);
-      return this.mergePersistedChildAgents(liveGraph, persistedGraph);
+       const persistedGraph = await this.graphProjection.reconstructPersisted(runId);
+       return this.graphProjection.mergePersistedChildAgents(liveGraph, persistedGraph);
     }
 
-    const persistedGraph = await this.reconstructPersistedGraphSafely(runId);
+    const persistedGraph = await this.graphProjection.reconstructPersisted(runId);
     const run = await this.findRunDurable(runId);
     if (!run) return persistedGraph;
     const schema = this.schemasByRunId.get(runId) ?? this.registry.findOne(run.schemaId);
     const auditEvents = await this.auditRecovery.reconstructEvents(runId);
     if (schema && auditEvents.length > 0) {
-      return this.mergePersistedChildAgents(
-        buildArchitectureGraphProjection(runId, schema, auditEvents, run.status),
+      return this.graphProjection.mergePersistedChildAgents(
+        this.graphProjection.build(runId, schema, auditEvents, run.status),
         persistedGraph,
       );
     }
@@ -447,79 +446,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     if (!schema) return null;
     const events = await this.getEventsDurable(runId);
     if (events.length === 0) return null;
-    return buildArchitectureGraphProjection(runId, schema, events, run.status);
-  }
-
-  private mergePersistedChildAgents(
-    liveGraph: ArchitectureGraphProjection,
-    persistedGraph: ArchitectureGraphProjection | null,
-  ): ArchitectureGraphProjection {
-    const persistedChildAgents = persistedGraph?.childAgents ?? [];
-    if (persistedChildAgents.length === 0) {
-      return liveGraph;
-    }
-    const childAgents = new Map<string, NonNullable<ArchitectureGraphProjection['childAgents']>[number]>();
-    for (const childAgent of liveGraph.childAgents ?? []) {
-      childAgents.set(childAgent.id, childAgent);
-    }
-    for (const childAgent of persistedChildAgents) {
-      childAgents.set(childAgent.id, this.mergeChildAgentProjection(childAgents.get(childAgent.id), childAgent));
-    }
-    return {
-      ...liveGraph,
-      childAgents: [...childAgents.values()],
-    };
-  }
-
-  private mergeChildAgentProjection(
-    current: ArchitectureChildAgentProjection | undefined,
-    incoming: ArchitectureChildAgentProjection,
-  ): ArchitectureChildAgentProjection {
-    return {
-      id: incoming.id,
-      parentNodeId: incoming.parentNodeId ?? current?.parentNodeId,
-      parentRoleSlotId: incoming.parentRoleSlotId ?? current?.parentRoleSlotId,
-      parentEventId: incoming.parentEventId ?? current?.parentEventId,
-      kind: incoming.kind ?? current?.kind ?? 'cli-agent',
-      backend: incoming.backend ?? current?.backend,
-      status: mergeChildAgentStatus(current?.status, incoming.status),
-      toolName: incoming.toolName ?? current?.toolName,
-      workdir: incoming.workdir ?? current?.workdir,
-      targetPaths: incoming.targetPaths ?? current?.targetPaths,
-      updatedAt: incoming.updatedAt ?? current?.updatedAt,
-    };
-  }
-
-  private async reconstructPersistedGraphSafely(runId: string): Promise<ArchitectureGraphProjection | null> {
-    try {
-      return await this.withTimeout(
-        reconstructDurableArchitectureGraph(runId, this.sessions, this.registry),
-        PERSISTED_GRAPH_RECOVERY_TIMEOUT_MS,
-        `persisted architecture graph recovery timed out after ${PERSISTED_GRAPH_RECOVERY_TIMEOUT_MS}ms`,
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Failed to reconstruct architecture graph from persisted chat for run ${runId}: ${this.errorMessage(error)}`,
-      );
-      return null;
-    }
-  }
-
-  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<T>((_resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
-          timeout.unref?.();
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-    }
+    return this.graphProjection.build(runId, schema, events, run.status);
   }
 
   getChat(runId: string): ArchitectureChatProjection | null {
@@ -539,10 +466,6 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
 
   private personaForRunSlot(run: ArchitectureRun, slot: ArchitectureRoleSlot): string {
     return this.preparation.resolveArchitecturePersonaId(run.slotOverrides?.[slot.id] ?? slot.defaultPersonaId);
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
   }
 
 }

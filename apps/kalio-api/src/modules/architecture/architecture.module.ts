@@ -11,6 +11,7 @@ import { ArchitectureRunPreparationService } from './architecture-run-preparatio
 import { ArchitectureRuntimeAuditWriterService } from './architecture-runtime-audit.service';
 import { ArchitectureRuntimeAuditRecoveryService } from './architecture-runtime-audit-recovery.service';
 import { ArchitectureRuntimeChatProjectionService } from './architecture-runtime-chat-projection.service';
+import { ArchitectureRuntimeGraphProjectionService } from './architecture-runtime-graph-projection.service';
 import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.port';
 
 @Module({
@@ -22,6 +23,7 @@ import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.por
     ArchitectureRuntimeAuditWriterService,
     ArchitectureRuntimeAuditRecoveryService,
     ArchitectureRuntimeChatProjectionService,
+    ArchitectureRuntimeGraphProjectionService,
     ArchitectureRuntimeService,
     {
       provide: ARCHITECTURE_RUNTIME_STOP,
