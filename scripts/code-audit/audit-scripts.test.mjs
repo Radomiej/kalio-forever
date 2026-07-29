@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { buildSpawnCommand, extractSilentCatchHits } from './run-audit.mjs';
-import { collectKnipRows } from './aggregate.mjs';
+import { classifySizeFinding, collectKnipRows } from './aggregate.mjs';
 import { extractRegressionReviewLeads } from './regression-checks.mjs';
 import { extractStringBusinessLogicHits } from './string-business-logic-checks.mjs';
 
@@ -76,6 +76,20 @@ test('collectKnipRows includes unused files nested under issues', () => {
       Item: 'src/features/settings/PersonasPanel.tsx',
     },
   ]);
+});
+
+test('size findings keep architecture debt visible without making it a release blocker', () => {
+  const hard = classifySizeFinding('apps/kalio-api/src/modules/chat/chat.service.ts', 401);
+  const soft = classifySizeFinding('apps/kalio-api/src/modules/chat/chat.service.ts', 301);
+
+  assert.equal(hard.severity.endsWith('HIGH'), true);
+  assert.equal(hard.category, 'architecture-debt');
+  assert.equal(hard.conformance, 'hard-limit');
+  assert.equal(hard.limit, 400);
+  assert.equal(soft.severity.endsWith('MEDIUM'), true);
+  assert.equal(soft.category, 'architecture-debt');
+  assert.equal(soft.conformance, 'soft-limit');
+  assert.equal(soft.limit, 300);
 });
 
 test('extractRegressionReviewLeads detects Portal-style review leads', () => {

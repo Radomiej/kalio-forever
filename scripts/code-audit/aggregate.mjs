@@ -6,9 +6,9 @@
  *   - docs/audit/<date>-report.md
  *
  * Severity rules (aligned with AGENTS.md):
- *   🔴 CRITICAL — file > hard limit (Controller 250, Service 400, Module 120, React 350), OR silent catch in critical path, OR > 3 circular cycles
- *   🟡 HIGH     — file > soft limit (Controller 150, Service 300, Module 80, React 200), OR silent catch in non-critical path, OR circular dep
- *   🟢 MEDIUM   — any-type hotspot (≥ 5 per file), duplicate clone, unused export
+ *   🔴 CRITICAL — silent catch in critical path, OR > 3 circular cycles
+ *   🟡 HIGH     — hard-size architecture debt, silent catch in non-critical path, OR circular dep
+ *   🟢 MEDIUM   — soft-size architecture debt, any-type hotspot, duplicate clone, unused export
  *   ⚪ LOW      — any-type ≥ 1
  */
 import { readFile, writeFile, readdir } from 'node:fs/promises';
@@ -48,11 +48,54 @@ function getLimits(file) {
   return LIMITS[type] || LIMITS.service;
 }
 
-function sev(file, lines) {
+export function classifySizeFinding(file, lines) {
   const limits = getLimits(file);
-  if (lines > limits.hard) return '🔴 CRITICAL';
-  if (lines > limits.soft) return '🟡 HIGH';
-  return '🟢 MEDIUM';
+  if (lines > limits.hard) {
+    return {
+      severity: '\u{1F7E1} HIGH',
+      category: 'architecture-debt',
+      conformance: 'hard-limit',
+      limit: limits.hard,
+    };
+  }
+  if (lines > limits.soft) {
+    return {
+      severity: '\u{1F7E2} MEDIUM',
+      category: 'architecture-debt',
+      conformance: 'soft-limit',
+      limit: limits.soft,
+    };
+  }
+  return {
+    severity: '\u{1F7E2} MEDIUM',
+    category: 'architecture-debt',
+    conformance: 'within-limit',
+    limit: limits.soft,
+  };
+}
+
+function buildArchitectureDebtRow(row) {
+  const limits = getLimits(row.file);
+  const classification = classifySizeFinding(row.file, row.lines);
+  const hardLimit = classification.conformance === 'hard-limit';
+
+  return {
+    Severity: classification.severity,
+    Category: classification.category,
+    Conformance: classification.conformance,
+    File: row.file,
+    Lines: row.lines,
+    Limit: `${limits.soft}/${limits.hard}`,
+    Type: getFileType(row.file),
+    Owner: 'Architecture refactor backlog',
+    Status: 'open',
+    NextSlice: hardLimit
+      ? 'Extract one responsibility before the next feature change'
+      : 'Schedule a focused split before the next feature change',
+    Fix: hardLimit
+      ? 'Split responsibilities into focused modules per SRP'
+      : 'Plan split before next feature add',
+  };
 }
 
 async function readJson(name, fallback) {
@@ -126,25 +169,18 @@ async function main() {
   }
 
   // --- God Objects -----------------------------------------------------------
-  const godRows = fileStats.rows
+  const sizeCandidates = fileStats.rows
     .filter((r) => {
       const limits = getLimits(r.file);
       return r.lines > limits.soft;
     })
-    .slice(0, 25)
-    .map((r) => {
-      const limits = getLimits(r.file);
-      return {
-        Severity: sev(r.file, r.lines),
-        File: r.file,
-        Lines: r.lines,
-        Limit: `${limits.soft}/${limits.hard}`,
-        Type: getFileType(r.file),
-        Fix: r.lines > limits.hard
-          ? 'Split — extract domain/hook modules per SRP'
-          : 'Plan split before next feature add',
-      };
-    });
+  const architectureDebtRows = sizeCandidates.map(buildArchitectureDebtRow);
+  const godRows = architectureDebtRows.slice(0, 25);
+  const architectureDebtSummary = {
+    total: architectureDebtRows.length,
+    hard: architectureDebtRows.filter((r) => r.Conformance === 'hard-limit').length,
+    soft: architectureDebtRows.filter((r) => r.Conformance === 'soft-limit').length,
+  };
 
   // --- Silent errors ---------------------------------------------------------
   const silentRows = fileStats.silentCatchHits.map((h) => ({
@@ -220,17 +256,16 @@ async function main() {
 
   // --- Summary ---------------------------------------------------------------
   const counts = {
-    critical: godRows.filter((r) => r.Severity.includes('CRITICAL')).length
-            + silentRows.filter((r) => r.Severity.includes('CRITICAL')).length
+    critical: silentRows.filter((r) => r.Severity.includes('CRITICAL')).length
             + circularRows.filter((r) => r.Severity.includes('CRITICAL')).length
             + governanceRows.filter((r) => r.Severity.includes('CRITICAL')).length,
-    high: godRows.filter((r) => r.Severity.includes('HIGH')).length
+    high: architectureDebtRows.filter((r) => r.Severity.includes('HIGH')).length
         + silentRows.filter((r) => r.Severity.includes('HIGH')).length
         + circularRows.filter((r) => r.Severity.includes('HIGH')).length
         + governanceRows.filter((r) => r.Severity.includes('HIGH')).length
         + regressionRows.filter((r) => r.Severity.includes('HIGH')).length
         + stringLogicRows.filter((r) => r.Severity.includes('HIGH')).length,
-    medium: anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length + regressionRows.filter((r) => r.Severity.includes('MEDIUM')).length + stringLogicRows.filter((r) => r.Severity.includes('MEDIUM')).length,
+    medium: architectureDebtRows.filter((r) => r.Severity.includes('MEDIUM')).length + anyRows.filter((r) => r.Severity.includes('MEDIUM')).length + dupRows.length + deadRows.filter((r) => r.Severity.includes('MEDIUM')).length + governanceRows.filter((r) => r.Severity.includes('MEDIUM')).length + regressionRows.filter((r) => r.Severity.includes('MEDIUM')).length + stringLogicRows.filter((r) => r.Severity.includes('MEDIUM')).length,
     low: anyRows.filter((r) => r.Severity.includes('LOW')).length + deadRows.filter((r) => r.Severity.includes('LOW')).length + regressionRows.filter((r) => r.Severity.includes('LOW')).length + stringLogicRows.filter((r) => r.Severity.includes('LOW')).length,
   };
 
@@ -302,14 +337,30 @@ async function main() {
   }
 
   // --- Write JSON ------------------------------------------------------------
-  const jsonOut = { date, counts, godRows, silentRows, anyRows, regressionRows, stringLogicRows, circularRows, dupRows, deadRows, governanceRows, prio };
+  const jsonOut = {
+    date,
+    taxonomyVersion: 2,
+    counts,
+    architectureDebtSummary,
+    architectureDebtRows,
+    godRows,
+    silentRows,
+    anyRows,
+    regressionRows,
+    stringLogicRows,
+    circularRows,
+    dupRows,
+    deadRows,
+    governanceRows,
+    prio,
+  };
   await writeFile(path.join(OUT_DIR, `${date}-report.json`), JSON.stringify(jsonOut, null, 2));
 
   // --- Write Markdown --------------------------------------------------------
   const md = `# KALIO v2 Code Health Report — ${date}
 
 > Generated by \`scripts/code-audit/aggregate.mjs\` from static-analysis tool output in \`docs/audit/raw/\`.
-> Severity follows AGENTS.md architecture rules.
+> Audit taxonomy version: **2**. Size findings are architecture-conformance debt; active release blockers remain CRITICAL.
 
 ## File limits (from AGENTS.md)
 
@@ -327,14 +378,15 @@ async function main() {
 - 🟡 HIGH:     **${counts.high}**
 - 🟢 MEDIUM:   **${counts.medium}**
 - ⚪ LOW:      **${counts.low}**
+- Architecture debt: **${architectureDebtSummary.total}** (${architectureDebtSummary.hard} hard-limit, ${architectureDebtSummary.soft} soft-limit)
 
 ## Prioritized refactor queue
 
 ${prio.length ? mdTable(['#', 'Severity', 'Target', 'Type', 'Metric', 'Limit', 'Principle', 'Fix'], prio) : '_No CRITICAL/HIGH items — everything fits limits._'}
 
-## God Objects (size ranking)
+## Architecture debt (size ranking)
 
-${godRows.length ? mdTable(['Severity', 'File', 'Lines', 'Limit', 'Type', 'Fix'], godRows) : '_None over soft limit._'}
+${godRows.length ? `Showing ${godRows.length} of ${architectureDebtRows.length} size findings; the JSON report contains the complete set with owner, status, and next slice.\n\n${mdTable(['Severity', 'Category', 'Conformance', 'File', 'Lines', 'Limit', 'Type', 'Owner', 'Status', 'NextSlice', 'Fix'], godRows)}` : '_None over soft limit._'}
 
 ## Silent errors
 
