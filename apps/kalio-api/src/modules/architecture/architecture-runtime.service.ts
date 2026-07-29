@@ -35,7 +35,6 @@ import { reconstructDurableArchitectureGraph } from './architecture-durable-grap
 import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } from './architecture-action-summary';
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
 import { buildArchitectureRuntimeChatProjection } from './architecture-runtime-chat-projection.utils';
-import { architectureFailureRuntimeAuditEventInput, architectureRuntimeAuditEventInput } from './architecture-runtime-audit';
 import {
   architectureAuditEventActionField,
   architectureAuditExecutionMode,
@@ -58,7 +57,6 @@ import {
 import {
   cloneArchitectureRuntimeSchema,
 } from './architecture-runtime-schema.utils';
-import type { ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 import { terminalWorkflowFailureFromEvents } from './architecture-runtime-failure.utils';
 import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import {
@@ -68,6 +66,10 @@ import {
 } from './architecture-session-context';
 import type { ArchitectureRuntimeStopPort } from '../chat/architecture-runtime-stop.port';
 import { ArchitectureRunPreparationService, type PreparedArchitectureRun } from './architecture-run-preparation.service';
+import {
+  ArchitectureRuntimeAuditWriterService,
+  type ArchitectureRuntimeAuditWriter,
+} from './architecture-runtime-audit.service';
 
 const PERSISTED_GRAPH_RECOVERY_TIMEOUT_MS = 1500;
 
@@ -80,20 +82,26 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   private readonly stoppedRunIds = new Set<string>();
   private readonly activeRunExecutions = new Map<string, Promise<ArchitectureRun>>();
   private readonly preparation: ArchitectureRunPreparationService;
+  private readonly auditWriter: ArchitectureRuntimeAuditWriter;
+  private readonly audit?: AuditService;
 
   constructor(
     private readonly registry: ArchitectureRegistryService,
     private readonly sessions: SessionsService,
     private readonly sessionManager: SessionManagerService,
     @Inject(ARCHITECTURE_ROLE_EXECUTOR) private readonly roleExecutor: ArchitectureRoleExecutor,
-    @Optional() private readonly audit?: AuditService,
+    @Optional() audit?: AuditService,
     @Optional() vfs?: VFSService,
     @Optional() cliAgentConfig?: Pick<CLIAgentConfigService, 'getConfig'>,
-    @Optional() private readonly runtimeAudit?: RuntimeAuditLogger,
+    @Optional() runtimeAudit?: RuntimeAuditLogger,
     @Optional() preparation?: ArchitectureRunPreparationService,
+    @Optional() @Inject(ArchitectureRuntimeAuditWriterService) auditWriter?: ArchitectureRuntimeAuditWriter,
   ) {
     // TODO: legacy fallback: preserve direct-construction compatibility for existing tests and integrations.
     this.preparation = preparation ?? new ArchitectureRunPreparationService(registry, sessions, vfs, cliAgentConfig);
+    // TODO: legacy fallback: preserve direct-construction compatibility until all callers use Nest DI.
+    this.auditWriter = auditWriter ?? new ArchitectureRuntimeAuditWriterService(audit, runtimeAudit);
+    this.audit = audit;
   }
 
   async createRun(dto: CreateArchitectureRunDto, emit?: ArchitectureRoleExecutionInput['emit']): Promise<ArchitectureRun> {
@@ -138,8 +146,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       });
       this.runs.set(prepared.run.id, prepared.run);
       this.eventsByRunId.set(prepared.run.id, liveEvents);
-      this.auditArchitectureFailure(prepared.schema, prepared.run, failure);
-      this.auditArchitectureRun(prepared.schema, prepared.run, liveEvents);
+      this.auditWriter.logFailure(prepared.schema, prepared.run, failure);
+      this.auditWriter.logRun(prepared.schema, prepared.run, liveEvents);
       await this.persistParentChatProjectionSafely(prepared.schema, prepared.run, liveEvents);
       return prepared.run;
     }).finally(() => {
@@ -181,7 +189,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
           if (liveEvents) {
             run.updatedAt = Date.now();
             this.runs.set(run.id, run);
-            this.auditArchitectureEvent(schema, run, event);
+            this.auditWriter.logEvent(schema, run, event);
           }
         },
       });
@@ -225,19 +233,19 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
             ...events,
             terminalEvent,
           ];
-          this.auditArchitectureEvent(schema, run, terminalEvent);
+          this.auditWriter.logEvent(schema, run, terminalEvent);
         }
         run.errorCode = errorCode;
         run.failure = fallbackFailure;
-        this.auditArchitectureFailure(schema, run, fallbackFailure);
+        this.auditWriter.logFailure(schema, run, fallbackFailure);
       }
       run.updatedAt = completedAt;
       run.completedAt = completedAt;
       this.runs.set(run.id, run);
       this.schemasByRunId.set(run.id, cloneArchitectureRuntimeSchema(schema));
       this.eventsByRunId.set(run.id, events);
-      this.auditArchitectureHydration(run, hydration);
-      this.auditArchitectureRun(schema, run, events, liveEvents === undefined);
+      this.auditWriter.logHydration(run, hydration);
+      this.auditWriter.logRun(schema, run, events, liveEvents === undefined);
       await this.persistParentChatProjection(schema, run, events);
       return run;
     }
@@ -256,8 +264,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.runs.set(run.id, run);
     this.schemasByRunId.set(run.id, cloneArchitectureRuntimeSchema(schema));
     this.eventsByRunId.set(run.id, events);
-    this.auditArchitectureHydration(run, hydration);
-    this.auditArchitectureRun(schema, run, events, liveEvents === undefined);
+    this.auditWriter.logHydration(run, hydration);
+    this.auditWriter.logRun(schema, run, events, liveEvents === undefined);
     await this.persistParentChatProjection(schema, run, events);
     return run;
   }
@@ -306,8 +314,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.eventsByRunId.set(id, nextEvents);
     const schema = this.schemasByRunId.get(id) ?? this.registry.findOne(stoppedRun.schemaId);
     if (schema) {
-      this.auditArchitectureEvent(schema, stoppedRun, stopEvent);
-      this.auditArchitectureRun(schema, stoppedRun, nextEvents);
+      this.auditWriter.logEvent(schema, stoppedRun, stopEvent);
+      this.auditWriter.logRun(schema, stoppedRun, nextEvents);
       await this.persistParentChatProjectionSafely(schema, stoppedRun, nextEvents);
     }
     return stoppedRun;
@@ -587,153 +595,6 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
 
   private errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-  }
-
-  private auditArchitectureRun(
-    schema: ArchitectureSchema,
-    run: ArchitectureRun,
-    events: ArchitectureExecutionEvent[],
-    auditEvents = true,
-  ): void {
-    if (!this.audit) return;
-    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId;
-    void this.audit.log({
-      sessionId,
-      type: 'tool_result',
-      label: `architecture:${schema.id}:${run.id}`,
-      data: {
-        domain: 'architecture',
-        kind: 'architecture_runtime',
-        runId: run.id,
-        schemaId: schema.id,
-        executionMode: run.executionMode,
-        rootSessionId: run.rootSessionId,
-        branchSessionIds: run.branchSessionIds,
-        eventCount: events.length,
-        events: events.map((event) => ({
-          id: event.id,
-          type: event.type,
-          nodeId: event.nodeId,
-          roleSlotId: event.roleSlotId,
-          route: event.route,
-        })),
-      },
-    });
-    if (!auditEvents) {
-      return;
-    }
-    events.forEach((event) => {
-      this.auditArchitectureEvent(schema, run, event);
-    });
-  }
-
-  private auditArchitectureEvent(
-    schema: ArchitectureSchema,
-    run: ArchitectureRun,
-    event: ArchitectureExecutionEvent,
-  ): void {
-    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
-    if (this.audit) {
-      const actionFields = architectureActionFieldsForEvent(event);
-      void this.audit.log({
-        sessionId,
-        type: 'architecture_event',
-        label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
-        data: {
-          domain: 'architecture',
-          kind: 'architecture_event',
-          runId: run.id,
-          architectureRunId: run.id,
-          schemaId: schema.id,
-          executionMode: run.executionMode,
-          rootSessionId: run.rootSessionId,
-          eventId: event.id,
-          eventType: event.type,
-          sequence: event.sequence,
-          nodeId: event.nodeId,
-          roleSlotId: event.roleSlotId,
-          prompt: event.type === 'run_created' ? run.prompt : undefined,
-          reasonCode: event.reasonCode,
-          errorCode: event.errorCode,
-          failure: event.failure,
-          evidence: event.evidence,
-          runtimeDecision: event.runtimeDecision,
-          incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
-          runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
-          toolEvidence: this.toolEvidenceForAudit(event),
-          route: event.route,
-          routerOutput: event.routerOutput,
-          messagePreview: event.message.slice(0, 800),
-          actionSummary: actionFields.actionSummary,
-          action: actionFields.action,
-          detail: actionFields.detail,
-        },
-      });
-    }
-    const runtimeEvent = architectureRuntimeAuditEventInput(schema, run, event, sessionId);
-    if (runtimeEvent) {
-      void this.runtimeAudit?.log(runtimeEvent);
-    }
-  }
-
-  private toolEvidenceForAudit(event: ArchitectureExecutionEvent): Record<string, unknown> | undefined {
-    const value = event.data?.['toolEvidence'];
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-  }
-
-  private auditArchitectureFailure(
-    schema: ArchitectureSchema,
-    run: ArchitectureRun,
-    failure: WorkflowFailure,
-  ): void {
-    if (!this.audit) return;
-    void this.audit.log({
-      sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
-      type: 'error',
-      label: `architecture:error:${schema.id}:${run.id}`,
-      data: {
-        domain: 'architecture',
-        kind: 'architecture_error',
-        runId: run.id,
-        architectureRunId: run.id,
-        schemaId: schema.id,
-        executionMode: run.executionMode,
-        rootSessionId: run.rootSessionId,
-        branchSessionIds: run.branchSessionIds,
-        status: run.status,
-        errorCode: failure.code,
-        failure,
-        errorMessage: failure.message,
-      },
-    });
-    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
-    void this.runtimeAudit?.log(architectureFailureRuntimeAuditEventInput(schema, run, failure, sessionId));
-  }
-
-  private auditArchitectureHydration(
-    run: ArchitectureRun,
-    hydration: ArchitectureVfsHydrationResult | null,
-  ): void {
-    if (!this.audit || !hydration) return;
-    void this.audit.log({
-      sessionId: getArchitectureParentSessionId(run.context) ?? run.rootSessionId,
-      type: 'tool_result',
-      label: `architecture_hydration:${run.id}`,
-      data: {
-        domain: 'architecture',
-        kind: 'architecture_hydration',
-        runId: run.id,
-        architectureRunId: run.id,
-        rootSessionId: run.rootSessionId,
-        fromSessionId: hydration.fromSessionId,
-        targetPrefix: hydration.targetPrefix,
-        requestedPaths: hydration.requestedPaths,
-        copiedFiles: hydration.copiedFiles,
-        copiedCount: hydration.copiedFiles.length,
-        skippedPaths: hydration.skippedPaths,
-        skippedCount: hydration.skippedPaths.length,
-      },
-    });
   }
 
   private async reconstructRunFromAudit(runId: string): Promise<ArchitectureRun | null> {
