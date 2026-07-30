@@ -49,6 +49,67 @@ describe('MockLLMProvider', () => {
     }));
   });
 
+  it('returns a deterministic Data Analyst plan for local integration tests', async () => {
+    const provider = new MockLLMProvider();
+    const onStructuredOutput = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [{
+      role: 'user',
+      content: [
+        'Pytanie biznesowe: Pokaż przychód według regionu',
+        '- "OrderId" | Identyfikator | typ=id | agregacja=count',
+        '- "Region" | Region | typ=dimension | agregacja=count',
+        '- "Revenue" | Przychód | typ=measure | agregacja=sum',
+      ].join('\n'),
+    }];
+
+    await provider.streamChat(messages, [], {
+      sessionId: 'data-analyst-session',
+      messageId: 'data-analyst-message',
+      onChunk: vi.fn(),
+      onStructuredOutput,
+      structuredOutput: {
+        name: 'data_analyst_query_plan',
+        schema: {},
+      },
+    });
+
+    expect(onStructuredOutput).toHaveBeenCalledWith({
+      title: 'Analiza Revenue według Region',
+      targetMetric: 'Revenue',
+      dimension: 'Region',
+      aggregation: 'sum',
+      chartType: 'bar',
+      filters: [],
+      dateColumn: null,
+      dateGrain: null,
+      sql: 'SELECT "Region", SUM("Revenue") AS "Revenue" FROM dataset GROUP BY "Region"',
+    });
+  });
+
+  it('returns a deterministic Data Analyst explanation for local integration tests', async () => {
+    const provider = new MockLLMProvider();
+    const onStructuredOutput = vi.fn();
+
+    await provider.streamChat(
+      [{ role: 'user', content: 'Wyniki (maksymalnie 15 wierszy):\n[{"Region":"Północ","Revenue":300}]' }],
+      [],
+      {
+        sessionId: 'data-analyst-session',
+        messageId: 'data-analyst-message',
+        onChunk: vi.fn(),
+        onStructuredOutput,
+        structuredOutput: {
+          name: 'data_analyst_explanation',
+          schema: {},
+        },
+      },
+    );
+
+    expect(onStructuredOutput).toHaveBeenCalledWith({
+      explanation: expect.stringContaining('Analiza i wnioski'),
+    });
+  });
+
   it('REGRESSION: returns a deterministic raapp_create tool call without arg-progress chunks for fallback UX e2e', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

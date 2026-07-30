@@ -97,6 +97,26 @@ export class MockLLMProvider implements ILLMProvider {
       });
       return [];
     }
+    if (options.structuredOutput?.name === 'data_analyst_query_plan') {
+      options.onStructuredOutput?.(createMockDataAnalystPlan(lastMessage));
+      return [];
+    }
+    if (options.structuredOutput?.name === 'data_analyst_explanation') {
+      options.onStructuredOutput?.({
+        explanation: [
+          '## Analiza i wnioski',
+          'Mock Kalio potwierdziło wykonanie deterministycznej analizy w lokalnym DuckDB.',
+          '',
+          '## Kluczowe fakty',
+          '- Wyniki pochodzą z backendowego silnika obliczeniowego, nie z obliczeń LLM.',
+          '',
+          '## Rekomendowane pytania szczegółowe',
+          '- Jak wynik zmienia się w czasie?',
+          '- Które segmenty odpowiadają za największą część wyniku?',
+        ].join('\n'),
+      });
+      return [];
+    }
     if (lastMessage.includes(MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER)) {
       if (
         lastMessage.includes('Slot: Implementer')
@@ -288,4 +308,42 @@ function firstAvailableNextNode(message: string): string | null {
   const match = /Available next nodes:\s*([^\n]+)/.exec(message);
   const first = match?.[1]?.split(',')[0]?.trim();
   return first && /^[A-Za-z0-9_.:-]+$/.test(first) ? first : null;
+}
+
+function createMockDataAnalystPlan(message: string): Record<string, unknown> {
+  const dimension = extractSemanticColumn(message, 'dimension|date')
+    ?? extractSemanticColumn(message, 'id')
+    ?? 'Dimension';
+  const targetMetric = extractSemanticColumn(message, 'measure')
+    ?? extractSemanticColumn(message, 'id')
+    ?? 'Metric';
+  const aggregation = extractSemanticAggregation(message, targetMetric) ?? 'sum';
+  const quotedDimension = `"${dimension.replace(/"/g, '""')}"`;
+  const quotedMetric = `"${targetMetric.replace(/"/g, '""')}"`;
+
+  return {
+    title: `Analiza ${targetMetric} według ${dimension}`,
+    targetMetric,
+    dimension,
+    aggregation,
+    chartType: 'bar',
+    filters: [],
+    dateColumn: null,
+    dateGrain: null,
+    sql: `SELECT ${quotedDimension}, ${aggregation.toUpperCase()}(${quotedMetric}) AS ${quotedMetric} FROM dataset GROUP BY ${quotedDimension}`,
+  };
+}
+
+function extractSemanticColumn(message: string, semanticTypes: string): string | null {
+  const match = new RegExp(`^- "([^"]+)" .*typ=(${semanticTypes})\\b`, 'm').exec(message);
+  return match?.[1] ?? null;
+}
+
+function extractSemanticAggregation(message: string, column: string): string | null {
+  const escapedColumn = column.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(
+    `^- "${escapedColumn}" .*agregacja=(sum|avg|count|min|max)\\b`,
+    'm',
+  ).exec(message);
+  return match?.[1] ?? null;
 }
