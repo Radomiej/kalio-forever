@@ -7,58 +7,37 @@ import {
 } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type {
   CreateMCPServerDto,
   MCPServer,
-  MCPServerOriginSource,
-  MCPServerStore,
   MCPTool,
 } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { mcpServers } from '../../database/schema';
 import { KalioConfigService } from '../../config/kalio-config.service';
-import type { KalioMcpServerConfig } from '../../config/kalio-config.types';
 import {
-  buildMcpSignature,
   buildServerKey,
   makeMcpServerId,
   parseServerKey,
   resolveRegistryEntries,
   type MCPResolvedRegistryEntry,
 } from './mcp-registry.utils';
-import { buildMcpServerStatusPayload, buildMcpToolPayload } from './mcp-projections';
+import {
+  buildMcpServerStatusPayload,
+  buildMcpToolName,
+  buildMcpToolPayload,
+} from './mcp-projections';
+import {
+  configToMcpHandle,
+  createMcpTransport,
+  rowToMcpHandle,
+  type ServerHandle,
+} from './mcp-runtime.utils';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
 const MAX_RESTART_MS = 60_000;
-
-interface ServerHandle {
-  serverKey: string;
-  id: string;
-  name: string;
-  store: MCPServerStore;
-  originSource: MCPServerOriginSource;
-  transport: 'stdio' | 'http';
-  url?: string;
-  command?: string;
-  args?: string[];
-  envVars?: Record<string, string>;
-  headers?: Record<string, string>;
-  client: Client;
-  rawTransport: Transport | null;
-  status: 'connecting' | 'connected' | 'disconnected' | 'error';
-  tools: MCPTool[];
-  restartCount: number;
-  createdAt: number;
-  enabled: boolean;
-  lastError?: string;
-  permanentError?: boolean;
-  managed?: boolean;
-  signature: string;
-}
 
 type MCPServerRow = typeof mcpServers.$inferSelect;
 
@@ -109,7 +88,9 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     if (!ref) return undefined;
     const tools = this.handles.get(ref.serverKey)?.tools ?? [];
     return tools.find((tool) => (
-      tool.name === toolName || tool.name === `mcp_${ref.serverKey}_${ref.originalName}`
+      tool.name === toolName
+      || tool.name === buildMcpToolName(ref.serverKey, ref.originalName)
+      || tool.aliases?.includes(toolName)
     ));
   }
 
@@ -210,7 +191,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
 
     let transport: Transport;
     try {
-      transport = this.createTransport(handle);
+      transport = createMcpTransport(handle);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`[MCP] Transport error for ${handle.serverKey}: ${msg}`);
@@ -275,21 +256,6 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     this.emitStatus(handle);
   }
 
-  private createTransport(handle: ServerHandle): Transport {
-    if (handle.transport === 'stdio') {
-      if (!handle.command) throw new Error('stdio transport requires command');
-      return new StdioClientTransport({
-        command: handle.command,
-        args: handle.args ?? [],
-        env: { ...process.env, ...(handle.envVars ?? {}) } as Record<string, string>,
-      });
-    }
-    if (!handle.url) throw new Error('http transport requires url');
-    return new StreamableHTTPClientTransport(new URL(handle.url), {
-      requestInit: { headers: handle.headers ?? {} },
-    });
-  }
-
   private async discoverTools(serverKey: string, client: Client): Promise<MCPTool[]> {
     const tools: MCPTool[] = [];
     let cursor: string | undefined;
@@ -298,9 +264,20 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     do {
       const result = await client.listTools(cursor ? { cursor } : undefined);
       for (const t of result.tools) {
-        const canonicalName = `mcp_${serverKey}_${t.name}`;
-        this.toolNameMap.set(canonicalName, { serverKey, originalName: t.name });
-        tools.push(buildMcpToolPayload(serverKey, t));
+        const tool = buildMcpToolPayload(serverKey, t);
+        const ref = { serverKey, originalName: t.name };
+        for (const name of [tool.name, ...(tool.aliases ?? [])]) {
+          const existing = this.toolNameMap.get(name);
+          if (!existing) {
+            this.toolNameMap.set(name, ref);
+          } else if (
+            existing.serverKey !== serverKey
+            || existing.originalName !== t.name
+          ) {
+            this.toolNameMap.delete(name);
+          }
+        }
+        tools.push(tool);
       }
       cursor = result.nextCursor;
       iterations++;
@@ -356,110 +333,13 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     const { config } = await this.kalioConfig.getEffectiveConfig();
     return Object.entries(config.mcp_servers ?? {})
       .filter(([, server]) => server.enabled !== false)
-      .map(([id, server]) => this.configToHandle(id, server));
-  }
-
-  private configToHandle(id: string, server: KalioMcpServerConfig): ServerHandle {
-    const serverKey = buildServerKey('toml', id);
-    const envVars = this.resolveEnv(server);
-    const headers = this.resolveHeaders(server);
-    return {
-      id,
-      serverKey,
-      name: id,
-      store: 'toml',
-      originSource: 'toml',
-      transport: server.url ? 'http' : 'stdio',
-      url: server.url,
-      command: server.command,
-      args: server.args,
-      envVars,
-      headers,
-      client: null as unknown as Client,
-      rawTransport: null,
-      status: 'disconnected',
-      tools: [],
-      restartCount: 0,
-      createdAt: 0,
-      enabled: server.enabled !== false,
-      managed: true,
-      signature: buildMcpSignature({
-        transport: server.url ? 'http' : 'stdio',
-        url: server.url,
-        command: server.command,
-        args: server.args,
-        env: envVars,
-        headers,
-      }),
-    };
-  }
-
-  private resolveEnv(server: KalioMcpServerConfig): Record<string, string> | undefined {
-    const env: Record<string, string> = { ...(server.env ?? {}) };
-    for (const entry of server.env_vars ?? []) {
-      const name = typeof entry === 'string' ? entry : entry.name;
-      const source = typeof entry === 'string' ? 'local' : entry.source;
-      if (source !== 'local') continue;
-      const value = process.env[name];
-      if (value !== undefined) {
-        env[name] = value;
-      }
-    }
-    return Object.keys(env).length > 0 ? env : undefined;
-  }
-
-  private resolveHeaders(server: KalioMcpServerConfig): Record<string, string> | undefined {
-    const headers: Record<string, string> = { ...(server.http_headers ?? {}) };
-    for (const [header, envName] of Object.entries(server.env_http_headers ?? {})) {
-      const value = process.env[envName];
-      if (value !== undefined) {
-        headers[header] = value;
-      }
-    }
-    if (server.bearer_token_env_var) {
-      const token = process.env[server.bearer_token_env_var];
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-    }
-    return Object.keys(headers).length > 0 ? headers : undefined;
+      .map(([id, server]) => configToMcpHandle(id, server));
   }
 
   private removeToolRefs(serverKey: string): void {
     for (const [name, info] of this.toolNameMap) {
       if (info.serverKey === serverKey) this.toolNameMap.delete(name);
     }
-  }
-
-  private rowToHandle(row: MCPServerRow): ServerHandle {
-    return {
-      id: row.id,
-      serverKey: buildServerKey('sqlite', row.id),
-      name: row.name,
-      store: 'sqlite',
-      originSource: row.originSource ?? 'manual',
-      transport: (row.transport as 'stdio' | 'http') ?? 'http',
-      url: row.url ?? undefined,
-      command: row.command ?? undefined,
-      args: row.args ?? undefined,
-      envVars: row.envVars ?? undefined,
-      headers: row.headers ?? undefined,
-      client: null as unknown as Client,
-      rawTransport: null,
-      status: 'disconnected',
-      tools: [],
-      restartCount: 0,
-      createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : (row.createdAt as number),
-      enabled: row.enabled ?? true,
-      signature: buildMcpSignature({
-        transport: (row.transport as 'stdio' | 'http') ?? 'http',
-        url: row.url ?? undefined,
-        command: row.command ?? undefined,
-        args: row.args ?? undefined,
-        env: row.envVars ?? undefined,
-        headers: row.headers ?? undefined,
-      }),
-    };
   }
 
   private async loadRegistryEntries(enabledRowsOnly = false): Promise<{
@@ -529,7 +409,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     const scheduled: ServerHandle[] = [];
     for (const entry of activeEntries) {
       const desiredHandle = registry.managedByServerKey.get(entry.serverKey)
-        ?? this.rowToHandle(registry.rowsByServerKey.get(entry.serverKey)!);
+        ?? rowToMcpHandle(registry.rowsByServerKey.get(entry.serverKey)!);
       const currentHandle = this.handles.get(entry.serverKey);
 
       if (currentHandle && this.sameHandleConfig(currentHandle, desiredHandle)) {
@@ -561,7 +441,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     return activeEntries.map((entry) =>
       this.handles.get(entry.serverKey)
       ?? registry.managedByServerKey.get(entry.serverKey)
-      ?? this.rowToHandle(registry.rowsByServerKey.get(entry.serverKey)!));
+      ?? rowToMcpHandle(registry.rowsByServerKey.get(entry.serverKey)!));
   }
 
   private sameHandleConfig(left: ServerHandle, right: ServerHandle): boolean {

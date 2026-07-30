@@ -254,6 +254,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Persisted chat-history fixtures must seed assistant messages with durable `turn_id` and `prompt_message_id`; chronological reconstruction is only a legacy fallback, not an E2E contract.
 - After rebuilding the frontend while a random-port QA stack is already running, refresh `apps/kalio-web/dist/runtime-config.js` from the managed stack state before Playwright/release gates so API and Socket.IO origins stay authoritative.
 - Never treat fixed-duration waits as an architecture fix; sleeps are only diagnostic/test fallbacks, while runtime stability must use typed state, drain/ack barriers, or explicit lifecycle events.
+- Treat Data Analyst MCP as a session-scoped, composable data/artifact engine for agents; keep one-click `run_analysis` only as a compatibility facade, not the native agent workflow.
 
 ---
 

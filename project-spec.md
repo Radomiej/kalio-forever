@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-07-16
+Last updated: 2026-07-30
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -76,6 +76,37 @@ flowchart TD
 - Router/parent nodes pass downstream context as typed handoff packets derived from `ArchitectureRouterOutput`: target, action, confidence, accepted inputs, rejected inputs, conflicts, risks, and response.
 - `routerOutput.nextAction` is the control contract. Only `route_to` may become a downstream route call; `ask_human` and other pause actions may keep `targetNodeId` as context, but must not emit route hops or selected downstream nodes.
 - A visible handoff bubble is display-only. The actual route is selected from typed `routerOutput` and graph edges.
+
+## External Structured LLM API
+
+- Kalio may serve product-specific local applications through `POST /api/v1/llm/structured`; Kalio remains the sole owner of provider credentials, active provider/model selection, generation limits, and provider error normalization.
+- External callers provide bounded text messages and a bounded JSON Schema. They never receive provider credentials or an endpoint that executes tools.
+- The endpoint is disabled until `KALIO_EXTERNAL_API_TOKEN` is configured. Every caller, including loopback callers, must send the matching bearer token.
+- A product-specific caller owns its domain prompts and validates the returned object against its own semantic/domain boundary before using it.
+- An external structured request is not a chat turn, workflow run, or durable child execution. It must not fabricate chat/session lifecycle evidence or mutate runtime projections.
+
+## Data Analyst MCP Boundary
+
+- Data Analyst is a session-scoped data and artifact engine exposed through
+  authenticated Streamable HTTP MCP. Kalio, Codex, and other agents own
+  investigative reasoning and final narrative; DA owns dataset access,
+  deterministic computation, durable analysis history, replay, and report UI.
+- The native workflow is composable: create a document-scoped session, profile
+  datasets, query bounded SQL, search text, inspect relationships, read/replay
+  immutable artifacts, and publish an agent-authored report.
+  `data_analyst_run_analysis` is compatibility-only.
+- Every session pins exact dataset fingerprints. Every operation appends an
+  immutable artifact containing its inputs, outputs, timestamps, and lineage,
+  so the analysis can be audited and replayed without reconstructing it from
+  chat prose.
+- Raw SQL access is disabled by default and is allowed only for a trusted local
+  agent through explicit runtime configuration. It remains read-only,
+  dataset-scoped, parsed, and bounded. Raw artifacts cannot be embedded in
+  report snapshots.
+- `.kalio/config.toml` is the canonical repo-managed Kalio MCP registration.
+  Provider-facing MCP tool names must be deterministic, collision-resistant,
+  and compatible with OpenAI-style function-name constraints; legacy names are
+  aliases only.
 
 ```mermaid
 classDiagram
