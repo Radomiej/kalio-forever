@@ -7,6 +7,8 @@ const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta
 const installScriptSource = readFileSync(new URL('./install.ps1', import.meta.url), 'utf8');
 const autostartScriptSource = readFileSync(new URL('./kalio-autostart.ps1', import.meta.url), 'utf8');
 const prodScriptSource = readFileSync(new URL('../start-prod.ps1', import.meta.url), 'utf8');
+const devScriptSource = readFileSync(new URL('../start-dev.ps1', import.meta.url), 'utf8');
+const devCmdSource = readFileSync(new URL('../start-dev.cmd', import.meta.url), 'utf8');
 const quickstartSource = readFileSync(new URL('../docs/quickstart-user.md', import.meta.url), 'utf8');
 const localDevGuideSource = readFileSync(new URL('../docs/local-dev-guide.md', import.meta.url), 'utf8');
 const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
@@ -99,6 +101,37 @@ test('prod launcher reads canonical stack-manager status instead of a legacy sta
   assert.match(prodScriptSource, /\$statusJson = & \$nodeCmd\.Source \(Join-Path \$root 'scripts\\stack-manager\.mjs'\) 'status' '--json'/);
   assert.match(prodScriptSource, /\$state = \$status\.state/);
   assert.doesNotMatch(prodScriptSource, /\.kalio-stack\\qa-stack-state\.json/);
+});
+
+test('dev launcher does not kill listeners unless ForceRestart is explicit', () => {
+  assert.match(devScriptSource, /if \(\$ForceRestart\) \{[\s\S]*Stop-PreviousKalioLaunchers/);
+  assert.match(devScriptSource, /Clear-OccupiedPorts -Ports @\(\$BE_PORT, \$FE_PORT\) -Force:\$ForceRestart/);
+  assert.match(devScriptSource, /if \(-not \$Force\) \{[\s\S]*Ports are already in use/);
+  assert.doesNotMatch(devCmdSource, /-ForceRestart/);
+});
+
+test('desktop build contract keeps the bundled backend and AppData paths aligned', () => {
+  const desktopBuildSource = readFileSync(new URL('./desktop-build.mjs', import.meta.url), 'utf8');
+  const desktopPrepareSource = readFileSync(new URL('./tauri-prepare.mjs', import.meta.url), 'utf8');
+  const desktopBootstrapSource = readFileSync(new URL('./desktop-server-bootstrap.mjs', import.meta.url), 'utf8');
+  const tauriConfigSource = readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8');
+  const backendSource = readFileSync(new URL('../src-tauri/src/backend.rs', import.meta.url), 'utf8');
+
+  assert.match(desktopBuildSource, /VITE_API_URL: desktopBackendOrigin/);
+  assert.match(desktopPrepareSource, /kalio-server/);
+  assert.match(desktopPrepareSource, /kalio-node\.exe/);
+  assert.match(desktopPrepareSource, /runtime-config\.js/);
+  assert.match(desktopPrepareSource, /node-linker=hoisted/);
+  assert.match(desktopPrepareSource, /--ignore-workspace/);
+  assert.match(desktopPrepareSource, /name !== '@kalio\/types'/);
+  assert.match(desktopBootstrapSource, /CREDENTIALS_MASTER_KEY/);
+  assert.match(desktopBootstrapSource, /randomBytes\(32\)/);
+  assert.match(tauriConfigSource, /"installMode": "currentUser"/);
+  assert.match(tauriConfigSource, /127\.0\.0\.1:4516/);
+  assert.match(backendSource, /app_local_data_dir\(\)/);
+  assert.match(backendSource, /normalize_windows_path/);
+  assert.match(backendSource, /const BACKEND_PORT: u16 = 4516/);
+  assert.match(backendSource, /http:\/\/tauri\.localhost/);
 });
 
 test('stack manager refreshes managed PIDs from live port owners and refuses unmanaged port reuse', () => {

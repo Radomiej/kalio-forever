@@ -1,0 +1,19 @@
+[package]
+name = "kalio"
+version = "1.0.0"
+description = "Kalio local-first agent workflow runtime"
+authors = ["Radomiej"]
+license = "UNLICENSED"
+repository = "https://github.com/Radomiej/kalio-forever"
+edition = "2021"
+
+[lib]
+name = "kalio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde_json = "1"
+tauri = { version = "2.6.3", features = [] }

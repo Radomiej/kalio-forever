@@ -205,3 +205,10 @@ window.parent.postMessage({ type: 'kalio_send_message', content: 'user answer' }
 - Type duplication — all shared types in `@kalio/types/src/index.ts`
 - `workspaceId` on any session/message/tool type — deliberately removed
 - Modifying: `packages/@kalio/types/**`, `apps/kalio-api/src/main.ts`, `turbo.json`, `pnpm-workspace.yaml`, `drizzle.config.ts` without explicit ask
+
+<!-- mermaid-ai-skills:start -->
+## Mermaid Diagrams
+
+When the user asks to create, edit, or visualize a diagram, follow the
+instructions in `.github/instructions/mermaid.instructions.md`.
+<!-- mermaid-ai-skills:end -->

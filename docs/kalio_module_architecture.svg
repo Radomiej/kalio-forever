@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 1280 780" xmlns="http://www.w3.org/2000/svg" role="img">
   <title>Kalio current module architecture</title>
-  <desc>Session-centric system map showing the frontend thin client, the session event lane, the backend orchestration modules, shared contracts, and runtime storage.</desc>
+  <desc>Session-centric system map showing the React client, runtime event lane, backend orchestration, shared contracts, and persistence.</desc>
 
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -27,9 +27,9 @@
       .subtitle { font: 500 16px 'Segoe UI', Arial, sans-serif; fill: #5b6472; }
       .pill { font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; }
       .cardTitle { font: 700 26px 'Segoe UI', Arial, sans-serif; fill: #1f2937; }
-      .cardBody { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
-      .label { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #6b7280; }
-      .small { font: 600 14px 'Segoe UI', Arial, sans-serif; fill: #64748b; }
+      .cardBody { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #4b5563; }
+      .label { font: 700 12px 'Segoe UI', Arial, sans-serif; fill: #6b7280; }
+      .small { font: 600 13px 'Segoe UI', Arial, sans-serif; fill: #64748b; }
     </style>
   </defs>
 
@@ -41,10 +41,10 @@
     <rect x="60" y="44" width="1160" height="130" rx="30" fill="#fffdfa" stroke="#e6dfd1" stroke-width="1.2"/>
   </g>
   <text x="92" y="96" class="title">Kalio Runtime Architecture</text>
-  <text x="92" y="128" class="subtitle">A thin React client drives session-scoped events. The backend owns orchestration, tools, persistence, and isolation boundaries.</text>
+  <text x="92" y="128" class="subtitle">A thin React client projects session events. The backend owns runtime orchestration and persistence.</text>
   <g>
-    <rect x="910" y="72" width="250" height="36" rx="18" fill="#f4efe3" stroke="#d9ccb3" stroke-width="1"/>
-    <text x="1035" y="95" text-anchor="middle" class="pill" fill="#7a5a12">ChatSession isolates history, VFS, KV, approvals, sub-agents</text>
+    <rect x="954" y="72" width="220" height="36" rx="18" fill="#f4efe3" stroke="#d9ccb3" stroke-width="1"/>
+    <text x="1064" y="95" text-anchor="middle" class="pill" fill="#7a5a12">Session-scoped isolation</text>
   </g>
 
   <g filter="url(#shadow)">
@@ -53,10 +53,11 @@
   <rect x="96" y="244" width="116" height="30" rx="15" fill="#e5dcff"/>
   <text x="154" y="264" text-anchor="middle" class="pill" fill="#5b44cc">Frontend</text>
   <text x="96" y="312" class="cardTitle" fill="#332b84">React surface</text>
-  <text x="96" y="352" class="cardBody">ChatInterface, CanvasPanel, ToolCallBubble</text>
-  <text x="96" y="386" class="cardBody">sessionStore keeps transcript state and sessions</text>
-  <text x="96" y="420" class="cardBody">agentStore keeps live chunks, queue state, confirmations</text>
-  <text x="96" y="454" class="cardBody">eventBus and @kalio/sdk mirror the socket contract</text>
+  <text x="96" y="350" class="cardBody">
+    <tspan x="96" dy="0">Chat, canvas, and tool feedback</tspan>
+    <tspan x="96" dy="25">Session state and live activity</tspan>
+    <tspan x="96" dy="25">Typed socket contract projection</tspan>
+  </text>
 
   <g filter="url(#shadow)">
     <rect x="440" y="250" width="310" height="220" rx="34" fill="#fffaf3" stroke="#dfcfb3" stroke-width="1.4"/>
@@ -64,36 +65,44 @@
   <rect x="480" y="282" width="150" height="30" rx="15" fill="#f4ece0"/>
   <text x="555" y="302" text-anchor="middle" class="pill" fill="#7d5c1e">Session lane</text>
   <text x="480" y="348" class="cardTitle" fill="#2b2f36">Socket.IO + queue</text>
-  <text x="480" y="382" class="cardBody">chat, tool, agent, session, and RA-App events</text>
-  <text x="480" y="416" class="cardBody">One active turn per session via SessionPipelineService</text>
-  <text x="480" y="450" class="cardBody">Interrupts, confirmations, and child runs stay scoped</text>
+  <text x="480" y="378" class="cardBody">
+    <tspan x="480" dy="0">Session events and turn ordering</tspan>
+    <tspan x="480" dy="25">One active turn per session</tspan>
+    <tspan x="480" dy="25">Scoped confirmations and child runs</tspan>
+  </text>
 
   <g filter="url(#shadow)">
-    <rect x="800" y="220" width="410" height="220" rx="30" fill="#e8f8f1" stroke="#1e8b69" stroke-width="1.5"/>
+    <rect x="800" y="220" width="410" height="250" rx="30" fill="#e8f8f1" stroke="#1e8b69" stroke-width="1.5"/>
   </g>
   <rect x="826" y="244" width="166" height="30" rx="15" fill="#d8f1e6"/>
   <text x="909" y="264" text-anchor="middle" class="pill" fill="#0d7c5d">Backend orchestration</text>
   <text x="826" y="312" class="cardTitle" fill="#125542">NestJS control plane</text>
-  <text x="826" y="352" class="cardBody">ChatGateway receives and emits session-scoped events</text>
-  <text x="826" y="386" class="cardBody">ChatService drives LLM streaming, tool loops, persistence</text>
-  <text x="826" y="420" class="cardBody">ToolDispatch, MCP, RA-App, VFS, Image, Memory, Persona plug in here</text>
+  <text x="826" y="348" class="cardBody">
+    <tspan x="826" dy="0">Gateway, turns, tools, and runtime state</tspan>
+    <tspan x="826" dy="25">MCP, RA-App, VFS, and memory integrations</tspan>
+  </text>
 
   <g filter="url(#shadow)">
-    <rect x="800" y="468" width="410" height="168" rx="30" fill="#fff9f1" stroke="#d59b2b" stroke-width="1.4"/>
+    <rect x="800" y="500" width="410" height="186" rx="30" fill="#fff9f1" stroke="#d59b2b" stroke-width="1.4"/>
   </g>
-  <rect x="826" y="492" width="150" height="30" rx="15" fill="#f7e7c9"/>
-  <text x="901" y="512" text-anchor="middle" class="pill" fill="#936510">Runtime storage</text>
-  <text x="826" y="558" class="cardTitle" fill="#5d4210">Persistent state</text>
-  <text x="826" y="592" class="cardBody">SQLite rows for sessions, messages, tools, MCP, audit, RA-Apps</text>
-  <text x="826" y="626" class="cardBody">sessions/{id}/files and sessions/{id}/_kv.json for per-session data</text>
+  <rect x="826" y="524" width="150" height="30" rx="15" fill="#f7e7c9"/>
+  <text x="901" y="544" text-anchor="middle" class="pill" fill="#936510">Runtime storage</text>
+  <text x="826" y="590" class="cardTitle" fill="#5d4210">Persistent state</text>
+  <text x="826" y="620" class="cardBody">
+    <tspan x="826" dy="0">SQLite sessions, messages, tools, and audit</tspan>
+    <tspan x="826" dy="25">Session files and key-value state</tspan>
+  </text>
 
   <g filter="url(#shadow)">
-    <rect x="70" y="550" width="680" height="136" rx="30" fill="#fdf4e6" stroke="#ba7d16" stroke-width="1.4"/>
+    <rect x="70" y="550" width="680" height="150" rx="30" fill="#fdf4e6" stroke="#ba7d16" stroke-width="1.4"/>
   </g>
   <rect x="96" y="574" width="164" height="30" rx="15" fill="#f6e1b9"/>
   <text x="178" y="594" text-anchor="middle" class="pill" fill="#8d5e10">Shared contracts</text>
-  <text x="96" y="640" class="cardTitle" fill="#63380a">@kalio/types</text>
-  <text x="96" y="674" class="cardBody">SocketEvents, ChatMessage, ToolResult, MCPServer, GuiDslPayload, AuditLogEntry</text>
+  <text x="96" y="632" class="cardTitle" fill="#63380a">@kalio/types</text>
+  <text x="96" y="660" class="cardBody">
+    <tspan x="96" dy="0">Events, sessions, tools, MCP, and AgentFlow</tspan>
+    <tspan x="96" dy="21">Shared across the runtime boundary</tspan>
+  </text>
 
   <line x1="390" y1="360" x2="438" y2="360" stroke="#7a7a7a" stroke-width="2.2" marker-end="url(#arrow)"/>
   <line x1="750" y1="360" x2="798" y2="360" stroke="#7a7a7a" stroke-width="2.2" marker-end="url(#arrow)"/>
@@ -101,9 +110,9 @@
   <text x="774" y="340" text-anchor="middle" class="label">queue + dispatch</text>
 
   <line x1="220" y1="500" x2="220" y2="548" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="980" y1="440" x2="980" y2="466" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="980" y1="470" x2="980" y2="498" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="560" y1="470" x2="560" y2="548" stroke="#7a7a7a" stroke-width="2" marker-end="url(#arrow)"/>
   <text x="252" y="530" class="small">imports contracts</text>
-  <text x="1008" y="454" class="small">writes runtime state</text>
+  <text x="1008" y="488" class="small">writes runtime state</text>
   <text x="590" y="520" class="small">typed wire format</text>
 </svg>

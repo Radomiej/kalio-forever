@@ -36,9 +36,13 @@
     "stack:status": "node scripts/stack-manager.mjs status",
     "stack:stop": "node scripts/stack-manager.mjs stop",
     "bench:embeddings": "node scripts/bench-embeddings.mjs",
-    "llm:probe": "node scripts/probe-llm.mjs"
+    "llm:probe": "node scripts/probe-llm.mjs",
+    "tauri": "node node_modules/@tauri-apps/cli/tauri.js",
+    "desktop:prepare": "node scripts/tauri-prepare.mjs",
+    "desktop:build": "node scripts/desktop-build.mjs"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.11.0",
     "turbo": "^2.4.0",
     "typescript": "~5.8.2"
   },

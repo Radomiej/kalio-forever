@@ -32,3 +32,5 @@ kalio-*.png
 tmp/runtime-report/
 docs/sessions/
 apps/output/
+src-tauri/resources/
+src-tauri/target/

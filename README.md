@@ -44,25 +44,25 @@ Kalio keeps two graphs separate but connected:
 - **Execution Graph** - what actually happened in a specific run.
 
 ~~~mermaid
-flowchart LR
-  Editor["Architecture Editor"]
-  Registry["Architecture Registry"]
-  Runtime["Architecture Runtime"]
-  Viewer["Execution Viewer"]
+flowchart TB
+  Design["Architecture<br/>design"]
+  Registry["Versioned<br/>schema"]
+  Runtime["Runtime<br/>execution"]
+  Inspect["Execution<br/>inspect"]
 
-  Editor -->|design protocol graph| Registry
-  Registry -->|load schema or variant| Runtime
-  Runtime -->|events and projections| Viewer
-  Viewer -->|timeline, graph, chat| Editor
+  Design -->|save graph| Registry
+  Registry -->|load version| Runtime
+  Runtime -->|project events| Inspect
+  Inspect -.->|timeline + graph| Design
 ~~~
 
 <p align="center">
   <img src="docs/kalio_module_architecture.svg" alt="Kalio frontend and backend module architecture" />
 </p>
 
-The frontend is a thin projection client. The backend owns queueing, tool
-execution, memory, persistence, and I/O. ChatSession is the isolation unit for
-chat history, VFS state, approvals, and sub-agent lineage.
+The React client projects session state and runtime activity. The backend owns
+orchestration, tools, memory, persistence, and I/O. ChatSession scopes history,
+files, approvals, and child runs.
 
 Read the [AgentFlow architecture guide](docs/agentflow-architecture-and-workflow.md)
 for the full runtime model, or the [Architect User Guide](docs/architect-user-guide.md)
@@ -89,6 +89,27 @@ Open **http://localhost:6188**. The API health endpoint is
 
 See the [Windows user guide](docs/quickstart-user.md) for upgrades,
 uninstall, data locations, and troubleshooting.
+
+### Standalone desktop build
+
+The Windows desktop build packages the web client, the production API, and a
+Node.js runtime into a per-user Tauri installer. The backend starts on loopback
+and stores the SQLite database, workspaces, memory, embeddings cache, secrets,
+and logs under Tauri's local app-data directory (`%LOCALAPPDATA%`, currently
+`com.radomiej.kalio`).
+
+Requirements for building: Node.js 22+, pnpm 9+, Rust with the MSVC Windows
+target, and WebView2 on the target machine.
+
+~~~powershell
+pnpm install
+pnpm desktop:build
+~~~
+
+The NSIS installer is written to
+`src-tauri/target/release/bundle/nsis/Kalio_1.0.0_x64-setup.exe`.
+The desktop backend uses `http://127.0.0.1:4516`; this port is reserved for
+the installed desktop app and should not be shared with another local service.
 
 ### Develop from a clone
 
@@ -177,32 +198,42 @@ stack, CI, release, and test command map.
 Every user message follows the same high-level path:
 
 ~~~mermaid
+%%{init: {"sequence": {"mirrorActors": false}}}%%
 sequenceDiagram
   participant U as User
-  participant FE as Web client
-  participant GW as Chat gateway
-  participant P as Session pipeline
-  participant LLM as Configured provider
-  participant T as Tool dispatch
+  participant FE as Browser
+  participant GW as Gateway
+  participant P as Pipeline
 
   U->>FE: Send message
-  FE->>GW: chat:send(sessionId, content)
+  FE->>GW: chat:send
   GW->>P: Submit turn
 
-  alt Active turn exists
-    P-->>FE: chat:queued
+  alt Turn active
+    P-->>FE: queued
   else Dispatch now
-    loop LLM and tool iterations
-      P->>LLM: Stream response
-      LLM-->>FE: Live chunks
-      opt Tool call emitted
-        P->>T: Dispatch tool
-        T-->>FE: Progress or confirmation
-        T-->>P: Tool result
-      end
-    end
-    P-->>FE: chat:complete and agent:done
+    P-->>FE: start turn
   end
+~~~
+
+~~~mermaid
+%%{init: {"sequence": {"mirrorActors": false}}}%%
+sequenceDiagram
+  participant FE as Browser
+  participant P as Pipeline
+  participant LLM as Provider
+  participant T as Tools
+
+  loop Turn iterations
+    P->>LLM: Stream
+    LLM-->>FE: Chunks
+    opt Tool call
+      P->>T: Dispatch
+      T-->>FE: Progress / confirm
+      T-->>P: Result
+    end
+  end
+  P-->>FE: Complete + done
 ~~~
 
 Tools with requiresConfirmation=true pause before execution. The frontend shows

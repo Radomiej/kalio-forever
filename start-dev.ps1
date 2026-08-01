@@ -24,12 +24,6 @@ $devDataRoot = Join-Path $localAppData "kalio-forever-dev"
 $BE_PORT = $BackendPort
 $FE_PORT = $FrontendPort
 
-# Singleton lock — must run before port cleanup or stack startup.
-$script:devStackMutex = $null
-$script:devStackMutexOwned = $false
-$script:devStackMutexBypassed = $false
-$devStackMutexName = "Global\KalioForever-DevStack-$BE_PORT-$FE_PORT"
-
 function Get-PortOwners {
     param([int[]]$Ports)
 
@@ -42,121 +36,59 @@ function Get-PortOwners {
     ) | Sort-Object -Unique
 }
 
-function Get-DevLauncherProcessIds {
-    param([int]$CurrentProcessId)
-
+function Stop-PreviousKalioLaunchers {
     $escapedRoot = [Regex]::Escape($root)
-    @(
-        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.ProcessId -ne $CurrentProcessId -and
-                $_.CommandLine -and
-                $_.CommandLine -match $escapedRoot -and
-                $_.CommandLine -match 'start-dev\.ps1'
-            } |
-            Select-Object -ExpandProperty ProcessId
-    ) | Sort-Object -Unique
-}
+    try {
+        $processes = @(
+            Get-CimInstance Win32_Process -ErrorAction Stop |
+                Where-Object {
+                    $_.ProcessId -ne $PID -and
+                    $_.CommandLine -and
+                    $_.CommandLine -match $escapedRoot -and
+                    $_.CommandLine -match 'start-dev\.ps1'
+                }
+        )
+    } catch {
+        Write-Host "  [warn] Could not inspect previous Kalio launchers: $($_.Exception.Message)" -ForegroundColor Yellow
+        return
+    }
 
-function Stop-DevLauncherProcesses {
-    param([int[]]$ProcessIds)
-
-    foreach ($processId in @($ProcessIds | Where-Object { $_ -gt 0 } | Sort-Object -Unique)) {
+    foreach ($process in $processes) {
         try {
-            Stop-Process -Id $processId -Force -ErrorAction Stop
-            Write-Host "  [kill] stale dev launcher PID $processId" -ForegroundColor DarkYellow
+            & taskkill.exe /PID $process.ProcessId /T /F 2>$null | Out-Null
+            Write-Host "  [kill] stale Kalio launcher PID $($process.ProcessId)" -ForegroundColor DarkYellow
         } catch {
-            Write-Host "  [warn] could not stop stale dev launcher PID ${processId}: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "  [warn] Could not stop stale Kalio launcher PID $($process.ProcessId): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 }
 
-function Try-AcquireDevStackMutex {
-    $script:devStackMutex = [System.Threading.Mutex]::new($false, $devStackMutexName)
-    $script:devStackMutexOwned = $script:devStackMutex.WaitOne(0, $false)
-    return $script:devStackMutexOwned
-}
-
-try {
-    $script:devStackMutexOwned = Try-AcquireDevStackMutex
-    if (-not $script:devStackMutexOwned) {
-        if ($ForceRestart) {
-            Write-Host "  Force restart requested; removing stale dev launcher state..." -ForegroundColor DarkYellow
-            Stop-DevLauncherProcesses -ProcessIds (Get-DevLauncherProcessIds -CurrentProcessId $PID)
-            if ($script:devStackMutex) {
-                try { $script:devStackMutex.Dispose() } catch { }
-                $script:devStackMutex = $null
-            }
-            Start-Sleep -Milliseconds 400
-            $script:devStackMutexOwned = Try-AcquireDevStackMutex
-            if (-not $script:devStackMutexOwned) {
-                $portOwners = @(Get-PortOwners -Ports @($BE_PORT, $FE_PORT))
-                if ($portOwners.Count -eq 0) {
-                    # A killed launcher can leave an unrecoverable Global mutex behind.
-                    Write-Host "  Force restart bypassing orphaned dev stack mutex; ports are free." -ForegroundColor DarkYellow
-                    if ($script:devStackMutex) {
-                        try { $script:devStackMutex.Dispose() } catch { }
-                        $script:devStackMutex = $null
-                    }
-                    $script:devStackMutexBypassed = $true
+function Stop-PreviousKalioWatchers {
+    try {
+        $processes = @(
+            Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction Stop |
+                Where-Object {
+                    $_.CommandLine -and
+                    $_.CommandLine -match [Regex]::Escape($root) -and
+                    (
+                        $_.CommandLine -match 'nest\.js.*start.*--watch' -or
+                        $_.CommandLine -match "vite\.js.*--port\s+$FE_PORT"
+                    )
                 }
-            }
-        }
+        )
+    } catch {
+        Write-Host "  [warn] Could not inspect previous Kalio watchers: $($_.Exception.Message)" -ForegroundColor Yellow
+        return
     }
-    if (-not $script:devStackMutexOwned -and -not $script:devStackMutexBypassed) {
-        $beHealthy = $false
-        $feHealthy = $false
-        try {
-            $beResponse = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-            $beHealthy = $beResponse.StatusCode -eq 200
-        } catch { }
-        try {
-            $feResponse = Invoke-WebRequest -Uri "http://localhost:$FE_PORT" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-            $feHealthy = $feResponse.StatusCode -eq 200
-        } catch { }
 
-        if ($beHealthy -and $feHealthy) {
-            Write-Host "[OK] Kalio dev stack already running on ports $BE_PORT/$FE_PORT." -ForegroundColor Green
-            Write-Host "  Backend  -> http://localhost:$BE_PORT" -ForegroundColor Green
-            Write-Host "  Frontend -> http://localhost:$FE_PORT" -ForegroundColor Green
-            Write-Host "  Attached to existing stack (dev-servers watchdog)." -ForegroundColor DarkGray
-            if ($script:devStackMutex) {
-                try { $script:devStackMutex.Dispose() } catch { }
-                $script:devStackMutex = $null
-            }
-            while ($true) {
-                Start-Sleep -Seconds 15
-                $stillHealthy = $true
-                try {
-                    $beCheck = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-                    if ($beCheck.StatusCode -ne 200) { $stillHealthy = $false }
-                } catch { $stillHealthy = $false }
-                try {
-                    $feCheck = Invoke-WebRequest -Uri "http://localhost:$FE_PORT" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-                    if ($feCheck.StatusCode -ne 200) { $stillHealthy = $false }
-                } catch { $stillHealthy = $false }
-                if (-not $stillHealthy) {
-                    Write-Host "[WARN] Existing stack became unhealthy; exiting so dev-servers can restart." -ForegroundColor Yellow
-                    exit 1
-                }
-            }
+    foreach ($process in $processes) {
+        try {
+            & taskkill.exe /PID $process.ProcessId /T /F 2>$null | Out-Null
+            Write-Host "  [kill] stale Kalio watcher PID $($process.ProcessId)" -ForegroundColor DarkYellow
+        } catch {
+            Write-Host "  [warn] Could not stop stale Kalio watcher PID $($process.ProcessId): $($_.Exception.Message)" -ForegroundColor Yellow
         }
-
-        Write-Host "[FAIL] Kalio dev stack already running (ports $BE_PORT/$FE_PORT)." -ForegroundColor Red
-        Write-Host "  Stop dev-servers Kalio or the other start-dev.ps1 before starting again." -ForegroundColor DarkYellow
-        if ($script:devStackMutex) {
-            try { $script:devStackMutex.Dispose() } catch { }
-            $script:devStackMutex = $null
-        }
-        exit 1
     }
-} catch {
-    if ($script:devStackMutex) {
-        try { $script:devStackMutex.Dispose() } catch { }
-        $script:devStackMutex = $null
-    }
-    Write-Host "[FAIL] Could not acquire dev stack singleton lock: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
 }
 
 $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
@@ -369,7 +301,8 @@ function Stop-KalioStack {
 function Clear-OccupiedPorts {
     param(
         [int[]]$Ports,
-        [int]$TimeoutMs = 10000
+        [int]$TimeoutMs = 10000,
+        [switch]$Force
     )
 
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
@@ -377,6 +310,10 @@ function Clear-OccupiedPorts {
     do {
         $portOwners = @(Get-PortOwners -Ports $Ports)
         if ($portOwners.Count -eq 0) { return $true }
+        if (-not $Force) {
+            Write-Host "  [FAIL] Ports are already in use: $($Ports -join ', '). Use -ForceRestart only when those listeners belong to Kalio." -ForegroundColor Red
+            return $false
+        }
         Stop-Processes -ProcessIds $portOwners -Label 'port owner'
         Start-Sleep -Milliseconds 300
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -389,22 +326,16 @@ function Clear-OccupiedPorts {
     return $true
 }
 
-function Release-DevStackMutex {
-    if ($script:devStackMutexOwned -and $script:devStackMutex) {
-        try { [void]$script:devStackMutex.ReleaseMutex() } catch { }
-        $script:devStackMutexOwned = $false
-    }
-    if ($script:devStackMutex) {
-        try { $script:devStackMutex.Dispose() } catch { }
-        $script:devStackMutex = $null
-    }
-}
-
-try {
-# --- Kill any leftover processes on our ports ---
+# --- Start only after an explicit conflict decision ---
 Write-Host "KALIO Dev Stack" -ForegroundColor Cyan
+if ($ForceRestart) {
+    Write-Host "  Force restart requested; stopping previous Kalio launcher and watchers..." -ForegroundColor DarkYellow
+    Stop-PreviousKalioLaunchers
+    Stop-PreviousKalioWatchers
+    Start-Sleep -Milliseconds 400
+}
 Write-Host "  Clearing ports $BE_PORT and $FE_PORT..." -ForegroundColor DarkYellow
-if (-not (Clear-OccupiedPorts -Ports @($BE_PORT, $FE_PORT))) {
+if (-not (Clear-OccupiedPorts -Ports @($BE_PORT, $FE_PORT) -Force:$ForceRestart)) {
     exit 1
 }
 
@@ -518,7 +449,4 @@ try {
     Stop-KalioStack -BeProcess $beProcess -FeProcess $feProcess -Ports @($BE_PORT, $FE_PORT)
     Restore-EnvVars -Values $previousEnv
     Write-Host "[OK] Stack stopped." -ForegroundColor Green
-}
-} finally {
-    Release-DevStackMutex
 }
