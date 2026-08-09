@@ -116,7 +116,7 @@ async function removeForeignBarePathPrebuilds() {
     throw error;
   }
 
-  const foreignPrebuilds = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith('linux-'));
+  const foreignPrebuilds = entries.filter((entry) => entry.isDirectory() && entry.name !== 'linux-x64');
   await Promise.all(
     foreignPrebuilds.map((entry) => rm(join(prebuildsRoot, entry.name), { recursive: true, force: true })),
   );
