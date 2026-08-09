@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -109,6 +109,28 @@ async function removeBarePathPrebuilds() {
   await rm(prebuildsRoot, { recursive: true, force: true });
 }
 
+async function removeMuslSharpPrebuilds() {
+  if (process.platform !== 'linux') {
+    return;
+  }
+
+  const imgRoot = join(serverRoot, 'node_modules', '@img');
+  let entries;
+  try {
+    entries = await readdir(imgRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  const muslPackages = entries.filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'));
+  await Promise.all(
+    muslPackages.map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })),
+  );
+}
+
 await rm(resourcesRoot, { recursive: true, force: true });
 await mkdir(resourcesRoot, { recursive: true });
 
@@ -133,6 +155,7 @@ await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies')
 
 await installFlatRuntimeDependencies();
 await removeBarePathPrebuilds();
+await removeMuslSharpPrebuilds();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
 
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
