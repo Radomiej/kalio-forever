@@ -100,13 +100,17 @@ async function installFlatRuntimeDependencies() {
   ], serverRoot);
 }
 
-async function removeBarePathPrebuilds() {
+async function removeBareRuntimePrebuilds() {
   if (process.platform !== 'linux') {
     return;
   }
 
-  const prebuildsRoot = join(serverRoot, 'node_modules', 'bare-path', 'prebuilds');
-  await rm(prebuildsRoot, { recursive: true, force: true });
+  const nodeModulesRoot = join(serverRoot, 'node_modules');
+  const entries = await readdir(nodeModulesRoot, { withFileTypes: true });
+  const barePackages = entries.filter((entry) => entry.isDirectory() && entry.name.startsWith('bare-'));
+  await Promise.all(
+    barePackages.map((entry) => rm(join(nodeModulesRoot, entry.name, 'prebuilds'), { recursive: true, force: true })),
+  );
 }
 
 async function removeMuslSharpPrebuilds() {
@@ -154,7 +158,7 @@ await requirePath(bootstrapSource, 'desktop backend bootstrap');
 await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies');
 
 await installFlatRuntimeDependencies();
-await removeBarePathPrebuilds();
+await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
 
