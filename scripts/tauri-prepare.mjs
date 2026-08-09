@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -100,26 +100,13 @@ async function installFlatRuntimeDependencies() {
   ], serverRoot);
 }
 
-async function removeForeignBarePathPrebuilds() {
+async function removeBarePathPrebuilds() {
   if (process.platform !== 'linux') {
     return;
   }
 
   const prebuildsRoot = join(serverRoot, 'node_modules', 'bare-path', 'prebuilds');
-  let entries;
-  try {
-    entries = await readdir(prebuildsRoot, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-
-  const foreignPrebuilds = entries.filter((entry) => entry.isDirectory() && entry.name !== 'linux-x64');
-  await Promise.all(
-    foreignPrebuilds.map((entry) => rm(join(prebuildsRoot, entry.name), { recursive: true, force: true })),
-  );
+  await rm(prebuildsRoot, { recursive: true, force: true });
 }
 
 await rm(resourcesRoot, { recursive: true, force: true });
@@ -145,7 +132,7 @@ await requirePath(bootstrapSource, 'desktop backend bootstrap');
 await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies');
 
 await installFlatRuntimeDependencies();
-await removeForeignBarePathPrebuilds();
+await removeBarePathPrebuilds();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
 
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
