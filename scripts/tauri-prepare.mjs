@@ -135,6 +135,19 @@ async function removeMuslSharpPrebuilds() {
   );
 }
 
+async function removeUnneededOnnxRuntimeArtifacts() {
+  if (process.platform !== 'linux') {
+    return;
+  }
+
+  const linuxRuntimeRoot = join(serverRoot, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6', 'linux');
+  await rm(join(linuxRuntimeRoot, 'arm64'), { recursive: true, force: true });
+  await Promise.all([
+    rm(join(linuxRuntimeRoot, 'x64', 'libonnxruntime_providers_cuda.so'), { force: true }),
+    rm(join(linuxRuntimeRoot, 'x64', 'libonnxruntime_providers_tensorrt.so'), { force: true }),
+  ]);
+}
+
 await rm(resourcesRoot, { recursive: true, force: true });
 await mkdir(resourcesRoot, { recursive: true });
 
@@ -160,6 +173,7 @@ await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies')
 await installFlatRuntimeDependencies();
 await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
+await removeUnneededOnnxRuntimeArtifacts();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
 
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
