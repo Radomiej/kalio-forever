@@ -265,6 +265,13 @@ jobs:
           fi
           echo "KALIO_NODE_BINARY=$node_path" >> "$GITHUB_ENV"
 
+      - name: Prepare AppImage linker paths
+        shell: bash
+        run: |
+          if [ -e /usr/lib/x86_64-linux-gnu/libm.so ] && [ ! -e /lib/x86_64-linux-gnu/libm.so ]; then
+            sudo ln -s /usr/lib/x86_64-linux-gnu/libm.so /lib/x86_64-linux-gnu/libm.so
+          fi
+
       - name: Build workspace bundles
         run: pnpm build
 
