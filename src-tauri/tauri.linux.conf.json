@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["appimage", "deb"],
+    "resources": {
+      "resources/kalio-server": "kalio-server",
+      "resources/kalio-node": "kalio-node"
+    }
+  }
+}

@@ -371,6 +371,14 @@ files past the repository's 500 LOC limit; split a touched slice first.
 
 ## Community and licensing
 
-This checkout does not currently contain a tracked `LICENSE` file. Add the
-project's chosen license before redistributing the repository. Contributions
-follow the [Contributor Covenant 2.1](./CODE_OF_CONDUCT.md).
+Kalio is source-available under the
+[PolyForm Noncommercial License 1.0.0](./LICENSE). This permits personal,
+hobby, educational, and other noncommercial use. It is not an OSI-approved
+open-source license.
+
+Commercial use, embedding Kalio in a paid product, redistribution, resale,
+white-labeling, hosted services, and paid client delivery require a separate
+commercial license. See [commercial licensing](./COMMERCIAL-LICENSE.md) and
+the [agreement template](./COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md).
+
+Contributions follow the [Contributor Covenant 2.1](./CODE_OF_CONDUCT.md).

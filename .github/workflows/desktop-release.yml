@@ -1,0 +1,397 @@
+name: Desktop release
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'LICENSE'
+      - 'COMMERCIAL-LICENSE.md'
+      - 'COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md'
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Release tag $env:GITHUB_REF_NAME does not match Tauri version $expectedTag"
+          }
+
+      - name: Select bundled Node.js runtime
+        shell: pwsh
+        run: |
+          $nodePath = (Get-Command node -CommandType Application).Source
+          if ([string]::IsNullOrWhiteSpace($nodePath)) {
+            throw 'Unable to resolve the Node.js executable for the desktop bundle'
+          }
+          "KALIO_NODE_BINARY=$nodePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build workspace bundles
+        run: pnpm build
+
+      - name: Require signing secrets for tagged releases
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64)) { $missing += 'WINDOWS_CERTIFICATE_PFX_BASE64' }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { $missing += 'WINDOWS_CERTIFICATE_PASSWORD' }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) { $missing += 'WINDOWS_TIMESTAMP_URL' }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { $missing += 'TAURI_SIGNING_PRIVATE_KEY' }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_UPDATER_PUBLIC_KEY)) { $missing += 'TAURI_UPDATER_PUBLIC_KEY' }
+          if ($missing.Count -gt 0) {
+            throw "Tagged releases require GitHub Actions secrets: $($missing -join ', ')"
+          }
+
+      - name: Prepare Windows signing config
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $certificateDirectory = Join-Path $env:RUNNER_TEMP 'kalio-code-signing'
+          $certificatePath = Join-Path $certificateDirectory 'certificate.pfx'
+          New-Item -ItemType Directory -Path $certificateDirectory -Force | Out-Null
+
+          try {
+            $certificateBytes = [Convert]::FromBase64String(($env:WINDOWS_CERTIFICATE_PFX_BASE64 -replace '\s', ''))
+            [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+            $securePassword = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = @(
+              Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword |
+                Where-Object { $_.HasPrivateKey } |
+                Select-Object -First 1
+            ) | Select-Object -First 1
+            if ($null -eq $certificate) {
+              throw 'The imported PFX did not contain a certificate with a private key'
+            }
+
+            $signtool = Get-ChildItem -LiteralPath "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter 'signtool.exe' -File -Recurse -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if ($null -eq $signtool) {
+              throw 'signtool.exe was not found on the Windows runner'
+            }
+
+            $configPath = Join-Path $env:RUNNER_TEMP 'kalio-tauri-signing.json'
+            $config = @{
+              bundle = @{
+                windows = @{
+                  certificateThumbprint = ($certificate.Thumbprint -replace '\s', '')
+                  digestAlgorithm = 'sha256'
+                  timestampUrl = $env:WINDOWS_TIMESTAMP_URL
+                }
+              }
+            }
+            $config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding utf8
+            "TAURI_SIGNING_CONFIG=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "TAURI_WINDOWS_SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } finally {
+            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $certificateDirectory -Force -Recurse -ErrorAction SilentlyContinue
+          }
+
+      - name: Prepare updater config
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $configPath = Join-Path $env:RUNNER_TEMP 'kalio-tauri-updater.json'
+          node scripts/tauri-updater-config.mjs $configPath
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Tauri updater config generation failed'
+          }
+          "TAURI_UPDATER_CONFIG=$configPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build unsigned Tauri package
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: pnpm tauri build --no-sign
+
+      - name: Build signed Tauri package
+        if: startsWith(github.ref, 'refs/tags/')
+        run: pnpm tauri build --config "$env:TAURI_SIGNING_CONFIG" --config "$env:TAURI_UPDATER_CONFIG"
+
+      - name: Verify Windows signatures
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath 'src-tauri\target\release\bundle\nsis' -Filter '*-setup.exe' -File | Select-Object -First 1
+          if ($null -eq $installer) {
+            throw 'The NSIS installer was not found for signature verification'
+          }
+          $files = @(
+            'src-tauri\target\release\kalio.exe',
+            $installer.FullName
+          )
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file
+            if ($signature.Status -ne 'Valid') {
+              throw "Invalid Windows signature for $($file): $($signature.Status)"
+            }
+          }
+
+      - name: Prepare release notices and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'release' -Force | Out-Null
+          Copy-Item -LiteralPath 'LICENSE' -Destination 'release\LICENSE' -Force
+          Copy-Item -LiteralPath 'COMMERCIAL-LICENSE.md' -Destination 'release\COMMERCIAL-LICENSE.md' -Force
+          Copy-Item -LiteralPath 'COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md' -Destination 'release\COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md' -Force
+          node scripts/generate-third-party-notices.mjs --output release/THIRD_PARTY_NOTICES.md
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Third-party notices generation failed'
+          }
+
+          $installer = Get-ChildItem -LiteralPath 'src-tauri\target\release\bundle\nsis' -Filter '*-setup.exe' -File | Select-Object -First 1
+          if ($null -eq $installer) {
+            throw 'The NSIS installer was not found for checksum generation'
+          }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
+          "$hash  $($installer.Name)" | Set-Content -LiteralPath 'release\SHA256SUMS-windows.txt' -Encoding utf8
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-windows-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            release/LICENSE
+            release/COMMERCIAL-LICENSE.md
+            release/COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md
+            release/THIRD_PARTY_NOTICES.md
+            release/SHA256SUMS-windows.txt
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")
+          expected_tag="v${version}"
+          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+            echo "Release tag $GITHUB_REF_NAME does not match Tauri version $expected_tag"
+            exit 1
+          fi
+
+      - name: Select bundled Node.js runtime
+        shell: bash
+        run: |
+          node_path=$(command -v node)
+          if [ -z "$node_path" ]; then
+            echo 'Unable to resolve the Node.js executable for the desktop bundle'
+            exit 1
+          fi
+          echo "KALIO_NODE_BINARY=$node_path" >> "$GITHUB_ENV"
+
+      - name: Build workspace bundles
+        run: pnpm build
+
+      - name: Require updater signing secrets for tagged releases
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          missing=()
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || missing+=(TAURI_SIGNING_PRIVATE_KEY)
+          [ -n "$TAURI_UPDATER_PUBLIC_KEY" ] || missing+=(TAURI_UPDATER_PUBLIC_KEY)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Tagged releases require GitHub Actions secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Prepare updater config
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          config_path="$RUNNER_TEMP/kalio-tauri-updater.json"
+          node scripts/tauri-updater-config.mjs "$config_path"
+          echo "TAURI_UPDATER_CONFIG=$config_path" >> "$GITHUB_ENV"
+
+      - name: Build unsigned Tauri package
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: pnpm tauri build --config src-tauri/tauri.linux.conf.json --no-sign
+
+      - name: Build signed Tauri package
+        if: startsWith(github.ref, 'refs/tags/')
+        run: pnpm tauri build --config src-tauri/tauri.linux.conf.json --config "$TAURI_UPDATER_CONFIG"
+
+      - name: Prepare release notices and checksums
+        shell: bash
+        run: |
+          mkdir -p release
+          cp LICENSE release/LICENSE
+          cp COMMERCIAL-LICENSE.md release/COMMERCIAL-LICENSE.md
+          cp COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md release/COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md
+          node scripts/generate-third-party-notices.mjs --output release/THIRD_PARTY_NOTICES.md
+          find src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' \) -print0 | sort -z | xargs -0 sha256sum > release/SHA256SUMS-linux.txt
+          test -s release/SHA256SUMS-linux.txt
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/release/bundle/deb/*.deb
+            release/LICENSE
+            release/COMMERCIAL-LICENSE.md
+            release/COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md
+            release/THIRD_PARTY_NOTICES.md
+            release/SHA256SUMS-linux.txt
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, build-linux]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kalio-*-${{ github.run_number }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate updater manifest
+        shell: pwsh
+        run: |
+          $env:KALIO_RELEASE_VERSION = (Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          node scripts/generate-tauri-latest-json.mjs release-assets release-assets/latest.json
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Tauri updater manifest generation failed'
+          }
+
+      - name: Create or update draft GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem -LiteralPath 'release-assets' -Filter '*-setup.exe' -File -Recurse | Select-Object -First 1
+          $windowsChecksum = Get-ChildItem -LiteralPath 'release-assets' -Filter 'SHA256SUMS-windows.txt' -File -Recurse | Select-Object -First 1
+          $linuxChecksum = Get-ChildItem -LiteralPath 'release-assets' -Filter 'SHA256SUMS-linux.txt' -File -Recurse | Select-Object -First 1
+          $license = Get-ChildItem -LiteralPath 'release-assets' -Filter 'LICENSE' -File -Recurse | Select-Object -First 1
+          $commercialPolicy = Get-ChildItem -LiteralPath 'release-assets' -Filter 'COMMERCIAL-LICENSE.md' -File -Recurse | Select-Object -First 1
+          $commercialAgreement = Get-ChildItem -LiteralPath 'release-assets' -Filter 'COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md' -File -Recurse | Select-Object -First 1
+          $notices = Get-ChildItem -LiteralPath 'release-assets' -Filter 'THIRD_PARTY_NOTICES.md' -File -Recurse | Select-Object -First 1
+          $latest = Get-Item -LiteralPath 'release-assets\latest.json' -ErrorAction SilentlyContinue
+          $updaterAssets = @(Get-ChildItem -LiteralPath 'release-assets' -File -Recurse | Where-Object {
+            $_.Name -like '*.sig' -or $_.Name -like '*.AppImage' -or $_.Name -like '*.deb'
+          })
+          $requiredAssets = @($installer, $windowsChecksum, $linuxChecksum, $license, $commercialPolicy, $commercialAgreement, $notices, $latest)
+          if ($requiredAssets | Where-Object { $null -eq $_ }) {
+            throw 'One or more release assets were missing after artifact download'
+          }
+          if ($updaterAssets.Count -eq 0) {
+            throw 'No signed updater assets were found after artifact download'
+          }
+
+          $assets = @(
+            "$($installer.FullName)#Kalio Windows installer",
+            "$($windowsChecksum.FullName)#SHA256SUMS-windows.txt",
+            "$($linuxChecksum.FullName)#SHA256SUMS-linux.txt",
+            "$($license.FullName)#LICENSE",
+            "$($commercialPolicy.FullName)#COMMERCIAL-LICENSE.md",
+            "$($commercialAgreement.FullName)#COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md",
+            "$($notices.FullName)#THIRD_PARTY_NOTICES.md",
+            "$($latest.FullName)#latest.json"
+          )
+          $assets += $updaterAssets.FullName
+
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME @assets --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME --draft --generate-notes --title "Kalio $env:GITHUB_REF_NAME" @assets
+          }

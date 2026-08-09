@@ -39,4 +39,5 @@ console.log('[desktop] building Tauri Windows installer');
 await run(process.execPath, [
   resolve(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'),
   'build',
+  '--no-sign',
 ], buildEnv);

@@ -39,7 +39,10 @@
     "llm:probe": "node scripts/probe-llm.mjs",
     "tauri": "node node_modules/@tauri-apps/cli/tauri.js",
     "desktop:prepare": "node scripts/tauri-prepare.mjs",
-    "desktop:build": "node scripts/desktop-build.mjs"
+    "desktop:build": "node scripts/desktop-build.mjs",
+    "desktop:updater-config": "node scripts/tauri-updater-config.mjs",
+    "release:tauri-manifest": "node scripts/generate-tauri-latest-json.mjs",
+    "release:third-party-notices": "node scripts/generate-third-party-notices.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.0",

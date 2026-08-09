@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-07-30
+Last updated: 2026-08-03
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -166,6 +166,14 @@ classDiagram
 - Live-provider proof must use system Node on Windows and record effective provider/model evidence.
 - Comprehensive workflow release coverage runs only against the mock provider. Paid proof is a separate, explicit single-node/no-tool canary with no project path or project memory/browser/prior-decision context, an exact provider/model guard, temporary output-token cap, settings restore, FE-first Talk start, and reconnect/F5 verification.
 - Live tool proof is a second, separately confirmed canary limited to one manually approved `fs_write` under an explicit disposable allowed path. It must cap model iterations, block hidden title generation, verify the real file and F5 hydration, remove its own artifact, and restore allowed-path, HITL, and generation settings.
+
+## Desktop Distribution And Updates
+
+- The desktop app embeds the Tauri updater; a separate launcher is not part of the product runtime.
+- GitHub Releases is the distribution source for public Windows/Linux builds. The `main` branch stores source and release configuration, never binary installers or private signing keys.
+- Tagged CI releases publish signed Windows NSIS and Linux AppImage updater artifacts, their `.sig` files, and a generated `latest.json` manifest. The updater trusts the embedded Tauri public key and uses the GitHub `latest.json` endpoint.
+- The updater check is non-blocking and user-confirmed. Network, missing release configuration, or signature-check errors must leave normal Kalio startup usable; installation only proceeds through an explicit user action and ends with a relaunch.
+- The current manifest supports `windows-x86_64` and `linux-x86_64`. macOS remains a separate signing/notarization and updater-release scope.
 
 ## Primary Database Migration Boundary
 

@@ -18,6 +18,7 @@ import { SkillEditorPanel } from './features/skills/SkillEditorPanel';
 import { MemoryPage } from './features/memory/MemoryPage';
 import { LandingPage } from './features/landing/LandingPage';
 import { BackendStatusBadge } from './components/ui/BackendStatusBadge';
+import { DesktopUpdateNotice } from './features/updates/DesktopUpdateNotice';
 import { AppNavRail } from './AppNavRail';
 import { AppSecondarySections } from './AppSecondarySections';
 import type { ActiveSection, AppViewState, MindTab, TalkTab, TalkView, ToolsTab } from './App.types';
@@ -430,6 +431,7 @@ export function App() {
 
       {/* Backend offline banner — only visible while the backend is unreachable */}
       <BackendStatusBadge />
+      <DesktopUpdateNotice />
     </div>
   );
 }

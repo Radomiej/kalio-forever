@@ -34,3 +34,4 @@ docs/sessions/
 apps/output/
 src-tauri/resources/
 src-tauri/target/
+release/
