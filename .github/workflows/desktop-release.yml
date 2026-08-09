@@ -71,7 +71,7 @@ jobs:
       - name: Select bundled Node.js runtime
         shell: pwsh
         run: |
-          $nodePath = (Get-Command node -CommandType Application).Source
+          $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source
           if ([string]::IsNullOrWhiteSpace($nodePath)) {
             throw 'Unable to resolve the Node.js executable for the desktop bundle'
           }

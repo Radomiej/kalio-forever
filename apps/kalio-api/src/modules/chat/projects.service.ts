@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { normalize, resolve } from 'node:path';
+import { normalize, resolve, win32 } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { CreateProjectDto, Project, ProjectKind, UpdateProjectDto } from '@kalio/types';
 import { eq } from 'drizzle-orm';
@@ -19,7 +19,11 @@ export function normalizeProjectPath(path: string): string {
 }
 
 export function normalizeProjectPathForStorage(path: string): string {
-  const normalized = normalize(resolve(path.trim())).replaceAll('\\', '/');
+  const trimmedPath = path.trim();
+  const normalized = (/^[a-z]:[\\/]/i.test(trimmedPath) || trimmedPath.startsWith('\\\\') || trimmedPath.startsWith('//')
+    ? win32.normalize(trimmedPath)
+    : normalize(resolve(trimmedPath))
+  ).replaceAll('\\', '/');
   if (normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)) {
     return normalized.replace(/\/+$/, '');
   }
