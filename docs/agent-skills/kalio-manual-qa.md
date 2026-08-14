@@ -27,6 +27,7 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 8. If the QA MCP tools are missing in Kalio, first copy `docs/examples/kalio-agent-qa-mcp.config.toml` into a real `.kalio/config.toml` and restart the Kalio API or wait for config cache refresh.
 9. Treat `.vscode/mcp.json` import as legacy/manual fallback only. For repo/dev-managed QA MCP, start from `.kalio/config.toml`. If you use Settings -> MCP Servers -> Import Existing MCP Configs for debugging, remember that imported entries land in SQLite; equivalent TOML and SQLite rows may both stay visible, with TOML active and SQLite shadowed.
 10. Do not use `~/.codex/config.toml` to diagnose Kalio MCP state; that file is Codex-only.
+11. On Windows, Playwright/QA stack verification must use system Node outside the sandbox. If a run fails with `EPERM` on pnpm junctions or false `MODULE_NOT_FOUND` for installed dependencies such as `ajv`, rerun with system Node before treating it as a Kalio regression.
 
 ## Architecture QA
 

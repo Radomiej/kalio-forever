@@ -44,7 +44,7 @@ Run these checks across the codebase and flag violations:
 | No `any` in TypeScript | `grep_search "`: any`\|: any[,;)\]]"` across `src/` | HIGH |
 | No cross-module imports (only `@kalio/types` crosses) | grep for `import.*from.*modules/` outside same module | HIGH |
 | No empty catch blocks | grep for `catch.*{[^}]*}` or `.catch\s*\(\s*\)` | HIGH |
-| File LOC within hard limits (non-test) | run `node scripts/code-audit/run-audit.mjs` then `aggregate.mjs`; any 🔴 CRITICAL in report = violation | HIGH |
+| File LOC within hard limits (non-test) | run `node scripts/code-audit/run-audit.mjs` then `aggregate.mjs`; hard-limit rows are reported as HIGH architecture debt and remain a conformance violation | HIGH |
 | All shared types in `@kalio/types` | grep for `interface\|type =` in `modules/` or `features/` that duplicate `@kalio/types` entries | HIGH |
 | No `workspaceId` on session/message/tool types | grep for `workspaceId` | MEDIUM |
 | Socket events defined in `SocketEvents` interface | check that new socket emits reference the type | MEDIUM |

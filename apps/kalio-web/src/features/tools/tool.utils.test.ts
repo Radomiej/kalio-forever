@@ -147,6 +147,19 @@ describe('groupToolsByPrefix', () => {
     expect(result[1]?.tools.map((tool) => tool.name)).toEqual(['mcp_toml::docs_search']);
   });
 
+  it('uses MCP serverKey metadata for canonical MCP tools without parsing name prefixes', () => {
+    const result = groupToolsByPrefix([
+      makeTool('web_search'),
+      {
+        ...makeTool('mcp_toml::docs_search'),
+        serverKey: 'toml::docs',
+      },
+    ]);
+
+    expect(result.map((group) => group.label)).toEqual(['Web', 'MCP']);
+    expect(result[1]?.tools.map((tool) => tool.name)).toEqual(['mcp_toml::docs_search']);
+  });
+
   it('uses typed tool domains instead of native name prefixes for grouping', () => {
     const result = groupToolsByPrefix([
       makeTool('custom_virtual_reader', 'vfs'),

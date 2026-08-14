@@ -12,6 +12,9 @@ export function structuredRouteToCall(output: unknown): ArchitectureRouteDecisio
   if (!routerOutput) {
     return null;
   }
+  if (routerOutput.nextAction !== 'route_to') {
+    return null;
+  }
   const targetNodeId = routerOutput.targetNodeId?.trim();
   if (!targetNodeId || !/^[A-Za-z0-9_.:-]+$/.test(targetNodeId)) {
     return null;

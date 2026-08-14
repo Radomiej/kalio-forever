@@ -3,7 +3,18 @@ import { waitFor } from '@testing-library/react';
 import type { ChatMessage } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
+import { apiClient } from '../../../services/apiClient';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
+
+const mockApiGet = vi.hoisted(() => vi.fn(async (url: string) => {
+  throw new Error(`unexpected apiClient.get call: ${url}`);
+}));
+
+vi.mock('../../../services/apiClient', () => ({
+  apiClient: {
+    get: mockApiGet,
+  },
+}));
 
 function makeWorkflowEnvelopeProjection() {
   return {
@@ -35,6 +46,7 @@ function makeWorkflowEnvelopeProjection() {
 
 describe('handleSocketReconnect', () => {
   beforeEach(() => {
+    vi.mocked(apiClient.get).mockClear();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     useSessionStore.setState({
       activeSessionId: 'session-1',
@@ -77,6 +89,7 @@ describe('handleSocketReconnect', () => {
     const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
       useSessionStore.getState().setAgentTurns(turns, sessionId);
     });
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
     handleSocketReconnect({
       cliChild: {
         upsertCLIChildProjection: vi.fn(),
@@ -108,6 +121,7 @@ describe('handleSocketReconnect', () => {
       setMessages,
       setAgentTurns,
       hasActiveLoopForSession: () => false,
+      fetchArchitectureRunProjection,
       fetchSessions: async () => [
         { id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
         {
@@ -219,6 +233,7 @@ describe('handleSocketReconnect', () => {
       useSessionStore.getState().setAgentTurns(turns, sessionId);
     });
     const setSessionHistoryMeta = vi.fn();
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
 
     handleSocketReconnect({
       cliChild: {
@@ -250,6 +265,7 @@ describe('handleSocketReconnect', () => {
       setSessionHistoryMeta,
       setAgentTurns,
       hasActiveLoopForSession: () => false,
+      fetchArchitectureRunProjection,
       fetchMessages: async (sessionId) => {
         if (sessionId === 'session-1') {
           return {
@@ -332,6 +348,7 @@ describe('handleSocketReconnect', () => {
   });
 
   afterEach(() => {
+    expect(apiClient.get).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 
@@ -377,6 +394,7 @@ describe('handleSocketReconnect', () => {
     });
 
     const identifySession = vi.fn();
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
 
     handleSocketReconnect({
       cliChild: {
@@ -409,6 +427,7 @@ describe('handleSocketReconnect', () => {
       setMessages,
       setAgentTurns,
       hasActiveLoopForSession: () => false,
+      fetchArchitectureRunProjection,
       fetchSessions: async () => [
         { id: 'session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
         {
@@ -776,6 +795,7 @@ describe('handleSocketReconnect', () => {
     const setAgentTurns = vi.fn((turns, sessionId?: string | null) => {
       useSessionStore.getState().setAgentTurns(turns, sessionId);
     });
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
 
     handleSocketReconnect({
       cliChild: {
@@ -806,6 +826,7 @@ describe('handleSocketReconnect', () => {
       setMessages,
       setAgentTurns,
       hasActiveLoopForSession: () => true,
+      fetchArchitectureRunProjection,
       fetchMessages: async () => [
         {
           id: 'user-1',
@@ -851,6 +872,7 @@ describe('handleSocketReconnect', () => {
     const setAwaitingFirstChunk = vi.fn();
     const setStreaming = vi.fn();
     const fetchMessages = vi.fn(async () => []);
+    const fetchArchitectureRunProjection = vi.fn(async () => makeWorkflowEnvelopeProjection());
 
     useAgentStore.setState({
       runtimeActivitySnapshots: {
@@ -924,6 +946,7 @@ describe('handleSocketReconnect', () => {
       }),
       hasActiveLoopForSession: () => false,
       fetchMessages,
+      fetchArchitectureRunProjection,
     });
 
     await waitFor(() => {

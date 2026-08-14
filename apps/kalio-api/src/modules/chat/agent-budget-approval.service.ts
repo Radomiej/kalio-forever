@@ -37,6 +37,8 @@ export class AgentBudgetApprovalService {
     const payload: AgentBudgetApprovalRequest = {
       requestId,
       sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      promptMessageId: ctx.promptMessageId,
       scope: input.runtimeKind,
       usedIterations: input.usedIterations,
       currentLimit: input.currentLimit,
@@ -47,8 +49,6 @@ export class AgentBudgetApprovalService {
       requestedBy: input.requestedBy,
       agentRun: ctx.agentRun,
     };
-
-    ctx.emit('agent:budget_required', payload);
 
     return new Promise<number | null>((resolve) => {
       const handleAbort = () => {
@@ -77,6 +77,7 @@ export class AgentBudgetApprovalService {
         return;
       }
       ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });
+      ctx.emit('agent:budget_required', payload);
     });
   }
 

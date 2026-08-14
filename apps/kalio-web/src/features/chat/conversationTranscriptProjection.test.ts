@@ -21,6 +21,36 @@ const branchSession: ChatSession = {
 };
 
 describe('resolveRenderableConversationProjection', () => {
+  it('drops an optimistic workflow envelope when a typed projection owns the same prompt', () => {
+    const hostSession: ChatSession = {
+      id: 'host-1', personaId: 'default', title: 'Host', createdAt: 1, updatedAt: 1,
+    };
+    const messages: ChatMessage[] = [
+      { id: 'pending-1', sessionId: 'host-1', role: 'assistant', content: 'Display text can change.', createdAt: 2 },
+      {
+        id: 'projection-1', sessionId: 'host-1', role: 'assistant', content: '', createdAt: 3,
+        architectureRun: {
+          runId: 'run-1', schemaId: 'strategic-decision-council', status: 'running', trace: [], routeHops: [],
+        },
+      },
+    ];
+    const turns: AgentTurn[] = [
+      {
+        id: 'optimistic-turn', sessionId: 'host-1', promptMessageId: 'prompt-1',
+        turnKind: 'workflow-envelope', items: [{ kind: 'text', messageId: 'pending-1' }], done: false,
+      },
+      {
+        id: 'typed-turn', sessionId: 'host-1', promptMessageId: 'prompt-1',
+        turnKind: 'workflow-envelope', items: [{ kind: 'text', messageId: 'projection-1' }], done: false,
+      },
+    ];
+
+    const projection = resolveRenderableConversationProjection({ session: hostSession, messages, agentTurns: turns });
+
+    expect(projection.agentTurns).toEqual([turns[1]]);
+    expect(projection.messages.map((message) => message.id)).toEqual(['projection-1']);
+  });
+
   it('drops raw branch scaffold-only transcript and prunes empty turns', () => {
     const scaffoldMessages: ChatMessage[] = [
       {

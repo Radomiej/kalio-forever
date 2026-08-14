@@ -37,6 +37,7 @@ describe('buildArchitectureGraphProjection', () => {
     expect(graph.schemaName).toBe('Test Schema');
     expect(graph.nodes[0]?.sessionId).toBe('arch-run-1-implementer');
     expect(graph.nodes[0]?.status).toBe('pending');
+    expect(graph.nodes[0]?.hasRuntimeEvidence).toBe(false);
   });
 
   it('marks a role node running from start-only events', () => {
@@ -91,6 +92,7 @@ describe('buildArchitectureGraphProjection', () => {
     expect(graph.nodes[0]).toMatchObject({
       id: 'agent',
       status: 'running',
+      hasRuntimeEvidence: true,
       visitCount: 1,
       eventIds: ['event-1', 'event-2'],
     });
@@ -329,12 +331,19 @@ describe('buildArchitectureGraphProjection', () => {
       status: 'failed',
       action: 'node_failed',
       detail: 'structured output was malformed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: {
+        code: 'CONTRACT_VIOLATION',
+        source: 'llm-provider',
+        retryable: false,
+      },
     });
     expect(graph.nodes.find((node) => node.id === 'final-artifact')).toMatchObject({
       status: 'cancelled',
       action: 'node_failed',
       detail: 'Skipped because an upstream workflow node failed before this node started.',
       eventIds: ['event-3'],
+      errorCode: 'CONTRACT_VIOLATION',
     });
   });
 

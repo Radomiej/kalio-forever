@@ -619,6 +619,135 @@ describe('createArchitectureGraphEvents max visit guards', () => {
     }));
   });
 
+  it('does not project ask-human router pauses as downstream route hops', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'ask-human-router-pause-runtime',
+      name: 'Ask Human Router Pause Runtime',
+      description: 'Schema where router pause must not look like a downstream route.',
+      version: '0.1.0',
+      roleSlots: [
+        {
+          id: 'orchestrator',
+          label: 'Orchestrator',
+          description: 'Decides whether to continue.',
+          slotType: 'judge',
+          defaultPersonaId: 'orchestrator',
+          allowedPersonaTags: ['review'],
+          required: true,
+          canOverrideAtRunStart: true,
+        },
+        {
+          id: 'reviewer',
+          label: 'Reviewer',
+          description: 'Should wait for explicit human decision.',
+          slotType: 'participant',
+          defaultPersonaId: 'reviewer',
+          allowedPersonaTags: ['review'],
+          required: true,
+          canOverrideAtRunStart: true,
+        },
+      ],
+      nodes: [
+        { id: 'orchestrator', label: 'Orchestrator', kind: 'router', roleSlotId: 'orchestrator', behavior: { mode: 'choose_one' } },
+        { id: 'reviewer', label: 'Reviewer', kind: 'role', roleSlotId: 'reviewer' },
+      ],
+      edges: [
+        { id: 'orchestrator-reviewer', fromNodeId: 'orchestrator', toNodeId: 'reviewer' },
+      ],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-ask-human-router-pause',
+      schemaId: schema.id,
+      prompt: 'Pause for human review.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 10 },
+      rootSessionId: 'root-ask-human-router-pause',
+      branchSessionIds: {
+        orchestrator: 'arch-run-ask-human-router-pause-orchestrator',
+        reviewer: 'arch-run-ask-human-router-pause-reviewer',
+      },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const routerOutput: ArchitectureRouterOutput = {
+      selectedStrategy: 'reviewer',
+      mergedDecision: 'Human decision is required before Reviewer runs.',
+      acceptedInputs: [],
+      rejectedInputs: [],
+      unresolvedConflicts: ['The router cannot choose a safe next step.'],
+      risks: [],
+      confidence: 0.2,
+      nextAction: 'ask_human',
+      targetNodeId: 'reviewer',
+      response: 'Human decision is required before Reviewer runs.',
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async ({ branchSessionId, personaId, run: activeRun, slot }) => ({
+        message: slot.id === 'orchestrator'
+          ? 'Human decision is required before Reviewer runs.'
+          : 'Reviewer should not run before human approval.',
+        data: {
+          branchSessionId,
+          personaId,
+          rootSessionId: activeRun.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: activeRun.executionMode,
+          ...(slot.id === 'orchestrator' ? { routerOutput } : {}),
+        },
+      })),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+    });
+    const routerDecision = events.find((event) => event.type === 'router_decision' && event.nodeId === 'orchestrator');
+    const humanGate = events.find((event) => event.type === 'human_gate' && event.nodeId === 'orchestrator');
+
+    expect(roleExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(routerDecision?.route).toMatchObject({
+      source: 'router',
+      selectedNodeIds: [],
+      rejectedNodeIds: ['reviewer'],
+    });
+    expect(routerDecision?.route?.nextNodeId).toBeUndefined();
+    expect(routerDecision?.data).toMatchObject({
+      nextAction: 'ask_human',
+      selectedNodeIds: [],
+    });
+    expect(humanGate).toMatchObject({
+      reasonCode: 'runtime_pause',
+      runtimeDecision: {
+        status: 'waiting_on_orchestrator',
+        reasonCode: 'runtime_pause',
+      },
+      route: {
+        selectedNodeIds: [],
+        rejectedNodeIds: ['reviewer'],
+      },
+    });
+  });
+
   it('emits a terminal guard event when maxNodeVisits prevents a routed continuation', async () => {
     const schema: ArchitectureSchema = {
       id: 'self-looping-runtime',
@@ -713,6 +842,108 @@ describe('createArchitectureGraphEvents max visit guards', () => {
     }));
   });
 
+  it('emits max_node_visits when resuming onto a pending node already at the visit cap', async () => {
+    const schema: ArchitectureSchema = {
+      id: 'resume-max-visits-runtime',
+      name: 'Resume Max Visits Runtime',
+      description: 'Schema where resumed pending work is already visit-capped.',
+      version: '0.1.0',
+      roleSlots: [{
+        id: 'worker',
+        label: 'Worker',
+        description: 'Should not be executed after the visit cap is reached.',
+        slotType: 'participant',
+        defaultPersonaId: 'dev',
+        allowedPersonaTags: ['implementation'],
+        required: true,
+        canOverrideAtRunStart: true,
+      }],
+      nodes: [{
+        id: 'worker',
+        label: 'Worker',
+        kind: 'role',
+        roleSlotId: 'worker',
+      }],
+      edges: [],
+      routerPolicy: {
+        mode: 'evidence_first',
+        mustAddressCriticFindings: true,
+        canReturnNeedsMoreResearch: true,
+      },
+      contextPolicy: {
+        includeUserTask: true,
+        includeProjectMemory: false,
+        includeBrowserSession: false,
+        includePriorDecisions: false,
+      },
+      memoryPolicy: {
+        persistFinalArtifact: true,
+        persistRouterDecision: true,
+      },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-resume-max-visits',
+      schemaId: schema.id,
+      prompt: 'Resume onto capped pending node.',
+      executionMode: 'subagent_execution',
+      context: {
+        maxArchitectureSteps: 10,
+        maxArchitectureNodeVisits: 1,
+      },
+      rootSessionId: 'root-run-resume-max-visits',
+      branchSessionIds: { worker: 'arch-run-resume-max-visits-worker' },
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: vi.fn(async () => ({
+        message: 'Worker should not execute.',
+        data: {},
+      })),
+    };
+
+    const events = await createArchitectureGraphEvents({
+      schema,
+      run,
+      now: run.createdAt,
+      roleExecutor,
+      personaForSlot: () => 'dev',
+      priorEvents: [{
+        id: 'event-prior-worker-completed',
+        runId: run.id,
+        sequence: 1,
+        type: 'node_completed',
+        message: 'Worker completed before pause.',
+        nodeId: 'worker',
+        roleSlotId: 'worker',
+        status: 'done',
+        data: { selectedNodeIds: ['worker'] },
+        createdAt: run.createdAt,
+      }],
+      resumeFrom: {
+        reason: 'max_steps',
+        waitingNodeId: 'worker',
+        pendingNodeIds: ['worker'],
+        visitCounts: { worker: 1 },
+      },
+    });
+
+    expect(roleExecutor.execute).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual(expect.objectContaining({
+      type: 'router_decision',
+      message: expect.stringContaining('max node visits'),
+      reasonCode: 'max_node_visits',
+      data: expect.objectContaining({
+        reasonCode: 'max_node_visits',
+        maxNodeVisits: 1,
+        pendingNodeIds: ['worker'],
+        visitCounts: { worker: 1 },
+      }),
+    }));
+  });
+
   it('surfaces branch budget approvals as human gate events before timeout fallback', async () => {
     const schema: ArchitectureSchema = {
       id: 'budget-human-gate-runtime',
@@ -786,6 +1017,8 @@ describe('createArchitectureGraphEvents max visit guards', () => {
           emit?.('agent:budget_required', {
             requestId: 'budget-1',
             sessionId: branchSessionId,
+            turnId: 'turn-budget-1',
+            promptMessageId: 'prompt-budget-1',
             scope: 'agent-flow-branch',
             usedIterations: 8,
             currentLimit: 8,
@@ -829,6 +1062,23 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         usedIterations: 8,
         currentLimit: 8,
         requestedBy: 'orchestrator',
+      }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'orchestrator',
+      reasonCode: 'runtime_pause',
+      lifecycle: 'waiting_on_orchestrator',
+      status: 'waiting_on_orchestrator',
+      data: expect.objectContaining({
+        pendingNodeIds: ['orchestrator'],
+        waitEvent: 'agent:budget_required',
+        waitIdentity: {
+          requestId: 'budget-1',
+          childSessionId: 'arch-run-budget-human-gate-orchestrator',
+          childTurnId: 'turn-budget-1',
+          promptMessageId: 'prompt-budget-1',
+        },
       }),
     }));
   });
@@ -892,6 +1142,8 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         emit?.('tool:confirmation_required', {
           requestId: 'confirm-1',
           sessionId: branchSessionId,
+          turnId: 'turn-confirm-1',
+          promptMessageId: 'prompt-confirm-1',
           toolName: 'vfs_delete',
           args: {
             path: 'C:\\Projekty\\kalio-forever\\tmp\\stale.txt',
@@ -924,6 +1176,23 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         sessionId: 'arch-run-tool-confirmation-human-gate-orchestrator',
         toolName: 'vfs_delete',
         toolPath: 'C:\\Projekty\\kalio-forever\\tmp\\stale.txt',
+      }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'router_decision',
+      nodeId: 'orchestrator',
+      reasonCode: 'runtime_pause',
+      lifecycle: 'waiting_on_orchestrator',
+      status: 'waiting_on_orchestrator',
+      data: expect.objectContaining({
+        pendingNodeIds: ['orchestrator'],
+        waitEvent: 'tool:confirmation_required',
+        waitIdentity: {
+          requestId: 'confirm-1',
+          childSessionId: 'arch-run-tool-confirmation-human-gate-orchestrator',
+          childTurnId: 'turn-confirm-1',
+          promptMessageId: 'prompt-confirm-1',
+        },
       }),
     }));
   });

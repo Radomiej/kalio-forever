@@ -380,7 +380,7 @@ describe('filterRenderableSessions', () => {
     ]);
   });
 
-  it('keeps roleSlotId graph node status as source of truth after reload', () => {
+  it('stops pending downstream nodes when the persisted architecture run failed', () => {
     const sessions: ChatSession[] = [
       makeSession({ id: 'host', title: 'Workflow host', updatedAt: 10 }),
       makeSession({
@@ -424,6 +424,6 @@ describe('filterRenderableSessions', () => {
 
     const states = buildArchitectureSessionRuntimeStates(sessions, { host: [message] });
 
-    expect(states.get('arch-finalizer')).toBe('pending');
+    expect(states.get('arch-finalizer')).toBe('stopped');
   });
 });

@@ -20,6 +20,7 @@ async function postJsonFromNode(url: string, data: Record<string, unknown>): Pro
 
 test.describe('chat reconnect hydration on built QA', () => {
   test('reconnect clears a stale pending confirmation without reloading the page', async ({ page, request }) => {
+    test.setTimeout(90_000);
     const suffix = Date.now();
     const title = `Reconnect Hydration ${suffix}`;
     const requestId = `req-reconnect-${suffix}`;

@@ -1,4 +1,4 @@
-import type { AgentRunContext, SocketEvents } from '@kalio/types';
+import type { AgentRunContext, SessionRuntimeKind, SocketEvents } from '@kalio/types';
 import type { TurnState } from '../turn-state';
 
 /**
@@ -13,9 +13,15 @@ export type EmitFn = <K extends keyof SocketEvents>(event: K, data: SocketEvents
  */
 export interface StreamContext {
   readonly sessionId: string;
+  readonly runId?: string;
   readonly turnId?: string;
   readonly promptMessageId?: string;
   readonly vfsSessionId?: string;
+  readonly historySessionId?: string;
+  readonly runtimeKind?: Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
+  readonly iteration?: number;
+  readonly currentLimit?: number;
+  readonly markWaitingForHuman?: () => Promise<void>;
   readonly messageId: string;
   readonly abortSignal: AbortSignal;
   readonly state: TurnState;

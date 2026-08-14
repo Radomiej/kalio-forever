@@ -17,6 +17,7 @@ interface FakeRow {
   parentSessionId?: string | null;
   parentTurnId?: string | null;
   parentToolCallId?: string | null;
+  projectId?: string;
   runtimeContext?: unknown;
   archivedAt?: number | Date | null;
   createdAt: number | Date;
@@ -25,12 +26,20 @@ interface FakeRow {
 
 function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[]; ops: string[] } {
   const ops: string[] = [];
+  type MutationResult = PromiseLike<void> & { run: () => void };
+  type RowQuery = PromiseLike<FakeRow[]> & { limit: (limit: number) => Promise<FakeRow[]> };
+  const rowQuery = (sourceRows: FakeRow[]): RowQuery => ({
+    then: (onfulfilled, onrejected) => Promise.resolve(sourceRows).then(onfulfilled, onrejected),
+    limit: (limit: number) => Promise.resolve(sourceRows.slice(0, limit)),
+  });
   const select = () => ({
     from: () => ({
-      orderBy: () => Promise.resolve(rows),
+      then: (onfulfilled: (value: FakeRow[]) => unknown, onrejected?: (reason: unknown) => unknown) => Promise.resolve(rows).then(onfulfilled, onrejected),
+      all: () => rows,
+      orderBy: () => rowQuery(rows),
       where: () => ({
-        orderBy: () => Promise.resolve(rows.filter((row) => row.archivedAt == null)),
-        limit: () => Promise.resolve(rows),
+        orderBy: () => rowQuery(rows.filter((row) => row.archivedAt == null)),
+        limit: (limit: number) => Promise.resolve(rows.slice(0, limit)),
       }),
     }),
   });
@@ -43,10 +52,17 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
   });
   const update = () => ({
     set: (patch: Partial<FakeRow>) => ({
-      where: () => {
+      where: (): MutationResult => {
+        const apply = () => {
+          const targetRows = 'projectId' in patch || 'runtimeContext' in patch ? rows : rows.slice(0, 1);
+          for (const row of targetRows) Object.assign(row, patch);
+        };
         ops.push('update');
-        Object.assign(rows[0], patch);
-        return Promise.resolve();
+        apply();
+        return {
+          then: (onfulfilled, onrejected) => Promise.resolve().then(onfulfilled, onrejected),
+          run: apply,
+        };
       },
     }),
   });
@@ -59,7 +75,13 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
   });
 
   const drizzle = {
-    db: { select, insert, update, delete: del },
+    db: {
+      select,
+      insert,
+      update,
+      delete: del,
+      transaction: <T>(callback: (tx: { update: typeof update }) => T) => callback({ update }),
+    },
   } as unknown as DrizzleService;
 
   return { drizzle, rows, ops };
@@ -71,6 +93,8 @@ describe('SessionsService', () => {
   let sessionEvents: SessionEventsService;
   let llm: LLMService;
   let allowedPaths: AllowedPathsService;
+  let projects: { assertAssignable: ReturnType<typeof vi.fn> };
+  let activeSessionRegistry: { isActive: ReturnType<typeof vi.fn> };
   let rows: FakeRow[];
   let ops: string[];
 
@@ -106,7 +130,26 @@ describe('SessionsService', () => {
     allowedPaths = {
       ensurePath: vi.fn().mockResolvedValue({ id: 'allowed-1', path: 'C:\\Projekty\\kalio-forever', createdAt: 1 }),
     } as unknown as AllowedPathsService;
-    service = new SessionsService(fixture.drizzle, sessionManager, sessionEvents, repo, llm, allowedPaths);
+    projects = { assertAssignable: vi.fn().mockResolvedValue({
+      id: 'project-1',
+      name: 'Project',
+      path: 'C:/Project',
+      kind: 'workspace',
+      isSystem: false,
+      createdAt: 1,
+      updatedAt: 1,
+    }) };
+    activeSessionRegistry = { isActive: vi.fn().mockReturnValue(false) };
+    service = new SessionsService(
+      fixture.drizzle,
+      sessionManager,
+      sessionEvents,
+      repo,
+      llm,
+      allowedPaths,
+      projects as never,
+      activeSessionRegistry as never,
+    );
   });
 
   describe('create', () => {
@@ -121,6 +164,33 @@ describe('SessionsService', () => {
     it('defaults title to "New Chat" when not provided', async () => {
       const result = await service.create({ personaId: 'p1' });
       expect(result.title).toBe('New Chat');
+    });
+
+    it('persists the selected project id on a new session', async () => {
+      const result = await service.create({ personaId: 'p1', projectId: 'project-1' });
+
+      expect(projects.assertAssignable).toHaveBeenCalledWith('project-1');
+      expect(result.projectId).toBe('project-1');
+    });
+
+    it('inherits the host project for child sessions and rejects a conflicting project', async () => {
+      rows.push({
+        id: 'host-session',
+        personaId: 'p1',
+        title: 'Host',
+        projectId: 'project-1',
+        createdAt: 1,
+        updatedAt: 2,
+      });
+
+      const child = await service.create({ personaId: 'p1', parentSessionId: 'host-session' });
+
+      expect(child.projectId).toBe('project-1');
+      await expect(service.create({
+        personaId: 'p1',
+        parentSessionId: 'host-session',
+        projectId: 'project-2',
+      })).rejects.toThrow('host project');
     });
 
     it('does not register projectPath for public session creation by default', async () => {
@@ -151,6 +221,44 @@ describe('SessionsService', () => {
       });
 
       expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
+    });
+  });
+
+  describe('assignProject', () => {
+    it('moves a session subtree without changing activity timestamps', async () => {
+      rows.push(
+        {
+          id: 'host-session', personaId: 'p1', title: 'Host', projectId: 'project-1',
+          runtimeContext: { runtimeKind: 'chat', architectureContext: { projectPath: 'C:/Project-1' } },
+          createdAt: 1, updatedAt: 2,
+        },
+        {
+          id: 'child-session', personaId: 'p1', title: 'Child', projectId: 'project-1', parentSessionId: 'host-session',
+          runtimeContext: { runtimeKind: 'chat', architectureContext: { projectPath: 'C:/Project-1' } },
+          createdAt: 1, updatedAt: 3,
+        },
+      );
+      projects.assertAssignable.mockResolvedValue({
+        id: 'project-2', name: 'Project 2', path: 'C:/Project-2', kind: 'workspace', isSystem: false, createdAt: 1, updatedAt: 1,
+      });
+
+      await service.assignProject('host-session', { projectId: 'project-2', pathOverride: null });
+
+      expect(rows.map((row) => row.projectId)).toEqual(['project-2', 'project-2']);
+      expect(rows.map((row) => row.updatedAt)).toEqual([2, 3]);
+      expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:/Project-2');
+      expect(rows.map((row) => (
+        (row.runtimeContext as { architectureContext?: { projectPath?: string } } | undefined)?.architectureContext?.projectPath
+      ))).toEqual(['C:/Project-2', 'C:/Project-2']);
+    });
+
+    it('rejects moving a subtree while one of its sessions is generating', async () => {
+      rows.push({ id: 'host-session', personaId: 'p1', title: 'Host', projectId: 'project-1', createdAt: 1, updatedAt: 2 });
+      activeSessionRegistry.isActive.mockImplementation((sessionId: string) => sessionId === 'host-session');
+
+      await expect(service.assignProject('host-session', { projectId: 'project-2' }))
+        .rejects.toMatchObject({ response: { sessionId: 'host-session' } });
+      expect(rows[0]?.projectId).toBe('project-1');
     });
   });
 
@@ -204,6 +312,42 @@ describe('SessionsService', () => {
       const result = await service.list({ includeArchived: true });
 
       expect(result.map((session) => session.id)).toEqual(['visible', 'archived']);
+    });
+
+    it('returns the full default active session list for large histories', async () => {
+      for (let index = 0; index < 260; index += 1) {
+        rows.push({
+          id: `session-${index}`,
+          personaId: 'p1',
+          title: `Session ${index}`,
+          createdAt: index,
+          updatedAt: index,
+          archivedAt: null,
+        });
+      }
+
+      const result = await service.list();
+
+      expect(result).toHaveLength(260);
+      expect(result.at(0)?.id).toBe('session-0');
+      expect(result.at(-1)?.id).toBe('session-259');
+    });
+
+    it('clamps explicit active session limits to the release-safe maximum', async () => {
+      for (let index = 0; index < 550; index += 1) {
+        rows.push({
+          id: `session-${index}`,
+          personaId: 'p1',
+          title: `Session ${index}`,
+          createdAt: index,
+          updatedAt: index,
+          archivedAt: null,
+        });
+      }
+
+      const result = await service.list({ limit: 999 });
+
+      expect(result).toHaveLength(500);
     });
   });
 

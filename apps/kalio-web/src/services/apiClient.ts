@@ -1,5 +1,14 @@
 import axios from 'axios';
-import type { RAAppSummary, RAAppGroup, VFSListResult } from '@kalio/types';
+import type {
+  AssignSessionProjectDto,
+  ChatSession,
+  CreateProjectDto,
+  Project,
+  RAAppSummary,
+  RAAppGroup,
+  RaAppPendingApprovalSnapshot,
+  VFSListResult,
+} from '@kalio/types';
 import { resolvePairedBackendOrigin } from './backendOrigin';
 import { readRuntimeConfig } from './runtimeConfig';
 
@@ -45,6 +54,27 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+export async function getProjects(): Promise<Project[]> {
+  const { data } = await apiClient.get<Project[]>('/api/projects');
+  return data;
+}
+
+export async function createProject(dto: CreateProjectDto): Promise<Project> {
+  const { data } = await apiClient.post<Project>('/api/projects', dto);
+  return data;
+}
+
+export async function assignSessionProject(
+  sessionId: string,
+  dto: AssignSessionProjectDto,
+): Promise<ChatSession> {
+  const { data } = await apiClient.patch<ChatSession>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/project`,
+    dto,
+  );
+  return data;
+}
+
 // ── Typed RA-App catalog helpers ─────────────────────────────────────────────
 
 export async function getRAApps(): Promise<RAAppSummary[]> {
@@ -54,6 +84,11 @@ export async function getRAApps(): Promise<RAAppSummary[]> {
 
 export async function getRAAppGroups(): Promise<RAAppGroup[]> {
   const { data } = await apiClient.get<RAAppGroup[]>('/api/ra-apps/groups');
+  return data;
+}
+
+export async function getPendingRAAppApprovals(): Promise<RaAppPendingApprovalSnapshot[]> {
+  const { data } = await apiClient.get<RaAppPendingApprovalSnapshot[]>('/api/ra-apps/pending-approvals');
   return data;
 }
 

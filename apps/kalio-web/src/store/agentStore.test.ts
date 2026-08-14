@@ -352,6 +352,7 @@ describe('agentStore - runtime snapshot ingestion', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 1,
@@ -397,5 +398,31 @@ describe('agentStore - runtime snapshot ingestion', () => {
     expect(secondState.runtimeActivitySnapshots).toBe(firstState.runtimeActivitySnapshots);
     expect(secondState.toolActivities).toBe(firstState.toolActivities);
     expect(secondState.sessionToolActivities).toBe(firstState.sessionToolActivities);
+  });
+
+  it('REGRESSION: rejects equal or lower revisions for the same runtime run', () => {
+    const store = useAgentStore.getState();
+    const current = {
+      ...makeRuntimeSnapshot('session-1'),
+      active: false,
+      run: { ...makeRuntimeSnapshot('session-1').run!, revision: 3, phase: 'completed' as const, status: 'completed' as const },
+    };
+    const stale = {
+      ...makeRuntimeSnapshot('session-1'),
+      active: true,
+      queueLength: 4,
+      run: { ...makeRuntimeSnapshot('session-1').run!, revision: 2, phase: 'tool_running' as const, status: 'active' as const },
+    };
+
+    store.setRuntimeActivitySnapshot(current);
+    const stateAfterCurrent = useAgentStore.getState();
+    store.setRuntimeActivitySnapshot(stale);
+
+    expect(useAgentStore.getState().runtimeActivitySnapshots).toBe(stateAfterCurrent.runtimeActivitySnapshots);
+    expect(useAgentStore.getState().runtimeActivitySnapshots['session-1']).toMatchObject({
+      active: false,
+      queueLength: 0,
+      run: { revision: 3, status: 'completed' },
+    });
   });
 });

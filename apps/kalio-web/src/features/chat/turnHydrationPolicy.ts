@@ -40,5 +40,8 @@ export function shouldReplaceTurnsFromHydratedHistory({
     return false;
   }
 
-  return hydratedTurns.some((turn) => turn.turnKind === 'workflow-envelope') || activeTurn.items.length > 0;
+  return hydratedTurns.some((turn) =>
+    turn.turnKind === 'workflow-envelope'
+    || turn.items.some((item) => item.kind === 'tool'),
+  ) || activeTurn.items.length > 0;
 }

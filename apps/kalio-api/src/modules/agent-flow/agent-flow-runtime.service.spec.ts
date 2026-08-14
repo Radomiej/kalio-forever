@@ -1,8 +1,10 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentFlowRunSnapshot, ResumeAgentFlowRunDto } from '@kalio/types';
-import { DrizzleService } from '../../database/drizzle.service';
+import type { DrizzleService } from '../../database/drizzle.service';
 import * as schema from '../../database/schema';
 import { AgentFlowRuntimeService } from './agent-flow-runtime.service';
 import { AgentFlowRunRepository } from './agent-flow-run.repository';
@@ -2246,10 +2248,10 @@ describe('AgentFlowRuntimeService', () => {
   it('preserves waiting continuation and resume fields after service reconstruction and adapter refresh', async () => {
     const sqlite = new Database(':memory:');
     try {
-      const drizzleService = new DrizzleService(null as never);
-      (drizzleService as unknown as { sqlite: Database.Database }).sqlite = sqlite;
-      (drizzleService as unknown as { ensureAgentFlowTables: () => void }).ensureAgentFlowTables();
       const db = drizzle(sqlite, { schema });
+      migrate(db, {
+        migrationsFolder: resolve(__dirname, '../../database/migrations'),
+      });
 
       const repository = new AgentFlowRunRepository({ db } as unknown as DrizzleService);
       repository.saveSnapshot({

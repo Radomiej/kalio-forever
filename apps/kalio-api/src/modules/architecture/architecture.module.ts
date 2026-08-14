@@ -7,13 +7,28 @@ import { ArchitectureRegistryService } from './architecture-registry.service';
 import { ARCHITECTURE_ROLE_EXECUTOR, ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRunsController } from './architecture-runs.controller';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { ArchitectureRunPreparationService } from './architecture-run-preparation.service';
+import { ArchitectureRuntimeAuditWriterService } from './architecture-runtime-audit.service';
+import { ArchitectureRuntimeAuditRecoveryService } from './architecture-runtime-audit-recovery.service';
+import { ArchitectureRuntimeChatProjectionService } from './architecture-runtime-chat-projection.service';
+import { ArchitectureRuntimeGraphProjectionService } from './architecture-runtime-graph-projection.service';
+import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.port';
 
 @Module({
   imports: [ChatModule, VFSModule, CLIAgentModule],
   controllers: [ArchitectureRegistryController, ArchitectureRunsController],
   providers: [
     ArchitectureRegistryService,
+    ArchitectureRunPreparationService,
+    ArchitectureRuntimeAuditWriterService,
+    ArchitectureRuntimeAuditRecoveryService,
+    ArchitectureRuntimeChatProjectionService,
+    ArchitectureRuntimeGraphProjectionService,
     ArchitectureRuntimeService,
+    {
+      provide: ARCHITECTURE_RUNTIME_STOP,
+      useExisting: ArchitectureRuntimeService,
+    },
     {
       provide: ARCHITECTURE_ROLE_EXECUTOR,
       useClass: ArchitectureRoleExecutorService,

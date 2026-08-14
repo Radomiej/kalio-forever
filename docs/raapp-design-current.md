@@ -1,5 +1,7 @@
 # RA-App Design - stan aktualny
 
+Dla workflow instalowania wlasnych pluginow przez ZIP zobacz [RA-App Plugin ZIP Upload](raapp-plugin-upload.md).
+
 Ten dokument opisuje runtime i powierzchnie renderowania RA-App w Kalio Workstation.
 Jesli chcesz zrozumiec aktualny VFS-first workflow roboczy, wersjonowany release lane,
 porownanie z legacy V1 oraz status testow przed merge, zacznij od

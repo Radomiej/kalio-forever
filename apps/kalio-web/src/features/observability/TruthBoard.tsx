@@ -62,24 +62,24 @@ export function TruthBoard({ entries }: { entries: AuditLogEntry[] }) {
           testId="truth-overview-work-time"
         />
       </div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
+      <div className="grid grid-cols-3 divide-x divide-base-300/55 overflow-hidden rounded-lg bg-base-200/30 ring-1 ring-inset ring-base-300/45 md:grid-cols-6">
       {counts.map((lane) => (
-        <div key={lane.id} data-testid={`truth-lane-${lane.id}`} className="min-w-0 rounded border border-base-300 bg-base-200/40 px-2.5 py-2 min-h-[82px]">
+        <div key={lane.id} data-testid={`truth-lane-${lane.id}`} className="min-h-[86px] min-w-0 px-3 py-2.5 text-left">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[10px] uppercase tracking-[0.14em] text-base-content/65 truncate">{lane.label}</div>
-            <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] ${laneStatus(lane.id, lane.count).className}`}>
+            <div className="truncate text-[11px] uppercase tracking-[0.12em] text-base-content/65">{lane.label}</div>
+            <span className={`rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] ${laneStatus(lane.id, lane.count).className}`}>
               {laneStatus(lane.id, lane.count).label}
             </span>
           </div>
           <div className="mt-1 text-lg font-mono font-semibold text-base-content">{lane.count}</div>
-          <div className="mt-0.5 break-words text-[10px] leading-4 text-base-content/50" title={lane.summary}>{lane.summary}</div>
-          <div className="mt-1 text-[9px] leading-3 text-base-content/65" title={lane.laneEntries.at(-1)?.label}>
+          <div className="mt-0.5 break-words text-[11px] leading-4 text-base-content/55" title={lane.summary}>{lane.summary}</div>
+          <div className="mt-1 text-[10px] leading-4 text-base-content/65" title={lane.laneEntries.at(-1)?.label}>
             {formatLaneLatestLabel(lane.laneEntries.at(-1))}
           </div>
         </div>
       ))}
       </div>
-      <div className="min-w-0 rounded border border-base-300 bg-base-200/35 px-2.5 py-1.5 text-[11px] text-base-content/55">
+      <div className="min-w-0 rounded-md bg-base-200/35 px-3 py-2 text-xs text-base-content/55">
         Latest: {latest ? formatLatestEntry(latest) : 'none'}
       </div>
     </div>
@@ -88,10 +88,10 @@ export function TruthBoard({ entries }: { entries: AuditLogEntry[] }) {
 
 function OverviewCard({ detail, label, testId, value }: { detail: string; label: string; testId: string; value: string }) {
   return (
-    <div className="min-w-0 rounded border border-base-300 bg-base-200/65 px-3 py-2" data-testid={testId}>
-      <div className="text-[10px] uppercase tracking-[0.14em] text-base-content/65">{label}</div>
+    <div className="min-w-0 rounded-lg bg-base-200/55 px-3 py-2 ring-1 ring-inset ring-base-300/45" data-testid={testId}>
+      <div className="text-[11px] uppercase tracking-[0.12em] text-base-content/65">{label}</div>
       <div className="mt-1 truncate font-mono text-xl font-semibold text-base-content">{value}</div>
-      <div className="mt-0.5 truncate text-[10px] text-base-content/65" title={detail}>{detail}</div>
+      <div className="mt-0.5 truncate text-[11px] text-base-content/65" title={detail}>{detail}</div>
     </div>
   );
 }

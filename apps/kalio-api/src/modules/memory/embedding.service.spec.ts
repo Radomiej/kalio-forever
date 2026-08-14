@@ -288,6 +288,42 @@ describe('EmbeddingService', () => {
   });
 
   describe('reloadFromCredential â€” env vars', () => {
+    it('uses the deterministic mock provider when explicitly configured', async () => {
+      const { svc } = makeService({
+        EMBEDDING_PROVIDER: 'mock',
+        EMBEDDING_MODEL: 'text-embedding-3-small',
+      });
+
+      await svc.reloadFromCredential();
+
+      const status = svc.getStatus();
+      expect(status.source).toBe('mock');
+      expect(status.provider).toBe('mock');
+      expect(status.model).toBe('mock');
+      expect(status.configured).toBe(true);
+      await expect(svc.embedOne('deterministic E2E embedding')).resolves.toHaveLength(1536);
+    });
+
+    it('prioritizes an active DB credential over the explicit E2E mock fallback', async () => {
+      const { svc, credentials } = makeService({ EMBEDDING_PROVIDER: 'mock' });
+      const credential = await credentials.create({
+        name: 'Active credential',
+        provider: 'openai',
+        apiKey: 'sk-test',
+        baseUrl: 'https://example.test/v1',
+        model: 'text-embedding-3-small',
+        dimensions: 1536,
+      });
+      await credentials.setActive(credential.id);
+
+      await svc.reloadFromCredential();
+
+      expect(svc.getStatus()).toMatchObject({
+        source: 'db',
+        activeCredentialId: credential.id,
+      });
+    });
+
     it('uses env provider when EMBEDDING_API_KEY + EMBEDDING_BASE_URL set', async () => {
       const { svc } = makeService({
         EMBEDDING_API_KEY: 'sk-env',

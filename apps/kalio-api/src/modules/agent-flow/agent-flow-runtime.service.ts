@@ -1,4 +1,5 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type {
   AgentFlowRunSnapshot,
   ResumeAgentFlowRunDto,
@@ -12,6 +13,7 @@ import { AgentFlowRunRepository } from './agent-flow-run.repository';
 import type { AgentFlowRuntimePort } from './agent-flow-runtime.port';
 import { ArchitectureRuntimeService } from '../architecture/architecture-runtime.service';
 import { SessionsService } from '../chat/sessions.service';
+import { RunJournalService } from '../chat/run-journal.service';
 import { VFSService } from '../vfs/vfs.service';
 import {
   argsFromRun,
@@ -30,16 +32,66 @@ import {
 
 const DURABLE_RECONCILE_INTERVAL_MS = 1000;
 const DURABLE_RECONCILE_MAX_ATTEMPTS = 180;
+const RECOVERY_LEASE_MS = 5 * 60 * 1000;
 
 @Injectable()
-export class AgentFlowRuntimeService implements AgentFlowRuntimePort {
+export class AgentFlowRuntimeService implements AgentFlowRuntimePort, OnApplicationBootstrap, OnModuleDestroy {
+  private readonly logger = new Logger(AgentFlowRuntimeService.name);
+  private readonly recoveryOwnerId = `agent-flow-${randomUUID()}`;
+  private unsubscribeCompletedRun?: () => void;
   constructor(
     private readonly adapter: ArchitectureAgentFlowAdapter,
     private readonly repository: AgentFlowRunRepository,
     @Optional() private readonly vfs?: VFSService,
     @Optional() private readonly sessions?: SessionsService,
     @Optional() private readonly architectureRuntime?: ArchitectureRuntimeService,
+    @Optional() private readonly runJournal?: RunJournalService,
   ) {}
+
+  onApplicationBootstrap(): void {
+    this.unsubscribeCompletedRun = this.runJournal?.subscribeCompleted(async (run) => {
+      if (run.outcome?.finalText) await this.recoverOrphanedRuns();
+    });
+    void this.recoverOrphanedRuns().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`AgentFlow recovery scan failed: ${message}`);
+    });
+  }
+
+  onModuleDestroy(): void {
+    this.unsubscribeCompletedRun?.();
+    this.unsubscribeCompletedRun = undefined;
+  }
+
+  async recoverOrphanedRuns(now = Date.now()): Promise<number> {
+    if (!this.runJournal) return 0;
+    let recovered = 0;
+    for (const candidate of this.repository.findRecoverableRuns(now)) {
+      const continuation = candidate.snapshot.run.checkpoint?.continuation;
+      const wait = continuation?.reason === 'runtime_pause' ? continuation.waitIdentity : undefined;
+      if (!wait) continue;
+      const childRun = await this.runJournal.getCompletedTurn(wait.childSessionId, wait.childTurnId);
+      if (!childRun?.outcome?.finalText) continue;
+      if (!this.repository.claimRecovery(
+        candidate.snapshot.run.id,
+        candidate.revision,
+        this.recoveryOwnerId,
+        now + RECOVERY_LEASE_MS,
+        now,
+      )) continue;
+      await this.resume(candidate.snapshot.run.id, {
+        context: {
+          runtimeRecovery: {
+            requestId: wait.requestId,
+            childSessionId: wait.childSessionId,
+            childTurnId: wait.childTurnId,
+          },
+        },
+      });
+      recovered += 1;
+    }
+    return recovered;
+  }
 
   async run(args: RunSubAgentFlowArgs): Promise<SubAgentFlowResult> {
     const resolvedArgs = await this.withInheritedContext(args);

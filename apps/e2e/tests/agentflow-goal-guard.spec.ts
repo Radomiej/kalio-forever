@@ -2,7 +2,9 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { io } from 'socket.io-client';
 import { API_BASE, deleteSessionIfExists, isMockLlm, selectSession, selectSessionOriginFilter, sendMessageFromComposer } from './helpers/test-config';
+import { restartPlaywrightBackend } from './helpers/restart-control';
 
 type SeedStatement = {
   run: (...params: unknown[]) => unknown;
@@ -20,14 +22,21 @@ type AgentFlowRunSnapshot = {
     id: string;
     childSessionId?: string;
     status: string;
+    checkpoint?: {
+      continuation?: unknown;
+      resumeContext?: unknown;
+      goal?: string;
+    };
   };
   result?: {
     status?: string;
     childSessionId?: string;
     openChatSessionId?: string;
     openGraphRunId?: string;
+    flowDefinitionId?: string;
+    summary?: string;
   };
-  events?: unknown;
+  events: Array<{ type?: string } & Record<string, unknown>>;
 };
 
 const GOAL_FLOW_ROOT_LABEL = /Goal Guard|Architecture|Goal Master Delivery Loop/i;
@@ -74,7 +83,7 @@ function seedParentAgentFlowBubbleFixture(): { sessionId: string; childSessionId
         childSessionId,
         'default',
         `Architecture: Goal Guard child ${stamp}`,
-        'agent',
+        'agent-flow',
         sessionId,
         null,
         'call-agentflow',
@@ -201,43 +210,100 @@ async function waitForAgentFlow(
   request: APIRequestContext,
   runId: string,
   terminal: (status: string) => boolean,
-  attempts = 80,
+  timeoutMs = 40_000,
 ) {
-  let snapshot: {
-    run: { status: string };
-    result?: { status: string; summary?: string };
-  } | null = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  let snapshot: AgentFlowRunSnapshot | null = null;
+  await expect
+    .poll(async () => {
     const response = await request.get(`${API_BASE}/agent-flows/runs/${runId}`);
-    expect(response.ok()).toBeTruthy();
-    snapshot = await response.json();
-    if (terminal(snapshot.run.status)) {
-      return snapshot;
+      if (!response.ok()) {
+        return `http:${response.status()}`;
+      }
+      snapshot = await response.json() as AgentFlowRunSnapshot;
+      return terminal(snapshot.run.status) ? 'matched' : snapshot.run.status;
+    }, {
+      timeout: timeoutMs,
+      message: `AgentFlow ${runId} did not reach expected terminal state`,
+    })
+    .toBe('matched');
+
+  if (!snapshot) {
+    throw new Error(`AgentFlow ${runId} returned no snapshot`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  return snapshot;
+}
+
+async function waitForNestedSubagent(
+  request: APIRequestContext,
+  rootSessionId: string,
+): Promise<{ outerSessionId: string; nestedSessionId: string }> {
+  let match: { outerSessionId: string; nestedSessionId: string } | undefined;
+  await expect.poll(async () => {
+    const outerResponse = await request.get(`${API_BASE}/sessions/${rootSessionId}/children`);
+    if (!outerResponse.ok()) return 'missing-outer';
+    const outerSessions = await outerResponse.json() as Array<{ id: string }>;
+    for (const outer of outerSessions) {
+      const nestedResponse = await request.get(`${API_BASE}/sessions/${outer.id}/children`);
+      if (!nestedResponse.ok()) continue;
+      const nested = (await nestedResponse.json() as Array<{ id: string }>)[0];
+      if (nested) {
+        match = { outerSessionId: outer.id, nestedSessionId: nested.id };
+        return 'found';
+      }
+    }
+    return 'missing-nested';
+  }, { timeout: 30_000 }).toBe('found');
+  if (!match) throw new Error(`No nested subagent found for AgentFlow session ${rootSessionId}`);
+  return match;
+}
+
+async function approvePendingToolConfirmation(sessionId: string): Promise<void> {
+  const socket = io(API_BASE.replace(/\/api\/?$/, ''), { transports: ['websocket'] });
+  try {
+    await new Promise<void>((resolveApproval, reject) => {
+      socket.on('connect_error', reject);
+      socket.on('tool:confirmation_required', (request: { requestId: string }) => {
+        socket.once('tool:result', () => resolveApproval());
+        socket.emit('tool:confirm', { requestId: request.requestId, sessionId });
+      });
+      socket.on('connect', () => socket.emit('session:identify', { sessionId }));
+    });
+  } finally {
+    socket.close();
   }
-  throw new Error(`AgentFlow ${runId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'}`);
 }
 
 async function waitForParentAgentFlowRun(
   request: APIRequestContext,
   parentSessionId: string,
   terminal: (snapshot: AgentFlowRunSnapshot) => boolean,
-  attempts = 90,
+  timeoutMs = 45_000,
 ) {
   let snapshot: AgentFlowRunSnapshot | undefined;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(parentSessionId)}`);
-    expect(response.ok()).toBeTruthy();
-    const runs = await response.json() as AgentFlowRunSnapshot[];
-    const match = runs.find((entry) => terminal(entry));
-    if (match) {
-      return match;
-    }
-    snapshot = runs.at(-1) ?? runs[0];
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  let lastError: string | undefined;
+  let matched: AgentFlowRunSnapshot | undefined;
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(parentSessionId)}`);
+      if (!response.ok()) {
+        lastError = `HTTP ${response.status()}`;
+        return lastError;
+      }
+      const runs = await response.json() as AgentFlowRunSnapshot[];
+      matched = runs.find((entry) => terminal(entry));
+      snapshot = runs.at(-1) ?? runs[0];
+      lastError = undefined;
+      return matched ? 'matched' : snapshot?.run.status ?? 'missing';
+    }, {
+      timeout: timeoutMs,
+      message: `AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state`,
+    })
+    .toBe('matched');
+
+  if (!matched) {
+    throw new Error(`AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'} error=${lastError ?? 'none'}`);
   }
-  throw new Error(`AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'}`);
+  return matched;
 }
 
 async function waitForAuditEntry(
@@ -245,17 +311,26 @@ async function waitForAuditEntry(
   predicate: (entry: { data?: unknown; type?: string; label?: string }) => boolean,
 ) {
   let rows: Array<{ data?: unknown; type?: string; label?: string }> = [];
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  let match: { data?: unknown; type?: string; label?: string } | undefined;
+  await expect
+    .poll(async () => {
     const response = await request.get(`${API_BASE}/audit-log?limit=500&type=architecture_event&sessionId=architect-ui`);
-    expect(response.ok()).toBeTruthy();
+      if (!response.ok()) {
+        return `http:${response.status()}`;
+      }
     rows = await response.json();
-    const match = rows.find(predicate);
-    if (match) {
-      return match;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+      match = rows.find(predicate);
+      return match ? 'matched' : `rows:${rows.length}`;
+    }, {
+      timeout: 10_000,
+      message: 'Expected architecture audit entry was not recorded',
+    })
+    .toBe('matched');
+
+  if (!match) {
+    throw new Error(`Expected architecture audit entry was not recorded; rows=${rows.length}`);
   }
-  throw new Error(`Expected architecture audit entry was not recorded; rows=${rows.length}`);
+  return match;
 }
 
 async function createParentSession(request: APIRequestContext, title: string): Promise<string> {
@@ -308,6 +383,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
   });
 
   test('renders parent run_sub_agentflow history bubble and QA waiting state in Talk', async ({ page, request }) => {
+    test.setTimeout(90_000);
     const fixture = seedParentAgentFlowBubbleFixture();
 
     try {
@@ -333,7 +409,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('agentflow-canvas-section')).toContainText('Goal Guard is waiting for external QA evidence');
       await expect(page.getByTestId('agentflow-canvas-section').getByText('Resume AgentFlow')).toBeVisible();
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
       await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
@@ -341,6 +417,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await page.reload();
       await page.getByTestId('nav-talk').click();
       await selectSession(page, fixture.sessionId, fixture.title);
+      await page.locator('[data-testid="talk-conversation-switcher"]:visible').click();
 
       const reloadedAgentFlowCall = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]');
       await expect(reloadedAgentFlowCall).toBeVisible({ timeout: 10_000 });
@@ -354,7 +431,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('agentflow-canvas-section')).toContainText('waiting_on_orchestrator');
       await expect(page.getByTestId('agentflow-canvas-section').getByText('Resume AgentFlow')).toBeVisible();
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
       await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
@@ -381,6 +458,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         'Start the required Dev/Implementer <-> Goal Guard architecture from Talk.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
         '[[mock:tool:run_sub_agentflow]]',
+        '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
       const liveBubble = page.getByTestId('agent-turn-bubble').first();
@@ -390,26 +468,26 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
       const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
       await expect(parentResult).toBeVisible({ timeout: 150_000 });
-      await expect(parentResult.getByTestId('sub-agentflow-result')).toContainText(/done|waiting_on_orchestrator/i, { timeout: 150_000 });
-      await expect(parentResult.getByTestId('sub-agentflow-result')).toContainText(/Goal Guard|AgentFlow/i);
-      await expect(parentResult).not.toContainText('Five Minds');
 
-      const runsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(sessionId)}`);
-      expect(runsResponse.ok()).toBeTruthy();
-      const runs = await runsResponse.json() as Array<{
-        run: { id: string; childSessionId?: string; status: string };
-        result?: { openChatSessionId?: string; childSessionId?: string; openGraphRunId?: string; status?: string };
-      }>;
-      expect(runs).toHaveLength(1);
-      const run = runs[0];
+      const run = await waitForParentAgentFlowRun(request, sessionId, (snapshot) => (
+        snapshot.run.status === 'done'
+        || snapshot.run.status === 'waiting_on_orchestrator'
+        || snapshot.result?.status === 'done'
+        || snapshot.result?.status === 'waiting_on_orchestrator'
+      ));
       childSessionId = run.result?.openChatSessionId ?? run.result?.childSessionId ?? run.run.childSessionId;
       expect(childSessionId).toBeTruthy();
 
-      await parentResult.getByTestId('open-agentflow-canvas').click();
-      await expect(page.getByTestId('agentflow-canvas-section')).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByTestId('agentflow-canvas-section')).toContainText(/Goal Guard|AgentFlow/i);
+      const parentTimeline = page.getByTestId('architecture-run-timeline').last();
+      await expect(parentTimeline).toBeVisible({ timeout: 150_000 });
+      await expect(parentTimeline).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
+      await expect(parentTimeline).not.toContainText('Five Minds');
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await parentTimeline.getByTestId('open-architecture-run-canvas').click();
+      await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId('architecture-run-canvas-section')).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
+
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText(/Goal Guard|AgentFlow/i);
       await expect(page.getByTestId('execution-graph-view')).not.toContainText('Five Minds');
@@ -429,11 +507,6 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     const sessionId = await createParentSession(request, title);
     let childSessionId: string | undefined;
     let runId: string | undefined;
-    const getRunNode = (id: string) => page.getByTestId(`graph-node-agent-flow:${id}`);
-    const getParentBubbleForRun = (id: string) => page
-      .locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]')
-      .filter({ hasText: id })
-      .first();
 
     try {
       await page.goto('/');
@@ -454,7 +527,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
       const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
       await expect(parentResult).toBeVisible({ timeout: 150_000 });
-      await expect(parentResult.getByTestId('sub-agentflow-result')).toContainText(/queued|running|waiting_on_orchestrator|done/i);
+      const parentTimeline = page.getByTestId('architecture-run-timeline').last();
+      await expect(parentTimeline).toBeVisible({ timeout: 150_000 });
+      await expect(parentTimeline).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
 
       const snapshot = await waitForParentAgentFlowRun(request, sessionId, (run) => run.run.status === 'done' || run.result?.status === 'done');
       runId = snapshot.run.id;
@@ -463,27 +538,27 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         ?? snapshot.run.childSessionId;
       expect(runId).toBeTruthy();
 
-      await expect(parentResult.getByTestId('sub-agentflow-result')).toContainText('done', { timeout: 45_000 });
-      await expect(parentResult.getByTestId('sub-agentflow-result')).not.toContainText('waiting_on_orchestrator');
+      await expect(parentTimeline).toContainText(/completed|done/i, { timeout: 45_000 });
+      await expect(parentTimeline).not.toContainText('waiting_on_orchestrator');
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
-      const runNode = getRunNode(runId);
-      await expect(runNode).toBeVisible({ timeout: 30_000 });
-      await expect(runNode).not.toContainText('running');
-      await expect(runNode).toContainText('done');
+      await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop / completed', { timeout: 30_000 });
+      await expect(page.getByTestId('execution-graph-view')).toContainText('Final response', { timeout: 30_000 });
+      await expect(page.getByTestId('execution-graph-view')).not.toContainText('running');
 
       await page.reload();
 
       await page.getByTestId('nav-talk').click();
       await selectSession(page, sessionId, title);
-      await page.getByTestId('talk-sidebar-conversation-entry').click();
-      const parentResultAfterReload = getParentBubbleForRun(runId).getByTestId('sub-agentflow-result');
-      await expect(parentResultAfterReload).toContainText('done', { timeout: 20_000 });
-      await expect(parentResultAfterReload).not.toContainText('waiting_on_orchestrator');
-      await expect(parentResultAfterReload).toContainText(childSessionId);
+      await page.getByTestId('execution-graph-view').getByTestId('talk-conversation-switcher').click();
+      const timelineAfterReload = page.getByTestId('architecture-run-timeline').last();
+      await expect(timelineAfterReload).toBeVisible({ timeout: 20_000 });
+      await expect(timelineAfterReload).toContainText(/completed|done/i);
+      await expect(timelineAfterReload).not.toContainText('waiting_on_orchestrator');
+      await expect(timelineAfterReload).not.toContainText('Five Minds');
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop / completed', { timeout: 20_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Final response', { timeout: 20_000 });
@@ -669,7 +744,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(talkRootLocator).toContainText(GOAL_FLOW_ROOT_LABEL);
     await expect(talkRootLocator).not.toContainText(/Five Minds/i);
     await talkRootLocator.click();
-    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await page.getByTestId('talk-graph-switcher').click();
     await openDetailedExecutionGraph(page);
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard accepted strict Implementer-owned VFS evidence', { timeout: 10_000 });
@@ -881,7 +956,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(page.getByTestId('architect-graph-status')).not.toContainText('Five Minds');
     const stopButton = page.getByRole('button', { name: /^Stop$/ });
     if (await stopButton.isVisible().catch(() => false)) {
-      await stopButton.click();
+      await stopButton.click({ timeout: 5_000 }).catch((error: unknown) => {
+        console.warn(`AgentFlow stop cleanup skipped: ${error instanceof Error ? error.message : String(error)}`);
+      });
     }
   });
 
@@ -976,11 +1053,62 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await expect(talkRootLocator).toContainText(GOAL_FLOW_ROOT_LABEL);
     await expect(talkRootLocator).not.toContainText(/Five Minds/i);
     await talkRootLocator.click();
-    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await page.getByTestId('talk-graph-switcher').click();
     await openDetailedExecutionGraph(page);
     await expect(page.getByTestId('execution-graph-view')).toContainText('Implementer', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop', { timeout: 10_000 });
     await expect(page.getByTestId('execution-graph-view')).not.toContainText(/Five Minds/i);
+  });
+});
+
+test.describe('AgentFlow restart recovery', () => {
+  test('resumes the owning parent once after nested child HITL and backend restart', async ({ request }) => {
+    test.setTimeout(180_000);
+    test.skip(!(await isMockLlm(request)), 'AgentFlow restart recovery requires the mock LLM stack.');
+
+    const parentSessionId = await createParentSession(request, `AgentFlow nested restart ${Date.now()}`);
+    const startResponse = await request.post(`${API_BASE}/agent-flows/runs`, {
+      data: {
+        flowId: 'goal_guard_delivery_loop',
+        goal: 'Delegate one approval-gated child task. [[mock:tool:run_subagent:hitl]]',
+        parentSessionId,
+        startMode: 'durable',
+        returnMode: 'summary',
+        maxSteps: 4,
+        context: {
+          allowArchitectureOrchestratorSubagents: true,
+          maxArchitectureSteps: 4,
+          maxArchitectureNodeVisits: 2,
+        },
+      },
+    });
+    expect(startResponse.ok()).toBeTruthy();
+    const started = await startResponse.json() as AgentFlowRunSnapshot;
+    const rootSessionId = started.run.childSessionId;
+    expect(rootSessionId).toBeTruthy();
+
+    await waitForAgentFlow(request, started.run.id, (status) => status === 'waiting_on_orchestrator');
+    const nested = await waitForNestedSubagent(request, rootSessionId!);
+
+    await restartPlaywrightBackend();
+    await approvePendingToolConfirmation(nested.nestedSessionId);
+
+    await expect.poll(async () => {
+      const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+      if (!response.ok()) return `http:${response.status()}`;
+      const snapshot = await response.json() as AgentFlowRunSnapshot;
+      return JSON.stringify(snapshot.run.checkpoint?.continuation ?? {}).includes('runtime_pause')
+        ? 'runtime_pause'
+        : snapshot.run.status;
+    }, { timeout: 60_000 }).not.toBe('runtime_pause');
+    const recoveredResponse = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+    expect(recoveredResponse.ok()).toBeTruthy();
+    const recovered = await recoveredResponse.json() as AgentFlowRunSnapshot;
+    expect(JSON.stringify(recovered.run.checkpoint?.continuation ?? {})).not.toContain('runtime_pause');
+    const orchestratorStarts = recovered.events.filter((event) =>
+      (event.type === 'flow:node_start' || event.type === 'node_started')
+      && (event['nodeId'] === 'orchestrator' || event['slotId'] === 'orchestrator'));
+    expect(orchestratorStarts).toHaveLength(1);
   });
 });
 

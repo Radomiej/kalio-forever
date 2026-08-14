@@ -3,6 +3,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import {
   API_BASE,
   deleteSessionIfExists,
+  getJsonWithTransportRetry,
   selectArchitectureInComposer,
   selectSession,
 } from './helpers/test-config';
@@ -68,14 +69,14 @@ async function waitForArchitectureRunCompleted(
 ): Promise<void> {
   await expect
     .poll(async () => {
-      const graphResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/graph`);
-      const chatResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/chat`);
-      if (!graphResponse.ok() || !chatResponse.ok()) {
-        return `http:${graphResponse.status()}:${chatResponse.status()}`;
-      }
-
-      const graph = await graphResponse.json() as ArchitectureGraphResponse;
-      const chat = await chatResponse.json() as ArchitectureChatResponse;
+      const graph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${runId}/graph`,
+      );
+      const chat = await getJsonWithTransportRetry<ArchitectureChatResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${runId}/chat`,
+      );
       const finalizerNode = graph.nodes?.find((node) => node.id === 'final-artifact' || node.kind === 'artifact');
       const hasFinalizerMessage = chat.messages?.some((message) => (
         message.speaker === 'finalizer'

@@ -1,7 +1,7 @@
 {
   "name": "kalio-forever",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
     "qa": "powershell -ExecutionPolicy Bypass -File start-qa.ps1",
@@ -15,6 +15,7 @@
     "prod:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1 -KeepData",
     "dev:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
     "build": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run build",
+    "db:reset": "node scripts/reset-kalio-db.mjs",
     "typecheck": "corepack pnpm --filter @kalio/types run build && corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run typecheck",
     "lint": "corepack pnpm -r --filter kalio-api --filter kalio-web run lint",
     "test": "node scripts/run-test-gate.mjs",
@@ -28,13 +29,23 @@
     "agentflow:paid-readiness": "node scripts/agentflow-paid-readiness.mjs",
     "agentflow:activate-live-credential": "node scripts/activate-live-credential.mjs",
     "release:workflow-gate": "node scripts/workflow-release-gate.mjs",
+    "release:paid-canary": "node scripts/paid-live-canary.mjs",
+    "release:paid-tool-canary": "node scripts/paid-live-tool-canary.mjs",
+    "release:demo-gate": "node scripts/demo-release-gate.mjs",
     "stack:start": "node scripts/stack-manager.mjs start",
     "stack:status": "node scripts/stack-manager.mjs status",
     "stack:stop": "node scripts/stack-manager.mjs stop",
     "bench:embeddings": "node scripts/bench-embeddings.mjs",
-    "llm:probe": "node scripts/probe-llm.mjs"
+    "llm:probe": "node scripts/probe-llm.mjs",
+    "tauri": "node node_modules/@tauri-apps/cli/tauri.js",
+    "desktop:prepare": "node scripts/tauri-prepare.mjs",
+    "desktop:build": "node scripts/desktop-build.mjs",
+    "desktop:updater-config": "node scripts/tauri-updater-config.mjs",
+    "release:tauri-manifest": "node scripts/generate-tauri-latest-json.mjs",
+    "release:third-party-notices": "node scripts/generate-third-party-notices.mjs"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.11.0",
     "turbo": "^2.4.0",
     "typescript": "~5.8.2"
   },

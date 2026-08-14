@@ -7,10 +7,8 @@ import {
   PreviewPane,
   SessionView,
   WorkView,
-  type CatalogRunTarget,
-  type FoundRAApp,
-  type WorkDraft,
 } from './RAAppManager.Views';
+import type { CatalogRunTarget, FoundRAApp, WorkDraft } from './RAAppManager.types';
 import {
   getRAApps,
   getRAAppGroups,
@@ -55,6 +53,24 @@ function safeParseRAAppMessage(content: string): RAAppBlock | null {
   return null;
 }
 
+function parseRunInputs(raw: string): Record<string, unknown> | undefined {
+  const normalized = raw.trim();
+  if (!normalized) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalized) as unknown;
+  } catch (error) {
+    throw new Error(`Inputs must be valid JSON: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Inputs must be a JSON object, for example {"value": 5}.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   const [groups, setGroups] = useState<RAAppGroup[]>([]);
   const [coreApps, setCoreApps] = useState<RAAppSummary[]>([]);
@@ -75,6 +91,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   const setPendingMessage = useSessionStore((s) => s.setPendingMessage);
   const setPendingRAAppLaunchIntent = useSessionStore((s) => s.setPendingRAAppLaunchIntent);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [runInputsJson, setRunInputsJson] = useState('');
   const [workFiles, setWorkFiles] = useState<VFSFile[]>([]);
   const [workLoading, setWorkLoading] = useState(false);
   const [workError, setWorkError] = useState<string | null>(null);
@@ -160,7 +177,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
 
   const handleUpload = useCallback(
     async (file: File) => {
-      if (!file.name.endsWith('.zip')) {
+      if (!/\.zip$/i.test(file.name)) {
         setCatalogError('Only .zip files are supported.');
         return;
       }
@@ -192,19 +209,27 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   };
 
   const handleRun = useCallback(
-    async (target: CatalogRunTarget) => {
+    async (target: CatalogRunTarget, inputsJson: string) => {
+      let inputs: Record<string, unknown> | undefined;
+      try {
+        inputs = parseRunInputs(inputsJson);
+      } catch (error) {
+        setCatalogError(error instanceof Error ? error.message : String(error));
+        return;
+      }
       try {
         const session = await createAndActivateEmptyHostSession({
           personaId: 'ra-apps',
           title: target.name,
-          runtimeContext: buildRAAppLaunchRuntimeContext(target.id, target.name, 'raapp_manager'),
+          runtimeContext: buildRAAppLaunchRuntimeContext(target.id, target.name, 'raapp_manager', inputs),
           addSession,
           setActiveSession,
           setMessages,
           setAgentTurns,
           reason: 'app-open',
         });
-        const prompt = `Run the "${target.name}" RA-App for me.${target.description ? ` ${target.description}` : ''} Launch it immediately.`;
+        const inputInstruction = inputs ? ` Use these JSON inputs: ${JSON.stringify(inputs)}.` : '';
+        const prompt = `Run the "${target.name}" RA-App for me.${target.description ? ` ${target.description}` : ''}${inputInstruction} Launch it immediately.`;
         setPendingRAAppLaunchIntent({
           targetSessionId: session.id,
           appId: target.id,
@@ -308,6 +333,8 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
               coreApps={coreApps}
               userStandaloneApps={userStandaloneApps}
               onRun={handleRun}
+              runInputsJson={runInputsJson}
+              onRunInputsChange={setRunInputsJson}
               onGroupDelete={(slug) => {
                 void deleteRAAppGroup(slug).then(refreshCatalog);
               }}

@@ -1,17 +1,14 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { eq, and, inArray, lt } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { DrizzleService } from '../../database/drizzle.service';
 import { raappPendingApprovals } from '../../database/schema';
 import { NativeSystemRegistry } from './native/native-system-registry.service';
 import type { NativeSessionContext } from './native/native-system-registry.service';
 import type { PendingApproval } from './effects-processor.service';
 import { AuditService } from '../chat/audit.service';
-import { HitlConfigService } from '../hitl/hitl-config.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import type { RaAppNativeResult, RaAppPendingApproval } from '@kalio/types';
 import type { RaAppOutputPatch } from './raapp-output-patches.util';
-
-const DEFAULT_RAAPP_HITL_TIMEOUT_MS = 600_000;
 
 export interface SavedApproval {
   id: string;
@@ -54,7 +51,6 @@ export class RAAppHITLService {
     private readonly nativeRegistry: NativeSystemRegistry,
     private readonly audit: AuditService,
     @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
-    @Optional() @Inject(HitlConfigService) private readonly hitlConfig: HitlConfigService | null,
   ) {}
 
   async savePendingApprovals(
@@ -316,61 +312,13 @@ export class RAAppHITLService {
     }));
   }
 
-  async expirePendingApprovals(
-    sessionId: string,
-    now = new Date(),
-    timeoutMs?: number,
-  ): Promise<SavedApproval[]> {
-    const effectiveTimeoutMs = timeoutMs ?? await this.getRaAppApprovalTimeoutMs();
-    if (effectiveTimeoutMs <= 0) return [];
-
-    const cutoff = new Date(now.getTime() - effectiveTimeoutMs);
-    const expired = await this.drizzle.db
+  async getAllPendingApprovals(): Promise<SavedApproval[]> {
+    const rows = await this.drizzle.db
       .select()
       .from(raappPendingApprovals)
-      .where(
-        and(
-          eq(raappPendingApprovals.sessionId, sessionId),
-          eq(raappPendingApprovals.status, 'pending'),
-          lt(raappPendingApprovals.createdAt, cutoff),
-        ),
-      );
+      .where(eq(raappPendingApprovals.status, 'pending'));
 
-    if (expired.length === 0) return [];
-
-    await this.drizzle.db
-      .update(raappPendingApprovals)
-      .set({ status: 'cancelled', result: { reason: 'timeout', timeoutMs: effectiveTimeoutMs } })
-      .where(
-        and(
-          eq(raappPendingApprovals.sessionId, sessionId),
-          eq(raappPendingApprovals.status, 'pending'),
-          lt(raappPendingApprovals.createdAt, cutoff),
-        ),
-      );
-
-    expired.forEach((row) => {
-      void this.audit.log({
-        sessionId,
-        type: 'external_hitl',
-        label: `raapp:timeout ${row.system}`,
-        data: {
-          domain: 'hitl',
-          kind: 'raapp_hitl_lifecycle',
-          eventType: 'raapp_approval_timeout',
-          approvalKind: 'raapp_native',
-          approvalId: row.id,
-          toolCallId: row.toolCallId,
-          system: row.system,
-          displayLabel: row.displayLabel,
-          timeoutMs: effectiveTimeoutMs,
-          source: 'runtime',
-        },
-      });
-    });
-
-    this.logger.warn(`Expired ${expired.length} RA-App approvals session=${sessionId}`);
-    return expired.map((r) => ({
+    return rows.map((r) => ({
       id: r.id,
       sessionId: r.sessionId,
       toolCallId: r.toolCallId,
@@ -378,25 +326,21 @@ export class RAAppHITLService {
       args: r.args as Record<string, unknown>,
       outputPath: r.outputPath ?? undefined,
       displayLabel: r.displayLabel,
-      status: 'cancelled',
-      result: { reason: 'timeout', timeoutMs: effectiveTimeoutMs },
+      status: r.status as SavedApproval['status'],
+      result: r.result as Record<string, unknown> | undefined,
       createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt as unknown as number),
     }));
   }
 
-  private async getRaAppApprovalTimeoutMs(): Promise<number> {
-    if (!this.hitlConfig) {
-      return DEFAULT_RAAPP_HITL_TIMEOUT_MS;
-    }
-
-    try {
-      const config = await this.hitlConfig.getConfig();
-      return config.raAppApprovalTimeoutMs;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`Failed to load RA-App HITL timeout config; using default: ${message}`);
-      return DEFAULT_RAAPP_HITL_TIMEOUT_MS;
-    }
+  async expirePendingApprovals(
+    sessionId: string,
+    _now = new Date(),
+    _timeoutMs?: number,
+  ): Promise<SavedApproval[]> {
+    void _now;
+    void _timeoutMs;
+    this.logger.debug(`RA-App HITL approvals do not auto-expire session=${sessionId}`);
+    return [];
   }
 
   private async shouldAutoExecuteBatch(

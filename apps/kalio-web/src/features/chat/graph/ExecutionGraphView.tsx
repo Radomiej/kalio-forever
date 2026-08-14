@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import type { ArchitectureGraphProjection } from '@kalio/types';
+import type { Project } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
+import { assignSessionProject } from '../../../services/apiClient';
 import { useSessionStore } from '../../../store/sessionStore';
-import { apiClient } from '../../../services/apiClient';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { hydrateActiveConversationSession } from '../activeConversationSession';
 import {
@@ -18,6 +18,12 @@ import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './exe
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 import { useExecutionGraphLaunch } from './useExecutionGraphLaunch';
+import type { TalkView } from '../../../App.types';
+import {
+  mergeRuntimeChildExecutions,
+  useArchitectureRootGraph,
+  useParentAgentFlowChildExecutions,
+} from './useExecutionGraphRuntimeSources';
 import {
   selectPendingConfirmationsForSession,
   selectRunningLoops,
@@ -31,9 +37,11 @@ const DEFAULT_INSPECTOR_WIDTH = 280;
 
 interface ExecutionGraphViewProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
+  talkView?: TalkView;
+  onTalkViewChange?: (view: TalkView) => void;
 }
 
-export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGraphViewProps = {}) {
+export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'graph', onTalkViewChange = () => undefined }: ExecutionGraphViewProps = {}) {
   const {
     activeSessionId,
     messages,
@@ -48,6 +56,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     setMessages,
     setAgentTurns,
     setPendingMessage,
+    updateSession,
   } = useSessionStore();
   const {
     toolActivities,
@@ -62,9 +71,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     isBusy,
     personas,
     projectPath,
+    projectId,
     selectedPersonaId,
     selectedArchitectureId,
     setProjectPath,
+    setProjectId,
     setSelectedPersonaId,
     setSelectedArchitectureId,
     sendEmptyGraphPrompt,
@@ -75,7 +86,6 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   const [focusMode, setFocusMode] = useState<ExecutionGraphFocusMode>('latest-architecture');
   const [cardDensity, setCardDensity] = useState<GraphCardDensity>('compact');
   const [resetViewportToken, setResetViewportToken] = useState(0);
-  const [architectureRootGraph, setArchitectureRootGraph] = useState<ArchitectureGraphProjection | null>(null);
   const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const hydrationInFlightRef = useRef<Set<string>>(new Set());
 
@@ -105,6 +115,23 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       .finally(() => {
         hydrationInFlightRef.current.delete(sessionId);
       });
+  };
+
+  const handleProjectChange = async (project: Project) => {
+    setProjectId(project.id);
+    setProjectPath(project.path ?? '');
+    if (!activeSessionId || !activeSession || activeSession.projectId === project.id) {
+      return;
+    }
+    try {
+      const response = await assignSessionProject(activeSessionId, {
+        projectId: project.id,
+        pathOverride: project.path,
+      });
+      updateSession(response.id, response);
+    } catch (error: unknown) {
+      console.error('[ExecutionGraphView] project assignment failed', error instanceof Error ? error : new Error(String(error)));
+    }
   };
 
   useEffect(() => {
@@ -210,8 +237,46 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
   const activeArchitectureRunId = architectureRunIdFromRootSession(activeSession);
+  const activeSessionMessages = activeSessionId ? getSessionMessages(activeSessionId) : messages;
+  const activeSessionAgentTurns = activeSessionId ? getSessionAgentTurns(activeSessionId) : agentTurns;
+  const architectureRootGraph = useArchitectureRootGraph(activeSessionId, activeArchitectureRunId);
+  const parentAgentFlowChildExecutions = useParentAgentFlowChildExecutions({
+    parentSessionId: activeSessionId,
+    getSessionMessages,
+    getSessionAgentTurns,
+    getSessionActiveTurnId,
+    setMessages,
+    setAgentTurns,
+  });
+  const durableWaitingChildExecutions = useMemo(
+    () => activeSessionId
+      ? sessions
+          .filter((session) => session.kind === 'subagent'
+            && session.parentSessionId === activeSessionId
+            && Boolean(session.parentToolCallId)
+            && (pendingConfirmations[session.id]?.length ?? 0) > 0)
+          .map((session) => ({
+            id: `pending:${session.id}`,
+            kind: 'subagent' as const,
+            parentSessionId: activeSessionId,
+            childSessionId: session.id,
+            parentToolCallId: session.parentToolCallId,
+            label: session.title,
+            status: 'waiting' as const,
+            updatedAt: session.updatedAt,
+          }))
+      : [],
+    [activeSessionId, pendingConfirmations, sessions],
+  );
+  const graphChildExecutions = useMemo(
+    () => mergeRuntimeChildExecutions(
+      mergeRuntimeChildExecutions(activeRuntimeSnapshot?.childExecutions ?? [], parentAgentFlowChildExecutions),
+      durableWaitingChildExecutions,
+    ),
+    [activeRuntimeSnapshot?.childExecutions, durableWaitingChildExecutions, parentAgentFlowChildExecutions],
+  );
   const graphSurfaceClassName = 'flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.08),_transparent_42%),linear-gradient(rgba(56,189,248,0.06)_1px,_transparent_1px),linear-gradient(90deg,_rgba(56,189,248,0.06)_1px,_transparent_1px)] bg-[length:100%_100%,32px_32px,32px_32px] bg-[#0a1220] p-4';
-  const focusedGraph = focusExecutionGraphMessages(messages, focusMode);
+  const focusedGraph = focusExecutionGraphMessages(activeSessionMessages, focusMode);
   const hydrationStatus = extractExecutionGraphHydrationStatus(focusedGraph.messages, sessionMessages);
   const architectureRootModel = useMemo(() => {
     if (!activeSessionId || !architectureRootGraph) {
@@ -226,34 +291,6 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       runtimeActivitySnapshots,
     });
   }, [activeSessionId, architectureRootGraph, runtimeActivitySnapshots, sessions, sessionMessages]);
-
-  useEffect(() => {
-    if (!activeSessionId || !activeArchitectureRunId) {
-      setArchitectureRootGraph(null);
-      return;
-    }
-
-    let cancelled = false;
-    setArchitectureRootGraph(null);
-    apiClient
-      .get<ArchitectureGraphProjection>(`/api/architecture-runs/${activeArchitectureRunId}/graph`)
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setArchitectureRootGraph(response.data);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setArchitectureRootGraph(null);
-          console.error('[ExecutionGraphView] architecture root graph load failed', err);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeArchitectureRunId, activeSessionId]);
 
   useEffect(() => {
     const knownSessionIds = new Set(sessions.map((session) => session.id));
@@ -352,6 +389,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
       sessionTitleById={sessionTitleById}
       showFocusToggle={focusedGraph.architectureRunCount > 1}
       zoom={zoom}
+      talkView={talkView}
+      onTalkViewChange={onTalkViewChange}
+      projectId={activeSession ? projectId : undefined}
+      onProjectChange={activeSession ? handleProjectChange : undefined}
+      projectPickerDisabled={isBusy}
     />
   );
 
@@ -370,9 +412,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
             onDraftChange={() => undefined}
             onPersonaChange={setSelectedPersonaId}
             onProjectPathChange={setProjectPath}
+            onProjectChange={(project) => void handleProjectChange(project)}
             onRunPrompt={sendEmptyGraphPrompt}
             personas={personas}
             projectPath={projectPath}
+            projectId={projectId}
             screenKey="graph-empty-root"
             selectedPersonaId={selectedPersonaId}
             selectedArchitectureId={selectedArchitectureId}
@@ -384,8 +428,9 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
 
   const visibleMessages = focusedGraph.messages;
   const visiblePromptIds = new Set(visibleMessages.filter((message) => message.role === 'user').map((message) => message.id));
-  const graphTurns = agentTurns.length > 0
-    ? agentTurns.filter((turn) => !turn.promptMessageId || visiblePromptIds.has(turn.promptMessageId))
+  const graphTurnsFromState = activeSessionAgentTurns.filter((turn) => !turn.promptMessageId || visiblePromptIds.has(turn.promptMessageId));
+  const graphTurns = graphTurnsFromState.length > 0
+    ? graphTurnsFromState
     : buildTurnsFromHistory(visibleMessages, activeSessionId);
   const messageModel = buildExecutionGraphModel({
     sessionId: activeSessionId,
@@ -393,16 +438,27 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
     turns: graphTurns,
     toolActivities,
     activeAgentLoops: runtimeAwareAgentLoops,
-    childExecutions: activeRuntimeSnapshot?.childExecutions ?? [],
+    childExecutions: graphChildExecutions,
     sessions,
     sessionMessages,
     sessionAgentTurns,
     personas,
     collapseTools,
   });
-  const model = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
+  const baseModel = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
     ? architectureRootModel
     : messageModel;
+  const waitingSessionIds = new Set(Object.entries(pendingConfirmations)
+    .filter(([, requests]) => requests.length > 0)
+    .map(([sessionId]) => sessionId));
+  const model = waitingSessionIds.size > 0
+    ? {
+        ...baseModel,
+        nodes: baseModel.nodes.map((node) => waitingSessionIds.has(node.sessionId ?? '')
+          ? { ...node, status: 'waiting' as const }
+          : node),
+      }
+    : baseModel;
 
   const effectiveSelectedId = model.nodes.some((node) => node.id === selectedNodeId)
     ? selectedNodeId
@@ -452,9 +508,11 @@ export function ExecutionGraphView({ onOpenSessionInConversation }: ExecutionGra
             onDraftChange={() => undefined}
             onPersonaChange={setSelectedPersonaId}
             onProjectPathChange={setProjectPath}
+            onProjectChange={(project) => void handleProjectChange(project)}
             onRunPrompt={sendEmptyGraphPrompt}
             personas={personas}
             projectPath={projectPath}
+            projectId={projectId}
             screenKey={activeSession?.id ?? 'graph-empty-session'}
             selectedPersonaId={selectedPersonaId}
             selectedArchitectureId={selectedArchitectureId}

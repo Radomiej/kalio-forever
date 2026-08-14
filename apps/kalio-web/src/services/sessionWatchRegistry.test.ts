@@ -6,6 +6,7 @@ import {
   replaceBaselineWatchedSessions,
   resetSessionWatchConnectionEpoch,
 } from './sessionWatchRegistry';
+import { createPendingHostSession } from '../features/chat/pendingHostSession';
 
 vi.mock('./eventBus', () => ({
   eventBus: {
@@ -25,6 +26,15 @@ describe('sessionWatchRegistry', () => {
 
     expect(eventBus.identifySession).toHaveBeenCalledTimes(1);
     expect(eventBus.identifySession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('allows active session activation to force replay of runtime snapshots and pending HITL', () => {
+    identifyWatchedSession('session-1', 'tree-preload', { sticky: true });
+    identifyWatchedSession('session-1', 'active-selection', { sticky: true, force: true });
+
+    expect(eventBus.identifySession).toHaveBeenCalledTimes(2);
+    expect(eventBus.identifySession).toHaveBeenNthCalledWith(1, 'session-1');
+    expect(eventBus.identifySession).toHaveBeenNthCalledWith(2, 'session-1');
   });
 
   it('re-identifies baseline and sticky sessions after a new connection epoch starts', () => {
@@ -51,7 +61,9 @@ describe('sessionWatchRegistry', () => {
   });
 
   it('ignores pending host-session ids', () => {
-    identifyWatchedSession('pending-host-session:temp-1', 'active', { sticky: true });
+    const pendingSession = createPendingHostSession({ personaId: 'default', now: 1 });
+
+    identifyWatchedSession(pendingSession.id, 'active', { sticky: true });
 
     expect(eventBus.identifySession).not.toHaveBeenCalled();
 

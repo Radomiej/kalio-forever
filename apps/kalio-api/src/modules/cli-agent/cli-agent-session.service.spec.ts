@@ -31,6 +31,18 @@ describe('CLIAgentSessionService metadata contract', () => {
         created_at integer not null,
         updated_at integer not null
       );
+      CREATE TABLE projects (
+        id text primary key,
+        name text not null,
+        path text,
+        normalized_path text,
+        kind text not null,
+        is_system integer not null default false,
+        created_at integer not null,
+        updated_at integer not null
+      );
+      INSERT INTO projects (id, name, kind, is_system, created_at, updated_at)
+      VALUES ('system:none', 'Bez projektu', 'none', 1, 1, 1);
       CREATE TABLE sessions (
         id text primary key,
         persona_id text not null references personas(id) on delete cascade,
@@ -39,6 +51,7 @@ describe('CLIAgentSessionService metadata contract', () => {
         parent_session_id text,
         parent_turn_id text,
         parent_tool_call_id text,
+        project_id text not null references projects(id),
         runtime_context text,
         archived_at integer,
         created_at integer not null,
@@ -76,6 +89,7 @@ describe('CLIAgentSessionService metadata contract', () => {
       personaId: 'default',
       title: 'Parent',
       kind: 'chat',
+      projectId: 'system:none',
       createdAt: new Date(1),
       updatedAt: new Date(1),
     });

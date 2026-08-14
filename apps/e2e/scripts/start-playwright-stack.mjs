@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +28,17 @@ if (existsSync(envFilePath)) {
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:0';
 const apiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? 'http://127.0.0.1:0';
 const skipBuild = process.env.KALIO_PLAYWRIGHT_SKIP_BUILD === '1';
+const controlPortValue = process.env.KALIO_PLAYWRIGHT_CONTROL_PORT;
+const controlToken = process.env.KALIO_PLAYWRIGHT_CONTROL_TOKEN;
+
+if (Boolean(controlPortValue) !== Boolean(controlToken)) {
+  throw new Error('KALIO_PLAYWRIGHT_CONTROL_PORT and KALIO_PLAYWRIGHT_CONTROL_TOKEN must be configured together.');
+}
+
+const controlPort = controlPortValue ? Number(controlPortValue) : null;
+if (controlPort !== null && (!Number.isInteger(controlPort) || controlPort <= 0)) {
+  throw new Error('KALIO_PLAYWRIGHT_CONTROL_PORT must be a positive integer.');
+}
 
 const playwrightBaseWasExplicit = envKeysBeforeLoad.has('PLAYWRIGHT_BASE_URL') || explicitPlaywrightBase !== undefined;
 const playwrightApiWasExplicit = envKeysBeforeLoad.has('PLAYWRIGHT_API_ORIGIN') || explicitPlaywrightApi !== undefined;
@@ -68,6 +81,9 @@ const corepackEntrypoint = process.env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT
   ? resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js')
   : resolve(nodeBinDir, 'node_modules/corepack/dist/corepack.js'));
 const corepackPnpmCandidate = { command: corepackNodeCommand, argsPrefix: [corepackEntrypoint, 'pnpm'] };
+const hasExplicitCorepackOverride = Boolean(
+  process.env.KALIO_PLAYWRIGHT_NODE_COMMAND || process.env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT,
+);
 
 function isCommandOnPath(command) {
   const pathValue = process.env.PATH;
@@ -86,9 +102,10 @@ function isCommandOnPath(command) {
 
 const pnpmCandidates = process.platform === 'win32'
   ? [
+      ...(hasExplicitCorepackOverride && existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
       ...(isCommandOnPath('pnpm.cmd') ? [{ command: 'pnpm.cmd', argsPrefix: [] }] : []),
       ...(isCommandOnPath('corepack.cmd') ? [{ command: 'corepack.cmd', argsPrefix: ['pnpm'] }] : []),
-      ...(existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
+      ...(!hasExplicitCorepackOverride && existsSync(corepackEntrypoint) ? [corepackPnpmCandidate] : []),
     ]
   : [{ command: 'pnpm', argsPrefix: [] }];
 
@@ -120,6 +137,7 @@ const runStateDir = resolve(e2eStateDir);
 
 const backendEnv = {
   ...sharedEnv,
+  EMBEDDING_PROVIDER: 'mock',
   PORT: apiUrl.port,
   DATABASE_PATH: explicitDatabasePath ?? resolve(runStateDir, 'kalio-e2e.db'),
   WORKSPACE_ROOT: explicitWorkspaceRoot ?? resolve(runStateDir, 'workspaces'),
@@ -136,7 +154,11 @@ const frontendEnv = {
 };
 
 const managedChildren = [];
+const expectedExits = new WeakSet();
 let shuttingDown = false;
+let backendChild = null;
+let controlServer = null;
+let backendRestart = null;
 
 function writeFrontendRuntimeConfig(apiOriginUrl) {
   const runtimeConfigPath = resolve(webDistDir, 'runtime-config.js');
@@ -249,7 +271,7 @@ function spawnManaged(label, command, args, cwd, env) {
   });
 
   child.once('exit', (code, signal) => {
-    if (!shuttingDown) {
+    if (!shuttingDown && !expectedExits.has(child)) {
       console.error(`[playwright-stack] ${label} exited unexpectedly with ${renderExit(code, signal)}`);
       void shutdown(code ?? 1);
     }
@@ -265,11 +287,15 @@ async function killChild(child) {
   }
 
   if (process.platform === 'win32') {
+    const exitPromise = new Promise((resolvePromise) => child.once('exit', resolvePromise));
     await new Promise((resolvePromise) => {
       const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
       killer.once('exit', () => resolvePromise());
       killer.once('error', () => resolvePromise());
     });
+    if (child.exitCode === null) {
+      await exitPromise;
+    }
     return;
   }
 
@@ -292,8 +318,85 @@ async function shutdown(exitCode = 0) {
   }
 
   shuttingDown = true;
+  if (controlServer) {
+    await new Promise((resolvePromise) => controlServer.close(resolvePromise));
+  }
   await Promise.allSettled(managedChildren.map((child) => killChild(child)));
   process.exit(exitCode);
+}
+
+function hasValidControlToken(request) {
+  const authorization = request.headers.authorization;
+  if (!controlToken || typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
+    return false;
+  }
+
+  const supplied = Buffer.from(authorization.slice('Bearer '.length));
+  const expected = Buffer.from(controlToken);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
+function startBackend() {
+  backendChild = spawnManaged('backend', process.execPath, ['dist/main.js'], apiDir, backendEnv);
+  return backendChild;
+}
+
+async function restartBackend() {
+  if (backendRestart) {
+    return backendRestart;
+  }
+
+  backendRestart = (async () => {
+    if (!backendChild) {
+      throw new Error('Backend is not running.');
+    }
+
+    expectedExits.add(backendChild);
+    await killChild(backendChild);
+    startBackend();
+    await waitForUrl(`${apiUrl.origin}/api/health`, 60_000);
+    console.log('[playwright-stack] backend restart completed');
+  })();
+
+  try {
+    await backendRestart;
+  } finally {
+    backendRestart = null;
+  }
+}
+
+async function startControlServer() {
+  if (controlPort === null) {
+    return;
+  }
+
+  controlServer = createServer((request, response) => {
+    if (request.method !== 'POST' || request.url !== '/restart-backend') {
+      response.writeHead(404).end();
+      return;
+    }
+    if (!hasValidControlToken(request)) {
+      response.writeHead(401).end();
+      return;
+    }
+
+    void restartBackend()
+      .then(() => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ status: 'ready' }));
+      })
+      .catch((error) => {
+        console.error('[playwright-stack] backend restart failed', error);
+        response.writeHead(500, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ status: 'failed' }));
+      });
+  });
+
+  await new Promise((resolvePromise, reject) => {
+    controlServer.once('error', reject);
+    controlServer.listen(controlPort, '127.0.0.1', resolvePromise);
+  });
+  console.log(`[playwright-stack] control plane ready on 127.0.0.1:${controlPort}`);
 }
 
 process.on('SIGINT', () => {
@@ -316,7 +419,7 @@ async function main() {
   }
 
   console.log(`[playwright-stack] starting backend on ${apiUrl.origin}`);
-  spawnManaged('backend', process.execPath, ['dist/main.js'], apiDir, backendEnv);
+  startBackend();
   await waitForUrl(`${apiUrl.origin}/api/health`, 60_000);
 
   console.log(`[playwright-stack] starting frontend preview on ${webUrl.origin}`);
@@ -343,6 +446,8 @@ async function main() {
     frontendEnv,
   );
   await waitForUrl(webUrl.origin, 60_000);
+
+  await startControlServer();
 
   console.log('[playwright-stack] backend and frontend are ready');
 }

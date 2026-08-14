@@ -283,6 +283,61 @@ describe('resolveArchitectureRunTurnUpdate', () => {
     expect(resolved.turns).toEqual([resolved.nextTurn]);
   });
 
+  it('stamps typed workflow projection messages with durable turn linkage for reload ordering', () => {
+    const resolved = resolveArchitectureRunTurnUpdate({
+      currentMessages: [],
+      currentTurns: [],
+      pendingAssistantMessageId: 'architecture:user-2:pending',
+      promptMessageId: 'user-2',
+      projection: {
+        turnKind: 'workflow-envelope',
+        turnItems: [
+          { kind: 'tool', callId: 'architecture:run-linked:event-1' },
+          { kind: 'text', messageId: 'architecture:run-linked:text:event-2' },
+        ],
+        messages: [
+          {
+            id: 'architecture:run-linked:tool-calls',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'architecture:run-linked:event-1', name: 'run_subagent', args: { architectureRunId: 'run-linked' } }],
+            createdAt: 3,
+          },
+          {
+            id: 'architecture:run-linked:text:event-2',
+            sessionId: 'session-1',
+            role: 'assistant',
+            content: 'Workflow completed',
+            architectureRun: {
+              runId: 'run-linked',
+              schemaId: 'strategic-decision-council',
+              status: 'completed',
+              trace: [],
+              routeHops: [],
+            },
+            createdAt: 4,
+          },
+        ],
+      },
+      result: makeResult('run-linked', 'completed'),
+      sessionId: 'session-1',
+    });
+
+    expect(resolved.messages).toEqual([
+      expect.objectContaining({
+        id: 'architecture:run-linked:tool-calls',
+        turnId: 'architecture-turn-run-linked',
+        promptMessageId: 'user-2',
+      }),
+      expect.objectContaining({
+        id: 'architecture:run-linked:text:event-2',
+        turnId: 'architecture-turn-run-linked',
+        promptMessageId: 'user-2',
+      }),
+    ]);
+  });
+
   it('removes stale workflow-start placeholders for the same prompt when typed projection arrives', () => {
     const currentMessages: ChatMessage[] = [
       {

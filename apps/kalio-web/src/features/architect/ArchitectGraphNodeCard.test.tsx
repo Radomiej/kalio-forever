@@ -71,6 +71,7 @@ describe('ArchitectGraphNodeCard', () => {
 
     expect(screen.getByTestId('architect-node-input-pin-agent')).toBeInTheDocument();
     expect(screen.getByTestId('architect-node-output-pin-agent')).toBeInTheDocument();
+    expect(screen.getByText('Agent')).toHaveClass('text-xs');
   });
 
   it('marks the card and input hitbox while it is a connection drop target', () => {

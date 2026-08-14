@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RaAppPendingApproval } from '@kalio/types';
 import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 
 interface RaAppHITLOverlayProps {
   pendingApprovals: RaAppPendingApproval[];
+  sessionId?: string;
   onSettled?: () => void;
 }
 
@@ -14,30 +15,58 @@ interface RaAppHITLOverlayProps {
  * Buttons show a loading spinner while waiting for `raapp:native_result`.
  * The parent component drives hide by clearing pendingApprovals.
  */
-export function RaAppHITLOverlay({ pendingApprovals, onSettled }: RaAppHITLOverlayProps) {
-  void onSettled;
+export function RaAppHITLOverlay({ pendingApprovals, sessionId, onSettled }: RaAppHITLOverlayProps) {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const [submitting, setSubmitting] = useState<'approve' | 'cancel' | null>(null);
+  const [settledApprovalIds, setSettledApprovalIds] = useState<Set<string>>(() => new Set());
+  const targetSessionId = sessionId ?? activeSessionId;
+  const pendingApprovalIds = useMemo(
+    () => new Set(pendingApprovals.map((approval) => approval.id)),
+    [pendingApprovals],
+  );
+  const visibleApprovals = pendingApprovals.filter((approval) => !settledApprovalIds.has(approval.id));
 
-  if (pendingApprovals.length === 0) return null;
+  useEffect(() => eventBus.onRaAppNativeResult((payload) => {
+    if (!targetSessionId || payload.sessionId !== targetSessionId) {
+      return;
+    }
+
+    const completedIds = payload.results
+      .map((result) => result.id)
+      .filter((id) => pendingApprovalIds.has(id));
+
+    if (completedIds.length === 0) {
+      return;
+    }
+
+    setSettledApprovalIds((current) => {
+      const next = new Set(current);
+      completedIds.forEach((id) => next.add(id));
+      return next;
+    });
+    setSubmitting(null);
+    onSettled?.();
+  }), [onSettled, pendingApprovalIds, targetSessionId]);
+
+  if (visibleApprovals.length === 0) return null;
 
   function handleApprove() {
-    if (!activeSessionId || submitting) return;
+    if (!targetSessionId || submitting) return;
     setSubmitting('approve');
     eventBus.approveRaApp({
-      requestIds: pendingApprovals.map((a) => a.id),
-      sessionId: activeSessionId,
+      requestIds: visibleApprovals.map((a) => a.id),
+      sessionId: targetSessionId,
     });
     // Do NOT call onSettled here — wait for raapp:native_result to arrive
     // and for the parent to update pendingApprovals to [] which hides this component.
   }
 
   function handleCancel() {
-    if (!activeSessionId || submitting) return;
+    if (!targetSessionId || submitting) return;
     setSubmitting('cancel');
     eventBus.cancelRaApp({
-      requestIds: pendingApprovals.map((a) => a.id),
-      sessionId: activeSessionId,
+      requestIds: visibleApprovals.map((a) => a.id),
+      sessionId: targetSessionId,
     });
   }
 
@@ -47,10 +76,10 @@ export function RaAppHITLOverlay({ pendingApprovals, onSettled }: RaAppHITLOverl
       className="mt-2 rounded border border-warning bg-warning/10 p-3 text-xs space-y-2"
     >
       <p className="font-semibold text-warning">
-        Pending approval ({pendingApprovals.length} operation{pendingApprovals.length > 1 ? 's' : ''})
+        Pending approval ({visibleApprovals.length} operation{visibleApprovals.length > 1 ? 's' : ''})
       </p>
       <ul className="space-y-1">
-        {pendingApprovals.map((approval) => (
+        {visibleApprovals.map((approval) => (
           <li key={approval.id} className="rounded bg-base-200 px-2 py-1">
             <span className="font-mono font-semibold">{approval.system}</span>
             {' — '}

@@ -43,6 +43,16 @@ const LOCAL_STATUS: EmbeddingStatus = {
   profileId: 'local-transformers-xenova-multilingual-e5-small-384-cpu',
 };
 
+const MOCK_STATUS: EmbeddingStatus = {
+  provider: 'mock',
+  source: 'mock',
+  model: 'mock',
+  dimensions: 1536,
+  baseUrlMasked: '(mock)',
+  configured: true,
+  profileId: 'mock-mock-1536',
+};
+
 describe('EmbeddingsPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -77,6 +87,22 @@ describe('EmbeddingsPanel', () => {
         backend: 'cpu',
       });
     });
+  });
+
+  it('renders an explicit mock embedding status without presenting it as local', async () => {
+    installFetchQueue({
+      'GET /api/memory/embedding-credentials': [[]],
+      'GET /api/memory/status/embedding': [MOCK_STATUS],
+      'GET /api/memory/embedding-local': [{ enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu', message: 'Model installed and ready.' }],
+    });
+
+    render(<EmbeddingsPanel />);
+
+    const statusCard = await screen.findByTestId('embedding-env-card');
+    expect(statusCard).toHaveTextContent('Mock embeddings');
+    expect(statusCard).toHaveTextContent('Deterministic test provider; no remote model is used.');
+    expect(statusCard).not.toHaveTextContent('Local embeddings');
   });
 
   it('does not render per-persona reindex controls for local embeddings', async () => {

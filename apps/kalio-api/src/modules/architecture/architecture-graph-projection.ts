@@ -9,6 +9,7 @@ import type {
 } from '@kalio/types';
 import {
   architectureActionFieldsForEvent,
+  architectureCancelledActionSummaryForNodeKind,
   architectureCompletedActionSummaryForNodeKind,
   architectureFailedActionSummaryForNodeKind,
   architectureRunningActionSummaryForNodeKind,
@@ -68,6 +69,7 @@ function toGraphNode(
   const incompleteReason = latestIncompleteReason(nodeEvents);
   const status = nodeStatus(projectionEvents);
   const actionFields = latestActionFields(projectionEvents, node.kind, status);
+  const failureFields = latestFailureFields(projectionEvents);
   return {
     id: node.id,
     sessionId: sessionIdForNode(runId, node),
@@ -79,7 +81,10 @@ function toGraphNode(
     actionSummary: actionFields.actionSummary,
     action: actionFields.action,
     detail: actionFields.detail,
+    errorCode: failureFields.errorCode,
+    failure: failureFields.failure,
     visitCount: nodeVisitCount(nodeEvents),
+    hasRuntimeEvidence: hasNodeRuntimeEvidence(projectionEvents),
     eventIds,
     toolEvidence,
     incompleteReason,
@@ -164,6 +169,7 @@ function inferredUpstreamCancellationEventForNode(
     nodeId: node.id,
     roleSlotId: node.roleSlotId,
     status: 'cancelled',
+    actionSummary: architectureCancelledActionSummaryForNodeKind(node.kind),
     detail: runFailureEvent.reasonCode === 'max_steps' || runFailureEvent.reasonCode === 'max_node_visits'
       ? 'Skipped because the workflow stopped before this node started.'
       : 'Skipped because an upstream workflow node failed before this node started.',
@@ -177,7 +183,7 @@ function latestRunFailureEvent(
   if (status !== 'failed' && status !== 'cancelled') {
     return undefined;
   }
-  return [...events].reverse().find((event) => (
+  const runLevelFailure = [...events].reverse().find((event) => (
     event.nodeId === undefined
     && event.roleSlotId === undefined
     && (
@@ -185,6 +191,19 @@ function latestRunFailureEvent(
       || event.errorCode !== undefined
       || event.reasonCode !== undefined
       || event.runtimeDecision?.reasonCode !== undefined
+      || event.status === 'failed'
+      || event.status === 'cancelled'
+    )
+  ));
+  if (runLevelFailure) {
+    return runLevelFailure;
+  }
+  return [...events].reverse().find((event) => (
+    event.type === 'node_failed'
+    && (
+      event.failure !== undefined
+      || event.errorCode !== undefined
+      || event.reasonCode !== undefined
       || event.status === 'failed'
       || event.status === 'cancelled'
     )
@@ -214,6 +233,9 @@ function inferredRunFailureEventForNode(
     nodeId: node.id,
     roleSlotId: node.roleSlotId,
     status: runStatus === 'cancelled' || runFailureEvent.status === 'cancelled' ? 'cancelled' : 'failed',
+    actionSummary: runStatus === 'cancelled' || runFailureEvent.status === 'cancelled'
+      ? architectureCancelledActionSummaryForNodeKind(node.kind)
+      : architectureFailedActionSummaryForNodeKind(node.kind),
     detail: runFailureEvent.failure?.message ?? runFailureEvent.detail,
   };
 }
@@ -250,6 +272,21 @@ function latestIncompleteReason(events: ArchitectureExecutionEvent[]): string | 
     .find((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
+function latestFailureFields(events: ArchitectureExecutionEvent[]): Pick<
+  ArchitectureGraphProjection['nodes'][number],
+  'errorCode' | 'failure'
+> {
+  for (const event of [...events].reverse()) {
+    if (event.errorCode || event.failure) {
+      return {
+        errorCode: event.errorCode ?? event.failure?.code,
+        failure: event.failure,
+      };
+    }
+  }
+  return {};
+}
+
 function latestActionFields(
   events: ArchitectureExecutionEvent[],
   nodeKind: ArchitectureNodeKind,
@@ -270,6 +307,9 @@ function latestActionFields(
   if (status === 'failed') {
     return { actionSummary: architectureFailedActionSummaryForNodeKind(nodeKind) };
   }
+  if (status === 'cancelled') {
+    return { actionSummary: architectureCancelledActionSummaryForNodeKind(nodeKind) };
+  }
   return {};
 }
 
@@ -282,6 +322,21 @@ function nodeStatus(events: ArchitectureExecutionEvent[]): ArchitectureGraphNode
     return 'running';
   }
   return 'pending';
+}
+
+function hasNodeRuntimeEvidence(events: ArchitectureExecutionEvent[]): boolean {
+  return events.some((event) => (
+    event.type === 'node_started'
+    || event.type === 'agent_started'
+    || event.type === 'tool_call'
+    || event.type === 'human_gate'
+    || event.type === 'node_completed'
+    || event.type === 'participant_output'
+    || event.type === 'router_output'
+    || event.type === 'final_artifact'
+    || event.type === 'artifact_created'
+    || event.type === 'node_failed'
+  ));
 }
 
 function latestNodeTerminalStatus(events: ArchitectureExecutionEvent[]): ArchitectureGraphNodeStatus | undefined {

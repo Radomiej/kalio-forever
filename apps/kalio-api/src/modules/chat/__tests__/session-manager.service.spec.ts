@@ -7,6 +7,7 @@ import { MESSAGE_REPOSITORY } from '../chat.tokens';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
 import type { ChatMessage } from '@kalio/types';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { RunJournalService } from '../run-journal.service';
 
 function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
@@ -26,6 +27,7 @@ describe('SessionManagerService', () => {
   let service: SessionManagerService;
   let repo: IMessageRepository;
   let credentialsService: { getContextWindowSize: ReturnType<typeof vi.fn> };
+  let runJournal: { getNonReplayableTurnIds: ReturnType<typeof vi.fn> };
 
   async function buildSessionManager(
     messages: ChatMessage[] = [],
@@ -38,6 +40,7 @@ describe('SessionManagerService', () => {
         { provide: MESSAGE_REPOSITORY, useValue: nextRepo },
         { provide: ImageHydratorService, useValue: hydrator },
         { provide: CredentialsService, useValue: credentialsService },
+        { provide: RunJournalService, useValue: runJournal },
       ],
     }).compile();
 
@@ -51,6 +54,9 @@ describe('SessionManagerService', () => {
   beforeEach(async () => {
     credentialsService = {
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
+    };
+    runJournal = {
+      getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set<string>()),
     };
     ({ service, repo } = await buildSessionManager());
   });
@@ -264,6 +270,28 @@ describe('SessionManagerService', () => {
   });
 
   describe('loadHistoryForLLM', () => {
+    it('excludes typed terminal failed turns without hiding completed or current turns', async () => {
+      runJournal.getNonReplayableTurnIds.mockResolvedValue(new Set(['turn-failed']));
+      ({ service } = await buildSessionManager([
+        { id: 'u1', sessionId: 'sid', role: 'user', content: 'completed prompt', turnId: 'turn-completed', createdAt: 1 },
+        { id: 'a1', sessionId: 'sid', role: 'assistant', content: 'completed answer', turnId: 'turn-completed', createdAt: 2 },
+        { id: 'u2', sessionId: 'sid', role: 'user', content: 'failed prompt', turnId: 'turn-failed', createdAt: 3 },
+        { id: 'u3', sessionId: 'sid', role: 'user', content: 'current prompt', turnId: 'turn-current', createdAt: 4 },
+      ]));
+
+      const result = await service.loadHistoryForLLM('sid', {
+        systemPrompt: '',
+        toolMetas: [],
+      });
+
+      expect(runJournal.getNonReplayableTurnIds).toHaveBeenCalledWith(['sid']);
+      expect(result.history).toEqual([
+        { role: 'user', content: 'completed prompt' },
+        { role: 'assistant', content: 'completed answer' },
+        { role: 'user', content: 'current prompt' },
+      ]);
+    });
+
     it('REGRESSION: prepends the system prompt and compacts reasoning through the shared context manager', async () => {
       credentialsService.getContextWindowSize.mockResolvedValue(200);
       ({ service } = await buildSessionManager([
@@ -330,6 +358,7 @@ describe('SessionManagerService', () => {
           { provide: MESSAGE_REPOSITORY, useValue: nextRepo },
           { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
           { provide: CredentialsService, useValue: credentialsService },
+          { provide: RunJournalService, useValue: runJournal },
         ],
       }).compile();
       const mergedService = moduleRef.get(SessionManagerService);

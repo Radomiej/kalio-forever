@@ -67,6 +67,14 @@ export function isBuiltInLlmProvider(provider: string): boolean {
   return normalizeProviderKey(provider) in DEFAULT_LLM_PROVIDER_BASE_URLS;
 }
 
+export function requiresExplicitLlmProviderBaseUrl(provider: string): boolean {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === 'mock') {
+    return false;
+  }
+  return !isBuiltInLlmProvider(provider);
+}
+
 export function resolveLlmProviderBaseUrl(provider: string, baseUrl?: string): string {
   const trimmedBaseUrl = baseUrl?.trim();
   if (trimmedBaseUrl) {

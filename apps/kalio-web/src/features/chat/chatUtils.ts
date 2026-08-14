@@ -85,6 +85,7 @@ export function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessa
   const merged = new Map<string, ChatMessage>();
   const matchedLoadedIds = new Set<string>();
   const loadedBySyncKey = new Map<string, ChatMessage[]>();
+  const promptMessageIdAliases = new Map<string, string>();
 
   [...loadedMessages]
     .sort((left, right) => left.createdAt - right.createdAt)
@@ -113,6 +114,9 @@ export function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessa
 
       if (matchedLoaded) {
         matchedLoadedIds.add(matchedLoaded.id);
+        if (matchedLoaded.role === 'user' && matchedLoaded.id !== message.id) {
+          promptMessageIdAliases.set(matchedLoaded.id, message.id);
+        }
         merged.delete(matchedLoaded.id);
         merged.set(message.id, mergeMessageCopies(message, matchedLoaded));
         return;
@@ -126,7 +130,16 @@ export function mergeFetchedMessages(currentMessages: ChatMessage[], loadedMessa
       merged.set(message.id, mergeMessageCopies(message, existing));
     });
 
-  return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
+  return [...merged.values()]
+    .map((message) => {
+      if (!message.promptMessageId) {
+        return message;
+      }
+
+      const aliasedPromptMessageId = promptMessageIdAliases.get(message.promptMessageId);
+      return aliasedPromptMessageId ? { ...message, promptMessageId: aliasedPromptMessageId } : message;
+    })
+    .sort((left, right) => left.createdAt - right.createdAt);
 }
 
 /**
@@ -314,8 +327,46 @@ function suppressRawArchitectureTurnsCoveredByWorkflowEnvelope(
   });
 }
 
+function promptMessageIdFromTurnMessages(
+  turn: AgentTurn,
+  messageById: Map<string, ChatMessage>,
+  knownUserIds: Set<string>,
+): string | null {
+  for (const item of turn.items) {
+    if (item.kind !== 'text' && item.kind !== 'thinking') {
+      continue;
+    }
+
+    const message = messageById.get(item.messageId);
+    if (!message) {
+      continue;
+    }
+
+    const promptMessageId = getDurablePromptMessageId(message);
+    if (promptMessageId && knownUserIds.has(promptMessageId)) {
+      return promptMessageId;
+    }
+  }
+
+  return null;
+}
+
+function turnWithRenderablePromptMessageId(
+  turn: AgentTurn,
+  messageById: Map<string, ChatMessage>,
+  knownUserIds: Set<string>,
+): AgentTurn {
+  if (turn.promptMessageId && knownUserIds.has(turn.promptMessageId)) {
+    return turn;
+  }
+
+  const promptMessageId = promptMessageIdFromTurnMessages(turn, messageById, knownUserIds);
+  return promptMessageId ? { ...turn, promptMessageId } : turn;
+}
+
 export function buildConversationTimeline(messages: ChatMessage[], agentTurns: AgentTurn[]): ChatTimelineEntry[] {
   const userMessages = messages.filter((message) => message.role === 'user');
+  const messageById = new Map(messages.map((message) => [message.id, message] as const));
   const renderableAgentTurns = suppressRawArchitectureTurnsCoveredByWorkflowEnvelope(messages, agentTurns);
   const turnsByPromptMessageId = new Map<string, AgentTurn[]>();
   const leadingTurns: AgentTurn[] = [];
@@ -323,19 +374,20 @@ export function buildConversationTimeline(messages: ChatMessage[], agentTurns: A
   const knownUserIds = new Set(userMessages.map((message) => message.id));
 
   renderableAgentTurns.forEach((turn) => {
-    if (!turn.promptMessageId) {
-      leadingTurns.push(turn);
+    const renderableTurn = turnWithRenderablePromptMessageId(turn, messageById, knownUserIds);
+    if (!renderableTurn.promptMessageId) {
+      leadingTurns.push(renderableTurn);
       return;
     }
 
-    if (!knownUserIds.has(turn.promptMessageId)) {
-      trailingTurns.push(turn);
+    if (!knownUserIds.has(renderableTurn.promptMessageId)) {
+      trailingTurns.push(renderableTurn);
       return;
     }
 
-    const bucket = turnsByPromptMessageId.get(turn.promptMessageId) ?? [];
-    bucket.push(turn);
-    turnsByPromptMessageId.set(turn.promptMessageId, bucket);
+    const bucket = turnsByPromptMessageId.get(renderableTurn.promptMessageId) ?? [];
+    bucket.push(renderableTurn);
+    turnsByPromptMessageId.set(renderableTurn.promptMessageId, bucket);
   });
 
   const timeline: ChatTimelineEntry[] = leadingTurns.map((turn) => ({ kind: 'agent_turn', turn }));

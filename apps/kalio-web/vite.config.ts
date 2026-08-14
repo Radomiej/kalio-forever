@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { dirname, resolve } from 'node:path';
@@ -14,8 +15,32 @@ const cacheDir = process.env['VITE_CACHE_DIR'] ?? 'node_modules/.vite';
 const devHost = process.env['VITE_DEV_HOST'] ?? '127.0.0.1';
 const hmrHost = process.env['VITE_HMR_HOST'] ?? devHost;
 
+function runtimeConfigBody() {
+  return `window.__KALIO_RUNTIME_CONFIG__ = ${JSON.stringify({ apiUrl: apiOrigin, wsUrl: wsOrigin })};\n`;
+}
+
+function serveRuntimeConfig(_req: IncomingMessage, res: ServerResponse) {
+  const body = runtimeConfigBody();
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(body);
+}
+
+function runtimeConfigPlugin(): Plugin {
+  return {
+    name: 'kalio-runtime-config',
+    configureServer(server) {
+      server.middlewares.use('/runtime-config.js', serveRuntimeConfig);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/runtime-config.js', serveRuntimeConfig);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [runtimeConfigPlugin(), react(), tailwindcss()],
   cacheDir,
   optimizeDeps: {
     exclude: ['vitest'],

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditLogEntry } from '@kalio/types';
 import { ObservabilityPage } from './ObservabilityPage';
@@ -64,6 +64,79 @@ describe('ObservabilityPage', () => {
     const llmRow = screen.getByTestId('audit-entry-row:llm-1');
     expect(toolRow.compareDocumentPosition(firstArchitectureRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(firstArchitectureRow.compareDocumentPosition(llmRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }, 15_000);
+
+  it('supports search, type/time filters, and pausing live refresh', async () => {
+    render(<ObservabilityPage />);
+    await screen.findByTestId('architecture-run-group');
+
+    fireEvent.click(screen.getByTitle('Pause auto-refresh'));
+    expect(screen.getByTitle('Resume auto-refresh')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('1h', { selector: 'button' }));
+    fireEvent.change(screen.getByTestId('audit-search-input'), { target: { value: 'architecture' } });
+    expect(screen.getByDisplayValue('architecture')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear audit search' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear audit search' }));
+    expect(screen.getByTestId('audit-search-input')).toHaveValue('');
+
+    const typeFilter = screen.getAllByRole('button').find((button) => button.textContent?.includes('LLM'));
+    expect(typeFilter).toBeDefined();
+    fireEvent.click(typeFilter!);
+    expect(screen.getByText('None')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('None', { selector: 'button' }));
+    expect(screen.getAllByRole('button').some((button) => button.textContent?.trim() === 'All')).toBe(true);
+  }, 15_000);
+
+  it('handles cancelled and confirmed audit-log clearing', async () => {
+    render(<ObservabilityPage />);
+    await screen.findByTestId('architecture-run-group');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    fireEvent.click(screen.getByTitle('Clear all audit log entries'));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/audit-log?confirm=true', expect.anything());
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByTitle('Clear all audit log entries'));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/audit-log?confirm=true', { method: 'DELETE' }));
+    confirmSpy.mockRestore();
+  }, 15_000);
+
+  it('renders empty state after a failed load and exposes payload details', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('offline'));
+    render(<ObservabilityPage />);
+    expect(await screen.findByText('No events match your filters.')).toBeInTheDocument();
+
+    cleanup();
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      return Promise.resolve({
+        ok: true,
+        json: async () => (url.includes('/retention') ? makeRetentionStatus() : makeEntries()),
+      });
+    });
+    render(<ObservabilityPage />);
+    await screen.findByTestId('architecture-run-group');
+    fireEvent.click(screen.getByTestId('architecture-run-group').querySelector('button')!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Toggle developer payload' })[0]);
+    expect(screen.getByText('Developer payload')).toBeInTheDocument();
+  }, 15_000);
+
+  it('renders low-pressure retention with cold storage disabled', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      return Promise.resolve({
+        ok: true,
+        json: async () => (url.includes('/retention')
+          ? { ...makeRetentionStatus(), hotRows: 0, maxHotRows: 0, coldStorageEnabled: false }
+          : []),
+      });
+    });
+
+    render(<ObservabilityPage />);
+    const retention = await screen.findByTestId('audit-retention-strip');
+    expect(retention).toHaveTextContent('visible 0/0');
+    expect(retention).toHaveTextContent('archived 2');
   }, 15_000);
 });
 

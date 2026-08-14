@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   handleConnectionStateEvent,
   handleSessionStatusEvent,
+  mergeRaAppNativeResultIntoMessages,
   materializeLiveTurnFromHydratedRuntimeState,
   runtimeSnapshotKeepsSessionLive,
   sessionStatusKeepsSessionLive,
   type ReconnectUiState,
 } from './useChatSocketEvents.helpers';
 import type { ChatConnectionState } from '../ChatInterface.Parts';
-import type { RuntimeActivitySnapshot } from '@kalio/types';
+import type { ChatMessage, RuntimeActivitySnapshot } from '@kalio/types';
 
 function makeWaitingRuntimeSnapshot(sessionId: string, turnId = 'turn-1'): RuntimeActivitySnapshot {
   return {
@@ -113,6 +114,43 @@ describe('handleConnectionStateEvent', () => {
   });
 });
 
+describe('mergeRaAppNativeResultIntoMessages', () => {
+  it('clears matching RA-App pending approvals by approval id when toolCallId is stale', () => {
+    const messages: ChatMessage[] = [{
+      id: 'tool-result-1',
+      sessionId: 'session-raapp',
+      role: 'tool_result',
+      toolCallId: 'actual-tool-call',
+      content: JSON.stringify({
+        pendingApprovals: [{
+          id: 'approval-1',
+          system: 'vfs_write',
+          displayLabel: 'write file',
+          args: { path: 'architecture.md' },
+        }],
+      }),
+      createdAt: 1,
+    }];
+
+    const [updated] = mergeRaAppNativeResultIntoMessages(messages, 'stale-tool-call', [{
+      id: 'approval-1',
+      system: 'vfs_write',
+      status: 'executed',
+      result: { ok: true },
+    }]);
+
+    expect(JSON.parse(updated.content)).toEqual({
+      pendingApprovals: [],
+      nativeResults: [{
+        id: 'approval-1',
+        system: 'vfs_write',
+        status: 'executed',
+        result: { ok: true },
+      }],
+    });
+  });
+});
+
 describe('materializeLiveTurnFromHydratedRuntimeState', () => {
   it('does not revive a buffered live turn when the runtime snapshot is present but inactive', () => {
     const addActiveAgentLoop = vi.fn();
@@ -193,6 +231,63 @@ describe('materializeLiveTurnFromHydratedRuntimeState', () => {
     expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
     expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
   });
+
+  it('falls back to typed session status when a runtime snapshot is present but not live', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-stale',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 10,
+        },
+        bufferedSessionStatusSnapshots: [
+          {
+            sessionId: 'session-1',
+            active: true,
+            turnId: 'turn-buffered',
+            queueLength: 0,
+            run: {
+              id: 'run-buffered',
+              sessionId: 'session-1',
+              turnId: 'turn-buffered',
+              phase: 'llm_streaming',
+              status: 'active',
+              retryCount: 0,
+              safeResume: true,
+              startedAt: 1,
+              updatedAt: 20,
+              lastHeartbeatAt: 20,
+            },
+          },
+        ],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-buffered');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-buffered', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
+  });
 });
 
 describe('terminal runtime cleanup guards', () => {
@@ -227,6 +322,27 @@ describe('terminal runtime cleanup guards', () => {
         status: 'running',
         updatedAt: 10,
       }],
+      updatedAt: 10,
+    })).toBe(true);
+  });
+
+  it('keeps runtime snapshots live while an agent budget approval is pending', () => {
+    expect(runtimeSnapshotKeepsSessionLive({
+      sessionId: 'session-1',
+      active: false,
+      turnId: 'turn-budget',
+      queueLength: 0,
+      pendingConfirmations: [],
+      pendingBudgetApprovals: [{
+        requestId: 'budget-1',
+        sessionId: 'session-1',
+        scope: 'agent-flow-branch',
+        usedIterations: 1,
+        currentLimit: 1,
+        suggestedNextLimit: 11,
+      }],
+      toolActivities: [],
+      childExecutions: [],
       updatedAt: 10,
     })).toBe(true);
   });
@@ -300,6 +416,51 @@ describe('terminal runtime cleanup guards', () => {
     expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-workflow');
     expect(startAgentTurn).toHaveBeenCalledWith('turn-workflow', 'session-1');
     expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+  });
+
+  it('materializes a live turn from a hydrated runtime snapshot with pending budget approvals', () => {
+    const addActiveAgentLoop = vi.fn();
+    const startAgentTurn = vi.fn();
+    const setAwaitingFirstChunk = vi.fn();
+    const setStreaming = vi.fn();
+
+    materializeLiveTurnFromHydratedRuntimeState(
+      {
+        runtimeSnapshot: {
+          sessionId: 'session-1',
+          active: false,
+          turnId: 'turn-budget',
+          queueLength: 0,
+          pendingConfirmations: [],
+          pendingBudgetApprovals: [{
+            requestId: 'budget-1',
+            sessionId: 'session-1',
+            scope: 'agent-flow-branch',
+            usedIterations: 1,
+            currentLimit: 1,
+            suggestedNextLimit: 11,
+          }],
+          toolActivities: [],
+          childExecutions: [],
+          updatedAt: 10,
+        },
+        bufferedSessionStatusSnapshots: [],
+        latestSessionStatusSnapshot: undefined,
+      },
+      {
+        hasActiveLoopForSession: () => false,
+        getSessionActiveTurnId: () => null,
+        addActiveAgentLoop,
+        startAgentTurn,
+        setAwaitingFirstChunk,
+        setStreaming,
+      },
+    );
+
+    expect(addActiveAgentLoop).toHaveBeenCalledWith('session-1', 'turn-budget');
+    expect(startAgentTurn).toHaveBeenCalledWith('turn-budget', 'session-1');
+    expect(setAwaitingFirstChunk).toHaveBeenCalledWith(false);
+    expect(setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
   });
 
   it('releases a hydrated live turn when session status becomes terminal', () => {

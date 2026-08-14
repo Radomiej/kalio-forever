@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ToolActivity } from '../../../store/agentStore';
 import { ExecutionGraphHeader } from './ExecutionGraphHeader';
 
+vi.mock('../../projects/ProjectPicker', () => ({
+  ProjectPicker: ({ testId }: { testId: string }) => <button data-testid={testId} type="button">Project</button>,
+}));
+
 function makeToolActivity(overrides: Partial<ToolActivity> = {}): ToolActivity {
   return {
     callId: 'call-1',
@@ -63,6 +67,8 @@ describe('ExecutionGraphHeader', () => {
     );
 
     expect(screen.getByText('Execution Graph')).toBeInTheDocument();
+    expect(screen.getByTestId('talk-graph-switcher')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('talk-conversation-switcher')).toBeInTheDocument();
     expect(screen.queryByText('Prompts, turns, tools, subagents, artifacts and final responses.')).toBeNull();
     expect(screen.getByText('Orchestrator')).toBeInTheDocument();
     expect(screen.getByText('Branch read')).toBeInTheDocument();
@@ -147,6 +153,32 @@ describe('ExecutionGraphHeader', () => {
     expect(screen.getByText('1 agent live')).toBeInTheDocument();
     expect(screen.getByText('1 tool active')).toBeInTheDocument();
     expect(screen.getByText('tools grouped')).toBeInTheDocument();
+  });
+
+  it('offers the project picker in the active graph header', () => {
+    render(
+      <ExecutionGraphHeader
+        cardDensity="compact"
+        collapseTools
+        focusMode="latest-architecture"
+        hydrationStatus={null}
+        onCardDensityChange={vi.fn()}
+        onDecreaseZoom={vi.fn()}
+        onFitAll={vi.fn()}
+        onFocusModeChange={vi.fn()}
+        onIncreaseZoom={vi.fn()}
+        onResetZoom={vi.fn()}
+        projectId="project-1"
+        onProjectChange={vi.fn()}
+        runningLoops={[]}
+        runningToolActivities={[]}
+        sessionTitleById={new Map()}
+        showFocusToggle={false}
+        zoom={1}
+      />,
+    );
+
+    expect(screen.getByTestId('graph-header-project-picker')).toBeInTheDocument();
   });
 
   it('hides the focus toggle when disabled and applies success hydration styling', () => {

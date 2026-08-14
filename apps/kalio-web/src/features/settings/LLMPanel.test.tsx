@@ -242,16 +242,26 @@ describe('LLMPanel', () => {
       'GET /api/llm/active/models': { models: ['mimo-v2.5-pro', 'mimo-v2-thinking'] },
     });
 
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Runtime Settings' })).toBeInTheDocument(),
     );
 
-    expect(screen.getByText('Active Provider')).toBeInTheDocument();
-    expect(screen.getByTestId('provider-row-env')).toHaveTextContent(/xiaomi mimo/i);
+    expect(screen.getByText('Active Provider').parentElement).toHaveTextContent(/xiaomi mimo/i);
+    expect(screen.getByText('Active Provider').parentElement).toHaveTextContent(/env fallback/i);
     expect(screen.queryByText(/activate a provider above to select its model/i)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2.5-pro'));
+  });
+
+  it('keeps runtime controls out of provider settings', async () => {
+    mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    render(<LLMPanel mode="providers" />);
+
+    await screen.findByRole('heading', { name: 'LLM Settings', level: 2 });
+
+    expect(screen.queryByRole('heading', { name: 'Runtime Settings', level: 3 })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-selector')).not.toBeInTheDocument();
   });
 
   it('renders runtime mode without the provider management list', async () => {
@@ -265,6 +275,7 @@ describe('LLMPanel', () => {
     expect(screen.queryByTestId('add-provider-btn')).not.toBeInTheDocument();
     expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument();
     expect(screen.getByTestId('provider-health-card')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Runtime Settings' })).toHaveLength(1);
   });
 
   it('saves the active model through the runtime endpoint when the env provider is active', async () => {

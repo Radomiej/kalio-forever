@@ -30,7 +30,6 @@ export function ChatInput({
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const lastSendAtRef = useRef(0);
   const { activeSessionId, sessions } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
   const hasText = value.trim().length > 0;
@@ -39,10 +38,6 @@ export function ChatInput({
   const handleSend = (interrupt = false) => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-
-    const now = Date.now();
-    if (now - lastSendAtRef.current < 150) return;
-    lastSendAtRef.current = now;
 
     const activeArchitecture = architectures.find((schema) => schema.id === selectedArchitectureId) ?? null;
     if (activeArchitecture && onArchitectureRun) {

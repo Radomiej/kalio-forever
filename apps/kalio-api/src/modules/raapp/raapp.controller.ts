@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Delete,
+  HttpException,
   Param,
   NotFoundException,
   ForbiddenException,
@@ -15,10 +16,12 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import type { RAAppSummary, RAAppGroup } from '@kalio/types';
+import type { RAAppSummary, RAAppGroup, RaAppPendingApprovalSnapshot } from '@kalio/types';
 import { RAAppService } from './raapp.service';
 import { RAAppVersioningService, deriveSlug } from './raapp-versioning.service';
+import { RAAppHITLService } from './raapp-hitl.service';
 import type { LoadedRAApp } from './raapp.service';
+import { RAAPP_ZIP_LIMITS, RAAppPackageError } from './raapp-package-validation';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
 
 @Controller('ra-apps')
@@ -26,6 +29,7 @@ export class RAAppController {
   constructor(
     private readonly raAppService: RAAppService,
     private readonly versioningService: RAAppVersioningService,
+    private readonly hitlService: RAAppHITLService,
   ) {}
 
   @Get()
@@ -63,6 +67,21 @@ export class RAAppController {
     const group = this.versioningService.getGroupBySlug(slug);
     if (!group) throw new NotFoundException(`RA-App group not found: ${slug}`);
     return group;
+  }
+
+  @Get('pending-approvals')
+  async listPendingApprovals(): Promise<RaAppPendingApprovalSnapshot[]> {
+    const pending = await this.hitlService.getAllPendingApprovals();
+    return pending.map((approval) => ({
+      id: approval.id,
+      sessionId: approval.sessionId,
+      toolCallId: approval.toolCallId,
+      system: approval.system,
+      displayLabel: approval.displayLabel,
+      args: approval.args,
+      status: 'pending',
+      createdAt: approval.createdAt.getTime(),
+    }));
   }
 
   @Get('groups/:slug/download/:version')
@@ -111,23 +130,30 @@ export class RAAppController {
   }
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: RAAPP_ZIP_LIMITS.maxCompressedBytes } }))
   async upload(@UploadedFile() file: Express.Multer.File): Promise<RAAppSummary> {
     if (!file) throw new BadRequestException('No file uploaded');
-    if (!file.originalname.endsWith('.zip')) throw new BadRequestException('Only .zip files are accepted');
-    const app = await this.raAppService.saveUpload(file.buffer, file.originalname);
-    return {
-      id: app.id,
-      name: app.meta.name,
-      description: app.meta.description ?? '',
-      version: app.meta.version ?? '1.0',
-      tags: app.meta.tags ?? [],
-      expose_as_tool: app.meta.expose_as_tool ?? false,
-      tool_description: app.meta.tool_description ?? '',
-      source: app.source,
-      createdAt: app.createdAt,
-      updatedAt: app.updatedAt,
-    };
+    if (!/\.zip$/i.test(file.originalname)) throw new BadRequestException('Only .zip files are accepted');
+    try {
+      const app = await this.raAppService.saveUpload(file.buffer, file.originalname);
+      return {
+        id: app.id,
+        name: app.meta.name,
+        description: app.meta.description ?? '',
+        version: app.meta.version ?? '1.0',
+        tags: app.meta.tags ?? [],
+        expose_as_tool: app.meta.expose_as_tool ?? false,
+        tool_description: app.meta.tool_description ?? '',
+        source: app.source,
+        createdAt: app.createdAt,
+        updatedAt: app.updatedAt,
+      };
+    } catch (error) {
+      if (error instanceof RAAppPackageError) {
+        throw new HttpException(error.message, error.statusCode);
+      }
+      throw error;
+    }
   }
 
   @Delete(':id')

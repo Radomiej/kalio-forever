@@ -18,6 +18,7 @@ interface FakeSocket {
 }
 
 const handlers = new Map<string, SocketHandler>();
+const managerHandlers = new Map<string, SocketHandler>();
 let fakeSocket: FakeSocket;
 
 vi.mock('socket.io-client', () => ({
@@ -27,6 +28,7 @@ vi.mock('socket.io-client', () => ({
 describe('KalioSDK reconnect handling', () => {
   beforeEach(() => {
     handlers.clear();
+    managerHandlers.clear();
     fakeSocket = {
       recovered: false,
       connected: true,
@@ -38,7 +40,9 @@ describe('KalioSDK reconnect handling', () => {
       connect: vi.fn(),
       disconnect: vi.fn(),
       io: {
-        on: vi.fn(),
+        on: vi.fn((event: string, handler: SocketHandler) => {
+          managerHandlers.set(event, handler);
+        }),
         off: vi.fn(),
       },
     };
@@ -65,5 +69,39 @@ describe('KalioSDK reconnect handling', () => {
     handlers.get('connect')?.();
 
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires app-level reconnect callbacks on manager reconnect after a disconnect', () => {
+    const sdk = new KalioSDK({ wsUrl: 'http://localhost:3016' });
+    const handler = vi.fn();
+
+    sdk.onReconnect(handler);
+    handlers.get('disconnect')?.('transport close');
+    managerHandlers.get('reconnect')?.(1);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the current connected state when subscribing after socket connect already happened', () => {
+    fakeSocket.connected = true;
+    fakeSocket.recovered = true;
+    const sdk = new KalioSDK({ wsUrl: 'http://localhost:3016' });
+    const handler = vi.fn();
+
+    sdk.onConnectionState(handler);
+
+    expect(handler).toHaveBeenCalledWith({ status: 'connected', recovered: true });
+  });
+
+  it('reports connected state on manager reconnect success', () => {
+    const sdk = new KalioSDK({ wsUrl: 'http://localhost:3016' });
+    const handler = vi.fn();
+
+    sdk.onConnectionState(handler);
+    managerHandlers.get('reconnect_attempt')?.(1);
+    fakeSocket.recovered = true;
+    managerHandlers.get('reconnect')?.(1);
+
+    expect(handler).toHaveBeenLastCalledWith({ status: 'connected', recovered: true });
   });
 });

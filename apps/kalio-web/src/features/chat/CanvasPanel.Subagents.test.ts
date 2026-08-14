@@ -147,4 +147,30 @@ describe('buildSubagentPreviews', () => {
       }),
     ]);
   });
+
+  it('rebuilds a waiting child preview from durable session ownership after restart', () => {
+    const sessions: ChatSession[] = [{
+      id: 'sub-waiting',
+      personaId: 'default',
+      title: 'Sub-agent: waiting reviewer',
+      kind: 'subagent',
+      parentSessionId: 'session-1',
+      createdAt: 1,
+      updatedAt: 5,
+    }];
+
+    expect(buildSubagentPreviews(
+      [],
+      [],
+      sessions,
+      [],
+      new Set(['sub-waiting']),
+      'session-1',
+    )).toEqual([
+      expect.objectContaining({
+        sessionId: 'sub-waiting',
+        status: 'waiting',
+      }),
+    ]);
+  });
 });

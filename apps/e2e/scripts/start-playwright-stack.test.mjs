@@ -116,6 +116,9 @@ server.listen(port, () => {
     'memory=' + process.env.MEMORY_DB_PATH,
     'forceLlm=' + process.env.KALIO_FORCE_ENV_LLM,
     'fastMock=' + process.env.KALIO_MOCK_LLM_FAST,
+    'embeddingProvider=' + process.env.EMBEDDING_PROVIDER,
+    'controlPort=' + process.env.KALIO_PLAYWRIGHT_CONTROL_PORT,
+    'controlToken=' + (process.env.KALIO_PLAYWRIGHT_CONTROL_TOKEN ? 'set' : 'missing'),
     'model=' + process.env.LLM_MODEL,
   );
 });
@@ -233,6 +236,13 @@ function withoutPlaywrightUrls(env) {
   return nextEnv;
 }
 
+function withoutSystemNodeOverride(env) {
+  return {
+    ...env,
+    KALIO_PLAYWRIGHT_DISABLE_SYSTEM_NODE_OVERRIDE: '1',
+  };
+}
+
 async function waitForReady(child, output, timeoutMs) {
   const readyMarker = '[playwright-stack] backend and frontend are ready';
 
@@ -262,6 +272,40 @@ async function waitForReady(child, output, timeoutMs) {
       cleanupOutput();
       child.off('exit', onExit);
       resolvePromise();
+    };
+
+    child.on('exit', onExit);
+    child.stdout?.on('data', onChunk);
+    child.stderr?.on('data', onChunk);
+  });
+}
+
+async function waitForOutputCount(child, output, pattern, expectedCount, timeoutMs) {
+  const countMatches = () => output.join('').match(pattern)?.length ?? 0;
+  if (countMatches() >= expectedCount) {
+    return;
+  }
+
+  await new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${expectedCount} output matches.\n\n${output.join('')}`));
+    }, timeoutMs);
+    const onExit = (code, signal) => {
+      cleanup();
+      reject(new Error(`Launcher exited with code ${code ?? 'unknown'} signal ${signal ?? 'none'}.\n\n${output.join('')}`));
+    };
+    const onChunk = () => {
+      if (countMatches() >= expectedCount) {
+        cleanup();
+        resolvePromise();
+      }
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off('exit', onExit);
+      child.stdout?.off('data', onChunk);
+      child.stderr?.off('data', onChunk);
     };
 
     child.on('exit', onExit);
@@ -457,6 +501,64 @@ test('launcher starts on Windows without pnpm.cmd when corepack entrypoint is av
   }
 });
 
+test('launcher prefers explicit system corepack over pnpm.cmd from PATH on Windows', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows-only launcher selection test');
+    return;
+  }
+
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-win-corepack-first-'));
+  const output = [];
+
+  try {
+    const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot, {
+      includePnpmCmd: true,
+      includeCorepackCmd: false,
+      includeCorepackShim: true,
+    });
+    await writeFile(
+      resolve(binDir, 'pnpm.cmd'),
+      '@echo off\r\necho [broken-pnpm-cmd] should not be selected\r\nexit /b 31\r\n',
+      'utf8',
+    );
+    const frontendPort = await getFreePort();
+    const backendPort = await getFreePort();
+    const fakeProgramFiles = resolve(sandboxRoot, 'program-files');
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const controlledPath = `${binDir}${delimiter}${resolve(systemRoot, 'System32')}`;
+
+    const child = spawn(process.execPath, [launcherPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...process.env,
+        CI: 'true',
+        PATH: controlledPath,
+        PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${frontendPort}`,
+        PLAYWRIGHT_API_ORIGIN: `http://127.0.0.1:${backendPort}`,
+        ProgramFiles: fakeProgramFiles,
+        KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT: resolve(fakeProgramFiles, 'nodejs/node_modules/corepack/dist/corepack.js'),
+        KALIO_PLAYWRIGHT_NODE_COMMAND: process.execPath,
+        KALIO_FAKE_PNPM_PATH: resolve(binDir, 'fake-pnpm.cjs'),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      await waitForReady(child, output, launcherReadyTimeoutMs);
+      const fullOutput = output.join('');
+      assert.match(fullOutput, /backend and frontend are ready/);
+      assert.doesNotMatch(fullOutput, /\[broken-pnpm-cmd\]/);
+    } finally {
+      stopCollecting();
+      await terminateProcess(child);
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
 test('launcher can start from prebuilt artifacts when build step is skipped', async () => {
   const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-skip-build-'));
   const output = [];
@@ -495,6 +597,55 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
   }
 });
 
+test('launcher control plane authenticates and restarts backend after health recovery', async () => {
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-stack-control-'));
+  const output = [];
+
+  try {
+    const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const frontendPort = await getFreePort();
+    const backendPort = await getFreePort();
+    const controlPort = await getFreePort();
+    const controlToken = 'test-control-token';
+    const child = spawn(process.execPath, [launcherPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...process.env,
+        CI: 'true',
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${frontendPort}`,
+        PLAYWRIGHT_API_ORIGIN: `http://127.0.0.1:${backendPort}`,
+        KALIO_PLAYWRIGHT_CONTROL_PORT: String(controlPort),
+        KALIO_PLAYWRIGHT_CONTROL_TOKEN: controlToken,
+        KALIO_PLAYWRIGHT_SKIP_BUILD: '1',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stopCollecting = collectOutput(child, output);
+
+    try {
+      await waitForReady(child, output, launcherReadyTimeoutMs);
+
+      const unauthorized = await fetch(`http://127.0.0.1:${controlPort}/restart-backend`, { method: 'POST' });
+      assert.equal(unauthorized.status, 401);
+
+      const restart = await fetch(`http://127.0.0.1:${controlPort}/restart-backend`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${controlToken}` },
+      });
+      assert.equal(restart.status, 200);
+      assert.deepEqual(await restart.json(), { status: 'ready' });
+      await waitForOutputCount(child, output, /\[fake-backend\] listening on/g, 2, launcherReadyTimeoutMs);
+      assert.match(output.join(''), /backend restart completed/);
+    } finally {
+      stopCollecting();
+      await terminateProcess(child);
+    }
+  } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
 test('playwright wrapper waits on PLAYWRIGHT_BASE_URL from repo .env.test file', async () => {
   const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-runner-envfile-'));
   const output = [];
@@ -515,7 +666,7 @@ KALIO_PLAYWRIGHT_SKIP_BUILD=1
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...process.env,
+        ...withoutSystemNodeOverride(process.env),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -552,7 +703,7 @@ test('playwright wrapper allocates E2E ports when URLs are not pinned', async ()
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -594,7 +745,7 @@ test('playwright wrapper gives each run isolated database and workspace paths', 
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -641,7 +792,7 @@ test('playwright wrapper forces env mock LLM and fast mock streaming', async () 
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -655,6 +806,9 @@ test('playwright wrapper forces env mock LLM and fast mock streaming', async () 
       assert.equal(code, 0, fullOutput);
       assert.match(fullOutput, /forceLlm=1/);
       assert.match(fullOutput, /fastMock=1/);
+      assert.match(fullOutput, /embeddingProvider=mock/);
+      assert.match(fullOutput, /controlPort=\d+/);
+      assert.match(fullOutput, /controlToken=set/);
       assert.match(fullOutput, /model=mock/);
     } finally {
       stopCollecting();
@@ -679,7 +833,7 @@ test('playwright wrapper ignores legacy ports from repo .env.test when not expli
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...withoutPlaywrightUrls(process.env),
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
       },
@@ -754,7 +908,7 @@ test('playwright wrapper rejects legacy ports from explicit environment by defau
     const child = spawn(process.execPath, [runnerPath], {
       cwd: sandboxRoot,
       env: {
-        ...process.env,
+        ...withoutSystemNodeOverride(process.env),
         CI: 'true',
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
         PLAYWRIGHT_BASE_URL: 'http://127.0.0.1:5288',
@@ -783,7 +937,14 @@ test('playwright config rejects mismatched explicit API URLs', async () => {
 
   try {
     await createSandboxRepo(sandboxRoot);
-    const child = spawn(process.execPath, ['-e', `import(${JSON.stringify(pathToFileURL(resolve(sandboxRoot, 'apps/e2e/playwright.config.ts')).href)})`], {
+    const configPath = resolve(sandboxRoot, 'apps/e2e/playwright.config.ts');
+    const configUrl = pathToFileURL(configPath).href;
+    const configDir = dirname(configPath);
+    const child = spawn(process.execPath, [
+      '--experimental-strip-types',
+      '-e',
+      `globalThis.__dirname = ${JSON.stringify(configDir)}; await import(${JSON.stringify(configUrl)})`,
+    ], {
       env: {
         ...process.env,
         PLAYWRIGHT_API_ORIGIN: 'http://127.0.0.1:24116',

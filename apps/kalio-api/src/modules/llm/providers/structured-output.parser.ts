@@ -1,12 +1,11 @@
-import Ajv from 'ajv';
 import type { LLMStructuredOutputRequest } from '@kalio/types';
+import Ajv, { type ErrorObject, type ValidateFunction } from 'ajv';
 
 const WRAPPER_KEYS = ['output', 'result', 'data', 'routerOutput', 'finalArtifact'] as const;
 const MAX_VALIDATION_ERRORS = 3;
 const MAX_JSON_CANDIDATES = 30;
 const MAX_JSON_CANDIDATE_CHARS = 200_000;
-
-const ajv = new Ajv({ allErrors: true, strict: false });
+const structuredOutputAjv = new Ajv({ allErrors: true, allowUnionTypes: true, strict: false });
 
 export type StructuredOutputRecoveryMode = 'strict' | 'extracted' | 'unwrapped' | 'extracted_unwrapped';
 
@@ -75,7 +74,7 @@ export function parseStructuredOutputResponse(
       reason: 'schema_mismatch',
       preview: preview(raw),
       details: firstValidationDetails,
-    }
+    };
   }
 
   return {
@@ -106,21 +105,42 @@ function normalizeStructuredOutput(
 }
 
 function matchesSchema(value: unknown, request: LLMStructuredOutputRequest): boolean {
-  const validate = ajv.compile(request.schema);
-  return validate(value);
+  return validationIssues(value, request, 1).length === 0;
 }
 
 function validationDetails(value: unknown, request: LLMStructuredOutputRequest): string | undefined {
-  const validate = ajv.compile(request.schema);
-  validate(value);
-  const errors = validate.errors ?? [];
-  if (errors.length === 0) {
+  const issues = validationIssues(value, request, MAX_VALIDATION_ERRORS);
+  if (issues.length === 0) {
     return undefined;
   }
-  return errors
-    .slice(0, MAX_VALIDATION_ERRORS)
-    .map((error) => `${error.instancePath || '/'} ${error.message ?? 'failed validation'}`)
-    .join('; ');
+  return issues.join('; ');
+}
+
+function validationIssues(value: unknown, request: LLMStructuredOutputRequest, limit: number): string[] {
+  let validator: ValidateFunction;
+  try {
+    validator = structuredOutputAjv.compile(request.schema);
+  } catch (error) {
+    return [`$ schema compilation failed: ${error instanceof Error ? error.message : String(error)}`];
+  }
+
+  if (validator(value)) {
+    return [];
+  }
+  return (validator.errors ?? [])
+    .slice(0, limit)
+    .map(formatValidationError);
+}
+
+function formatValidationError(error: ErrorObject): string {
+  const path = error.instancePath || '$';
+  const additionalProperty = typeof error.params === 'object'
+    && error.params !== null
+    && 'additionalProperty' in error.params
+    && typeof error.params.additionalProperty === 'string'
+    ? ` (${error.params.additionalProperty})`
+    : '';
+  return `${path} ${error.message ?? 'schema mismatch'}${additionalProperty}`;
 }
 
 function extractedJsonCandidates(raw: string): string[] {

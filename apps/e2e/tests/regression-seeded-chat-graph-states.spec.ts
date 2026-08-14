@@ -331,7 +331,7 @@ test.describe('REGRESSION: seeded chat and graph visual states', () => {
       contentType: 'image/png',
     });
 
-    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await page.getByTestId('talk-graph-switcher').click();
     await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 5000 });
     await expect(page.getByRole('heading', { name: 'Execution Graph' })).toBeVisible();
     await expect(page.locator('[data-testid^="graph-node-subagent:"]').first()).toBeVisible({ timeout: 5000 });

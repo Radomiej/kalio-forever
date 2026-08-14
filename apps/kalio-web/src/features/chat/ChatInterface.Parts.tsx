@@ -1,18 +1,15 @@
-import { Check, Copy } from 'lucide-react';
-import type { ChatMessage, ChatSession, LLMContextPreview, Persona } from '@kalio/types';
-import type { TokenCount } from '../../services/tokenCounter';
+import type { ChatMessage, ChatSession, Persona, Project } from '@kalio/types';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { mergeRuntimeSessionStatusSnapshots } from '../../store/agentRuntimeSelectors';
-import { ConversationFilesBar } from '../vfs/ConversationFilesBar';
-import { ContextStats, type ContextPreviewStatus } from './ContextStats';
-import { TokenBadge } from './TokenBadge';
 import type { ArchitectSchema } from '../architect/architect.types';
 import { NewChatScreen } from './launch/NewChatScreen';
 import { isPendingHostSession } from './pendingHostSession';
 import { compactArchitectureTraceContent, findArchitectureRunInMessages } from './architectureChatSummary';
+import { architectureSessionLabel } from './chatSessionLabels';
 import { architectureSlotIdForSession, sessionStatusSnapshotToRuntimeState } from '../sessions/sessionTreeDisplay';
 import type { LiveTurnState } from './liveTurnState';
+export { ChatSessionHeader } from './ChatSessionHeader';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -69,59 +66,6 @@ export function buildCopiedChatText(messages: ChatMessage[]): string {
   }
 
   return entries.join('\n\n---\n\n');
-}
-
-function architectureSessionLabel(session: ChatSession): string | null {
-  const architectureContext = session.runtimeContext?.architectureContext;
-  if (!architectureContext || typeof architectureContext !== 'object') {
-    return null;
-  }
-  const displayLabel = architectureContext['displayLabel'];
-  if (typeof displayLabel === 'string' && displayLabel.trim().length > 0) {
-    return displayLabel.trim();
-  }
-  const schemaName = architectureContext['schemaName'];
-  return typeof schemaName === 'string' && schemaName.trim().length > 0 ? schemaName.trim() : null;
-}
-
-function humanizeArchitectureSchemaId(schemaId: string): string {
-  return schemaId
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
-    .join(' ');
-}
-
-function architectureMessageLabel(messages: ChatMessage[]): string | null {
-  const summary = findArchitectureRunInMessages(messages);
-  if (!summary) {
-    return null;
-  }
-
-  for (const message of [...messages].reverse()) {
-    if (message.role !== 'assistant' || !message.toolCalls?.length) {
-      continue;
-    }
-
-    const matchingCall = message.toolCalls.find((toolCall) => (
-      toolCall.name === 'run_subagent'
-      && toolCall.args['architectureRunId'] === summary.runId
-      && typeof toolCall.args['schemaName'] === 'string'
-      && toolCall.args['schemaName'].trim().length > 0
-    ));
-
-    if (matchingCall && typeof matchingCall.args['schemaName'] === 'string') {
-      return matchingCall.args['schemaName'].trim();
-    }
-  }
-
-  return summary.schemaId.trim().length > 0
-    ? humanizeArchitectureSchemaId(summary.schemaId)
-    : null;
-}
-
-function resolveArchitectureLabel(session: ChatSession, messages: ChatMessage[]): string | null {
-  return architectureSessionLabel(session) ?? architectureMessageLabel(messages);
 }
 
 function isChildSessionWithoutMessages(
@@ -274,93 +218,6 @@ export function ChatStatusBanners({
   );
 }
 
-interface ChatSessionHeaderProps {
-  activeContext: { systemPrompt: string | null; activeToolNames: string[] };
-  activeModel: string | null;
-  activeSession: ChatSession;
-  activeSessionId: string;
-  copied: boolean;
-  messages: ChatMessage[];
-  needsCompact: boolean;
-  onCloseContextStats: () => void;
-  onCompactNow: () => void;
-  onCopyChat: () => void;
-  onToggleContextStats: () => void;
-  showContextStats: boolean;
-  tokenCount: TokenCount;
-  contextPreview: LLMContextPreview | null;
-  contextPreviewStatus: ContextPreviewStatus;
-  vfsRefreshSignal: number;
-}
-
-export function ChatSessionHeader({
-  activeContext,
-  activeModel,
-  activeSession,
-  activeSessionId,
-  copied,
-  messages,
-  needsCompact,
-  onCloseContextStats,
-  onCompactNow,
-  onCopyChat,
-  onToggleContextStats,
-  showContextStats,
-  tokenCount,
-  contextPreview,
-  contextPreviewStatus,
-  vfsRefreshSignal,
-}: ChatSessionHeaderProps) {
-  const architectureLabel = resolveArchitectureLabel(activeSession, messages);
-  const pendingHostSession = isPendingHostSession(activeSession);
-
-  return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 truncate text-sm font-medium" data-testid="chat-session-title">{activeSession.title}</span>
-        {architectureLabel && (
-          <span
-            className="shrink-0 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-200"
-            data-testid="chat-session-architecture-label"
-          >
-            {architectureLabel}
-          </span>
-        )}
-      </div>
-      {!pendingHostSession && <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal} />}
-      {messages.length > 0 && (
-        <button
-          className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"
-          onClick={onCopyChat}
-          title="Copy chat to clipboard"
-          aria-label="Copy chat to clipboard"
-        >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-        </button>
-      )}
-      <div className="relative shrink-0">
-        <TokenBadge tokenCount={tokenCount} onClick={onToggleContextStats} />
-        {showContextStats && (
-          <ContextStats
-            tokenCount={tokenCount}
-            onCompactNow={needsCompact ? onCompactNow : undefined}
-            onClose={onCloseContextStats}
-            systemPrompt={activeContext.systemPrompt}
-            activeToolNames={activeContext.activeToolNames}
-            contextPreview={contextPreview}
-            contextPreviewStatus={contextPreviewStatus}
-          />
-        )}
-      </div>
-      {activeModel && (
-        <span className="text-[10px] font-mono text-base-content/65 shrink-0 truncate max-w-[9rem]" title={activeModel}>
-          {activeModel}
-        </span>
-      )}
-    </div>
-  );
-}
-
 interface ChatWelcomeScreenProps {
   activeSession: ChatSession | null;
   activeSessionId: string | null;
@@ -371,9 +228,11 @@ interface ChatWelcomeScreenProps {
   onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
+  onProjectChange?: (project: Project) => void;
   onSend: (content: string, personaId: string) => void;
   personas: Persona[];
   projectPath: string;
+  projectId?: string;
   selectedPersonaId: string;
   selectedArchitectureId: string;
 }
@@ -388,9 +247,11 @@ export function ChatWelcomeScreen({
   onDraftChange,
   onPersonaChange,
   onProjectPathChange,
+  onProjectChange,
   onSend,
   personas,
   projectPath,
+  projectId,
   selectedPersonaId,
   selectedArchitectureId,
 }: ChatWelcomeScreenProps) {
@@ -410,6 +271,7 @@ export function ChatWelcomeScreen({
       onDraftChange={onDraftChange}
       onPersonaChange={onPersonaChange}
       onProjectPathChange={onProjectPathChange}
+      onProjectChange={onProjectChange}
       onRunPrompt={(content) => {
         onDraftChange('');
         if (selectedArchitectureId === 'single-chat') {
@@ -420,6 +282,7 @@ export function ChatWelcomeScreen({
       }}
       personas={personas}
       projectPath={projectPath}
+      projectId={projectId}
       selectedPersonaId={selectedPersonaId}
       selectedArchitectureId={selectedArchitectureId}
       subtitle="AI assistant - build apps, query data, generate images, run tools"

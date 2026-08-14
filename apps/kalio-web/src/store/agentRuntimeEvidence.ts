@@ -1,4 +1,4 @@
-import type { ChatMessage, RuntimeActivitySnapshot } from '@kalio/types';
+import type { ChatMessage } from '@kalio/types';
 
 export type RuntimeEvidenceSource =
   | 'tool_result'
@@ -90,7 +90,6 @@ function extractToolResultEvidence(content: unknown, updatedAt: number | undefin
 
 export function extractLatestVisibleRuntimeEvidence(
   messages: ChatMessage[] | undefined,
-  _snapshot: RuntimeActivitySnapshot | undefined,
 ): RuntimeEvidence | null {
   const safeMessages = messages ?? [];
   for (let index = safeMessages.length - 1; index >= 0; index -= 1) {

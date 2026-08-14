@@ -8,12 +8,27 @@ import { RunJournalService } from './run-journal.service';
 import { ContextAssemblyService } from './context-assembly.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
+import { serializeToolResultContent } from './llm-turn-runtime.service';
+import { ToolDispatchService } from './tool-dispatch.service';
+import { HitlRequestService } from '../hitl/hitl-request.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { TurnState } from './turn-state';
 import { SessionsService } from './sessions.service';
-import { readPendingRAAppLaunchIntent, stripPendingRAAppLaunchRuntimeContext } from './raapp-launch-intent';
+import {
+  readPendingRAAppLaunchInputs,
+  readPendingRAAppLaunchIntent,
+  stripPendingRAAppLaunchRuntimeContext,
+} from './raapp-launch-intent';
 
 type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
+
+function normalizeClientMessageId(clientMessageId: string | undefined): string | undefined {
+  if (!clientMessageId) {
+    return undefined;
+  }
+  const trimmed = clientMessageId.trim();
+  return /^[A-Za-z0-9_-]{8,128}$/.test(trimmed) ? trimmed : undefined;
+}
 
 function getChatErrorCode(err: unknown): ChatErrorCode {
   if (err && typeof err === 'object' && 'code' in err) {
@@ -52,7 +67,132 @@ export class ChatService {
     private readonly sessions: SessionsService,
     @Optional() private readonly runJournal?: RunJournalService,
     @Optional() private readonly contextAssembly?: ContextAssemblyService,
+    @Optional() private readonly toolDispatch?: ToolDispatchService,
+    @Optional() private readonly hitlRequests?: HitlRequestService,
   ) {}
+
+  async approveAndResumeTool(
+    requestId: string,
+    sessionId: string,
+    message: string | undefined,
+    emit: EmitFn,
+  ): Promise<boolean> {
+    if (!this.hitlRequests) return false;
+    const pending = await this.hitlRequests.getById(requestId);
+    if (!pending || pending.sessionId !== sessionId || pending.status !== 'pending') return false;
+    const approved = await this.hitlRequests.resolve(
+      pending.id,
+      pending.revision,
+      'approved',
+      message ? { message } : undefined,
+    );
+    return approved ? this.resumeApprovedTool(requestId, emit) : false;
+  }
+
+  async cancelPendingTool(requestId: string, sessionId: string, message?: string): Promise<boolean> {
+    if (!this.hitlRequests) return false;
+    const pending = await this.hitlRequests.getById(requestId);
+    if (!pending || pending.sessionId !== sessionId || pending.status !== 'pending') return false;
+    return this.hitlRequests.resolve(
+      pending.id,
+      pending.revision,
+      'cancelled',
+      message ? { message } : undefined,
+    );
+  }
+
+  async resumeApprovedTool(requestId: string, emit: EmitFn): Promise<boolean> {
+    if (!this.hitlRequests || !this.toolDispatch || !this.contextAssembly) return false;
+    const approved = await this.hitlRequests.getById(requestId);
+    const cursor = approved?.continuation;
+    const payload = approved?.payload;
+    if (
+      !approved || approved.kind !== 'tool_confirmation' || approved.status !== 'approved'
+      || !approved.turnId || !approved.toolCallId
+      || !cursor || cursor['kind'] !== 'approved_tool_then_resume_turn'
+      || cursor['executionState'] !== 'pending'
+      || typeof cursor['promptMessageId'] !== 'string'
+      || typeof cursor['iteration'] !== 'number' || typeof cursor['currentLimit'] !== 'number'
+      || !payload || typeof payload['toolName'] !== 'string'
+      || !payload['args'] || typeof payload['args'] !== 'object' || Array.isArray(payload['args'])
+    ) return false;
+
+    const runtimeKind = cursor['runtimeKind'];
+    if (runtimeKind !== 'chat' && runtimeKind !== 'subagent' && runtimeKind !== 'agent-flow-branch') return false;
+    if (runtimeKind === 'chat' && (!approved.runId || !this.runJournal)) return false;
+
+    const claimed = await this.hitlRequests.claimApprovedContinuation(approved.id, approved.revision);
+    if (!claimed) return false;
+    const session = await this.sessions.get(claimed.sessionId);
+    const runtimeContext = session.runtimeContext ?? { runtimeKind: 'chat' as const, systemPromptProfile: 'default-chat' as const };
+    const assembled = await this.contextAssembly.assembleForSessionRuntime(session.personaId, runtimeContext);
+    const controller = new AbortController();
+    this.abortControllers.set(claimed.sessionId, controller);
+    const toolName = payload['toolName'];
+    const args = payload['args'] as Record<string, unknown>;
+    try {
+      const runId = claimed.runId ?? undefined;
+      const turnId = claimed.turnId;
+      const toolCallId = claimed.toolCallId;
+      if (!turnId || !toolCallId) return false;
+      if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_running', status: 'active' });
+      const result = await this.toolDispatch.dispatchApproved(toolCallId, toolName, args, {
+        sessionId: claimed.sessionId,
+        runId,
+        turnId,
+        promptMessageId: cursor['promptMessageId'],
+        messageId: typeof cursor['messageId'] === 'string' ? cursor['messageId'] : nanoid(),
+        vfsSessionId: typeof cursor['vfsSessionId'] === 'string' ? cursor['vfsSessionId'] : undefined,
+        historySessionId: typeof cursor['historySessionId'] === 'string' ? cursor['historySessionId'] : undefined,
+        runtimeKind,
+        iteration: cursor['iteration'],
+        currentLimit: cursor['currentLimit'],
+        abortSignal: controller.signal,
+        state: new TurnState(),
+        emit,
+      }, assembled.toolMetas);
+      await this.sessionManager.saveToolResult(claimed.sessionId, toolCallId, serializeToolResultContent(toolName, result), {
+        turnId,
+        promptMessageId: cursor['promptMessageId'],
+      });
+      const committed = await this.hitlRequests.markContinuationToolResult(claimed.id, claimed.revision, { status: result.status });
+      if (!committed) throw new Error('Unable to persist approved tool result continuation state');
+      emit('tool:result', result);
+      const loopResult = await this.llmTurnRuntime.runAgentLoop({
+        runtimeKind, sessionId: claimed.sessionId, runId, turnId,
+        historySessionId: typeof cursor['historySessionId'] === 'string' ? cursor['historySessionId'] : undefined,
+        vfsSessionId: typeof cursor['vfsSessionId'] === 'string' ? cursor['vfsSessionId'] : undefined,
+        promptMessageId: cursor['promptMessageId'], personaId: session.personaId,
+        effectiveSystemPrompt: assembled.effectiveSystemPrompt, toolMetas: assembled.toolMetas, model: assembled.model,
+        abortSignal: controller.signal, emit, maxIterations: cursor['currentLimit'],
+        resumeState: { iteration: cursor['iteration'], currentLimit: cursor['currentLimit'] },
+        maxEmptyNoToolRetries: Math.max(5, cursor['currentLimit'] * 2), auditDomain: 'chat',
+        callbacks: {
+          onBeforeIteration: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'llm_streaming', status: 'active' }); },
+          onToolPending: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_pending' }); },
+          onWaitingForHuman: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_pending', status: 'waiting_for_human' }); },
+          onToolRunning: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_running' }); },
+        },
+      });
+      if (runId && loopResult.maxIterationsReached) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${loopResult.finalLimit} iterations`);
+      else if (runId && loopResult.emptyNoToolRetriesExhausted) await this.runJournal?.fail(runId, 'LLM_ERROR', 'Agent produced empty output after resume');
+      else if (runId) await this.runJournal?.complete(runId, {
+        finalText: loopResult.finalText,
+        structuredOutput: loopResult.structuredOutput,
+        messageId: loopResult.lastMessageId,
+      });
+      emit('agent:done', { sessionId: claimed.sessionId, turnId });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (claimed.runId) await this.runJournal?.fail(claimed.runId, 'TOOL_EXECUTION_FAILED', message);
+      emit('chat:error', { sessionId: claimed.sessionId, code: 'LLM_ERROR', message, hadContent: false });
+      if (claimed.turnId) emit('agent:done', { sessionId: claimed.sessionId, turnId: claimed.turnId });
+      return false;
+    } finally {
+      if (this.abortControllers.get(claimed.sessionId) === controller) this.abortControllers.delete(claimed.sessionId);
+    }
+  }
 
   async handleTurn(
     sessionId: string,
@@ -62,6 +202,7 @@ export class ChatService {
     attachments?: import('@kalio/types').ChatAttachment[],
     suppliedTurnId?: string,
     runId?: string,
+    clientMessageId?: string,
   ): Promise<void> {
     const controller = new AbortController();
     this.abortControllers.set(sessionId, controller);
@@ -82,9 +223,6 @@ export class ChatService {
     };
 
     try {
-      trackingEmit('agent:start', { sessionId, turnId });
-      await checkpointRun('started');
-
       await this.sessionManager.ensureSession(sessionId, personaId);
       const session = await this.sessions.get(sessionId);
       await this.sessions.registerRuntimeProjectPathForSession(sessionId);
@@ -93,15 +231,22 @@ export class ChatService {
         systemPromptProfile: 'default-chat' as const,
       };
       const pendingRAAppLaunchIntent = readPendingRAAppLaunchIntent(sessionId, personaId, runtimeContext);
+      const pendingRAAppInputs = readPendingRAAppLaunchInputs(runtimeContext);
       let consumedPendingRAAppLaunchIntent = false;
 
       if (!this.contextAssembly) {
         throw new Error('ContextAssemblyService is required for chat turns');
       }
-      const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
-      const promptMessage = await this.sessionManager.persistUserMessage(sessionId, content, attachments, { turnId });
+      const promptMessage = await this.sessionManager.persistUserMessage(sessionId, content, attachments, {
+        turnId,
+        messageId: normalizeClientMessageId(clientMessageId),
+      });
       const promptMessageId = promptMessage?.id;
+      trackingEmit('agent:start', { sessionId, turnId, promptMessageId });
+      await checkpointRun('started');
+
+      const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
       trackingEmit('chat:context', {
         sessionId,
@@ -116,6 +261,7 @@ export class ChatService {
       const loopResult = await this.llmTurnRuntime.runAgentLoop({
         runtimeKind: 'chat',
         sessionId,
+        runId,
         turnId,
         promptMessageId,
         personaId,
@@ -140,12 +286,14 @@ export class ChatService {
                   `Overriding run_raapp target for session ${sessionId} from "${requestedId}" to "${pendingRAAppLaunchIntent.appId}"`,
                 );
               }
+              const args: Record<string, unknown> = {
+                ...toolCall.args,
+                id: pendingRAAppLaunchIntent.appId,
+              };
+              if (pendingRAAppInputs) args.inputs = pendingRAAppInputs;
               return {
                 ...toolCall,
-                args: {
-                  ...toolCall.args,
-                  id: pendingRAAppLaunchIntent.appId,
-                },
+                args,
               };
             }
           : undefined,
@@ -166,6 +314,9 @@ export class ChatService {
           },
           onToolPending: async () => {
             await checkpointRun('tool_pending');
+          },
+          onWaitingForHuman: async () => {
+            await checkpointRun('tool_pending', { status: 'waiting_for_human' });
           },
           onToolRunning: async () => {
             await checkpointRun('tool_running');
@@ -190,7 +341,7 @@ export class ChatService {
               personaId,
               updatedAt: Date.now(),
             });
-            await checkpointRun('tool_pending');
+            await checkpointRun('tool_pending', { status: 'waiting_for_human' });
             return this.agentBudgetApprovals.requestAdditionalBudget(
               {
                 sessionId,
@@ -245,7 +396,11 @@ export class ChatService {
           hadContent,
         });
       } else {
-        if (runId) await this.runJournal?.complete(runId);
+        if (runId) await this.runJournal?.complete(runId, {
+          finalText: loopResult.finalText,
+          structuredOutput: loopResult.structuredOutput,
+          messageId: loopResult.lastMessageId,
+        });
         trackingEmit('chat:complete', { sessionId, messageId: loopResult.lastMessageId });
       }
       trackingEmit('agent:done', { sessionId, turnId });

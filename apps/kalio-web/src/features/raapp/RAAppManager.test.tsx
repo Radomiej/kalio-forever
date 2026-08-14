@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { RAAppManager } from './RAAppManager';
 import type { RAAppGroup, VFSListResult } from '@kalio/types';
+import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 import {
   approveRAAppDraft,
   deleteRAAppGroup,
@@ -22,6 +23,10 @@ vi.mock('../../services/apiClient', () => ({
   discardRAAppDraft: vi.fn(),
   rollbackRAApp: vi.fn(),
   deleteRAAppGroup: vi.fn(),
+}));
+
+vi.mock('../chat/activeConversationSession', () => ({
+  createAndActivateEmptyHostSession: vi.fn(),
 }));
 
 const setPendingMessage = vi.fn();
@@ -99,6 +104,7 @@ function makeVfsResult(): VFSListResult {
 describe('RAAppManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(createAndActivateEmptyHostSession).mockResolvedValue({ id: 'session-run' } as never);
     vi.mocked(getRAApps).mockResolvedValue([]);
     vi.mocked(getRAAppGroups).mockResolvedValue([makeGroup()]);
     vi.mocked(getSessionVfsFiles).mockResolvedValue(makeVfsResult());
@@ -150,5 +156,26 @@ describe('RAAppManager', () => {
       'Publish the RA-App draft "draft-1" now using raapp_publish_draft with bump_type "minor", then report the released version.',
     );
     expect(onRunWithAgent).toHaveBeenCalledTimes(3);
+  });
+
+  it('passes catalog JSON inputs through the one-shot RA-App launch context', async () => {
+    const onOpenVFS = vi.fn();
+    const onRunWithAgent = vi.fn();
+
+    render(<RAAppManager onOpenVFS={onOpenVFS} onRunWithAgent={onRunWithAgent} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Catalog\s+1/ }));
+    const input = await screen.findByTestId('raapp-run-inputs');
+    fireEvent.change(input, { target: { value: '{"value":5}' } });
+    fireEvent.click(await screen.findByTestId('raapp-run-my-app'));
+
+    await waitFor(() => expect(createAndActivateEmptyHostSession).toHaveBeenCalled());
+    expect(createAndActivateEmptyHostSession).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeContext: expect.objectContaining({
+        architectureContext: expect.objectContaining({ raAppLaunchInputs: '{"value":5}' }),
+      }),
+    }));
+    expect(setPendingRAAppLaunchIntent).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('Use these JSON inputs: {"value":5}.'),
+    }));
   });
 });

@@ -4,8 +4,10 @@ import type { ToolConfirmationInvalidated, ToolConfirmationRequest } from '@kali
 import type { StreamContext } from './interfaces/stream-context.interface';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
+import { HitlRequestService } from '../hitl/hitl-request.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 
-const HITL_TIMEOUT_MS = 600_000;
+const HITL_TIMEOUT_MS = 0;
 const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
 const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set([
   'fs_write',
@@ -32,6 +34,7 @@ interface PendingConfirmation {
   emit: StreamContext['emit'];
   resolve: () => void;
   reject: (message?: string) => void;
+  revision?: number;
 }
 
 @Injectable()
@@ -42,9 +45,11 @@ export class ToolConfirmationService {
   constructor(
     @Optional() @Inject(HitlPolicyService) private readonly hitlPolicy: HitlPolicyService | null,
     @Optional() @Inject(HitlNotificationService) private readonly hitlNotifications: HitlNotificationService | null,
+    @Optional() @Inject(RuntimeAuditLogger) private readonly runtimeAudit: RuntimeAuditLogger | null = null,
+    @Optional() @Inject(HitlRequestService) private readonly hitlRequests: HitlRequestService | null = null,
   ) {}
 
-  resolveConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
+  async resolveConfirmation(requestId: string, sessionId?: string, message?: string): Promise<ConfirmationResolutionStatus> {
     const pending = this.pending.get(requestId);
     if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
@@ -53,14 +58,19 @@ export class ToolConfirmationService {
       );
       return 'session_mismatch';
     }
+    if (this.hitlRequests && pending.revision !== undefined) {
+      const resolved = await this.hitlRequests.resolve(requestId, pending.revision, 'approved', message ? { message } : undefined);
+      if (!resolved) return 'not_found';
+    }
     this.pending.delete(requestId);
     this.emitConfirmationInvalidated(pending, 'confirmed');
     this.logConfirmationLifecycle(pending, 'hitl_approval_confirmed', 'manual', message);
+    void this.logRuntimeConfirmation(pending, 'tool.confirmation.approved', 'completed');
     pending.resolve();
     return 'resolved';
   }
 
-  cancelConfirmation(requestId: string, sessionId?: string, message?: string): ConfirmationResolutionStatus {
+  async cancelConfirmation(requestId: string, sessionId?: string, message?: string): Promise<ConfirmationResolutionStatus> {
     const pending = this.pending.get(requestId);
     if (!pending) return 'not_found';
     if (sessionId && pending.sessionId !== sessionId) {
@@ -69,9 +79,14 @@ export class ToolConfirmationService {
       );
       return 'session_mismatch';
     }
+    if (this.hitlRequests && pending.revision !== undefined) {
+      const resolved = await this.hitlRequests.resolve(requestId, pending.revision, 'cancelled', message ? { message } : undefined);
+      if (!resolved) return 'not_found';
+    }
     this.pending.delete(requestId);
     this.emitConfirmationInvalidated(pending, 'cancelled');
     this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'manual', message);
+    void this.logRuntimeConfirmation(pending, 'tool.confirmation.denied', 'cancelled', message);
     pending.reject(message);
     return 'rejected';
   }
@@ -194,7 +209,7 @@ export class ToolConfirmationService {
     };
   }
 
-  private awaitConfirmation(
+  private async awaitConfirmation(
     callId: string,
     toolName: string,
     args: Record<string, unknown>,
@@ -207,11 +222,45 @@ export class ToolConfirmationService {
       requestId,
       toolCallId: callId,
       sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      promptMessageId: ctx.promptMessageId,
       toolName,
       args,
       timeoutMs,
       agentRun: ctx.agentRun,
     };
+
+    const persisted = this.hitlRequests
+      ? await this.hitlRequests.create({
+        id: requestId,
+        kind: 'tool_confirmation',
+        sessionId: ctx.sessionId,
+        turnId: ctx.turnId,
+        runId: ctx.runId,
+        toolCallId: callId,
+        payload: { toolName, args },
+        continuation: {
+          version: 1,
+          kind: 'approved_tool_then_resume_turn',
+          phase: 'tool_pending',
+          executionState: 'pending',
+          runId: ctx.runId,
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          promptMessageId: ctx.promptMessageId,
+          messageId: ctx.messageId,
+          vfsSessionId: ctx.vfsSessionId,
+          historySessionId: ctx.historySessionId,
+          runtimeKind: ctx.runtimeKind,
+          iteration: ctx.iteration,
+          currentLimit: ctx.currentLimit,
+        },
+      })
+      : undefined;
+
+    if (ctx.markWaitingForHuman) {
+      await ctx.markWaitingForHuman();
+    }
 
     ctx.emit('tool:confirmation_required', payload);
     void this.hitlNotifications?.notifyApprovalRequested({
@@ -227,16 +276,30 @@ export class ToolConfirmationService {
         toolCallId: callId,
       },
     });
+    void this.runtimeAudit?.log({
+      eventName: 'tool.confirmation.requested',
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      status: 'waiting_for_human',
+      data: {
+        requestId,
+        toolCallId: callId,
+        toolName,
+        agentRunId: ctx.agentRun?.agentRunId,
+        agentType: ctx.agentRun?.agentType,
+      },
+    });
 
     return new Promise<ConfirmationWaitResult>(resolve => {
       const timeout = timeoutMs > 0
         ? setTimeout(() => {
             const pending = this.pending.get(requestId);
-            if (pending) {
-              this.pending.delete(requestId);
-              this.emitConfirmationInvalidated(pending, 'timeout', `Approval timed out for tool ${toolName}.`);
-              this.logConfirmationLifecycle(pending, 'hitl_approval_timeout', 'manual');
-            }
+          if (pending) {
+            this.pending.delete(requestId);
+            this.emitConfirmationInvalidated(pending, 'timeout', `Approval timed out for tool ${toolName}.`);
+            this.logConfirmationLifecycle(pending, 'hitl_approval_timeout', 'manual');
+            void this.logRuntimeConfirmation(pending, 'tool.confirmation.timeout', 'failed');
+          }
             this.logger.warn(`HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`);
             resolve({ status: 'timeout', requestId });
           }, timeoutMs)
@@ -246,13 +309,39 @@ export class ToolConfirmationService {
         ctx.abortSignal?.removeEventListener('abort', handleAbort);
       };
 
-      const handleAbort = () => {
+      const handleAbort = async (): Promise<void> => {
         const pending = this.pending.get(requestId);
-        if (pending) {
-          this.pending.delete(requestId);
-          this.emitConfirmationInvalidated(pending, 'cancelled', `Tool confirmation aborted for ${toolName}.`);
-          this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'abort');
+        if (!pending) {
+          cleanupAbortListener();
+          return;
         }
+        const abortMessage = `Tool confirmation aborted for ${toolName}.`;
+        if (this.hitlRequests && pending.revision !== undefined) {
+          let persisted = false;
+          try {
+            persisted = await this.hitlRequests.resolve(
+              requestId,
+              pending.revision,
+              'cancelled',
+              { message: abortMessage },
+            );
+          } catch (error) {
+            this.logger.error(
+              `Unable to persist aborted HITL confirmation ${requestId}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          if (!persisted) {
+            this.logger.error(`Aborted HITL confirmation ${requestId} was not persisted; keeping it pending.`);
+            return;
+          }
+        }
+        if (this.pending.get(requestId) !== pending) {
+          return;
+        }
+        this.pending.delete(requestId);
+        this.emitConfirmationInvalidated(pending, 'cancelled', abortMessage);
+        this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'abort');
+        void this.logRuntimeConfirmation(pending, 'tool.confirmation.cancelled', 'cancelled');
         if (timeout) clearTimeout(timeout);
         cleanupAbortListener();
         resolve({ status: 'rejected', requestId });
@@ -261,6 +350,7 @@ export class ToolConfirmationService {
       this.pending.set(requestId, {
         sessionId: ctx.sessionId,
         payload,
+        revision: persisted?.revision,
         emit: ctx.emit,
         resolve: () => {
           if (timeout) clearTimeout(timeout);
@@ -275,7 +365,7 @@ export class ToolConfirmationService {
       });
 
       if (ctx.abortSignal?.aborted) {
-        handleAbort();
+        void handleAbort();
         return;
       }
       ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });
@@ -358,6 +448,27 @@ export class ToolConfirmationService {
       reason,
       ...(message !== undefined ? { message } : {}),
       ...(pending.payload.agentRun !== undefined ? { agentRun: pending.payload.agentRun } : {}),
+    });
+  }
+
+  private logRuntimeConfirmation(
+    pending: PendingConfirmation,
+    eventName: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    reason?: string,
+  ): Promise<string> | undefined {
+    return this.runtimeAudit?.log({
+      eventName,
+      sessionId: pending.payload.sessionId,
+      status,
+      data: {
+        requestId: pending.payload.requestId,
+        toolCallId: pending.payload.toolCallId,
+        toolName: pending.payload.toolName,
+        agentRunId: pending.payload.agentRun?.agentRunId,
+        agentType: pending.payload.agentRun?.agentType,
+        ...(reason ? { message: reason } : {}),
+      },
     });
   }
 }

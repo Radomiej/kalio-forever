@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type {
   AgentFlowRun,
   AgentFlowRunSnapshot,
@@ -8,6 +8,13 @@ import type {
 } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { agentFlowEvents, agentFlowRuns } from '../../database/schema';
+
+export interface RecoverableAgentFlowRun {
+  snapshot: AgentFlowRunSnapshot;
+  revision: number;
+  leaseOwner?: string;
+  leaseExpiresAt?: number;
+}
 
 function cloneJson<T>(value: T): T {
   return value === undefined || value === null ? value : structuredClone(value);
@@ -88,6 +95,42 @@ export class AgentFlowRunRepository {
       this.snapshots.set(snapshot.run.id, cloneSnapshot(snapshot));
     }
     return [...this.snapshots.values()].map((snapshot) => cloneSnapshot(snapshot));
+  }
+
+  findRecoverableRuns(now: number): RecoverableAgentFlowRun[] {
+    if (!this.drizzle?.db) return [];
+    const rows = this.drizzle.db.select().from(agentFlowRuns).where(and(
+      inArray(agentFlowRuns.status, ['running', 'waiting_on_orchestrator']),
+      or(isNull(agentFlowRuns.leaseExpiresAt), lt(agentFlowRuns.leaseExpiresAt, now)),
+    )).all();
+    return rows.map((row) => ({
+      snapshot: this.snapshotFromRunRow(row),
+      revision: row.revision,
+      ...(row.leaseOwner ? { leaseOwner: row.leaseOwner } : {}),
+      ...(row.leaseExpiresAt !== null ? { leaseExpiresAt: row.leaseExpiresAt } : {}),
+    }));
+  }
+
+  claimRecovery(
+    runId: string,
+    expectedRevision: number,
+    ownerId: string,
+    leaseExpiresAt: number,
+    now = Date.now(),
+  ): boolean {
+    if (!this.drizzle?.db) return false;
+    const result = this.drizzle.db.update(agentFlowRuns).set({
+      leaseOwner: ownerId,
+      leaseExpiresAt,
+      revision: sql`${agentFlowRuns.revision} + 1`,
+    }).where(and(
+      eq(agentFlowRuns.id, runId),
+      inArray(agentFlowRuns.status, ['running', 'waiting_on_orchestrator']),
+      eq(agentFlowRuns.revision, expectedRevision),
+      or(isNull(agentFlowRuns.leaseExpiresAt), lt(agentFlowRuns.leaseExpiresAt, now)),
+    )).run();
+    if (result.changes === 1) this.snapshots.delete(runId);
+    return result.changes === 1;
   }
 
   upsertRun(run: AgentFlowRun): void {

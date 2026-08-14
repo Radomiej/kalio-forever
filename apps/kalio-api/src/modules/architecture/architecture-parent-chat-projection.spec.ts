@@ -30,7 +30,7 @@ function makeSchema(): ArchitectureSchema {
   };
 }
 
-function makeRun(): ArchitectureRun {
+function makeRun(overrides: Partial<ArchitectureRun> = {}): ArchitectureRun {
   return {
     id: 'run-1',
     schemaId: 'schema-1',
@@ -43,10 +43,122 @@ function makeRun(): ArchitectureRun {
     branchSessionIds: {
       analyst: 'branch-analyst-fallback',
     },
+    ...overrides,
   };
 }
 
 describe('buildArchitectureParentChatMessages', () => {
+  it('persists typed workflow-envelope metadata and durable turn linkage for the parent chat', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-router',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'router_decision',
+        nodeId: 'router',
+        message: 'Router merged the branch outputs.',
+        createdAt: 12,
+        route: {
+          source: 'router',
+          fromNodeId: 'router',
+          selectedNodeIds: ['final'],
+          nextNodeId: 'final',
+        },
+      },
+      {
+        id: 'e-final',
+        runId: 'run-1',
+        sequence: 2,
+        type: 'final_artifact',
+        nodeId: 'final',
+        message: 'Final typed answer.',
+        createdAt: 13,
+      },
+    ];
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), makeRun(), 'parent-1', events, 100);
+    const assistantMessages = messages.filter((message) => message.role === 'assistant');
+    const finalMessage = assistantMessages.at(-1);
+
+    expect(assistantMessages).not.toHaveLength(0);
+    expect(assistantMessages.every((message) => message.turnId === 'architecture-turn-run-1')).toBe(true);
+    expect(assistantMessages.every((message) => message.promptMessageId === 'architecture:run-1:user')).toBe(true);
+    expect(finalMessage?.architectureRun).toMatchObject({
+      runId: 'run-1',
+      schemaId: 'schema-1',
+      status: 'completed',
+      hostProjectionKind: 'workflow-envelope',
+      finalArtifact: 'Final typed answer.',
+    });
+  });
+
+  it('links parent chat projection to the real prompt message id when chat launch context provides one', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-final',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'final_artifact',
+        nodeId: 'final',
+        message: 'Final typed answer.',
+        createdAt: 13,
+      },
+    ];
+
+    const messages = buildArchitectureParentChatMessages(
+      makeSchema(),
+      makeRun({ context: { promptMessageId: 'user-real' } }),
+      'parent-1',
+      events,
+      100,
+    );
+    const assistantMessages = messages.filter((message) => message.role === 'assistant');
+
+    expect(messages[0]).toMatchObject({
+      id: 'user-real',
+      role: 'user',
+      promptMessageId: 'user-real',
+    });
+    expect(assistantMessages).not.toHaveLength(0);
+    expect(assistantMessages.every((message) => message.promptMessageId === 'user-real')).toBe(true);
+  });
+
+  it('attaches typed workflow-envelope metadata to branch-only projections', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      {
+        id: 'e-branch',
+        runId: 'run-1',
+        sequence: 1,
+        type: 'participant_output',
+        nodeId: 'analyst',
+        roleSlotId: 'analyst',
+        message: 'Analyst branch output.',
+        createdAt: 12,
+        data: {
+          stream: {
+            streamGroupId: 'architecture:run-1:analyst',
+            branchSessionId: 'branch-analyst',
+            status: 'completed',
+            chunkCount: 1,
+            text: 'Analyst branch output.',
+          },
+        },
+      },
+    ];
+
+    const messages = buildArchitectureParentChatMessages(makeSchema(), makeRun(), 'parent-1', events, 100);
+    const toolHost = messages.find((message) => message.role === 'assistant' && message.toolCalls);
+
+    expect(toolHost).toMatchObject({
+      turnId: 'architecture-turn-run-1',
+      promptMessageId: 'architecture:run-1:user',
+      architectureRun: expect.objectContaining({
+        runId: 'run-1',
+        hostProjectionKind: 'workflow-envelope',
+      }),
+    });
+  });
+
   it('emits tool call/results for participant outputs and skips synthetic fan-out messages', () => {
     const events: ArchitectureExecutionEvent[] = [
       {

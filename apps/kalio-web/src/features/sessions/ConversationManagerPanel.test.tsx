@@ -16,9 +16,10 @@ type AgentStateShape = {
   pendingBudgetApprovals: Record<string, Array<{
     requestId: string;
     sessionId: string;
-    scope?: 'chat' | 'agent';
+    scope?: 'chat' | 'subagent' | 'agent-flow-branch';
     usedIterations: number;
     currentLimit: number;
+    suggestedNextLimit?: number;
   }>>;
   toolActivities: ToolActivity[];
   llmActivities: LlmActivity[];
@@ -37,9 +38,24 @@ type SessionStateShape = {
   sessionMessages: Record<string, ChatMessage[]>;
 };
 
-const { stopTurn, resumeAgentFlowRun, agentState, sessionState } = vi.hoisted(() => ({
+const {
+  stopTurn,
+  resumeAgentFlowRun,
+  approveRaApp,
+  cancelRaApp,
+  identifySession,
+  approveAgentBudget,
+  getPendingRAAppApprovals,
+  agentState,
+  sessionState,
+} = vi.hoisted(() => ({
   stopTurn: vi.fn(),
   resumeAgentFlowRun: vi.fn(),
+  approveRaApp: vi.fn(),
+  cancelRaApp: vi.fn(),
+  identifySession: vi.fn(),
+  approveAgentBudget: vi.fn(),
+  getPendingRAAppApprovals: vi.fn().mockResolvedValue([]),
   agentState: {
     pendingConfirmations: {} as Record<string, Array<{
       requestId: string;
@@ -53,9 +69,10 @@ const { stopTurn, resumeAgentFlowRun, agentState, sessionState } = vi.hoisted(()
     pendingBudgetApprovals: {} as Record<string, Array<{
       requestId: string;
       sessionId: string;
-      scope?: 'chat' | 'agent';
+      scope?: 'chat' | 'subagent' | 'agent-flow-branch';
       usedIterations: number;
       currentLimit: number;
+      suggestedNextLimit?: number;
     }>>,
     toolActivities: [] as ToolActivity[],
     llmActivities: [] as LlmActivity[],
@@ -87,7 +104,15 @@ vi.mock('../../services/eventBus', () => ({
     stopTurn,
     confirmTool: vi.fn(),
     cancelTool: vi.fn(),
+    approveRaApp,
+    cancelRaApp,
+    identifySession,
+    approveAgentBudget,
   },
+}));
+
+vi.mock('../../services/apiClient', () => ({
+  getPendingRAAppApprovals,
 }));
 
 vi.mock('../agent-flow/agentFlow.api', () => ({
@@ -267,6 +292,82 @@ describe('ConversationManagerPanel', () => {
     expect(onOpenSession).toHaveBeenCalledWith('session-hitl');
   });
 
+  it('renders RA-App pending approvals in the HITL inbox and resolves them through raapp events', () => {
+    const onOpenSession = vi.fn();
+    sessionState.sessions = [makeSession('session-raapp', 'Interactive RA-App')];
+    sessionState.sessionMessages = {
+      'session-raapp': [{
+        id: 'raapp-tool-result',
+        sessionId: 'session-raapp',
+        role: 'tool_result',
+        toolCallId: 'call-raapp',
+        content: JSON.stringify({
+          status: 'ready',
+          type: 'html',
+          mode: 'interactive',
+          content: '<p>Approve operation</p>',
+          pendingApprovals: [
+            {
+              id: 'approval-raapp-approve',
+              system: 'vfs_write',
+              displayLabel: 'write architecture.md',
+              args: { path: 'architecture.md' },
+            },
+            {
+              id: 'approval-raapp-reject',
+              system: 'vfs_write',
+              displayLabel: 'write draft.md',
+              args: { path: 'draft.md' },
+            },
+          ],
+        }),
+        createdAt: 2,
+      }],
+    };
+
+    render(<ConversationManagerPanel onOpenSession={onOpenSession} />);
+
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('RA-App approval');
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('write architecture.md');
+
+    fireEvent.click(screen.getByTestId('home-hitl-open-raapp-approval-raapp-approve'));
+    expect(onOpenSession).toHaveBeenCalledWith('session-raapp');
+
+    fireEvent.click(screen.getByTestId('home-hitl-approve-raapp-approval-raapp-approve'));
+    expect(identifySession).toHaveBeenCalledWith('session-raapp');
+    expect(approveRaApp).toHaveBeenCalledWith({
+      sessionId: 'session-raapp',
+      requestIds: ['approval-raapp-approve'],
+    });
+
+    fireEvent.click(screen.getByTestId('home-hitl-reject-raapp-approval-raapp-reject'));
+    expect(identifySession).toHaveBeenCalledWith('session-raapp');
+    expect(cancelRaApp).toHaveBeenCalledWith({
+      sessionId: 'session-raapp',
+      requestIds: ['approval-raapp-reject'],
+    });
+  });
+
+  it('hydrates RA-App pending approvals from the backend when the session transcript is not loaded', async () => {
+    const onOpenSession = vi.fn();
+    getPendingRAAppApprovals.mockResolvedValueOnce([{
+      id: 'approval-from-api',
+      sessionId: 'session-raapp-api',
+      toolCallId: 'call-raapp-api',
+      system: 'vfs_write',
+      displayLabel: 'write from durable pending table',
+      args: { path: 'durable.md' },
+      status: 'pending',
+      createdAt: 2,
+    }]);
+    sessionState.sessions = [makeSession('session-raapp-api', 'Durable RA-App')];
+
+    render(<ConversationManagerPanel onOpenSession={onOpenSession} />);
+
+    expect(await screen.findByTestId('home-hitl-open-raapp-approval-from-api')).toBeInTheDocument();
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('write from durable pending table');
+  });
+
   it('renders running loops using the session title and stops them through the event bus', () => {
     sessionState.sessions = [makeSession('session-1', 'Cats Session')];
     agentState.runtimeActivitySnapshots = {
@@ -321,6 +422,56 @@ describe('ConversationManagerPanel', () => {
     expect(screen.getByTestId('tool-budget-progress-session-budget')).toHaveTextContent('6/8');
   });
 
+  it('renders pending budget approvals as actionable HITL cards and approves +10', () => {
+    const onOpenSession = vi.fn();
+    sessionState.sessions = [makeSession('session-budget', 'Goal Guard Budget')];
+    agentState.pendingBudgetApprovals = {
+      'session-budget': [{
+        requestId: 'budget-1',
+        sessionId: 'session-budget',
+        scope: 'agent-flow-branch',
+        usedIterations: 30,
+        currentLimit: 30,
+      }],
+    };
+    agentState.runtimeActivitySnapshots = {
+      'session-budget': {
+        sessionId: 'session-budget',
+        active: true,
+        turnId: 'turn-budget',
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [{
+          requestId: 'budget-1',
+          sessionId: 'session-budget',
+          scope: 'agent-flow-branch',
+          usedIterations: 30,
+          currentLimit: 30,
+          suggestedNextLimit: 40,
+        }],
+        toolActivities: [],
+        childExecutions: [],
+        updatedAt: 10,
+      },
+    };
+
+    render(<ConversationManagerPanel onOpenSession={onOpenSession} />);
+
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('Agent budget approval');
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('30/30');
+    expect(screen.getByTestId('home-hitl-inbox')).toHaveTextContent('+10 to 40');
+
+    fireEvent.click(screen.getByTestId('home-hitl-open-budget-budget-1'));
+    expect(onOpenSession).toHaveBeenCalledWith('session-budget');
+
+    fireEvent.click(screen.getByTestId('home-hitl-approve-budget-budget-1'));
+    expect(approveAgentBudget).toHaveBeenCalledWith({
+      requestId: 'budget-1',
+      sessionId: 'session-budget',
+      decision: 'allow_ten',
+    });
+  });
+
   it('renders non-actionable runtime waiting rows and opens the owning conversation', () => {
     const onOpenSession = vi.fn();
     sessionState.sessions = [makeSession('session-1', 'Architecture Debate: Orchestrator')];
@@ -341,7 +492,7 @@ describe('ConversationManagerPanel', () => {
     expect(onOpenSession).toHaveBeenCalledWith('session-1');
   });
 
-  it('renders a resumable AgentFlow action and posts a generic resume request', () => {
+  it('renders a resumable AgentFlow action and posts a generic resume request', async () => {
     resumeAgentFlowRun.mockResolvedValue({
       run: {
         id: 'flow-run-1',
@@ -387,7 +538,10 @@ describe('ConversationManagerPanel', () => {
 
     expect(screen.getByTestId('runtime-continuation-flow-run-1')).toHaveTextContent('Goal Guard');
     expect(screen.getByTestId('runtime-continuation-flow-run-1')).toHaveTextContent('Waiting on orchestrator');
-    fireEvent.click(screen.getByRole('button', { name: 'Resume AgentFlow' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume AgentFlow' }));
+      await Promise.resolve();
+    });
 
     expect(resumeAgentFlowRun).toHaveBeenCalledWith('flow-run-1', { input: 'Continue.' });
   });
@@ -403,7 +557,7 @@ describe('ConversationManagerPanel', () => {
           toolResultErrorCode: 'SUBAGENT_TIMEOUT',
           toolResultErrorMessage: 'Sub-agent timed out after 300000ms.',
         }),
-        createdAt: 2,
+        createdAt: Date.now(),
       }],
     };
     agentState.runtimeActivitySnapshots = {
@@ -455,7 +609,7 @@ describe('ConversationManagerPanel', () => {
           toolResultErrorCode: 'TOOL_RUNTIME_ERROR',
           toolResultErrorMessage: longDetail,
         }),
-        createdAt: 2,
+        createdAt: Date.now(),
       }],
     };
     agentState.runtimeActivitySnapshots = {
@@ -502,6 +656,44 @@ describe('ConversationManagerPanel', () => {
 
     expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
     expect(screen.getByText('Needs attention')).toBeInTheDocument();
+  });
+
+  it('persists reviewed runtime notices across reload while keeping active approvals visible', () => {
+    const now = 60 * 60 * 1000;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    sessionState.sessions = [
+      makePersistedRuntimeSession('session-issue', 'Failed workflow', now - 1_000),
+    ];
+    sessionState.sessionMessages = {
+      'session-issue': [makeRuntimeErrorMessage('session-issue', now - 1_000, 'Runtime error')],
+    };
+    const firstRender = render(<ConversationManagerPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss runtime attention notice' }));
+    expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
+
+    firstRender.unmount();
+    const secondRender = render(<ConversationManagerPanel />);
+
+    expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
+
+    agentState.pendingConfirmations = {
+      'session-hitl': [{
+        requestId: 'req-hitl',
+        toolCallId: 'call-hitl',
+        sessionId: 'session-hitl',
+        toolName: 'fs_write',
+        args: { path: 'architecture.md' },
+        timeoutMs: 0,
+      }],
+    };
+    sessionState.sessions.push(makeSession('session-hitl', 'Tool approval'));
+
+    secondRender.rerender(<ConversationManagerPanel />);
+
+    expect(screen.getByTestId('home-hitl-inbox')).toBeInTheDocument();
+    expect(screen.getByTestId('home-hitl-approve-req-hitl')).toBeInTheDocument();
   });
 
   it('auto-expires recent runtime attention notice after the recent window elapses', () => {

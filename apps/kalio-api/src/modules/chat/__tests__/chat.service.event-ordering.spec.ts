@@ -195,6 +195,22 @@ describe('ChatService — event ordering (integration)', () => {
     expect(events[events.length - 1]).toBe('agent:done');
   });
 
+  it('agent:start includes the persisted prompt message id for the same turn', async () => {
+    const chunks: InternalLLMChunk[] = [
+      { type: 'text_delta', delta: 'Hello' },
+      { type: 'done' },
+    ];
+    const llmSource: ILLMSource = { stream: vi.fn().mockImplementation(() => makeStream(chunks)) };
+    const service = await buildService(llmSource, sessionManager, toolDispatch);
+
+    await service.handleTurn('sid', 'hi', 'p1', emit as EmitFn);
+
+    const startPayload = emit.mock.calls.find((args: unknown[]) => args[0] === 'agent:start')?.[1] as
+      | { promptMessageId?: string }
+      | undefined;
+    expect(startPayload?.promptMessageId).toBe('u0');
+  });
+
   it('thinking precedes text within a single iteration', async () => {
     const chunks: InternalLLMChunk[] = [
       { type: 'thinking_delta', delta: 'Let me think...' },

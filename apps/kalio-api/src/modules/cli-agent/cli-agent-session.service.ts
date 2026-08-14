@@ -26,7 +26,10 @@ export class CLIAgentSessionService {
 
   async createChildSession(params: CreateChildSessionParams): Promise<ChatSession> {
     const [parentSession] = await this.drizzle.db
-      .select({ personaId: sessions.personaId })
+      .select({
+        personaId: sessions.personaId,
+        projectId: sessions.projectId,
+      })
       .from(sessions)
       .where(eq(sessions.id, params.parentSessionId))
       .limit(1);
@@ -40,6 +43,7 @@ export class CLIAgentSessionService {
       parentSessionId: params.parentSessionId,
       parentTurnId: null,
       parentToolCallId: params.parentToolCallId,
+      projectId: parentSession?.projectId ?? 'system:none',
       createdAt: now,
       updatedAt: now,
     };
@@ -53,6 +57,7 @@ export class CLIAgentSessionService {
       kind: row.kind,
       parentSessionId: row.parentSessionId,
       parentToolCallId: row.parentToolCallId,
+      projectId: row.projectId,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
     };

@@ -9,15 +9,16 @@ async function openEmbeddingsPanel(page: Page) {
   await expect(page.getByTestId('settings-modal')).toBeVisible();
   await page.getByTestId('settings-tab-embeddings').click();
   await expect(page.getByTestId('embeddings-panel')).toBeVisible();
+  await expect(page.getByTestId('add-embedding-provider-btn')).toBeVisible({ timeout: 30_000 });
 }
 
 /** Clean up all embedding credentials via API */
 async function cleanupCredentials(page: Page) {
-  const res = await page.request.get(`${API_BASE}/memory/embedding-credentials`);
-  if (!res.ok()) return;
+  const res = await page.request.get(`${API_BASE}/memory/embedding-credentials`).catch(() => null);
+  if (!res?.ok()) return;
   const list: Array<{ id: string }> = await res.json();
   for (const c of list) {
-    await page.request.delete(`${API_BASE}/memory/embedding-credentials/${c.id}`);
+    await page.request.delete(`${API_BASE}/memory/embedding-credentials/${c.id}`).catch(() => undefined);
   }
 }
 
@@ -57,9 +58,9 @@ test.describe('Embedding Credentials UI', () => {
     await expect(page.getByTestId('embeddings-panel')).toBeVisible();
   });
 
-  test('shows local fallback when no remote credentials are configured', async ({ page }) => {
-    await expect(page.getByText('No remote embedding providers configured. Local embeddings are used by default.')).toBeVisible();
-    await expect(page.getByTestId('embedding-env-card').getByText('Local embeddings')).toBeVisible();
+  test('shows the deterministic mock profile when no remote credentials are configured', async ({ page }) => {
+    await expect(page.getByTestId('embeddings-panel').getByText(/No remote embedding providers configured/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('embedding-env-card').getByText('Mock embeddings')).toBeVisible({ timeout: 30_000 });
   });
 
   test('"Add Provider" button opens the add form', async ({ page }) => {
@@ -189,10 +190,10 @@ test.describe('Embedding Credentials UI', () => {
     expect(json.activeCredentialId).toBe(c.id);
   });
 
-  test('GET /memory/status/embedding returns local provider when no credential active', async ({ page }) => {
+  test('GET /memory/status/embedding returns the E2E mock provider when no credential is active', async ({ page }) => {
     const status = await page.request.get(`${API_BASE}/memory/status/embedding`);
     const json = await status.json() as { source: string; configured: boolean };
-    expect(json.source).toBe('local');
+    expect(json.source).toBe('mock');
     expect(json.configured).toBe(true);
   });
 
@@ -214,7 +215,7 @@ test.describe('Embedding Credentials UI', () => {
     const delRes = await page.request.delete(`${API_BASE}/memory/embedding-credentials/active`);
     if (delRes.ok()) {
       const status = await delRes.json() as { source?: string };
-      expect(status.source).toBe('local');
+      expect(status.source).toBe('mock');
       return;
     }
 

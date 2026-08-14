@@ -83,7 +83,7 @@ describe('KalioSDK logging', () => {
     emit('tool:result', payload);
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
-    expect(consoleGroupSpy).toHaveBeenCalledWith('[Thread] âś… TOOL RESULT: tool-1 â†’ cancelled');
+    expect(consoleGroupSpy).toHaveBeenCalledWith('[Thread] OK TOOL RESULT: tool-1 -> cancelled');
     expect(consoleGroupEndSpy).toHaveBeenCalled();
     expect(handler).toHaveBeenCalledWith(payload);
   });
@@ -104,7 +104,7 @@ describe('KalioSDK logging', () => {
     };
     emit('tool:result', payload);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[Thread] âťŚ TOOL RESULT: tool-2 â†’ error');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[Thread] ERROR TOOL RESULT: tool-2 -> error');
     expect(consoleLogSpy).toHaveBeenCalledWith('errorCode:', 'TOOL_EXECUTION_FAILED');
     expect(consoleLogSpy).toHaveBeenCalledWith('errorMessage:', 'Boom');
     expect(handler).toHaveBeenCalledWith(payload);

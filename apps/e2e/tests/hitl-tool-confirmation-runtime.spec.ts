@@ -5,8 +5,10 @@ import {
   expectComposerEnabled,
   getComposerSendButton,
   getActiveCredentialId,
+  isRetryableApiTransportError,
   selectSession,
 } from './helpers/test-config';
+import { restartPlaywrightBackend } from './helpers/restart-control';
 
 const MOCK_VFS_WRITE_TRIGGER = '[[mock:tool:vfs_write:no-arg-progress]]';
 const MOCK_VFS_WRITE_PATH = 'e2e/mock-tool-trigger.txt';
@@ -17,6 +19,13 @@ type HitlMode = 'manual' | 'auto' | 'bypass';
 interface HitlConfig {
   mode: HitlMode;
   autoPersonaId: string | null;
+}
+
+interface PersistedMessage {
+  role?: string;
+  content?: string;
+  turnId?: string;
+  toolCallId?: string;
 }
 
 async function fetchFromNode(
@@ -110,9 +119,19 @@ async function expectVfsContent(
 ): Promise<void> {
   await expect
     .poll(async () => {
-      const response = await request.get(
-        `${API_BASE}/sessions/${sessionId}/vfs/read?path=${encodeURIComponent(filePath)}`,
-      );
+      let response;
+      try {
+        response = await request.get(
+          `${API_BASE}/sessions/${sessionId}/vfs/read?path=${encodeURIComponent(filePath)}`,
+          { timeout: 10_000 },
+        );
+      } catch (error) {
+        if (isRetryableApiTransportError(error)) {
+          return null;
+        }
+        throw error;
+      }
+
       if (!response.ok()) {
         return null;
       }
@@ -156,6 +175,66 @@ test.describe('HITL tool confirmation on built QA', () => {
       await expect(confirmButton).toBeHidden({ timeout: 10_000 });
 
       await expectVfsContent(request, session.id, MOCK_VFS_WRITE_PATH, MOCK_VFS_WRITE_CONTENT);
+    } finally {
+      if (createdSessionId) {
+        await deleteSessionFromNode(createdSessionId);
+      }
+      await restoreHitlConfigFromNode(previousHitlConfig);
+      await restoreActiveCredentialFromNode(previousActiveCredentialId);
+    }
+  });
+
+  test('manual HITL resumes the same turn exactly once after a backend restart', async ({ page, request }) => {
+    test.setTimeout(90_000);
+
+    const previousHitlConfig = await getHitlConfig(request);
+    const previousActiveCredentialId = await getActiveCredentialId(request);
+    const title = `HITL restart ${Date.now()}`;
+    let createdSessionId: string | null = null;
+
+    try {
+      await ensureEnvMockProvider(request);
+      const session = await createSession(request, title, 'designer');
+      createdSessionId = session.id;
+
+      await saveHitlMode(page, 'manual');
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, session.id, title);
+
+      const input = await expectComposerEnabled(page, 10_000);
+      const sendButton = await getComposerSendButton(page);
+      await input.fill(`${MOCK_VFS_WRITE_TRIGGER} Use exactly the vfs_write tool and nothing else.`);
+      await sendButton.click();
+
+      const confirmButton = page.getByTestId('message-list').getByTestId('confirmation-confirm-btn');
+      await expect(confirmButton).toBeVisible({ timeout: 10_000 });
+
+      await restartPlaywrightBackend();
+      await page.reload();
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, session.id, title);
+      await expect(confirmButton).toBeVisible({ timeout: 15_000 });
+      await confirmButton.click();
+      await expect(confirmButton).toBeHidden({ timeout: 10_000 });
+
+      await expectVfsContent(request, session.id, MOCK_VFS_WRITE_PATH, MOCK_VFS_WRITE_CONTENT);
+      await expectComposerEnabled(page, 15_000);
+
+      let messages: PersistedMessage[] = [];
+      await expect.poll(async () => {
+        const response = await request.get(`${API_BASE}/sessions/${session.id}/messages`);
+        expect(response.ok()).toBeTruthy();
+        messages = await response.json() as PersistedMessage[];
+        return messages.filter((message) => message.role === 'tool_result').length;
+      }, { timeout: 15_000 }).toBe(1);
+
+      const toolResult = messages.find((message) => message.role === 'tool_result');
+      expect(toolResult?.turnId).toBeTruthy();
+      expect(messages.some((message) => (
+        message.role === 'assistant'
+        && message.turnId === toolResult?.turnId
+        && message.content?.includes('vfs_write completed')
+      ))).toBe(true);
     } finally {
       if (createdSessionId) {
         await deleteSessionFromNode(createdSessionId);

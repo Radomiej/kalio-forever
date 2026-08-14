@@ -5,6 +5,7 @@ import { NotFoundException, ForbiddenException, BadRequestException, StreamableF
 import { RAAppController } from './raapp.controller';
 import { RAAppService } from './raapp.service';
 import { RAAppVersioningService } from './raapp-versioning.service';
+import { RAAppHITLService } from './raapp-hitl.service';
 import type { LoadedRAApp } from './raapp.service';
 
 function makeApp(overrides: Partial<LoadedRAApp> = {}): LoadedRAApp {
@@ -49,6 +50,9 @@ describe('RAAppController', () => {
     rollback: vi.fn(),
     downloadRelease: vi.fn(),
   };
+  const mockHitlService = {
+    getAllPendingApprovals: vi.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -56,6 +60,7 @@ describe('RAAppController', () => {
       providers: [
         { provide: RAAppService, useValue: mockService },
         { provide: RAAppVersioningService, useValue: mockVersioningService },
+        { provide: RAAppHITLService, useValue: mockHitlService },
       ],
     }).compile();
 
@@ -115,6 +120,32 @@ describe('RAAppController', () => {
     it('throws NotFoundException when app not found', () => {
       mockService.getById.mockReturnValue(undefined);
       expect(() => controller.getOne('missing')).toThrow(NotFoundException);
+    });
+  });
+
+  describe('listPendingApprovals()', () => {
+    it('returns pending RA-App approval snapshots for the global HITL inbox', async () => {
+      mockHitlService.getAllPendingApprovals.mockResolvedValue([{
+        id: 'approval-1',
+        sessionId: 'session-1',
+        toolCallId: 'call-1',
+        system: 'vfs_write',
+        args: { path: 'architecture.md' },
+        displayLabel: 'write architecture.md',
+        status: 'pending',
+        createdAt: new Date('2026-07-02T12:00:00.000Z'),
+      }]);
+
+      await expect(controller.listPendingApprovals()).resolves.toEqual([{
+        id: 'approval-1',
+        sessionId: 'session-1',
+        toolCallId: 'call-1',
+        system: 'vfs_write',
+        args: { path: 'architecture.md' },
+        displayLabel: 'write architecture.md',
+        status: 'pending',
+        createdAt: Date.parse('2026-07-02T12:00:00.000Z'),
+      }]);
     });
   });
 

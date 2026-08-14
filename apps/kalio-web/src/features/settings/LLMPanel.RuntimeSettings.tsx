@@ -36,14 +36,7 @@ export function LLMRuntimeSettingsSection({
   onToolTimeoutCommit: (key: ToolTimeoutKey, value: number) => void;
 }) {
   return (
-    <section className="flex flex-col gap-6 rounded-2xl border border-base-300 bg-base-200/10 p-5 sm:p-6">
-      <div>
-        <h3 className="text-sm font-semibold mb-1">Runtime Settings</h3>
-        <p className="text-xs text-base-content/60">
-          Configure the active provider, runtime model, generation parameters, and turn-level limits.
-        </p>
-      </div>
-
+    <section className="flex flex-col gap-6">
       <ModelSettingsSection
         activeRuntimeConfig={activeRuntimeConfig}
         focusModelInputSignal={focusModelInputSignal}

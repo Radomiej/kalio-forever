@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AgentRunContext, ArchitectureRuntimeContext, SessionRuntimeContext, SocketEvents, SubagentCopiedFile } from '@kalio/types';
+import type { SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from '../tool/subagent-runtime.port';
 import { SessionManagerService } from './session-manager.service';
@@ -13,124 +13,30 @@ import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { ToolPolicyService } from './tool-policy.service';
 import { buildSubagentLLMAuditData } from './subagent-llm-audit.helpers';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
+import { RunJournalService } from './run-journal.service';
+import { SubagentResultReplayService } from './subagent-result-replay.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
-import { createWorkflowError, isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
+import { createWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import { RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME } from './raw-tool-call.parser';
+import {
+  ActiveSubagentRunRegistry,
+  type AgentRunWithDepth,
+  appendCopiedOutputLinks,
+  architectureContextForSubagent,
+  buildAttachmentHint,
+  displayTextFromStructuredOutput,
+  resolveHistorySessionId,
+  runtimeContextsEqual,
+  subagentErrorCode,
+} from './subagent-runtime.support';
 
 const DEFAULT_MAX_ITERATIONS = 30;
-
-type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
-type ChatErrorCode = SocketEvents['chat:error']['code'];
-
-function subagentErrorCode(error: Error): ChatErrorCode {
-  if ('code' in error) {
-    const code = (error as { code?: unknown }).code;
-    if (
-      code === 'LLM_RATE_LIMIT'
-      || code === 'LLM_TIMEOUT'
-      || code === 'LLM_AUTH'
-      || code === 'LLM_PROVIDER_DOWN'
-      || code === 'LLM_QUOTA'
-      || code === 'LLM_BAD_TOOL_ARGS'
-      || code === 'LLM_BAD_STRUCTURED_OUTPUT'
-      || code === 'MAX_ITERATIONS_REACHED'
-    ) {
-      return code;
-    }
-  }
-  if (isWorkflowError(error, 'TIMEOUT') || isWorkflowError(error, 'SUBAGENT_TIMEOUT')) {
-    return 'LLM_TIMEOUT';
-  }
-  return 'LLM_ERROR';
-}
-
-function appendCopiedOutputLinks(baseText: string, parentSessionId: string, copiedFiles: SubagentCopiedFile[]): string {
-  if (copiedFiles.length === 0) return baseText;
-
-  const lines = copiedFiles.map((file) => {
-    const downloadUrl = `/api/sessions/${parentSessionId}/vfs/download?path=${encodeURIComponent(file.toPath)}`;
-    return `- ${file.toPath} -> ${downloadUrl}`;
-  });
-
-  return `${baseText}\n\nCopied outputs:\n${lines.join('\n')}`;
-}
-
-function buildAttachmentHint(attachmentPaths: string[]): string {
-  if (attachmentPaths.length === 0) return '';
-  const lines = attachmentPaths.map((path) => `- ${path}`);
-  return `You have attached files available in VFS:\n${lines.join('\n')}\n\n`;
-}
-
-function runtimeContextsEqual(left: SessionRuntimeContext, right: SessionRuntimeContext): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function stringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = record?.[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function architectureContextForSubagent(request: RunSubagentRequest): ArchitectureRuntimeContext | undefined {
-  const base = isRecord(request.architectureContext)
-    ? request.architectureContext as ArchitectureRuntimeContext
-    : undefined;
-  if (!isRecord(request.auditContext) || !stringField(request.auditContext, 'architectureRunId')) {
-    return base;
-  }
-
-  const audit = request.auditContext;
-  const roleSlotId = stringField(audit, 'roleSlotId');
-  const roleSlotType = stringField(audit, 'roleSlotType');
-  const technicalSlot = roleSlotType === 'router'
-    || roleSlotType === 'finalizer'
-    || roleSlotId === 'router'
-    || roleSlotId === 'finalizer'
-    || roleSlotId === 'orchestrator';
-
-  return {
-    ...(base ?? {}),
-    architectureRunId: stringField(audit, 'architectureRunId'),
-    schemaId: stringField(audit, 'schemaId') ?? base?.schemaId,
-    schemaName: stringField(audit, 'schemaName') ?? base?.schemaName,
-    roleSlotId,
-    roleSlotType,
-    roleLabel: stringField(audit, 'roleLabel'),
-    displayLabel: stringField(audit, 'displayLabel') ?? stringField(audit, 'roleLabel') ?? base?.displayLabel,
-    sessionSurface: technicalSlot ? 'technical-node' : (base?.sessionSurface ?? 'conversation-branch'),
-    conversationVisibility: 'visible',
-  };
-}
-
-function resolveHistorySessionId(
-  runtimeKind: SessionRuntimeContext['runtimeKind'],
-  architectureContext: ArchitectureRuntimeContext | undefined,
-  parentSessionId: string,
-  childSessionId: string,
-): string {
-  if (runtimeKind !== 'agent-flow-branch') {
-    return childSessionId;
-  }
-  const historySessionId = architectureContext?.historySessionId;
-  if (typeof historySessionId === 'string' && historySessionId.trim().length > 0) {
-    return historySessionId.trim();
-  }
-  const hostSessionId = architectureContext?.hostSessionId;
-  if (typeof hostSessionId === 'string' && hostSessionId.trim().length > 0) {
-    return hostSessionId.trim();
-  }
-  return parentSessionId;
-}
-
 @Injectable()
 export class SubagentRuntimeService implements SubagentRuntimePort {
   private readonly logger = new Logger(SubagentRuntimeService.name);
-
+  private readonly activeRuns = new ActiveSubagentRunRegistry();
   constructor(
     @Inject(LLM_SOURCE) private readonly llmSource: ILLMSource,
     private readonly llmTurnRuntime: LLMTurnRuntimeService,
@@ -141,7 +47,17 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     private readonly toolPolicy: ToolPolicyService,
     private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly runJournal?: RunJournalService,
+    @Optional() private readonly resultReplay?: SubagentResultReplayService,
   ) {}
+
+  stopAndDrainSessions(sessionIds: readonly string[]): Promise<void> {
+    return this.activeRuns.stopAndDrainSessions(sessionIds);
+  }
+
+  getActiveRunStatus(sessionId: string) {
+    return this.activeRuns.getStatus(sessionId);
+  }
 
   async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
     const startedAt = performance.now();
@@ -214,6 +130,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           title: `Sub-agent: ${request.objective.slice(0, 54)}`,
           kind: 'subagent',
           parentSessionId: request.parentSessionId,
+          parentTurnId: request.parentTurnId,
           parentToolCallId: request.parentToolCallId,
           runtimeContext,
         }, { registerRuntimeProjectPath: true });
@@ -231,6 +148,13 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       await this.sessions.updateRuntimeContext(childSession.id, runtimeContext, {
         registerRuntimeProjectPath: true,
       });
+    }
+
+    if (request.resumeTurnId && this.resultReplay) {
+      const replay = await this.resultReplay.replay(
+        request, childSessionId, vfsSessionId, Math.round(performance.now() - startedAt),
+      );
+      if (replay) return replay;
     }
 
     const attachmentPaths = request.attachments ?? [];
@@ -258,14 +182,15 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
             const delta = payload['delta'];
             if (typeof delta === 'string') streamedText += delta;
           }
-          emit(event, data);
+          const forwarded = runtimeKind === 'agent-flow-branch' && typeof data === 'object' && data !== null
+            ? {
+                ...data as Record<string, unknown>,
+                architectureParentExecution: { childSessionId, childTurnId: turnId, promptMessageId },
+              }
+            : data;
+          emit(event, forwarded as never);
         }
       : undefined;
-
-    trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, agentRun });
-    if (!requestedChildSessionId) {
-      trackingEmit?.('session:created', childSession);
-    }
 
     const promptMessage = await this.sessionManager.persistUserMessage(
       childSessionId,
@@ -274,19 +199,46 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       { turnId },
     );
     const promptMessageId = promptMessage?.id;
+    trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, promptMessageId, agentRun });
+    if (!requestedChildSessionId) {
+      trackingEmit?.('session:created', childSession);
+    }
 
     const controller = new AbortController();
+    const completeActiveRun = this.activeRuns.register({
+      childSessionId,
+      parentSessionId: request.parentSessionId,
+      historySessionId,
+      vfsSessionId,
+      turnId,
+      promptMessageId,
+      agentRun,
+      controller,
+    });
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let journalRunId: string | undefined;
+    let rejectExecutionTimeout: ((error: Error) => void) | undefined;
+    const clearExecutionTimeout = () => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+    };
+    const armExecutionTimeout = () => {
+      clearExecutionTimeout();
+      timeoutHandle = setTimeout(() => {
+        const error = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${request.timeoutMs}ms`, {
+          source: 'subagent-runtime',
+        });
+        controller.abort(error);
+        rejectExecutionTimeout?.(error);
+      }, request.timeoutMs);
+    };
 
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          const error = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${request.timeoutMs}ms`, {
-            source: 'subagent-runtime',
-          });
-          controller.abort(error);
-          reject(error);
-        }, request.timeoutMs);
+        rejectExecutionTimeout = reject;
+        armExecutionTimeout();
       });
 
       const toolPolicyRequest = {
@@ -318,6 +270,11 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, assembledContext.model, request.model);
       const requestModel = request.model?.trim();
       const effectiveModel = requestModel || assembledContext.model || undefined;
+      journalRunId = (await this.runJournal?.startRun({
+        sessionId: childSessionId,
+        turnId,
+        model: effectiveModel,
+      }))?.id;
       const maxIterations = Number.isFinite(request.maxIterations)
         ? Math.max(1, Math.min(100, Math.round(request.maxIterations as number)))
         : Math.max(1, Math.min(100, Math.round(assembledContext.personaConfig?.maxToolAttempts ?? DEFAULT_MAX_ITERATIONS)));
@@ -326,6 +283,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         this.llmTurnRuntime.runAgentLoop({
           runtimeKind,
           sessionId: childSessionId,
+          runId: journalRunId,
           historySessionId,
           turnId,
           promptMessageId,
@@ -378,7 +336,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                 roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
                 updatedAt: Date.now(),
               });
-              return this.agentBudgetApprovals.requestAdditionalBudget(
+              clearExecutionTimeout();
+              const approvedLimit = await this.agentBudgetApprovals.requestAdditionalBudget(
                 {
                   sessionId: childSessionId,
                   turnId,
@@ -400,6 +359,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                   requestedBy: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : 'subagent',
                 },
               );
+              if (approvedLimit && !controller.signal.aborted) {
+                armExecutionTimeout();
+              }
+              return approvedLimit;
             },
           },
         }),
@@ -433,6 +396,13 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           completionMessageId = persistedCompletionMessageId;
         }
       }
+      if (journalRunId) {
+        await this.runJournal?.complete(journalRunId, {
+          finalText: baseResultText,
+          structuredOutput: loopResult.structuredOutput,
+          messageId: completionMessageId,
+        });
+      }
 
       trackingEmit?.('chat:complete', {
         sessionId: childSessionId,
@@ -457,6 +427,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       const failure = workflowFailureFromError(error);
+      if (journalRunId) {
+        await this.runJournal?.fail(journalRunId, failure.code, failure.message);
+      }
       const fallbackState = new TurnState();
       fallbackState.replaceText(this.failedRunResultText(error.message, streamedText.trim()));
       await this.persistTerminalAssistantMessage(
@@ -497,7 +470,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
       throw error;
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      clearExecutionTimeout();
+      completeActiveRun();
     }
   }
 
@@ -507,14 +481,12 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       : '';
     return `Sub-agent stopped after ${maxIterations} tool iteration${maxIterations === 1 ? '' : 's'} without producing a final answer.${suffix}`;
   }
-
   private failedRunResultText(errorMessage: string, lastText: string): string {
     const suffix = lastText.trim().length > 0
       ? ` Last assistant text before failure: ${lastText.trim()}`
       : '';
     return `Sub-agent failed: ${errorMessage}.${suffix}`;
   }
-
   private async persistTerminalAssistantMessage(
     sessionId: string,
     messageId: string,
@@ -531,18 +503,4 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       return null;
     }
   }
-}
-
-function displayTextFromStructuredOutput(output: unknown): string | null {
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    return null;
-  }
-  const record = output as Record<string, unknown>;
-  for (const key of ['answer', 'response', 'message', 'finalAnswer']) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-  return null;
 }

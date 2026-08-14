@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { MCPTool } from '@kalio/types';
 
 interface MCPToolDiscoveryResult {
@@ -14,15 +15,29 @@ interface MCPStatusHandle {
   lastError?: string;
 }
 
+export function buildMcpToolName(serverKey: string, toolName: string): string {
+  const digest = createHash('sha256')
+    .update(`${serverKey}\0${toolName}`)
+    .digest('hex')
+    .slice(0, 8);
+  const fragment = `${serverKey}_${toolName}`
+    .replace(/[^A-Za-z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 51) || 'tool';
+  return `mcp_${fragment}_${digest}`;
+}
+
 export function buildMcpToolPayload(serverKey: string, tool: MCPToolDiscoveryResult): MCPTool {
+  const legacyCanonicalName = `mcp_${serverKey}_${tool.name}`;
   return {
-    name: `mcp_${serverKey}_${tool.name}`,
+    name: buildMcpToolName(serverKey, tool.name),
     description: tool.description ?? '',
     parameters: (tool.inputSchema ?? {}) as Record<string, unknown>,
     requiresConfirmation: false,
     serverKey,
     serverId: serverKey,
-    aliases: [`mcp_${tool.name}`],
+    aliases: [legacyCanonicalName, `mcp_${tool.name}`],
   } satisfies MCPTool;
 }
 

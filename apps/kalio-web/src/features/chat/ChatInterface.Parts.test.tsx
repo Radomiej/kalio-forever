@@ -441,9 +441,8 @@ describe('ChatWelcomeScreen', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('welcome-persona-select'), {
-      target: { value: 'qa' },
-    });
+    fireEvent.click(screen.getByTestId('welcome-persona-select'));
+    fireEvent.click(screen.getByRole('option', { name: 'QA' }));
     expect(onPersonaChange).toHaveBeenCalledWith('qa');
 
     fireEvent.click(screen.getByTestId('welcome-mode-workflow'));
@@ -550,6 +549,8 @@ describe('ChatSessionHeader', () => {
     );
 
     expect(screen.queryByTestId('conversation-files-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('talk-conversation-switcher')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('talk-graph-switcher')).toBeInTheDocument();
   });
 
   it('shows architecture label from runtimeContext when the active session is an architecture session', () => {

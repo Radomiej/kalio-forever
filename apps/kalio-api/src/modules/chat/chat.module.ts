@@ -20,6 +20,8 @@ import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
+import { ProjectsController } from './projects.controller';
+import { ProjectsService } from './projects.service';
 import { ChatTestSupportAgentBudgetController } from './chat-test-support-agent-budget.controller';
 import { ChatTestSupportController } from './chat-test-support.controller';
 import { ChatTestSupportRaAppController } from './chat-test-support-raapp.controller';
@@ -29,12 +31,17 @@ import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
 import { SubagentRuntimeService } from './subagent-runtime.service';
+import { SubagentResultReplayService } from './subagent-result-replay.service';
+import { ChildExecutionContinuationService } from './child-execution-continuation.service';
 import { ToolPolicyService } from './tool-policy.service';
 import { ChatTestSupportService } from './chat-test-support.service';
 import { RunJournalService } from './run-journal.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { SessionEventsService } from './session-events.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
+import { SessionRuntimeStopService } from './session-runtime-stop.service';
+import { ActiveSessionRegistry } from './active-session-registry.service';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -73,6 +80,7 @@ import {
   imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, AllowedPathsModule, HitlModule, RelayModule],
   controllers: [
     SessionsController,
+    ProjectsController,
     ContextController,
     AuditLogController,
     ChatTestSupportController,
@@ -99,9 +107,13 @@ import {
     SessionEventsService,
     AgentBudgetApprovalService,
     SessionRuntimeWatchlistService,
+    SessionRuntimeStopService,
+    ActiveSessionRegistry,
     SessionsService,
+    ProjectsService,
     ChatTestSupportService,
     RunJournalService,
+    RuntimeAuditLogger,
     ChatService,
     SessionPipelineService,
     ChatGateway,
@@ -109,6 +121,8 @@ import {
     LLMServiceAdapter,
     ImageHydratorService,
     SubagentRuntimeService,
+    SubagentResultReplayService,
+    ChildExecutionContinuationService,
 
     // CHUNK_HANDLERS: ordered array injected into StreamProcessorService
     {
@@ -153,7 +167,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, RunJournalService, SubagentRuntimeService, SUBAGENT_RUNTIME],
+  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(
@@ -190,10 +204,10 @@ export class ChatModule implements OnModuleInit {
     });
   }
 
-  private resolveTelegramConfirmation(requestId: string, decision: 'approve' | 'cancel', message?: string): string {
+  private async resolveTelegramConfirmation(requestId: string, decision: 'approve' | 'cancel', message?: string): Promise<string> {
     const status = decision === 'approve'
-      ? this.toolDispatch.resolveConfirmation(requestId, undefined, message)
-      : this.toolDispatch.cancelConfirmation(requestId, undefined, message);
+      ? await this.toolDispatch.resolveConfirmation(requestId, undefined, message)
+      : await this.toolDispatch.cancelConfirmation(requestId, undefined, message);
 
     if (status === 'resolved') {
       return `Approved HITL request ${requestId}.`;

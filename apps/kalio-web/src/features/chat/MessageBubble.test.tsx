@@ -43,6 +43,7 @@ describe('MessageBubble layout', () => {
     );
 
     expect(screen.getByTestId('message-bubble').firstElementChild).toHaveClass('max-w-none');
+    expect(screen.getByTestId('message-content')).toHaveClass('max-w-[78ch]');
 
     rerender(<MessageBubble message={makeMessage({ role: 'user', content: 'user prompt' })} />);
 
@@ -55,6 +56,21 @@ describe('MessageBubble layout', () => {
     const bubble = screen.getByTestId('message-bubble').querySelector('.bg-base-300');
 
     expect(bubble).toHaveClass('px-2.5', 'py-1.5');
+  });
+
+  it('wraps long user workflow prompts without horizontal overflow', () => {
+    render(
+      <MessageBubble
+        message={makeMessage({
+          role: 'user',
+          content: `Run workflow\n${'C:/Projekty/FamilyQuest/'.repeat(20)}`,
+        })}
+      />,
+    );
+
+    const content = screen.getByTestId('message-content');
+    expect(content).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(content.parentElement).toHaveClass('max-w-full', 'overflow-hidden');
   });
 
   it('does not rerender markdown when an unrelated live chunk changes', () => {

@@ -19,6 +19,97 @@ describe('MockLLMProvider', () => {
     expect(onChunk).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: emits malformed architecture router structured output for workflow failure e2e', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const onStructuredOutput = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Slot: Router\nForce contract failure [[mock:architecture:router:malformed-output]]',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(messages, [], {
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      onChunk,
+      onStructuredOutput,
+      structuredOutput: {
+        name: 'architecture_router_output',
+        schema: {},
+      },
+    });
+
+    expect(toolCalls).toEqual([]);
+    expect(onChunk).not.toHaveBeenCalled();
+    expect(onStructuredOutput).toHaveBeenCalledWith(expect.objectContaining({
+      nextAction: 'route_to',
+      targetNodeId: 123,
+    }));
+  });
+
+  it('returns a deterministic Data Analyst plan for local integration tests', async () => {
+    const provider = new MockLLMProvider();
+    const onStructuredOutput = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [{
+      role: 'user',
+      content: [
+        'Pytanie biznesowe: Pokaż przychód według regionu',
+        '- "OrderId" | Identyfikator | typ=id | agregacja=count',
+        '- "Region" | Region | typ=dimension | agregacja=count',
+        '- "Revenue" | Przychód | typ=measure | agregacja=sum',
+      ].join('\n'),
+    }];
+
+    await provider.streamChat(messages, [], {
+      sessionId: 'data-analyst-session',
+      messageId: 'data-analyst-message',
+      onChunk: vi.fn(),
+      onStructuredOutput,
+      structuredOutput: {
+        name: 'data_analyst_query_plan',
+        schema: {},
+      },
+    });
+
+    expect(onStructuredOutput).toHaveBeenCalledWith({
+      title: 'Analiza Revenue według Region',
+      targetMetric: 'Revenue',
+      dimension: 'Region',
+      aggregation: 'sum',
+      chartType: 'bar',
+      filters: [],
+      dateColumn: null,
+      dateGrain: null,
+      sql: 'SELECT "Region", SUM("Revenue") AS "Revenue" FROM dataset GROUP BY "Region"',
+    });
+  });
+
+  it('returns a deterministic Data Analyst explanation for local integration tests', async () => {
+    const provider = new MockLLMProvider();
+    const onStructuredOutput = vi.fn();
+
+    await provider.streamChat(
+      [{ role: 'user', content: 'Wyniki (maksymalnie 15 wierszy):\n[{"Region":"Północ","Revenue":300}]' }],
+      [],
+      {
+        sessionId: 'data-analyst-session',
+        messageId: 'data-analyst-message',
+        onChunk: vi.fn(),
+        onStructuredOutput,
+        structuredOutput: {
+          name: 'data_analyst_explanation',
+          schema: {},
+        },
+      },
+    );
+
+    expect(onStructuredOutput).toHaveBeenCalledWith({
+      explanation: expect.stringContaining('Analiza i wnioski'),
+    });
+  });
+
   it('REGRESSION: returns a deterministic raapp_create tool call without arg-progress chunks for fallback UX e2e', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();
@@ -195,6 +286,82 @@ describe('MockLLMProvider', () => {
         }),
       },
     ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_sub_agentflow', description: 'Run child flow', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk },
+    );
+
+    expect(toolCalls).toEqual([]);
+    expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
+      delta: expect.stringContaining('Goal Guard AgentFlow result is available'),
+      done: false,
+    }));
+  });
+
+  it('stops repeating run_sub_agentflow after a prior AgentFlow tool_result exists', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const messages = [
+      {
+        role: 'user',
+        content: 'Start the two-agent delivery loop [[mock:tool:run_sub_agentflow]]',
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'mock-tool-1',
+        content: JSON.stringify({
+          flowRunId: 'run-from-talk',
+          childSessionId: 'arch-run-from-talk-root',
+          status: 'done',
+          summary: 'Goal Guard accepted deterministic VFS evidence.',
+        }),
+      },
+    ] as unknown as ContextManagedLLMMessage[];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_sub_agentflow', description: 'Run child flow', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk },
+    );
+
+    expect(toolCalls).toEqual([]);
+    expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
+      delta: expect.stringContaining('Goal Guard AgentFlow result is available'),
+      done: false,
+    }));
+  });
+
+  it('stops repeating run_sub_agentflow after a prior architecture runtime tool_result exists', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          'Use the Goal Guard delivery loop and accept only if evidence exists.',
+          '[[mock:tool:run_sub_agentflow]]',
+          '[[mock:goal-guard-vfs-success]]',
+          '[[mock:script]]',
+          'when("Slot: Orchestrator") return("route_to(implementer, run one implementation pass before guard review)")',
+          'when("Slot: Finalizer") return("Goal Guard accepted deterministic VFS evidence.")',
+          '[[/mock:script]]',
+        ].join('\n'),
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'mock-tool-1',
+        content: JSON.stringify({
+          domain: 'architecture',
+          kind: 'architecture_runtime',
+          runId: 'run-from-talk',
+          rootSessionId: 'arch-run-from-talk-root',
+          status: 'completed',
+          summary: 'Goal Guard accepted deterministic VFS evidence.',
+        }),
+      },
+    ] as unknown as ContextManagedLLMMessage[];
 
     const toolCalls = await provider.streamChat(
       messages,
@@ -405,6 +572,22 @@ describe('MockLLMProvider', () => {
       }),
     ]);
     expect(toolCalls[0]?.args['autoApproveTools']).toBeUndefined();
+  });
+
+  it('lets a structured architecture router execute run_subagent before returning its decision', async () => {
+    const provider = new MockLLMProvider();
+    const onStructuredOutput = vi.fn();
+    const toolCalls = await provider.streamChat(
+      [{ role: 'user', content: 'Slot: Orchestrator [[mock:tool:run_subagent:hitl]]' }],
+      [{ name: 'run_subagent', description: 'Run a reasoning child', parameters: {} }],
+      {
+        sessionId: 'router-session', messageId: 'router-message', onChunk: vi.fn(),
+        onStructuredOutput, structuredOutput: { name: 'architecture_router_output', schema: {} },
+      },
+    );
+
+    expect(toolCalls).toEqual([expect.objectContaining({ name: 'run_subagent' })]);
+    expect(onStructuredOutput).not.toHaveBeenCalled();
   });
 
   it('returns a deterministic run_subagent tool call that auto-approves child vfs_write', async () => {
@@ -799,6 +982,98 @@ describe('MockLLMProvider', () => {
     }));
   });
 
+  it('REGRESSION: stops repeating Goal Guard VFS tool calls after runtime dispatcher tool results exist', async () => {
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: [
+          'Architecture: Goal Master Delivery Loop v0.1.0',
+          'Slot: Implementer (tool_executor)',
+          'Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write before completing.',
+          'Task: build proof [[mock:goal-guard-vfs-success]]',
+        ].join('\n'),
+      },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {
+            id: 'mock-tool-1',
+            name: 'vfs_write',
+            args: {
+              filePath: 'e2e/goal-guard-proof.json',
+              content: '{"status":"implemented"}',
+            },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        toolCallId: 'mock-tool-1',
+        content: JSON.stringify({
+          path: 'e2e/goal-guard-proof.json',
+          bytesWritten: 75,
+        }),
+      },
+    ];
+
+    const implementerCalls = await provider.streamChat(
+      messages,
+      [{ name: 'vfs_write', description: 'Write to VFS', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk },
+    );
+
+    expect(implementerCalls).toEqual([]);
+    expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
+      delta: expect.stringContaining('vfs_write evidence'),
+      done: false,
+    }));
+
+    onChunk.mockClear();
+
+    const verifierCalls = await provider.streamChat(
+      [
+        {
+          role: 'user',
+          content: [
+            'Architecture: Goal Master Delivery Loop v0.1.0',
+            'Slot: Verifier (tool_executor)',
+            'Task: verify proof [[mock:goal-guard-vfs-success]]',
+          ].join('\n'),
+        },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: 'mock-tool-2',
+              name: 'vfs_read',
+              args: { filePath: 'e2e/goal-guard-proof.json' },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'mock-tool-2',
+          content: JSON.stringify({
+            path: 'e2e/goal-guard-proof.json',
+            content: '{"status":"implemented"}',
+          }),
+        },
+      ],
+      [{ name: 'vfs_read', description: 'Read from VFS', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-2', onChunk },
+    );
+
+    expect(verifierCalls).toEqual([]);
+    expect(onChunk).toHaveBeenCalledWith(expect.objectContaining({
+      delta: expect.stringContaining('Verifier confirmed'),
+      done: false,
+    }));
+  });
+
   it('runs directed mock scripts with wait and return actions selected by prompt content', async () => {
     const delay = vi.fn().mockResolvedValue(undefined);
     const provider = new MockLLMProvider({ delay });
@@ -926,6 +1201,46 @@ describe('MockLLMProvider', () => {
 
     expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
       delta: 'fast finalizer',
+    }));
+  });
+
+  it('honors scripted hold waits when KALIO_MOCK_LLM_FAST is enabled', async () => {
+    vi.stubEnv('KALIO_MOCK_LLM_FAST', '1');
+    vi.useFakeTimers();
+    const provider = new MockLLMProvider();
+    const onChunk = vi.fn();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: [
+          'Architecture: Demo',
+          'Slot: Finalizer',
+          '[[mock:script]]',
+          'when("Slot: Finalizer") hold(5000) return("held finalizer")',
+          '[[/mock:script]]',
+        ].join('\n'),
+      },
+    ];
+
+    try {
+      const stream = provider.streamChat(
+        messages,
+        [],
+        { sessionId: 'session-1', messageId: 'message-1', onChunk },
+      );
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(onChunk).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(stream).resolves.toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+
+    expect(onChunk).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      delta: 'held finalizer',
     }));
   });
 

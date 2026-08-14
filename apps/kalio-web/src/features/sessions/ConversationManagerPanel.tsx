@@ -8,6 +8,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import { HomeHitlInbox } from '../landing/HomeHitlInbox';
 import { resumeAgentFlowRun } from '../agent-flow/agentFlow.api';
+import { usePendingRaAppApprovals } from '../raapp/usePendingRaAppApprovals';
 import {
   selectPendingApprovalCount,
   selectRuntimeContinuationActions,
@@ -15,6 +16,39 @@ import {
   selectRuntimeAttentionItems,
 } from '../../store/agentRuntimeSelectors';
 import { selectRuntimeAttentionNotice } from '../../store/agentRuntimeAttentionNotice';
+
+const RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE = 'kalio:runtime-attention-reviewed-keys';
+
+function readReviewedRuntimeAttentionKeys(): Set<string> {
+  if (typeof window === 'undefined') {
+    return new Set();
+  }
+  try {
+    const raw = window.localStorage.getItem(RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((value): value is string => typeof value === 'string'));
+  } catch (err) {
+    console.warn('[ConversationManagerPanel] failed to read runtime attention review state', err);
+    return new Set();
+  }
+}
+
+function writeReviewedRuntimeAttentionKeys(keys: ReadonlySet<string>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE,
+      JSON.stringify(Array.from(keys).slice(-200)),
+    );
+  } catch (err) {
+    console.warn('[ConversationManagerPanel] failed to persist runtime attention review state', err);
+  }
+}
 
 function projectToolActivityForRuntimeState(
   activity: ToolActivity,
@@ -47,10 +81,11 @@ export function ConversationManagerPanel({
   const clearInactiveActivities = useAgentStore((s) => s.clearInactiveActivities);
   const sessions = useSessionStore((s) => s.sessions);
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
+  const pendingRaAppApprovals = usePendingRaAppApprovals(sessionMessages);
   const [resumingFlowRunId, setResumingFlowRunId] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [runtimeAttentionNowMs, setRuntimeAttentionNowMs] = useState(() => Date.now());
-  const [dismissedRuntimeAttentionThrough, setDismissedRuntimeAttentionThrough] = useState<number | null>(null);
+  const [reviewedRuntimeAttentionKeys, setReviewedRuntimeAttentionKeys] = useState(readReviewedRuntimeAttentionKeys);
 
   const runningLoops = selectRunningLoops({ runtimeActivitySnapshots });
   const toolBudgetProgresses = Object.values(runtimeActivitySnapshots)
@@ -59,6 +94,7 @@ export function ConversationManagerPanel({
   const attentionItems = selectRuntimeAttentionItems({
     pendingConfirmations,
     pendingBudgetApprovals,
+    pendingRaAppApprovals: pendingRaAppApprovals.approvals,
     runtimeActivitySnapshots,
     sessions,
     sessionMessages,
@@ -76,12 +112,14 @@ export function ConversationManagerPanel({
     runtimeActivitySnapshots,
     sessions,
     sessionMessages,
-    nowMs: Math.max(runtimeAttentionNowMs, Date.now()),
-    dismissedThroughUpdatedAt: dismissedRuntimeAttentionThrough,
+    nowMs: runtimeAttentionNowMs,
+    reviewedItemKeys: reviewedRuntimeAttentionKeys,
   });
   const pendingConfirmationCount = selectPendingApprovalCount({
     pendingConfirmations,
     pendingBudgetApprovals,
+    pendingRaAppApprovals: pendingRaAppApprovals.approvals,
+    sessionMessages,
   });
   const projectedToolActivities = toolActivities.map((activity) => (
     projectToolActivityForRuntimeState(activity, runtimeActivitySnapshots)
@@ -120,6 +158,15 @@ export function ConversationManagerPanel({
         setResumingFlowRunId((current) => (current === flowRunId ? null : current));
       });
   };
+  const dismissRuntimeAttentionNotice = () => {
+    if (!runtimeAttentionNotice) {
+      return;
+    }
+    const nextKeys = new Set(reviewedRuntimeAttentionKeys);
+    runtimeAttentionNotice.reviewKeys.forEach((key) => nextKeys.add(key));
+    writeReviewedRuntimeAttentionKeys(nextKeys);
+    setReviewedRuntimeAttentionKeys(nextKeys);
+  };
 
   useEffect(() => {
     if (!runtimeAttentionNotice) {
@@ -156,7 +203,11 @@ export function ConversationManagerPanel({
     <div className="flex flex-col h-full overflow-hidden">
       {pendingConfirmationCount > 0 && (
         <div className="shrink-0 px-2 pt-2">
-          <HomeHitlInbox onOpenSession={onOpenSession ?? onNavigate ?? (() => undefined)} />
+          <HomeHitlInbox
+            onOpenSession={onOpenSession ?? onNavigate ?? (() => undefined)}
+            raAppApprovals={pendingRaAppApprovals.approvals}
+            onRaAppApprovalSettled={pendingRaAppApprovals.markSettled}
+          />
         </div>
       )}
 
@@ -218,7 +269,7 @@ export function ConversationManagerPanel({
                 className="btn btn-ghost btn-xs h-6 min-h-0 w-6 shrink-0 p-0 text-base-content/45 hover:text-base-content"
                 aria-label="Dismiss runtime attention notice"
                 title="Dismiss runtime attention notice"
-                onClick={() => setDismissedRuntimeAttentionThrough(runtimeAttentionNotice.maxUpdatedAt)}
+                onClick={dismissRuntimeAttentionNotice}
               >
                 <X size={12} />
               </button>

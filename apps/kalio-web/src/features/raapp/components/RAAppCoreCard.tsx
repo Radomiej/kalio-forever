@@ -4,7 +4,7 @@
  */
 import { Play } from 'lucide-react';
 import type { RAAppSummary } from '@kalio/types';
-import type { CatalogRunTarget } from '../RAAppManager.Views';
+import type { CatalogRunTarget } from '../RAAppManager.types';
 
 export interface RAAppCoreCardProps {
   app: RAAppSummary;

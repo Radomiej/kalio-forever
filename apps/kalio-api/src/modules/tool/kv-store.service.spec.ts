@@ -27,6 +27,18 @@ function makeTestDrizzle(): DrizzleService {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      path TEXT,
+      normalized_path TEXT,
+      kind TEXT NOT NULL,
+      is_system INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO projects (id, name, kind, is_system, created_at, updated_at)
+    VALUES ('system:none', 'No project', 'none', 1, 0, 0);
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
@@ -36,6 +48,7 @@ function makeTestDrizzle(): DrizzleService {
       parent_turn_id TEXT,
       parent_tool_call_id TEXT,
       interlocutor_label TEXT,
+      project_id TEXT NOT NULL DEFAULT 'system:none' REFERENCES projects(id),
       archived_at INTEGER,
       runtime_context TEXT,
       created_at INTEGER NOT NULL,

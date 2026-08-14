@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { CreateMCPServerDto, MCPTool } from '@kalio/types';
 import { MCPService } from './mcp.service';
+import { buildMcpToolName } from './mcp-projections';
 import { buildMcpSignatureFromDto } from './mcp-registry.utils';
 import { DrizzleService } from '../../database/drizzle.service';
 import type { KalioConfigService } from '../../config/kalio-config.service';
@@ -560,21 +561,26 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       expect(service.getToolByName('mcp_sqlite::s1_baz')).toStrictEqual(tool);
     });
 
-    it('does not resolve legacy prefixed MCPTool names without an explicit alias map entry', () => {
+    it('resolves provider-safe names and their explicit legacy aliases', () => {
+      const safeName = buildMcpToolName('toml::docs', 'search');
       const tool: MCPTool = {
-        name: 'mcp_toml::docs_search',
+        name: safeName,
         description: 'search docs',
         parameters: {},
         requiresConfirmation: false,
         serverKey: 'toml::docs',
         serverId: 'toml::docs',
+        aliases: ['mcp_toml::docs_search', 'mcp_search'],
       };
       const internals = service as unknown as ServiceInternals;
+      internals.toolNameMap.set(safeName, { serverKey: 'toml::docs', originalName: 'search' });
       internals.toolNameMap.set('mcp_toml::docs_search', { serverKey: 'toml::docs', originalName: 'search' });
+      internals.toolNameMap.set('mcp_search', { serverKey: 'toml::docs', originalName: 'search' });
       internals.handles.set('toml::docs', { id: 'docs', tools: [tool], status: 'connected' });
 
+      expect(service.getToolByName(safeName)).toStrictEqual(tool);
       expect(service.getToolByName('mcp_toml::docs_search')).toStrictEqual(tool);
-      expect(service.getToolByName('mcp_docs_search')).toBeUndefined();
+      expect(service.getToolByName('mcp_search')).toStrictEqual(tool);
     });
   });
 
@@ -596,11 +602,11 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       expect(callCount).toBe(100);
       expect(tools).toHaveLength(100);
-      expect(tools[0].name).toBe('mcp_sqlite::s1_tool_1');
-      expect(tools[99].name).toBe('mcp_sqlite::s1_tool_100');
+      expect(tools[0].name).toBe(buildMcpToolName('sqlite::s1', 'tool_1'));
+      expect(tools[99].name).toBe(buildMcpToolName('sqlite::s1', 'tool_100'));
     });
 
-    it('stores only canonical tool names for toml and sqlite serverKey-shaped handles', async () => {
+    it('stores provider-safe tool names and explicit legacy aliases', async () => {
       const fakeClient = {
         listTools: vi.fn(async () => ({
           tools: [{ name: 'search', description: 'search docs', inputSchema: {} }],
@@ -610,14 +616,16 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       const internals = service as unknown as ServiceInternals;
       const canonicalTools = await internals.discoverTools('toml::docs', fakeClient);
+      const safeName = buildMcpToolName('toml::docs', 'search');
 
       expect(canonicalTools).toHaveLength(1);
-      expect(canonicalTools[0]!.name).toBe('mcp_toml::docs_search');
+      expect(canonicalTools[0]!.name).toBe(safeName);
       expect(canonicalTools[0]!.serverKey).toBe('toml::docs');
       expect(canonicalTools[0]!.serverId).toBe('toml::docs');
 
+      expect(internals.toolNameMap.has(safeName)).toBe(true);
       expect(internals.toolNameMap.has('mcp_toml::docs_search')).toBe(true);
-      expect(internals.toolNameMap.has('mcp_docs_search')).toBe(false);
+      expect(internals.toolNameMap.has('mcp_search')).toBe(true);
     });
 
     it('stops early when server returns no nextCursor', async () => {
@@ -636,7 +644,10 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
 
       expect(fakeClient.listTools).toHaveBeenCalledTimes(1);
       expect(tools).toHaveLength(2);
-      expect(tools.map((t) => t.name)).toEqual(['mcp_sqlite::s2_alpha', 'mcp_sqlite::s2_beta']);
+      expect(tools.map((t) => t.name)).toEqual([
+        buildMcpToolName('sqlite::s2', 'alpha'),
+        buildMcpToolName('sqlite::s2', 'beta'),
+      ]);
     });
 
     it('follows cursor across multiple pages until exhausted', async () => {
@@ -654,7 +665,11 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
       const tools = await internals.discoverTools('sqlite::s3', fakeClient);
 
       expect(fakeClient.listTools).toHaveBeenCalledTimes(3);
-      expect(tools.map((t) => t.name)).toEqual(['mcp_sqlite::s3_a', 'mcp_sqlite::s3_b', 'mcp_sqlite::s3_c']);
+      expect(tools.map((t) => t.name)).toEqual([
+        buildMcpToolName('sqlite::s3', 'a'),
+        buildMcpToolName('sqlite::s3', 'b'),
+        buildMcpToolName('sqlite::s3', 'c'),
+      ]);
     });
   });
 });

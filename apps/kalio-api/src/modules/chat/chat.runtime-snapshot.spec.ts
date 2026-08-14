@@ -41,6 +41,37 @@ type ChildStatusPatch = Omit<Partial<SocketEvents['session:status']>, 'run'> & {
 };
 
 describe('buildRuntimeActivitySnapshot', () => {
+  it('returns a snapshot instead of throwing when watched session metadata is missing', async () => {
+    const logger = { warn: vi.fn() };
+
+    const snapshot = await buildRuntimeActivitySnapshot({
+      sessionId: 'missing-session',
+      status: makeStatus('missing-session'),
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockResolvedValue(makeStatus('missing-session')),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockReturnValue([]),
+      },
+      sessionsService: {
+        listChildren: vi.fn().mockResolvedValue([]),
+        get: vi.fn().mockRejectedValue(new Error('Session not found: missing-session')),
+        getMessages: vi.fn(),
+      },
+      logger,
+    });
+
+    expect(snapshot).toMatchObject({
+      sessionId: 'missing-session',
+      active: false,
+      childExecutions: [],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Unable to load session metadata missing-session'));
+  });
+
   it('uses parent-scoped agent flow lookup instead of loading all runs', async () => {
     const findByParentSessionId = vi.fn().mockResolvedValue([makeAgentFlowSnapshot('session-1')]);
     const findAll = vi.fn().mockResolvedValue([makeAgentFlowSnapshot('other-session')]);
@@ -216,6 +247,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'failed',
         status: 'failed',
+        revision: 1,
         retryCount: 0,
         safeResume: false,
         startedAt: 111,
@@ -266,6 +298,101 @@ describe('buildRuntimeActivitySnapshot', () => {
     });
     expect(snapshot.pendingConfirmations).toEqual([]);
     expect(snapshot.run?.status).toBe('failed');
+  });
+
+  it('hydrates active subagent turn and pending budget from the subagent runtime for late watchers', async () => {
+    const childSession = {
+      id: 'child-subagent-1',
+      personaId: 'default',
+      title: 'Lab Bug Hunter: Orchestrator',
+      kind: 'subagent',
+      parentSessionId: 'root-session-1',
+      parentToolCallId: 'call-subagent-1',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const pendingBudgetApproval: AgentBudgetApprovalRequest = {
+      requestId: 'budget-child-1',
+      sessionId: 'child-subagent-1',
+      scope: 'agent-flow-branch',
+      usedIterations: 30,
+      currentLimit: 30,
+      suggestedNextLimit: 40,
+      requestedBy: 'orchestrator',
+      roleSlotId: 'orchestrator',
+      nodeId: 'orchestrator',
+    };
+    const listChildren = vi.fn().mockImplementation(async (sessionId: string) => (
+      sessionId === 'root-session-1' ? [childSession] : []
+    ));
+
+    const batch = await buildRuntimeActivitySnapshotBatch({
+      rootSessionId: 'root-session-1',
+      pipeline: {
+        getSessionStatusWithRun: vi.fn().mockImplementation(async (sessionId: string) => makeStatus(sessionId)),
+      },
+      toolDispatch: {
+        getPendingConfirmations: vi.fn().mockReturnValue([]),
+      },
+      agentBudgetApprovals: {
+        getPendingApprovals: vi.fn().mockImplementation((sessionId: string) => (
+          sessionId === 'child-subagent-1' ? [pendingBudgetApproval] : []
+        )),
+      },
+      sessionsService: {
+        listChildren,
+        get: vi.fn().mockImplementation(async (sessionId: string) => (
+          sessionId === 'child-subagent-1'
+            ? childSession
+            : { id: 'root-session-1', personaId: 'default', kind: 'chat' }
+        )),
+        getMessages: vi.fn().mockResolvedValue([]),
+      },
+      subagentRuntime: {
+        getActiveRunStatus: vi.fn().mockImplementation((sessionId: string) => (
+          sessionId === 'child-subagent-1'
+            ? {
+                sessionId: 'child-subagent-1',
+                parentSessionId: 'root-session-1',
+                turnId: 'turn-child-active',
+                promptMessageId: 'prompt-child-active',
+                agentRun: {
+                  agentRunId: 'subagent-active-run',
+                  agentType: 'subagent',
+                  parentSessionId: 'root-session-1',
+                  parentToolCallId: 'call-subagent-1',
+                  label: 'Orchestrator',
+                },
+              }
+            : null
+        )),
+      },
+    });
+
+    expect(batch.snapshotsBySessionId['child-subagent-1']).toMatchObject({
+      sessionId: 'child-subagent-1',
+      active: true,
+      turnId: 'turn-child-active',
+      pendingBudgetApprovals: [pendingBudgetApproval],
+      toolBudgetProgress: {
+        sessionId: 'child-subagent-1',
+        usedIterations: 30,
+        currentLimit: 30,
+        status: 'waiting',
+        runtimeKind: 'agent-flow-branch',
+      },
+      run: expect.objectContaining({
+        status: 'active',
+        phase: 'llm_streaming',
+        turnId: 'turn-child-active',
+      }),
+    });
+    expect(batch.snapshotsBySessionId['root-session-1'].childExecutions).toEqual([
+      expect.objectContaining({
+        childSessionId: 'child-subagent-1',
+        status: 'running',
+      }),
+    ]);
   });
 
   it.each([
@@ -689,6 +816,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 111,
@@ -876,7 +1004,7 @@ describe('buildRuntimeActivitySnapshot', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('status unavailable'));
   });
 
-  it('falls back to completed for an inactive child subagent that still has run metadata', async () => {
+  it('keeps an inactive child subagent unresolved when run metadata is not terminal', async () => {
     const listChildren = vi.fn().mockImplementation(async (sessionId: string) => {
       if (sessionId === 'session-1') {
         return [{ id: 'child-1', parentSessionId: 'session-1', kind: 'subagent', parentToolCallId: 'call-1', title: 'Child 1', updatedAt: 2 }];
@@ -924,7 +1052,7 @@ describe('buildRuntimeActivitySnapshot', () => {
     expect(batch.snapshotsBySessionId['session-1'].childExecutions).toEqual([
       expect.objectContaining({
         childSessionId: 'child-1',
-        status: 'completed',
+        status: 'idle',
       }),
     ]);
   });
@@ -939,6 +1067,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 111,
@@ -1008,6 +1137,7 @@ describe('buildRuntimeActivitySnapshot', () => {
         turnId: 'turn-1',
         phase: 'tool_running',
         status: 'active',
+        revision: 1,
         retryCount: 0,
         safeResume: true,
         startedAt: 111,

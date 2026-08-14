@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SessionsService } from '../chat/sessions.service';
 import type { SessionManagerService } from '../chat/session-manager.service';
 import type { AuditLogEntry, AuditService } from '../chat/audit.service';
+import { RuntimeAuditLogger } from '../chat/runtime-audit-logger.service';
 import type { VFSService } from '../vfs/vfs.service';
 import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
@@ -752,6 +753,99 @@ describe('ArchitectureRuntimeService', () => {
     expect(service.getEvents(run.id).at(-1)).toMatchObject({
       type: 'run_stopped',
       message: 'Architecture run stopped by user.',
+    });
+  });
+
+  it('stops active runs by root or branch session id for chat stop integration', async () => {
+    const { service, executor } = createService();
+    let rejectFirstBranch: ((error: Error) => void) | undefined;
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => {
+      if (slot.id === 'pragmatist') {
+        return new Promise((_resolve, reject) => {
+          rejectFirstBranch = reject;
+        });
+      }
+      return Promise.resolve({
+        message: `${slot.label} branch prepared for: ${run.prompt}`,
+        data: {
+          branchSessionId,
+          personaId,
+          sessionPersonaId: personaId,
+          rootSessionId: run.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: run.executionMode,
+        },
+      });
+    });
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Stop active architecture workflow from chat.',
+      context: { parentSessionId: 'host-session' },
+    });
+    await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
+
+    const stopPromise = service.stopRunsForSessions(['host-session', run.rootSessionId ?? 'missing']);
+    rejectFirstBranch?.(new Error('late branch failure after session stop'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const stoppedRunIds = await stopPromise;
+
+    expect(stoppedRunIds).toEqual([run.id]);
+    expect(service.findRun(run.id)).toMatchObject({
+      id: run.id,
+      status: 'cancelled',
+      reasonCode: 'user_stop',
+    });
+    expect(service.getEvents(run.id).at(-1)).toMatchObject({
+      type: 'run_stopped',
+      reasonCode: 'user_stop',
+    });
+  });
+
+  it('waits for active architecture execution to settle before resolving session-tree stop', async () => {
+    const { service, executor } = createService();
+    let rejectFirstBranch: ((error: Error) => void) | undefined;
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => {
+      if (slot.id === 'pragmatist') {
+        return new Promise((_resolve, reject) => {
+          rejectFirstBranch = reject;
+        });
+      }
+      return Promise.resolve({
+        message: `${slot.label} branch prepared for: ${run.prompt}`,
+        data: {
+          branchSessionId,
+          personaId,
+          sessionPersonaId: personaId,
+          rootSessionId: run.rootSessionId,
+          slotType: slot.slotType,
+          executionMode: run.executionMode,
+        },
+      });
+    });
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Stop and delete only after graph execution drains.',
+      context: { parentSessionId: 'host-session' },
+    });
+    await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
+
+    let stopped = false;
+    const stopPromise = service.stopRunsForSessions(['host-session']).then((runIds) => {
+      stopped = true;
+      return runIds;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stopped).toBe(false);
+
+    rejectFirstBranch?.(new Error('branch settled after session-tree stop'));
+    await expect(stopPromise).resolves.toEqual([run.id]);
+    expect(service.findRun(run.id)).toMatchObject({
+      id: run.id,
+      status: 'cancelled',
+      reasonCode: 'user_stop',
     });
   });
 
@@ -1875,6 +1969,79 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
+  it('fails resumed runs with a typed max_node_visits event when the pending node is already capped', async () => {
+    const { service, executor } = createService();
+    const baseSchema = new ArchitectureRegistryService().findOne('strategic-decision-council')!;
+    const roleSlots = baseSchema.roleSlots.filter((slot) => ['pragmatist', 'router'].includes(slot.id));
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, node, personaId, run, slot }) => ({
+      message: `${slot.label} response for ${node?.id ?? 'unknown'}`,
+      data: {
+        branchSessionId,
+        personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+        ...(node?.id === 'router-1'
+          ? routerData('agent-1', 'Loop back.')
+          : {}),
+      },
+    }));
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Resume should fail when pending node is visit-capped.',
+      executionMode: 'subagent_execution',
+      context: { maxArchitectureSteps: 1, maxArchitectureNodeVisits: 1 },
+      schema: {
+        ...baseSchema,
+        id: 'resume-max-node-visits',
+        name: 'Resume Max Node Visits',
+        roleSlots,
+        nodes: [
+          { id: 'agent-1', label: 'Agent 1', kind: 'role' as const, roleSlotId: 'pragmatist' },
+          {
+            id: 'router-1',
+            label: 'Router 1',
+            kind: 'router' as const,
+            roleSlotId: 'router',
+            behavior: { mode: 'choose_one' as const },
+          },
+        ],
+        edges: [
+          { id: 'agent-1-router-1', fromNodeId: 'agent-1', toNodeId: 'router-1' },
+          { id: 'router-1-agent-1', fromNodeId: 'router-1', toNodeId: 'agent-1' },
+        ],
+      },
+    });
+
+    vi.mocked(executor.execute).mockClear();
+    const resumed = await service.resumeRun(run.id, {
+      maxSteps: 5,
+      continuation: {
+        reason: 'max_steps',
+        waitingNodeId: 'router-1',
+        pendingNodeIds: ['router-1'],
+        visitCounts: { 'agent-1': 1, 'router-1': 1 },
+        lastCompletedNodeId: 'agent-1',
+        message: 'Router 1 was pending after a previous pause.',
+      },
+    });
+
+    expect(executor.execute).not.toHaveBeenCalled();
+    expect(resumed.status).toBe('failed');
+    expect(resumed.completedAt).toBeDefined();
+    expect(service.findRun(run.id)?.status).toBe('failed');
+    expect(service.getEvents(run.id).at(-1)).toMatchObject({
+      type: 'router_decision',
+      reasonCode: 'max_node_visits',
+      data: {
+        reasonCode: 'max_node_visits',
+        pendingNodeIds: ['router-1'],
+        visitCounts: { 'agent-1': 1, 'router-1': 1 },
+      },
+    });
+  });
+
   it('re-enters Goal Master after passed external QA instead of replaying the pending implementer', async () => {
     const executor = { execute: vi.fn() } satisfies ArchitectureRoleExecutor;
     const schema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop')!;
@@ -2364,6 +2531,38 @@ describe('ArchitectureRuntimeService', () => {
         messagePreview: expect.any(String),
       }),
     }));
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'workflow.run.started',
+      type: 'runtime_event',
+      sessionId: 'parent-session',
+      data: expect.objectContaining({
+        domain: 'runtime',
+        eventName: 'workflow.run.started',
+        runId: run.id,
+        schemaId: 'strategic-decision-council',
+        executionMode: 'subagent_execution',
+        status: 'started',
+      }),
+    }));
+    expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'workflow.node.started',
+      type: 'runtime_event',
+      sessionId: 'parent-session',
+      data: expect.objectContaining({
+        domain: 'runtime',
+        eventName: 'workflow.node.started',
+        runId: run.id,
+        nodeId: expect.any(String),
+        schemaId: 'strategic-decision-council',
+        eventType: 'node_started',
+        status: 'started',
+      }),
+    }));
+    const runtimeRows = audit.log.mock.calls
+      .map(([entry]) => entry)
+      .filter((entry) => entry.type === 'runtime_event');
+    expect(runtimeRows.length).toBeGreaterThan(0);
+    expect(runtimeRows.every((entry) => !('prompt' in (entry.data ?? {})))).toBe(true);
   });
 
   it('executes the Goal Master loop with bounded continuation routing', async () => {
@@ -3138,7 +3337,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Finalizer must not accept an unresolved CLI child.',
       executionMode: 'subagent_execution',
@@ -3146,7 +3345,23 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
       },
-    })).rejects.toThrow('Architecture finalization blocked: CLI child implementation is incomplete');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'UNKNOWN',
+      failure: expect.objectContaining({
+        code: 'UNKNOWN',
+        retryable: false,
+        message: expect.stringContaining('Architecture finalization blocked: CLI child implementation is incomplete'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'UNKNOWN',
+    });
   });
 
   it('passes all prior childCliSessions into Goal Master and finalizer inputs', async () => {
@@ -3737,7 +3952,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Reject prose-only proof.',
       executionMode: 'subagent_execution',
@@ -3747,7 +3962,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
         requireGoalMasterLoopProof: true,
       },
-    })).rejects.toThrow('verifier did not produce a successful read or terminal evidence result');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('verifier did not produce a successful read or terminal evidence result'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('allows Goal Master finalization when host project file proof is visible', async () => {
@@ -3818,7 +4050,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Reject prose-only implementer.',
       executionMode: 'subagent_execution',
@@ -3826,7 +4058,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureNodeVisits: 1,
         maxArchitectureSteps: 20,
       },
-    })).rejects.toThrow('completed without required tool evidence');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('completed without required tool evidence'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('allows strict Implementer proof mode to continue when a downstream Implementer writes', async () => {
@@ -3919,7 +4168,7 @@ describe('ArchitectureRuntimeService', () => {
       },
     }));
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       schema,
       prompt: 'Reject read-only Implementer in a two-agent proof flow.',
@@ -3929,7 +4178,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 10,
         requireImplementerWriteProof: true,
       },
-    })).rejects.toThrow('implementer did not produce a successful write result');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('implementer did not produce a successful write result'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('fails Goal Guard proof mode when Implementer only reads files and never writes', async () => {
@@ -3967,7 +4233,7 @@ describe('ArchitectureRuntimeService', () => {
       };
     });
 
-    await expect(service.createRun({
+    const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
       prompt: 'Reject read-only Implementer in Goal Guard proof mode.',
       executionMode: 'subagent_execution',
@@ -3976,7 +4242,24 @@ describe('ArchitectureRuntimeService', () => {
         maxArchitectureSteps: 20,
         requireGoalMasterLoopProof: true,
       },
-    })).rejects.toThrow('implementer did not produce a successful write result');
+    });
+
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        source: 'architecture-graph-runtime',
+        retryable: false,
+        message: expect.stringContaining('implementer did not produce a successful write result'),
+      }),
+    });
+    expect(semanticEvents(service.getEvents(run.id)).at(-1)).toMatchObject({
+      type: 'router_decision',
+      message: 'Architecture run failed.',
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+    });
   });
 
   it('uses an inline draft schema for run graph projections without changing the registry schema', async () => {
@@ -4458,6 +4741,80 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
+  it('reconstructs branch session ownership from durable session metadata when audit has no terminal summary', async () => {
+    const { service, audit, sessions } = createService();
+    const runId = 'durable-paused-run';
+    const hostSessionId = 'durable-host';
+    const rootSessionId = 'durable-paused-root';
+    const createdAt = 1_780_001_500_000;
+    audit.listEntries.mockResolvedValue([
+      auditRow({
+        id: 'audit-1',
+        createdAt,
+        sessionId: hostSessionId,
+        label: 'architecture_event:run_created:runtime',
+        data: {
+          domain: 'architecture',
+          kind: 'architecture_event',
+          runId,
+          architectureRunId: runId,
+          schemaId: 'goal-guard-delivery-loop',
+          executionMode: 'subagent_execution',
+          eventId: `${runId}:event:1`,
+          eventType: 'run_created',
+          sequence: 1,
+          messagePreview: 'Architecture run created.',
+        },
+      }),
+    ]);
+    const rootSession: ChatSession = {
+      id: rootSessionId,
+      personaId: 'default',
+      title: 'Goal Guard',
+      kind: 'agent-flow',
+      parentSessionId: hostSessionId,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root',
+        architectureContext: {
+          architectureRunId: runId,
+          schemaId: 'goal-guard-delivery-loop',
+        },
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+    const branchSession: ChatSession = {
+        id: 'opaque-branch-session',
+        personaId: 'orchestrator',
+        title: 'Goal Guard: Orchestrator',
+        kind: 'subagent',
+        parentSessionId: rootSessionId,
+        runtimeContext: {
+          runtimeKind: 'agent-flow-branch',
+          parentSessionId: rootSessionId,
+          architectureSlotId: 'orchestrator',
+          architectureContext: {
+            architectureRunId: runId,
+            schemaId: 'goal-guard-delivery-loop',
+            roleSlotId: 'orchestrator',
+          },
+        },
+        createdAt,
+        updatedAt: createdAt,
+    };
+    sessions.listChildren.mockImplementation(async (parentSessionId: string) =>
+      parentSessionId === hostSessionId ? [rootSession] : parentSessionId === rootSessionId ? [branchSession] : []);
+
+    await expect(service.findRunDurable(runId)).resolves.toMatchObject({
+      id: runId,
+      rootSessionId,
+      branchSessionIds: { orchestrator: 'opaque-branch-session' },
+      status: 'running',
+    });
+    expect(sessions.listChildren).toHaveBeenNthCalledWith(1, hostSessionId);
+    expect(sessions.listChildren).toHaveBeenNthCalledWith(2, rootSessionId);
+  });
+
   it('reconstructs failed architecture runs from max-step guard audit rows after runtime memory is gone', async () => {
     const { service, audit } = createService();
     const runId = 'durable-failed-run';
@@ -4750,6 +5107,49 @@ describe('ArchitectureRuntimeService', () => {
       status: 'running',
       rootSessionId: `arch-${runId}-root`,
     });
+  });
+
+  it('returns a live graph without legacy persisted child-agent reconstruction when the schema cannot spawn CLI children', async () => {
+    const { service, executor, sessions } = createService();
+    vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
+      message: slot.id === 'router'
+        ? 'Router selected the final artifact path.'
+        : slot.id === 'finalizer'
+          ? 'Finalizer produced the concise project assessment.'
+          : `${slot.label} branch prepared for: ${run.prompt}`,
+      data: {
+        branchSessionId,
+        personaId,
+        sessionPersonaId: personaId,
+        rootSessionId: run.rootSessionId,
+        slotType: slot.slotType,
+        executionMode: run.executionMode,
+        ...(slot.id === 'router' ? routerData('final-artifact') : {}),
+      },
+    }));
+    sessions.list.mockRejectedValue(new Error('legacy reconstruction should not run for this live graph'));
+
+    const run = await service.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Assess the project architecture without CLI child agents.',
+      executionMode: 'subagent_execution',
+      context: {
+        maxArchitectureNodeVisits: 1,
+        maxArchitectureSteps: 20,
+      },
+    });
+
+    const graph = await service.getGraphDurable(run.id);
+
+    expect(graph).toMatchObject({
+      runId: run.id,
+      status: 'completed',
+      childAgents: [],
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: 'final-artifact', status: 'completed' }),
+      ]),
+    });
+    expect(sessions.list).not.toHaveBeenCalled();
   });
 
   it('prefers audit-event node state while overlaying persisted CLI child agents', async () => {
@@ -5127,10 +5527,11 @@ function auditRow(params: {
   data: Record<string, unknown>;
   createdAt: number;
   type?: AuditLogEntry['type'];
+  sessionId?: string;
 }): AuditLogEntry {
   return {
     id: params.id,
-    sessionId: 'arch-durable-run-root',
+    sessionId: params.sessionId ?? 'arch-durable-run-root',
     type: params.type ?? 'architecture_event',
     label: params.label,
     data: params.data,
@@ -5146,9 +5547,10 @@ function createService(options: {
 } = {}): {
   service: ArchitectureRuntimeService;
   executor: ArchitectureRoleExecutor;
-  sessions: Pick<SessionsService, 'createWithId' | 'list' | 'getMessages' | 'get'> & {
+  sessions: Pick<SessionsService, 'createWithId' | 'list' | 'listChildren' | 'getMessages' | 'get'> & {
     created: Array<{ id: string; dto: CreateSessionDto }>;
     list: ReturnType<typeof vi.fn>;
+    listChildren: ReturnType<typeof vi.fn>;
     getMessages: ReturnType<typeof vi.fn>;
     get: ReturnType<typeof vi.fn>;
   };
@@ -5185,6 +5587,7 @@ function createService(options: {
       };
     }),
     list: vi.fn().mockResolvedValue([]),
+    listChildren: vi.fn().mockResolvedValue([]),
     getMessages: vi.fn().mockResolvedValue([]),
     get: vi.fn(async (id: string): Promise<ChatSession> => {
       const explicit = options.sessionById?.[id];
@@ -5269,6 +5672,7 @@ function createService(options: {
       audit as unknown as AuditService,
       vfs as unknown as VFSService,
       cliAgentConfig,
+      new RuntimeAuditLogger(audit as unknown as AuditService),
     ),
     executor,
     sessions,
