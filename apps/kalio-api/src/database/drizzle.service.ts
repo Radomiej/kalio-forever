@@ -66,7 +66,11 @@ const PRIMARY_SCHEMA_BACKFILL_COLUMNS = [
 const LEGACY_0023_TAG = '0023_chat_run_queue_contract';
 const LEGACY_0024_TAG = '0024_primary-schema-backfill';
 const LEGACY_0023_WHEN = 1783797000000;
-const LEGACY_0023_HASH = 'b5eb0d241f13f0ed0c866f1c0fe7527f725cfe13167a8cb2647954ee97a0b59c';
+// Git checkouts use LF on CI and may use CRLF on Windows; both hashes identify the same official migration.
+const LEGACY_0023_HASHES = new Set([
+  'ed5c6d0922267a7cb07c11f305b7443898c5ad6bddcf5e9b1686c212cbe79930',
+  'b5eb0d241f13f0ed0c866f1c0fe7527f725cfe13167a8cb2647954ee97a0b59c',
+]);
 
 interface MigrationJournalEntry {
   idx: number;
@@ -200,7 +204,7 @@ export function reconcileLegacyPrimarySchema(
   const targetMigration = migrations[compatibilityMigration.idx];
   if (!baselineMigration || !targetMigration
     || baseline.when !== LEGACY_0023_WHEN
-    || baselineMigration.hash !== LEGACY_0023_HASH
+    || !LEGACY_0023_HASHES.has(baselineMigration.hash)
     || baselineMigration.folderMillis !== LEGACY_0023_WHEN) {
     throw new Error('Migration journal does not match the pinned official 0023 migration.');
   }
