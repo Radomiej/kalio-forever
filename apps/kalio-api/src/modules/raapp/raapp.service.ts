@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import extractZip from 'extract-zip';
 import yaml from 'js-yaml';
@@ -10,10 +10,15 @@ import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
 import {
   type LoadedRAApp,
-  type RAAppMeta,
   getRenderableScore,
   isDirectoryOrigin,
 } from './raapp.service.helpers';
+import {
+  inspectRAAppZip,
+  parseRAAppMeta,
+  RAAPP_ZIP_LIMITS,
+  RAAppPackageError,
+} from './raapp-package-validation';
 
 export {
   type LoadedRAApp,
@@ -29,7 +34,7 @@ function getPackagedRAAppsPath(): string {
 }
 
 @Injectable()
-export class RAAppService implements OnModuleInit {
+export class RAAppService implements OnApplicationBootstrap {
   private readonly logger = new Logger(RAAppService.name);
   private readonly loaded = new Map<string, LoadedRAApp>();
   private readonly coreDir: string;
@@ -51,7 +56,7 @@ export class RAAppService implements OnModuleInit {
     this.userDir = path.resolve(runtimeBase, 'user');
   }
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.init();
   }
 
@@ -158,7 +163,7 @@ export class RAAppService implements OnModuleInit {
     source: 'core' | 'user',
   ): Promise<LoadedRAApp> {
     const metaRaw = await fs.readFile(path.join(appDir, 'meta.yml'), 'utf-8');
-    const meta = yaml.load(metaRaw) as RAAppMeta;
+    const meta = parseRAAppMeta(metaRaw);
     const stats = await fs.stat(originPath);
     const createdAt = stats.birthtimeMs > 0 ? Math.min(stats.birthtimeMs, stats.mtimeMs) : stats.mtimeMs;
 
@@ -184,6 +189,24 @@ export class RAAppService implements OnModuleInit {
       systemsContent = await fs.readFile(path.join(appDir, 'systems.yml'), 'utf-8');
     } catch (err) {
       this.logger.debug(`Optional RA-App systems.yml not found in ${appDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    if (!htmlContent && !guiContent) {
+      throw new RAAppPackageError('Every RA-App must contain main.html, index.html, or ui.gui');
+    }
+    if (guiContent) {
+      try {
+        compileGui(guiContent);
+      } catch (error) {
+        throw new RAAppPackageError(`Invalid ui.gui: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (systemsContent) {
+      try {
+        yaml.load(systemsContent, { schema: yaml.JSON_SCHEMA });
+      } catch (error) {
+        throw new RAAppPackageError(`Invalid systems.yml: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     const renderAs = (meta.execution?.render_as as string | undefined) ?? (meta as { ui?: { render_as?: string } }).ui?.render_as;
@@ -212,8 +235,9 @@ export class RAAppService implements OnModuleInit {
   private async loadZip(zipPath: string, source: 'core' | 'user'): Promise<LoadedRAApp> {
     const tmpDir = path.resolve(this.coreDir, '..', 'tmp', randomUUID());
     try {
+      await inspectRAAppZip(zipPath);
       await extractZip(zipPath, { dir: tmpDir });
-      return this.loadExtractedApp(tmpDir, zipPath, source);
+      return await this.loadExtractedApp(tmpDir, zipPath, source);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
@@ -228,10 +252,45 @@ export class RAAppService implements OnModuleInit {
   }
 
   async saveUpload(buffer: Buffer, originalName: string): Promise<LoadedRAApp> {
-    const id = originalName.replace(/\.zip$/i, '').replace(/[^a-z0-9-_]/gi, '-');
-    const zipPath = path.join(this.userDir, `${id}.zip`);
-    await fs.writeFile(zipPath, buffer);
-    return this.loadZip(zipPath, 'user');
+    if (path.extname(originalName).toLowerCase() !== '.zip') {
+      throw new RAAppPackageError('RA-App upload must be a .zip file', 422);
+    }
+    if (buffer.length > RAAPP_ZIP_LIMITS.maxCompressedBytes) {
+      throw new RAAppPackageError(
+        `RA-App ZIP exceeds the ${RAAPP_ZIP_LIMITS.maxCompressedBytes} byte limit`,
+        413,
+      );
+    }
+
+    await fs.mkdir(this.userDir, { recursive: true });
+    const tempZipPath = path.join(this.userDir, `.raapp-upload-${randomUUID()}.zip`);
+    await fs.writeFile(tempZipPath, buffer, { flag: 'wx' });
+    let installedZipPath: string | null = null;
+    try {
+      const inspection = await inspectRAAppZip(tempZipPath);
+      const zipPath = path.join(this.userDir, `${inspection.meta.id}.zip`);
+      if (this.loaded.has(inspection.meta.id)) {
+        throw new RAAppPackageError(`RA-App id is already installed: ${inspection.meta.id}`, 409);
+      }
+      try {
+        await fs.access(zipPath);
+        throw new RAAppPackageError(`RA-App id is already installed: ${inspection.meta.id}`, 409);
+      } catch (error) {
+        if (error instanceof RAAppPackageError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+
+      await fs.rename(tempZipPath, zipPath);
+      installedZipPath = zipPath;
+      return await this.loadZip(zipPath, 'user');
+    } catch (error) {
+      if (installedZipPath) {
+        await fs.rm(installedZipPath, { force: true });
+      }
+      throw error;
+    } finally {
+      await fs.rm(tempZipPath, { force: true });
+    }
   }
 
   async delete(id: string): Promise<void> {

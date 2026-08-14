@@ -41,7 +41,7 @@ function normalizeMaxToolAttempts(size: number): number {
   return Math.max(MIN_MAX_TOOL_ATTEMPTS, Math.min(MAX_MAX_TOOL_ATTEMPTS, Math.round(size)));
 }
 
-export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) {
+export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'runtime' } = {}) {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
@@ -415,7 +415,9 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
         description={
           mode === 'runtime'
             ? 'Adjust the active provider model and turn-level limits.'
-            : 'Configure model behavior, runtime limits, and provider credentials. Active provider selection is stored in the database, and API keys remain write-only.'
+            : mode === 'providers'
+              ? 'Configure provider credentials and connection health. Active provider selection is stored in the database, and API keys remain write-only.'
+              : 'Configure model behavior, runtime limits, and provider credentials. Active provider selection is stored in the database, and API keys remain write-only.'
         }
       />
       {error && <LLMPanelErrorAlert error={error} onClear={() => setError(null)} />}
@@ -429,7 +431,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
         showWindowsLocalHint={derived.showWindowsLocalHint}
       />
 
-      {mode === 'full' ? (
+      {mode !== 'runtime' ? (
         <ProviderSettingsSection
           credentials={credentials}
           activeId={activeId}
@@ -463,21 +465,23 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'runtime' } = {}) 
         />
       ) : null}
 
-      <LLMRuntimeSettingsSection
-        activeRuntimeConfig={activeRuntimeConfig}
-        contextWindow={contextWindow}
-        maxToolAttempts={maxToolAttempts}
-        maxToolAttemptsSaveStatus={maxToolAttemptsSaveStatus}
-        toolTimeouts={toolTimeouts}
-        focusModelInputSignal={runtimeModelFocusRequest}
-        onRuntimeConfigChange={handleRuntimeConfigChange}
-        onContextWindowInputChange={handleContextWindowInputChange}
-        onContextWindowCommit={(size) => void handleContextWindowCommit(size)}
-        onMaxToolAttemptsInputChange={handleMaxToolAttemptsInputChange}
-        onMaxToolAttemptsCommit={(size) => void handleMaxToolAttemptsCommit(size)}
-        onToolTimeoutInputChange={handleToolTimeoutInputChange}
-        onToolTimeoutCommit={(key, value) => void commitToolTimeoutChange(key, value)}
-      />
+      {mode !== 'providers' ? (
+        <LLMRuntimeSettingsSection
+          activeRuntimeConfig={activeRuntimeConfig}
+          contextWindow={contextWindow}
+          maxToolAttempts={maxToolAttempts}
+          maxToolAttemptsSaveStatus={maxToolAttemptsSaveStatus}
+          toolTimeouts={toolTimeouts}
+          focusModelInputSignal={runtimeModelFocusRequest}
+          onRuntimeConfigChange={handleRuntimeConfigChange}
+          onContextWindowInputChange={handleContextWindowInputChange}
+          onContextWindowCommit={(size) => void handleContextWindowCommit(size)}
+          onMaxToolAttemptsInputChange={handleMaxToolAttemptsInputChange}
+          onMaxToolAttemptsCommit={(size) => void handleMaxToolAttemptsCommit(size)}
+          onToolTimeoutInputChange={handleToolTimeoutInputChange}
+          onToolTimeoutCommit={(key, value) => void commitToolTimeoutChange(key, value)}
+        />
+      ) : null}
     </div>
   );
 }

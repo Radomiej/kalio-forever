@@ -42,6 +42,7 @@ export function registerSessionLifecycleHandlers({
   addActiveAgentLoop,
   removeActiveAgentLoop,
   startAgentTurn,
+  finalizeAgentTurn,
   setAwaitingFirstChunk,
   setStreaming,
   setQueuedDepth,
@@ -55,6 +56,7 @@ export function registerSessionLifecycleHandlers({
   addActiveAgentLoop: AgentStoreState['addActiveAgentLoop'];
   removeActiveAgentLoop: AgentStoreState['removeActiveAgentLoop'];
   startAgentTurn: SessionStoreState['startAgentTurn'];
+  finalizeAgentTurn: SessionStoreState['finalizeAgentTurn'];
   setAwaitingFirstChunk: (value: boolean) => void;
   setStreaming: AgentStoreState['setStreaming'];
   setQueuedDepth: AgentStoreState['setQueuedDepth'];
@@ -72,6 +74,7 @@ export function registerSessionLifecycleHandlers({
       addActiveAgentLoop,
       removeActiveAgentLoop,
       startAgentTurn,
+      finalizeAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
       recordSessionStatusSnapshot,
@@ -82,6 +85,7 @@ export function registerSessionLifecycleHandlers({
   const offRuntimeSnapshot = eventBus.onRuntimeActivitySnapshot((payload) => {
     setRuntimeActivitySnapshot(payload);
     if (!runtimeSnapshotKeepsSessionLive(payload)) {
+      finalizeAgentTurn(payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId);
       setStreaming(false, undefined, payload.sessionId);
       if (payload.sessionId === useSessionStore.getState().activeSessionId) {

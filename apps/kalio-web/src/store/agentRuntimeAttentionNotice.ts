@@ -1,33 +1,20 @@
 import type { ChatMessage, ChatSession, RuntimeActivitySnapshot } from '@kalio/types';
 import type { RuntimeAttentionItem } from './agentRuntimeSelectors';
-import { extractLatestVisibleRuntimeEvidence } from './agentRuntimeEvidence';
 
 export const RUNTIME_ATTENTION_NOTICE_LIMIT = 3;
 export const RUNTIME_ATTENTION_NOTICE_WINDOW_MS = 5 * 60 * 1000;
 
 export interface RuntimeAttentionNotice {
   items: RuntimeAttentionItem[];
+  reviewKeys: string[];
   totalRecentCount: number;
   hiddenRecentCount: number;
   maxUpdatedAt: number;
   nextExpiresInMs: number;
 }
 
-function itemUpdatedAt(params: {
-  item: RuntimeAttentionItem;
-  sessionMessages?: Record<string, ChatMessage[]> | null;
-  runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot> | null;
-  sessionsById: Map<string, ChatSession>;
-}): number {
-  const evidence = extractLatestVisibleRuntimeEvidence(
-    params.sessionMessages?.[params.item.sessionId],
-    params.runtimeActivitySnapshots?.[params.item.sessionId],
-  );
-  return Math.max(
-    evidence?.updatedAt ?? 0,
-    params.runtimeActivitySnapshots?.[params.item.sessionId]?.updatedAt ?? 0,
-    params.sessionsById.get(params.item.sessionId)?.updatedAt ?? 0,
-  );
+export function runtimeAttentionReviewKey(item: RuntimeAttentionItem, updatedAt: number): string {
+  return `${item.id}:${updatedAt}`;
 }
 
 export function selectRuntimeAttentionNotice(params: {
@@ -37,28 +24,24 @@ export function selectRuntimeAttentionNotice(params: {
   sessions?: ChatSession[] | null;
   nowMs: number;
   dismissedThroughUpdatedAt?: number | null;
+  reviewedItemKeys?: ReadonlySet<string> | null;
   limit?: number;
   windowMs?: number;
 }): RuntimeAttentionNotice | null {
   const limit = params.limit ?? RUNTIME_ATTENTION_NOTICE_LIMIT;
   const windowMs = params.windowMs ?? RUNTIME_ATTENTION_NOTICE_WINDOW_MS;
   const dismissedThroughUpdatedAt = params.dismissedThroughUpdatedAt ?? 0;
-  const sessionsById = new Map((params.sessions ?? []).map((session) => [session.id, session]));
   const recentItems = params.items
     .filter((item) => !item.actionable)
     .map((item) => ({
       item,
-      updatedAt: itemUpdatedAt({
-        item,
-        sessionMessages: params.sessionMessages,
-        runtimeActivitySnapshots: params.runtimeActivitySnapshots,
-        sessionsById,
-      }),
+      updatedAt: item.occurredAt,
     }))
-    .filter(({ updatedAt }) => (
+    .filter(({ item, updatedAt }) => (
       updatedAt > dismissedThroughUpdatedAt
       && updatedAt > 0
       && params.nowMs - updatedAt <= windowMs
+      && !params.reviewedItemKeys?.has(runtimeAttentionReviewKey(item, updatedAt))
     ))
     .sort((left, right) => {
       if (left.updatedAt !== right.updatedAt) {
@@ -80,6 +63,7 @@ export function selectRuntimeAttentionNotice(params: {
 
   return {
     items: visibleItems.map(({ item }) => item),
+    reviewKeys: recentItems.map(({ item, updatedAt }) => runtimeAttentionReviewKey(item, updatedAt)),
     totalRecentCount: recentItems.length,
     hiddenRecentCount: Math.max(0, recentItems.length - visibleItems.length),
     maxUpdatedAt: recentItems[0]?.updatedAt ?? params.nowMs,

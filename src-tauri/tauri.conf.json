@@ -1,0 +1,51 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Kalio",
+  "version": "1.0.0",
+  "identifier": "com.radomiej.kalio",
+  "build": {
+    "frontendDist": "../apps/kalio-web/dist",
+    "devUrl": "http://127.0.0.1:5188",
+    "beforeBuildCommand": "node scripts/tauri-prepare.mjs"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Kalio",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4516 ws://127.0.0.1:4516; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Productivity",
+    "shortDescription": "Local-first runtime for agent workflows",
+    "longDescription": "Kalio lets you design, run, and inspect local-first agent workflows with chat, tools, memory, files, and durable execution history.",
+    "resources": {
+      "resources/kalio-server": "kalio-server",
+      "resources/kalio-node.exe": "kalio-node.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "compression": "zlib"
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  }
+}

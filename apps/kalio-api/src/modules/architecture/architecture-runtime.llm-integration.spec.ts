@@ -195,6 +195,69 @@ describe('Architecture graph runtime LLM integration', () => {
     ]);
   });
 
+  it('fails the workflow when router structured output violates the contract', async () => {
+    const source = new MalformedRouterOutputLLMSource();
+    const roleExecutor = new ArchitectureRoleExecutorService(createStructuredSourceSubagentRuntime(source));
+    const sessions = createSessionStore();
+    const runtime = new ArchitectureRuntimeService(
+      new ArchitectureRegistryService(),
+      sessions.service as unknown as SessionsService,
+      { persistMessage: vi.fn().mockResolvedValue(undefined) } as never,
+      roleExecutor,
+    );
+    const baseSchema = new ArchitectureRegistryService().findOne('strategic-decision-council')!;
+    const schema = {
+      ...baseSchema,
+      id: 'malformed-router-output-runtime',
+      name: 'Malformed Router Output Runtime',
+      roleSlots: baseSchema.roleSlots.filter((slot) => ['pragmatist', 'router', 'finalizer'].includes(slot.id)),
+      nodes: [
+        { id: 'pragmatist', label: 'Pragmatist', kind: 'role' as const, roleSlotId: 'pragmatist' },
+        {
+          id: 'router',
+          label: 'Router',
+          kind: 'router' as const,
+          roleSlotId: 'router',
+          behavior: { mode: 'choose_one' as const },
+        },
+        {
+          id: 'final-artifact',
+          label: 'Final Artifact',
+          kind: 'artifact' as const,
+          roleSlotId: 'finalizer',
+          behavior: { mode: 'finalize' as const },
+        },
+      ],
+      edges: [
+        { id: 'pragmatist-router', fromNodeId: 'pragmatist', toNodeId: 'router' },
+        { id: 'router-final', fromNodeId: 'router', toNodeId: 'final-artifact' },
+      ],
+    };
+
+    const run = await runtime.createRun({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Force router structured output failure.',
+      executionMode: 'subagent_execution',
+      schema,
+    });
+    const events = runtime.getEvents(run.id);
+    const routerFailure = events.find((event) => event.nodeId === 'router' && event.type === 'node_failed');
+    const graph = runtime.getGraph(run.id);
+    const finalizerNode = graph?.nodes.find((node) => node.id === 'final-artifact');
+
+    expect(run.status).toBe('failed');
+    expect(routerFailure).toMatchObject({
+      status: 'failed',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: expect.objectContaining({
+        code: 'CONTRACT_VIOLATION',
+        retryable: false,
+      }),
+    });
+    expect(events.some((event) => event.type === 'final_artifact')).toBe(false);
+    expect(finalizerNode?.status).toBe('cancelled');
+  });
+
   it('runs a dry Goal Master delivery loop with MockLLM rejection before final acceptance', async () => {
     const source = new StatefulDeliveryLoopLLMSource();
     const roleExecutor = new ArchitectureRoleExecutorService(createStructuredSourceSubagentRuntime(source));
@@ -631,6 +694,32 @@ class GoalMasterScenarioLLMSource implements ILLMSource {
       return { text: 'Verified completion report: Goal Guard accepted the implementation.' };
     }
     return { text: 'Unhandled dry loop slot.' };
+  }
+}
+
+class MalformedRouterOutputLLMSource implements ILLMSource {
+  async *stream(params: LLMSourceParams): AsyncIterable<InternalLLMChunk> {
+    const prompt = lastUserPrompt(params.messages);
+    if (prompt.includes('Slot: Router')) {
+      yield { type: 'text_delta', delta: 'Router returned a malformed typed decision.' };
+      yield {
+        type: 'structured_output',
+        value: {
+          nextAction: 'route_to',
+          targetNodeId: 123,
+          response: 'Malformed typed router output.',
+        },
+      };
+      yield { type: 'done' };
+      return;
+    }
+    if (prompt.includes('Slot: Finalizer')) {
+      yield { type: 'text_delta', delta: 'Finalizer should not execute after router contract failure.' };
+      yield { type: 'done' };
+      return;
+    }
+    yield { type: 'text_delta', delta: 'Participant produced input for malformed router test.' };
+    yield { type: 'done' };
   }
 }
 

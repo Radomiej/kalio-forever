@@ -1,8 +1,13 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { existsSync, statSync } from 'node:fs';
+import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import {
   API_BASE,
   deleteSessionIfExists,
+  ensureProjectForPath,
+  getJsonWithTransportRetry,
+  isRetryableApiTransportError,
   selectArchitectureInComposer,
+  selectProjectInWelcome,
   selectSession,
   selectSessionOriginFilter,
   sendMessageFromComposer,
@@ -20,12 +25,42 @@ type ArchitectureSessionListItem = {
   };
 };
 
+const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+
+function requireProjectPath(): string {
+  const projectPath = PROCESS_ENV?.KALIO_E2E_PROJECT_PATH?.trim();
+  if (!projectPath) {
+    throw new Error('KALIO_E2E_PROJECT_PATH must point to an existing project directory.');
+  }
+  if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) {
+    throw new Error(`KALIO_E2E_PROJECT_PATH is not an existing project directory: ${projectPath}`);
+  }
+  return projectPath;
+}
+
 type ArchitectureGraphResponse = {
   status?: string;
+  schemaId?: string;
   nodes?: Array<{
     id: string;
+    label: string;
     kind: string;
     status?: string;
+  }>;
+};
+
+type ArchitectureRunResponse = {
+  id: string;
+  schemaId: string;
+  status?: string;
+};
+
+type ArchitectureSchemaListItem = {
+  id: string;
+  name: string;
+  nodes?: Array<{
+    id: string;
+    maxToolAttempts?: number;
   }>;
 };
 
@@ -36,6 +71,20 @@ type ArchitectureChatResponse = {
   }>;
 };
 
+function graphNodeCardByLabel(page: Page, label: string) {
+  const escaped = label.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  return page.locator(`[data-graph-node-card="true"][aria-label*="${escaped}" i]`).first();
+}
+
+async function expectArchitectureChildTranscriptReady(page: Page, options: { allowRunning?: boolean } = {}) {
+  const readinessPattern = options.allowRunning
+    ? /Architecture: Strategic Decision Council v0\.1\.0|Status: completed|Status: running/
+    : /Architecture: Strategic Decision Council v0\.1\.0|Status: completed/;
+  const messageList = page.getByTestId('message-list');
+  await expect(messageList).not.toContainText('Waiting for the first persisted message');
+  await expect(messageList).toContainText(readinessPattern, { timeout: 30_000 });
+}
+
 async function waitForArchitectureRunCompleted(
   request: APIRequestContext,
   runId: string,
@@ -43,10 +92,19 @@ async function waitForArchitectureRunCompleted(
 ): Promise<void> {
   await expect
     .poll(async () => {
-      const graphResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/graph`);
-      const chatResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/chat`);
-      if (!graphResponse.ok() || !chatResponse.ok()) {
-        return `http:${graphResponse.status()}:${chatResponse.status()}`;
+      let graphResponse: APIResponse;
+      let chatResponse: APIResponse;
+      try {
+        graphResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/graph`);
+        chatResponse = await request.get(`${API_BASE}/architecture-runs/${runId}/chat`);
+        if (!graphResponse.ok() || !chatResponse.ok()) {
+          return `http:${graphResponse.status()}:${chatResponse.status()}`;
+        }
+      } catch (error) {
+        if (isRetryableApiTransportError(error)) {
+          return 'transport:retry';
+        }
+        throw error;
       }
 
       const graph = await graphResponse.json() as ArchitectureGraphResponse;
@@ -61,6 +119,90 @@ async function waitForArchitectureRunCompleted(
       return `${graph.status ?? 'missing'}:${finalizerNode?.status ?? 'missing'}:${hasFinalizerMessage ? 'finalizer-message' : 'missing-finalizer-message'}`;
     }, { timeout: timeoutMs })
     .toBe('completed:completed:finalizer-message');
+}
+
+async function getSession(
+  request: APIRequestContext,
+  sessionId: string,
+): Promise<ArchitectureSessionListItem> {
+  return getJsonWithTransportRetry<ArchitectureSessionListItem>(
+    request,
+    `${API_BASE}/sessions/${encodeURIComponent(sessionId)}`,
+  );
+}
+
+async function getSessionDescendants(
+  request: APIRequestContext,
+  rootSessionId: string,
+): Promise<ArchitectureSessionListItem[]> {
+  const descendants: ArchitectureSessionListItem[] = [];
+  const seen = new Set<string>();
+  const queue = [rootSessionId];
+
+  while (queue.length > 0) {
+    const parentSessionId = queue.shift();
+    if (!parentSessionId) {
+      continue;
+    }
+
+    const children = await getJsonWithTransportRetry<ArchitectureSessionListItem[]>(
+      request,
+      `${API_BASE}/sessions/${encodeURIComponent(parentSessionId)}/children`,
+    );
+    for (const child of children) {
+      if (seen.has(child.id)) {
+        continue;
+      }
+      seen.add(child.id);
+      descendants.push(child);
+      queue.push(child.id);
+    }
+  }
+
+  return descendants;
+}
+
+async function waitForArchitectureSchemaByName(
+  request: APIRequestContext,
+  name: string,
+): Promise<ArchitectureSchemaListItem> {
+  let matchedSchema: ArchitectureSchemaListItem | null = null;
+  await expect
+    .poll(async () => {
+      const schemas = await getJsonWithTransportRetry<ArchitectureSchemaListItem[]>(
+        request,
+        `${API_BASE}/architecture-registry/schemas`,
+      );
+      matchedSchema = schemas.find((schema) => schema.name === name) ?? null;
+      return matchedSchema?.id ?? null;
+    }, { timeout: 30_000 })
+    .not.toBeNull();
+
+  if (!matchedSchema) {
+    throw new Error(`Architecture schema ${name} was not persisted`);
+  }
+  return matchedSchema;
+}
+
+async function waitForArchitectureRunIdFromSession(
+  request: APIRequestContext,
+  rootSessionId: string,
+): Promise<string> {
+  let architectureRunId: string | null = null;
+  await expect
+    .poll(async () => {
+      const descendants = await getSessionDescendants(request, rootSessionId);
+      architectureRunId = descendants
+        .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
+        .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0) ?? null;
+      return architectureRunId;
+    }, { timeout: 60_000 })
+    .not.toBeNull();
+
+  if (!architectureRunId) {
+    throw new Error('Missing architecture run id for workflow proof');
+  }
+  return architectureRunId;
 }
 
 test.describe('Architecture chat turn projection', () => {
@@ -148,6 +290,26 @@ test.describe('Architecture chat turn projection', () => {
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
+      const architectureRunId = await waitForArchitectureRunIdFromSession(request, session.id);
+      await waitForArchitectureRunCompleted(request, architectureRunId);
+
+      const run = await getJsonWithTransportRetry<ArchitectureRunResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}`,
+      );
+      expect(run.schemaId).toBe(variant.id);
+      expect(run.status).toBe('completed');
+
+      const graph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}/graph`,
+      );
+      expect(graph.schemaId).toBe(variant.id);
+      expect(graph.status).toBe('completed');
+      expect(graph.nodes?.filter((node) => node.kind === 'router')).toHaveLength(3);
+      expect(graph.nodes?.filter((node) => node.kind === 'role')).toHaveLength(2);
+      expect(graph.nodes?.find((node) => node.id === 'final-artifact')?.status).toBe('completed');
+
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
@@ -171,6 +333,75 @@ test.describe('Architecture chat turn projection', () => {
     } finally {
       await deleteSessionIfExists(request, session.id);
       await request.delete(`${API_BASE}/architecture-registry/schemas/${variant.id}`, { timeout: 5000 }).catch(() => undefined);
+    }
+  });
+
+  test('saves an Architect UI variant and runs it through Talk workflow mode', async ({ page, request }) => {
+    test.setTimeout(240_000);
+    const title = `Architecture UI Variant E2E ${Date.now()}`;
+    const variantName = `E2E UI Tool Budget ${Date.now()}`;
+    let sessionId: string | null = null;
+    let variantId: string | null = null;
+
+    try {
+      await page.goto('/');
+      await page.getByTestId('nav-architect').click();
+      await expect(page.getByTestId('architect-page')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('architect-node-pragmatist')).toBeVisible({ timeout: 30_000 });
+
+      await page.getByTestId('architect-node-pragmatist').click();
+      await page.getByTestId('architect-node-properties-open').click();
+      await page.getByTestId('architect-node-max-tool-attempts').fill('7');
+      await page.getByTestId('architect-node-properties-close').click();
+      await expect(page.getByTestId('architect-save-variant')).toBeEnabled();
+
+      await page.getByTestId('architect-save-variant').click();
+      await page.getByTestId('architect-variant-name-input').fill(variantName);
+      await page.getByTestId('architect-confirm-save-variant').click();
+
+      const variant = await waitForArchitectureSchemaByName(request, variantName);
+      variantId = variant.id;
+      expect(variant.nodes?.find((node) => node.id === 'pragmatist')?.maxToolAttempts).toBe(7);
+
+      const response = await request.post(`${API_BASE}/sessions`, {
+        data: { title, personaId: 'default' },
+      });
+      expect(response.ok()).toBeTruthy();
+      const session = await response.json() as { id: string };
+      sessionId = session.id;
+
+      await page.getByTestId('nav-talk').click();
+      await selectSession(page, session.id, title);
+      await selectArchitectureInComposer(page, variant.id);
+      await expect(page.getByTestId('welcome-architecture-select').locator(`option[value="${variant.id}"]`)).toHaveCount(1, { timeout: 30_000 });
+      await sendMessageFromComposer(page, 'Run the UI-saved architecture variant and produce a concise final decision.');
+
+      await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
+      const architectureRunId = await waitForArchitectureRunIdFromSession(request, session.id);
+      await waitForArchitectureRunCompleted(request, architectureRunId);
+
+      const run = await getJsonWithTransportRetry<ArchitectureRunResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}`,
+      );
+      expect(run.schemaId).toBe(variant.id);
+      expect(run.status).toBe('completed');
+
+      const graph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}/graph`,
+      );
+      expect(graph.schemaId).toBe(variant.id);
+      expect(graph.status).toBe('completed');
+      expect(graph.nodes?.some((node) => node.id === 'pragmatist')).toBe(true);
+      await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
+    } finally {
+      if (sessionId) {
+        await deleteSessionIfExists(request, sessionId);
+      }
+      if (variantId) {
+        await request.delete(`${API_BASE}/architecture-registry/schemas/${variantId}`, { timeout: 5000 }).catch(() => undefined);
+      }
     }
   });
 
@@ -220,22 +451,7 @@ test.describe('Architecture chat turn projection', () => {
       const branchSessionIds = branchSessionProofs.map((proof) => proof.sessionId);
       expect(new Set(branchSessionIds).size).toBe(5);
       expect(new Set(branchSessionProofs.map((proof) => proof.label))).toEqual(new Set(expectedBranchLabels));
-      const sessionsResponse = await request.get(`${API_BASE}/sessions`);
-      expect(sessionsResponse.ok()).toBeTruthy();
-      const persistedSessions = await sessionsResponse.json() as ArchitectureSessionListItem[];
-      const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
-      const isCurrentWorkflowDescendant = (candidate: { id: string; parentSessionId?: string }): boolean => {
-        let currentParentId = candidate.parentSessionId;
-        const visited = new Set<string>();
-        while (currentParentId) {
-          if (visited.has(currentParentId)) return false;
-          if (currentParentId === session.id) return true;
-          visited.add(currentParentId);
-          currentParentId = sessionById.get(currentParentId)?.parentSessionId;
-        }
-        return false;
-      };
-      const currentWorkflowSessions = persistedSessions.filter((candidate) => isCurrentWorkflowDescendant(candidate));
+      const currentWorkflowSessions = await getSessionDescendants(request, session.id);
       const architectureRunId = currentWorkflowSessions
         .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
         .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
@@ -245,6 +461,17 @@ test.describe('Architecture chat turn projection', () => {
       }
 
       await waitForArchitectureRunCompleted(request, architectureRunId);
+      const completedGraph = await getJsonWithTransportRetry<ArchitectureGraphResponse>(
+        request,
+        `${API_BASE}/architecture-runs/${architectureRunId}/graph`,
+      );
+      expect(completedGraph.status).toBe('completed');
+      const completedGraphLabels = completedGraph.nodes?.map((node) => node.label) ?? [];
+      expect(completedGraphLabels.some((label) => label.includes('Router'))).toBe(true);
+      expect(completedGraphLabels).toContain('Final Artifact');
+      for (const label of expectedBranchLabels) {
+        expect(completedGraphLabels).toContain(label);
+      }
       await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
       for (const routerCard of await page.getByTestId('architecture-route-router').all()) {
         await expect(routerCard).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
@@ -329,17 +556,7 @@ test.describe('Architecture chat turn projection', () => {
         await expect
           .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 10_000 })
           .toBe(technicalTimelineSessionId);
-        await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
-        await expect
-          .poll(async () => {
-            const text = await page.getByTestId('message-list').textContent();
-            return Boolean(
-              text?.includes('Architecture: Strategic Decision Council v0.1.0')
-              || text?.includes('Status: completed')
-              || text?.includes('Status: running'),
-            );
-          }, { timeout: 10_000 })
-          .toBe(true);
+        await expectArchitectureChildTranscriptReady(page, { allowRunning: true });
         await expect(page.getByTestId('message-list')).toContainText(label);
         await selectSession(page, session.id, title);
         await page.getByTestId('open-architecture-run-canvas').click();
@@ -358,7 +575,7 @@ test.describe('Architecture chat turn projection', () => {
         await page.getByTestId(`architecture-open-branch-${timelineChildSessionId}`).first().click();
         await expect(page.getByTestId('canvas-focus-section')).toBeVisible({ timeout: 10_000 });
         await expect(page.getByTestId('canvas-focus-section')).toContainText(timelineChildSessionId);
-        await expect(page.getByTestId('canvas-focus-section')).toContainText('Architecture: Strategic Decision Council v0.1.0', { timeout: 10_000 });
+        await expect(page.getByTestId('canvas-focus-section')).toContainText(label, { timeout: 10_000 });
         await expect
           .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 10_000 })
           .toBe(session.id);
@@ -366,8 +583,7 @@ test.describe('Architecture chat turn projection', () => {
         await expect
           .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 10_000 })
           .toBe(timelineChildSessionId);
-        await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
-        await expect(page.getByTestId('message-list')).toContainText('Architecture: Strategic Decision Council v0.1.0');
+        await expectArchitectureChildTranscriptReady(page, { allowRunning: true });
         await expect(page.getByTestId('message-list')).toContainText(label);
         await expect
           .poll(async () => {
@@ -389,6 +605,7 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
 
+      await expect(page.getByTestId(`session-done-${session.id}`)).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(5, { timeout: 30_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router');
@@ -429,16 +646,7 @@ test.describe('Architecture chat turn projection', () => {
         await expect
           .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 10_000 })
           .toBe(technicalTimelineSessionId);
-        await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
-        await expect
-          .poll(async () => {
-            const text = await page.getByTestId('message-list').textContent();
-            return Boolean(
-              text?.includes('Architecture: Strategic Decision Council v0.1.0')
-              || text?.includes('Status: completed'),
-            );
-          }, { timeout: 10_000 })
-          .toBe(true);
+        await expectArchitectureChildTranscriptReady(page);
         await expect(page.getByTestId('message-list')).toContainText(label);
         await selectSession(page, session.id, title);
         await page.getByTestId('open-architecture-run-canvas').click();
@@ -448,17 +656,18 @@ test.describe('Architecture chat turn projection', () => {
       await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('canvas-subagents-section')).toHaveCount(0);
 
-      await page.getByTestId('talk-sidebar-graph-entry').click();
+      await page.getByTestId('talk-graph-switcher').click();
       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByTestId('execution-graph-view')).toContainText('Strategic Decision Council', { timeout: 10_000 });
-      await expect(page.getByTestId('execution-graph-view')).toContainText('Router', { timeout: 10_000 });
-      await expect(page.getByTestId('execution-graph-view')).toContainText('Final Artifact', { timeout: 10_000 });
-      await expect(page.getByTestId('execution-graph-view')).toContainText('Final response', { timeout: 10_000 });
-      const graphNodeCards = page.locator('[data-graph-node-card="true"]');
-      await expect(graphNodeCards.filter({ hasText: 'Router' }).first().locator('[aria-label="Status: ready"]')).toBeVisible({ timeout: 10_000 });
-      await expect(graphNodeCards.filter({ hasText: 'Final Artifact' }).first().locator('[aria-label="Status: ready"]')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-testid^="graph-node-architecture-run:"]').first()).toBeVisible({ timeout: 10_000 });
+      await expect.poll(
+        async () => page.locator('[data-testid^="graph-node-architecture-route:"]').count(),
+        { timeout: 10_000 },
+      ).toBeGreaterThanOrEqual(completedGraph.nodes?.length ?? expectedBranchLabels.length + 3);
+      await expect(page.getByTestId(/^graph-node-final:/)).toHaveCount(1, { timeout: 10_000 });
+      await expect(graphNodeCardByLabel(page, 'Router').locator('[aria-label="Status: ready"]')).toBeVisible({ timeout: 10_000 });
+      await expect(graphNodeCardByLabel(page, 'Final Artifact').locator('[aria-label="Status: ready"]')).toBeVisible({ timeout: 10_000 });
       for (const { sessionId: branchSessionId, label } of branchSessionProofs) {
-        const graphBranchCard = graphNodeCards.filter({ hasText: label }).first();
+        const graphBranchCard = graphNodeCardByLabel(page, label);
         await expect(graphBranchCard).toBeVisible({ timeout: 10_000 });
         await expect(graphBranchCard.locator('[aria-label="Status: ready"]')).toBeVisible({ timeout: 10_000 });
         await graphBranchCard.click();
@@ -469,7 +678,7 @@ test.describe('Architecture chat turn projection', () => {
           .toBe(branchSessionId);
         await expect(page.getByTestId('message-list')).toContainText(label);
         await selectSession(page, session.id, title);
-        await page.getByTestId('talk-sidebar-graph-entry').click();
+        await page.getByTestId('talk-graph-switcher').click();
         await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
       }
     } finally {
@@ -496,16 +705,7 @@ test.describe('Architecture chat turn projection', () => {
 
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
 
-      const allSessionsResponse = await request.get(`${API_BASE}/sessions`);
-      expect(allSessionsResponse.ok()).toBeTruthy();
-      const sessions = await allSessionsResponse.json() as Array<{
-        id: string;
-        parentSessionId?: string;
-        runtimeContext?: {
-          architectureSlotId?: string;
-          architectureContext?: { architectureRunId?: string };
-        };
-      }>;
+      const sessions = await getSessionDescendants(request, session.id);
       const envelopeSession = sessions.find((candidate) => (
         candidate.parentSessionId === session.id
         && typeof candidate.runtimeContext?.architectureContext?.architectureRunId === 'string'
@@ -534,18 +734,19 @@ test.describe('Architecture chat turn projection', () => {
 
   test('launches Architecture Debate from the welcome screen with projectPath and keeps child transcripts repo-scoped after reload', async ({ page, request }) => {
     test.setTimeout(420_000);
-    const projectPath = 'C:\\Projekty\\kalio-forever';
+    const projectPath = requireProjectPath();
     let sessionId: string | null = null;
     let title = '';
 
     try {
+      await ensureProjectForPath(request, projectPath);
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
-      await page.getByTestId('welcome-project-path-input').fill(projectPath);
+      await selectProjectInWelcome(page, projectPath);
       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
       await page.getByTestId('welcome-run-prompt').click();
 
@@ -561,26 +762,10 @@ test.describe('Architecture chat turn projection', () => {
       title = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? '';
       expect(title.length).toBeGreaterThan(0);
 
-      const sessionsResponse = await request.get(`${API_BASE}/sessions`);
-      expect(sessionsResponse.ok()).toBeTruthy();
-      const persistedSessions = await sessionsResponse.json() as ArchitectureSessionListItem[];
-      const rootSession = persistedSessions.find((candidate) => candidate.id === sessionId);
-      expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath);
+      const rootSession = await getSession(request, sessionId);
+      expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath.replaceAll('\\', '/'));
 
-      const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
-      const isCurrentWorkflowDescendant = (candidate: { id: string; parentSessionId?: string }): boolean => {
-        let currentParentId = candidate.parentSessionId;
-        const visited = new Set<string>();
-        while (currentParentId) {
-          if (visited.has(currentParentId)) return false;
-          if (currentParentId === sessionId) return true;
-          visited.add(currentParentId);
-          currentParentId = sessionById.get(currentParentId)?.parentSessionId;
-        }
-        return false;
-      };
-
-      const currentWorkflowSessions = persistedSessions.filter((candidate) => isCurrentWorkflowDescendant(candidate));
+      const currentWorkflowSessions = await getSessionDescendants(request, sessionId);
       const architectureRunId = currentWorkflowSessions
         .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
         .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);

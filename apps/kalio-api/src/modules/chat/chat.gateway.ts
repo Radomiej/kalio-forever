@@ -15,14 +15,21 @@ import { SessionPipelineService } from './session-pipeline.service';
 import { SessionsService } from './sessions.service';
 import { SessionEventsService } from './session-events.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
+import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { RAAppHITLService } from '../raapp/raapp-hitl.service';
+import { HitlRequestService } from '../hitl/hitl-request.service';
 import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 import {
   CLI_AGENT_SESSION_RUNTIME,
   type CLIAgentSessionRuntimePort,
 } from '../cli-agent/cli-agent-session-runtime.port';
+import {
+  ARCHITECTURE_RUNTIME_STOP,
+  type ArchitectureRuntimeStopPort,
+} from './architecture-runtime-stop.port';
+import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { findAgentFlowSnapshotsForSessions, isActiveAgentFlowSnapshot } from './chat.gateway.agentflow-stop';
 import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
@@ -32,6 +39,11 @@ import {
   collectRuntimeSnapshotSessionTree,
   type RuntimeSnapshotSessionTree,
 } from './chat.runtime-snapshot';
+import {
+  cancelToolConfirmation,
+  replayPendingToolConfirmations,
+  resolveToolConfirmation,
+} from './chat.runtime-hitl';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -53,7 +65,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
     @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
+    @Optional() @Inject(ARCHITECTURE_RUNTIME_STOP) private readonly architectureRuntimeStop?: ArchitectureRuntimeStopPort,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() @Inject(SUBAGENT_RUNTIME) private readonly subagentRuntime?: SubagentRuntimePort,
+    @Optional() @Inject(HitlRequestService) private readonly hitlRequests?: Pick<HitlRequestService, 'listPendingToolConfirmations'>,
+    @Optional() @Inject(ChatService) private readonly chatService?: Pick<ChatService, 'approveAndResumeTool' | 'cancelPendingTool'>,
   ) {
     this.sessionEvents.onSessionCreated(({ session }) => {
       this.emitSessionLifecycleEvent('session:created', session);
@@ -86,14 +102,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.subscribeSocketToSession(client.id, payload.sessionId);
 
     const replayedRequestIds = new Set<string>();
-    const replayPendingConfirmations = (sessionId: string): void => {
-      this.toolDispatch.getPendingConfirmations(sessionId).forEach((request) => {
-        this.subscribeSocketToSession(client.id, request.sessionId);
-        if (replayedRequestIds.has(request.requestId)) {
-          return;
-        }
-        replayedRequestIds.add(request.requestId);
-        client.emit('tool:confirmation_required', request);
+    const replayPendingConfirmations = async (sessionId: string): Promise<void> => {
+      await replayPendingToolConfirmations({
+        sessionId,
+        replayedRequestIds,
+        toolDispatch: this.toolDispatch,
+        hitlRequests: this.hitlRequests,
+        replay: (request) => {
+          this.subscribeSocketToSession(client.id, request.sessionId);
+          client.emit('tool:confirmation_required', request);
+        },
       });
       this.agentBudgetApprovals.getPendingApprovals(sessionId).forEach((request) => {
         replayedRequestIds.add(request.requestId);
@@ -117,7 +135,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (sessionId !== payload.sessionId) {
         this.subscribeSocketToSession(client.id, sessionId);
       }
-      replayPendingConfirmations(sessionId);
+      await replayPendingConfirmations(sessionId);
       const status = await this.pipeline.getSessionStatusWithRun(sessionId);
       statusesBySessionId[sessionId] = status;
       client.emit('session:status', status);
@@ -127,6 +145,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (const sessionId of snapshotBatch.sessionIds) {
       client.emit('session:runtime_snapshot', snapshotBatch.snapshotsBySessionId[sessionId]);
     }
+
+    const emit: EmitFn = (event, data) => {
+      this.emitToInitiatorAndSessionSubscribers(client.id, payload.sessionId, event, data);
+    };
+    await this.pipeline.resumeQueuedSession(payload.sessionId, emit);
 
     this.logger.log(`Session re-identified: ${payload.sessionId} for socket ${client.id}`);
   }
@@ -157,68 +180,62 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const sessionTree = await this.collectRuntimeSnapshotSessionTree(payload.sessionId);
     const descendantSessionIds = sessionTree.descendantIdsBySessionId[payload.sessionId] ?? [];
+    const stoppedSessionIds = [payload.sessionId, ...descendantSessionIds];
+
+    await this.stopArchitectureRunsForSessions(stoppedSessionIds);
+    await this.stopAgentFlowRunsForSessions(stoppedSessionIds);
+
+    const stoppedStatusesBySessionId = await this.buildStoppedSessionStatuses(sessionTree.sessionIds);
+    const stoppedSnapshotBatch = await this.buildRuntimeActivitySnapshots(
+      payload.sessionId,
+      sessionTree,
+      stoppedStatusesBySessionId,
+    );
+    this.emitRuntimeActivitySnapshotBatch(client.id, stoppedSnapshotBatch);
 
     for (const sessionId of sessionTree.sessionIds) {
       await this.stopCliAgentSessionIfNeeded(client.id, sessionId);
       await this.pipeline.stopAndDrain(sessionId);
     }
-    await this.stopAgentFlowRunsForSessions([payload.sessionId, ...descendantSessionIds]);
 
     const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree);
-    for (const sessionId of snapshotBatch.sessionIds) {
-      this.emitToInitiatorAndSessionSubscribers(
-        client.id,
-        sessionId,
-        'session:runtime_snapshot',
-        snapshotBatch.snapshotsBySessionId[sessionId],
-      );
-    }
+    this.emitRuntimeActivitySnapshotBatch(client.id, snapshotBatch);
   }
 
   @SubscribeMessage('tool:confirm')
-  handleToolConfirm(
+  async handleToolConfirm(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['tool:confirm'],
-  ): void {
+  ): Promise<void> {
     const socketSessions = this.socketSessions.get(client.id);
     if (!socketSessions?.has(payload.sessionId)) {
       this.logger.warn(`tool:confirm rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    const status = payload.message
-      ? this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId, payload.message)
-      : this.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
-    if (status === 'not_found') {
-      client.emit('tool:confirmation_invalidated', {
-        requestId: payload.requestId,
-        sessionId: payload.sessionId,
-        reason: 'not_found',
-        message: 'This approval is no longer active.',
-      } satisfies SocketEvents['tool:confirmation_invalidated']);
-    }
+    await resolveToolConfirmation({
+      payload,
+      toolDispatch: this.toolDispatch,
+      chatService: this.chatService,
+      emit: ((event, data) => client.emit(event, data)) as EmitFn,
+    });
   }
 
   @SubscribeMessage('tool:cancel')
-  handleToolCancel(
+  async handleToolCancel(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['tool:cancel'],
-  ): void {
+  ): Promise<void> {
     const socketSessions = this.socketSessions.get(client.id);
     if (!socketSessions?.has(payload.sessionId)) {
       this.logger.warn(`tool:cancel rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
       return;
     }
-    const status = payload.message
-      ? this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId, payload.message)
-      : this.toolDispatch.cancelConfirmation(payload.requestId, payload.sessionId);
-    if (status === 'not_found') {
-      client.emit('tool:confirmation_invalidated', {
-        requestId: payload.requestId,
-        sessionId: payload.sessionId,
-        reason: 'not_found',
-        message: 'This approval is no longer active.',
-      } satisfies SocketEvents['tool:confirmation_invalidated']);
-    }
+    await cancelToolConfirmation({
+      payload,
+      toolDispatch: this.toolDispatch,
+      chatService: this.chatService,
+      emit: ((event, data) => client.emit(event, data)) as EmitFn,
+    });
   }
 
   @SubscribeMessage('raapp:approve')
@@ -367,10 +384,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       status,
       pipeline: this.pipeline,
       toolDispatch: this.toolDispatch,
+      hitlRequests: this.hitlRequests,
       agentBudgetApprovals: this.agentBudgetApprovals,
       sessionsService: this.sessionsService,
       agentFlowRuntime: this.getAgentFlowRuntime(),
       cliAgentSessionRuntime: this.getCliAgentSessionRuntime(),
+      subagentRuntime: this.getSubagentRuntime(),
       logger: this.logger,
     });
   }
@@ -386,12 +405,64 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       statusesBySessionId,
       pipeline: this.pipeline,
       toolDispatch: this.toolDispatch,
+      hitlRequests: this.hitlRequests,
       agentBudgetApprovals: this.agentBudgetApprovals,
       sessionsService: this.sessionsService,
       agentFlowRuntime: this.getAgentFlowRuntime(),
       cliAgentSessionRuntime: this.getCliAgentSessionRuntime(),
+      subagentRuntime: this.getSubagentRuntime(),
       logger: this.logger,
     });
+  }
+
+  private async buildStoppedSessionStatuses(
+    sessionIds: readonly string[],
+  ): Promise<Record<string, SocketEvents['session:status']>> {
+    const now = Date.now();
+    const entries = await Promise.all(sessionIds.map(async (sessionId) => {
+      const currentStatus = await this.pipeline.getSessionStatusWithRun(sessionId).catch((error: unknown) => {
+        this.logger.warn(
+          `Unable to load session status ${sessionId} for stop snapshot: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      });
+      const stoppedStatus: SocketEvents['session:status'] = {
+        sessionId,
+        active: false,
+        queueLength: 0,
+        ...(currentStatus?.turnId ? { turnId: currentStatus.turnId } : {}),
+        ...(currentStatus?.run ? {
+          run: {
+            ...currentStatus.run,
+            phase: 'interrupted',
+            status: 'interrupted',
+            safeResume: false,
+            errorCode: currentStatus.run.errorCode ?? 'USER_STOPPED',
+            errorMessage: currentStatus.run.errorMessage ?? 'Stopped by user.',
+            updatedAt: now,
+            lastHeartbeatAt: now,
+            completedAt: now,
+          },
+        } : {}),
+      };
+      return [sessionId, stoppedStatus] as const;
+    }));
+
+    return Object.fromEntries(entries);
+  }
+
+  private emitRuntimeActivitySnapshotBatch(
+    initiatorSocketId: string,
+    snapshotBatch: Awaited<ReturnType<ChatGateway['buildRuntimeActivitySnapshots']>>,
+  ): void {
+    for (const sessionId of snapshotBatch.sessionIds) {
+      this.emitToInitiatorAndSessionSubscribers(
+        initiatorSocketId,
+        sessionId,
+        'session:runtime_snapshot',
+        snapshotBatch.snapshotsBySessionId[sessionId],
+      );
+    }
   }
 
   private emitSessionLifecycleEvent<K extends 'session:created' | 'session:updated'>(
@@ -481,6 +552,29 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  private async stopArchitectureRunsForSessions(sessionIds: string[]): Promise<void> {
+    const architectureRuntime = this.getArchitectureRuntimeStopPort();
+    if (!architectureRuntime) {
+      return;
+    }
+    try {
+      await architectureRuntime.stopRunsForSessions(sessionIds);
+    } catch (error) {
+      this.logger.warn(`Failed to stop Architecture runs: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private getArchitectureRuntimeStopPort(): ArchitectureRuntimeStopPort | undefined {
+    if (this.architectureRuntimeStop) {
+      return this.architectureRuntimeStop;
+    }
+    try {
+      return this.moduleRef?.get<ArchitectureRuntimeStopPort>(ARCHITECTURE_RUNTIME_STOP, { strict: false });
+    } catch {
+      return undefined;
+    }
+  }
+
   private async stopCliAgentSessionIfNeeded(initiatorSocketId: string, sessionId: string): Promise<void> {
     const cliRuntime = this.getCliAgentSessionRuntime();
     if (!cliRuntime) {
@@ -533,6 +627,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return this.moduleRef?.get<AgentFlowRuntimePort>(AGENT_FLOW_RUNTIME, { strict: false });
     } catch (error) {
       this.logger.warn(`AgentFlow runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
+  private getSubagentRuntime(): SubagentRuntimePort | undefined {
+    if (this.subagentRuntime) {
+      return this.subagentRuntime;
+    }
+    try {
+      return this.moduleRef?.get<SubagentRuntimePort>(SUBAGENT_RUNTIME, { strict: false });
+    } catch (error) {
+      this.logger.warn(`Subagent runtime lookup failed: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
   }

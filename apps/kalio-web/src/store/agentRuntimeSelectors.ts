@@ -21,6 +21,9 @@ import {
   sessionAttentionLabel,
   waitingDetail,
 } from './agentRuntimeAttentionSupport';
+import { selectPendingRaAppApprovals } from './agentRuntimeRaAppApprovals';
+
+export { selectPendingApprovalCount } from './agentRuntimeApprovalSelectors';
 
 type LiveSessionLoopSeed = {
   sessionId: string;
@@ -55,11 +58,15 @@ export type RuntimeAttentionKind =
 export interface RuntimeAttentionItem {
   id: string;
   sessionId: string;
+  navigationSessionId: string;
+  sourceSessionIds: string[];
+  groupId?: string;
   kind: RuntimeAttentionKind;
   label: string;
   detail: string;
   actionable: boolean;
   priority: number;
+  occurredAt: number;
 }
 
 export interface RuntimeContinuationAction {
@@ -99,6 +106,61 @@ function setRuntimeAttentionItem(
   if (!current || nextItem.priority < current.priority) {
     itemsBySessionId.set(nextItem.sessionId, nextItem);
   }
+}
+
+function attentionOccurrence(params: {
+  evidenceUpdatedAt?: number;
+  snapshot?: RuntimeActivitySnapshot;
+}): number {
+  return params.evidenceUpdatedAt
+    ?? params.snapshot?.run?.completedAt
+    ?? params.snapshot?.run?.updatedAt
+    ?? 0;
+}
+
+function groupArchitectureRuntimeItems(
+  items: RuntimeAttentionItem[],
+  sessionsById: Map<string, ChatSession>,
+): RuntimeAttentionItem[] {
+  const architectureRootsByRunId = new Map<string, string>();
+  sessionsById.forEach((session) => {
+    const runId = session.runtimeContext?.architectureContext?.architectureRunId;
+    if (runId && session.runtimeContext?.runtimeKind === 'agent-flow-root') {
+      architectureRootsByRunId.set(runId, session.id);
+    }
+  });
+
+  const grouped = new Map<string, RuntimeAttentionItem>();
+  items.forEach((item) => {
+    const session = sessionsById.get(item.sessionId);
+    const runId = session?.runtimeContext?.architectureContext?.architectureRunId;
+    if (!runId) {
+      grouped.set(`session:${item.sessionId}`, item);
+      return;
+    }
+
+    const groupId = `architecture:${runId}`;
+    const rootSessionId = architectureRootsByRunId.get(runId) ?? item.sessionId;
+    const current = grouped.get(groupId);
+    const primary = !current || item.priority < current.priority ? item : current;
+    const sourceSessionIds = [...new Set([
+      ...(current?.sourceSessionIds ?? []),
+      ...item.sourceSessionIds,
+    ])].sort();
+
+    grouped.set(groupId, {
+      ...primary,
+      id: `${primary.kind}:${groupId}`,
+      sessionId: rootSessionId,
+      navigationSessionId: rootSessionId,
+      sourceSessionIds,
+      groupId,
+      label: sessionAttentionLabel(rootSessionId, sessionsById),
+      occurredAt: Math.max(current?.occurredAt ?? 0, item.occurredAt),
+    });
+  });
+
+  return [...grouped.values()];
 }
 
 function recoveredRunDetail(snapshot: RuntimeActivitySnapshot): string | null {
@@ -210,21 +272,10 @@ export function selectRunningLoops(params: {
   return [...loopsBySessionId.values()].sort((left, right) => left.startedAt - right.startedAt);
 }
 
-export function selectPendingApprovalCount(params: {
-  pendingConfirmations?: Record<string, ToolConfirmationRequest[] | ToolConfirmationRequest> | null;
-  pendingBudgetApprovals?: Record<string, AgentBudgetApprovalRequest[] | AgentBudgetApprovalRequest> | null;
-}): number {
-  const confirmationCount = Object.values(params.pendingConfirmations ?? {})
-    .reduce((total, entries) => total + normalizePendingEntries(entries).length, 0);
-  const budgetApprovalCount = Object.values(params.pendingBudgetApprovals ?? {})
-    .reduce((total, entries) => total + normalizePendingEntries(entries).length, 0);
-
-  return confirmationCount + budgetApprovalCount;
-}
-
 export function selectRuntimeAttentionItems(params: {
   pendingConfirmations?: Record<string, ToolConfirmationRequest[] | ToolConfirmationRequest> | null;
   pendingBudgetApprovals?: Record<string, AgentBudgetApprovalRequest[] | AgentBudgetApprovalRequest> | null;
+  pendingRaAppApprovals?: ReturnType<typeof selectPendingRaAppApprovals> | null;
   runtimeActivitySnapshots?: Record<string, RuntimeActivitySnapshot> | null;
   sessions?: ChatSession[] | null;
   sessionMessages?: Record<string, ChatMessage[]> | null;
@@ -244,6 +295,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: 'Awaiting confirmation',
         actionable: true,
         priority: 0,
+        occurredAt: 0,
+        navigationSessionId: confirmation.sessionId,
+        sourceSessionIds: [confirmation.sessionId],
       });
       actionableSessionIds.add(confirmation.sessionId);
     });
@@ -259,9 +313,31 @@ export function selectRuntimeAttentionItems(params: {
         detail: 'Budget approval required',
         actionable: true,
         priority: 0,
+        occurredAt: 0,
+        navigationSessionId: approval.sessionId,
+        sourceSessionIds: [approval.sessionId],
       });
       actionableSessionIds.add(approval.sessionId);
     });
+  });
+
+  selectPendingRaAppApprovals({
+    durableApprovals: params.pendingRaAppApprovals,
+    sessionMessages: params.sessionMessages,
+  }).forEach((approval) => {
+    approvalItems.push({
+      id: `raapp:${approval.sessionId}:${approval.requestId}`,
+      sessionId: approval.sessionId,
+      kind: 'hitl',
+      label: 'RA-App approval',
+      detail: approval.displayLabel,
+      actionable: true,
+      priority: 0,
+      occurredAt: 0,
+      navigationSessionId: approval.sessionId,
+      sourceSessionIds: [approval.sessionId],
+    });
+    actionableSessionIds.add(approval.sessionId);
   });
 
   const sessions = params.sessions ?? [];
@@ -281,7 +357,7 @@ export function selectRuntimeAttentionItems(params: {
       ? sessionStatusSnapshotToRuntimeState(runtimeSnapshotToSessionStatus(snapshot))
       : null;
     const architectureState = architectureSessionRuntimeStates.get(session.id) ?? null;
-    const evidence = extractLatestVisibleRuntimeEvidence(sessionMessages[session.id], snapshot);
+    const evidence = extractLatestVisibleRuntimeEvidence(sessionMessages[session.id]);
     const classifiedEvidence = classifyRuntimeEvidence(evidence);
     const label = sessionAttentionLabel(session.id, sessionsById);
     const persistedRuntimeEvidence = canProjectPersistedRuntimeEvidence(session);
@@ -307,6 +383,12 @@ export function selectRuntimeAttentionItems(params: {
         detail: classifiedEvidence.detail,
         actionable: false,
         priority: classifiedEvidence.priority,
+        occurredAt: attentionOccurrence({
+          evidenceUpdatedAt: evidence?.updatedAt,
+          snapshot,
+        }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
       return;
     }
@@ -320,6 +402,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: recoveredDetail,
         actionable: false,
         priority: 18,
+        occurredAt: attentionOccurrence({ snapshot }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
       return;
     }
@@ -333,6 +418,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: 'Runtime error',
         actionable: false,
         priority: 20,
+        occurredAt: attentionOccurrence({ snapshot }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
       return;
     }
@@ -346,6 +434,9 @@ export function selectRuntimeAttentionItems(params: {
         detail: waitingDetail(snapshot),
         actionable: false,
         priority: 30,
+        occurredAt: attentionOccurrence({ snapshot }),
+        navigationSessionId: session.id,
+        sourceSessionIds: [session.id],
       });
     }
   });
@@ -370,6 +461,9 @@ export function selectRuntimeAttentionItems(params: {
           detail: execution.status === 'blocked' ? 'Child execution blocked' : 'Child execution failed',
           actionable: false,
           priority: 15,
+          occurredAt: execution.updatedAt,
+          navigationSessionId: targetSessionId,
+          sourceSessionIds: [targetSessionId],
         });
         return;
       }
@@ -385,6 +479,9 @@ export function selectRuntimeAttentionItems(params: {
             : waitingDetail(undefined, execution.label),
           actionable: false,
           priority: 30,
+          occurredAt: execution.updatedAt,
+          navigationSessionId: targetSessionId,
+          sourceSessionIds: [targetSessionId],
         });
       }
     });
@@ -392,7 +489,10 @@ export function selectRuntimeAttentionItems(params: {
 
   return [
     ...approvalItems.sort((left, right) => left.id.localeCompare(right.id)),
-    ...[...runtimeItemsBySessionId.values()].sort((left, right) => {
+    ...groupArchitectureRuntimeItems(
+      [...runtimeItemsBySessionId.values()],
+      sessionsById,
+    ).sort((left, right) => {
       if (left.priority === right.priority) {
         return left.label.localeCompare(right.label);
       }

@@ -46,6 +46,7 @@ describe('useChatSessionActivation', () => {
       cliChildProjections: {},
       activeAgentLoops: {},
       pendingConfirmations: {},
+      pendingBudgetApprovals: {},
       runtimeActivitySnapshots: {},
     });
     useSessionStore.setState({
@@ -81,6 +82,207 @@ describe('useChatSessionActivation', () => {
       expect(apiClient.get).toHaveBeenCalledWith('/api/sessions/session-1/messages', expect.objectContaining({
         params: { limit: 40 },
       }));
+    });
+  });
+
+  it('identifies the parent when a child session is selected so backend can replay the child tree', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+    useSessionStore.setState({
+      activeSessionId: 'child-session-1',
+      sessions: [
+        { id: 'parent-session-1', personaId: 'default', title: 'Parent', createdAt: 1, updatedAt: 1 },
+        {
+          id: 'child-session-1',
+          personaId: 'default',
+          title: 'Child',
+          kind: 'subagent',
+          parentSessionId: 'parent-session-1',
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+      sessionMessages: {
+        'parent-session-1': [],
+        'child-session-1': [],
+      },
+    });
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'child-session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    expect(eventBus.identifySession).toHaveBeenCalledWith('child-session-1');
+    expect(eventBus.identifySession).toHaveBeenCalledWith('parent-session-1');
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith(
+        '/api/sessions/child-session-1/messages',
+        expect.objectContaining({
+          params: { limit: 40 },
+        }),
+      );
+    });
+  });
+
+  it('hydrates pending architecture budget approvals from durable human gate events on child activation', async () => {
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (url === '/api/architecture-runs/run-1/events') {
+        return {
+          data: [
+            {
+              id: 'event-budget',
+              runId: 'run-1',
+              sequence: 1,
+              type: 'human_gate',
+              message: 'Pragmatist requested more tool budget (1/1).',
+              createdAt: 1,
+              data: {
+                event: 'agent:budget_required',
+                requestId: 'budget-1',
+                sessionId: 'child-session-1',
+                usedIterations: 1,
+                currentLimit: 1,
+                suggestedNextLimit: 11,
+                requestedBy: 'pragmatist',
+              },
+            },
+          ],
+        };
+      }
+      return { data: [] };
+    });
+    useSessionStore.setState({
+      activeSessionId: 'child-session-1',
+      sessions: [
+        {
+          id: 'child-session-1',
+          personaId: 'default',
+          title: 'Child',
+          kind: 'subagent',
+          parentSessionId: 'parent-session-1',
+          runtimeContext: {
+            runtimeKind: 'agent-flow-branch',
+            architectureContext: { architectureRunId: 'run-1' },
+          },
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+      sessionMessages: {
+        'child-session-1': [],
+      },
+    });
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'child-session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().pendingBudgetApprovals['child-session-1']).toEqual([
+        expect.objectContaining({
+          requestId: 'budget-1',
+          sessionId: 'child-session-1',
+          usedIterations: 1,
+          currentLimit: 1,
+          suggestedNextLimit: 11,
+        }),
+      ]);
+    });
+  });
+
+  it('hydrates architecture budget approvals when the active child runtime context arrives after selection', async () => {
+    vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
+      if (url === '/api/architecture-runs/run-late/events') {
+        return {
+          data: [
+            {
+              id: 'event-budget',
+              runId: 'run-late',
+              sequence: 1,
+              type: 'human_gate',
+              message: 'Pragmatist requested more tool budget (1/1).',
+              createdAt: 1,
+              data: {
+                event: 'agent:budget_required',
+                requestId: 'budget-late',
+                sessionId: 'child-session-1',
+                usedIterations: 1,
+                currentLimit: 1,
+              },
+            },
+          ],
+        };
+      }
+      return { data: [] };
+    });
+    useSessionStore.setState({
+      activeSessionId: 'child-session-1',
+      sessions: [
+        {
+          id: 'child-session-1',
+          personaId: 'default',
+          title: 'Child',
+          kind: 'subagent',
+          parentSessionId: 'parent-session-1',
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ],
+      sessionMessages: {
+        'child-session-1': [],
+      },
+    });
+
+    renderHook(() => useChatSessionActivation({
+      activeSessionId: 'child-session-1',
+      clearToolActivities: vi.fn(),
+      handleSendRef: { current: vi.fn() },
+      setAgentTurns: vi.fn(),
+      setMessages: vi.fn(),
+      setPendingConfirmation: vi.fn(),
+      updateAgentTurn: vi.fn(),
+    }));
+
+    expect(apiClient.get).not.toHaveBeenCalledWith('/api/architecture-runs/run-late/events');
+
+    act(() => {
+      useSessionStore.setState({
+        sessions: [
+          {
+            id: 'child-session-1',
+            personaId: 'default',
+            title: 'Child',
+            kind: 'subagent',
+            parentSessionId: 'parent-session-1',
+            runtimeContext: {
+              runtimeKind: 'agent-flow-branch',
+              architectureContext: { architectureRunId: 'run-late' },
+            },
+            createdAt: 2,
+            updatedAt: 3,
+          },
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().pendingBudgetApprovals['child-session-1']).toEqual([
+        expect.objectContaining({
+          requestId: 'budget-late',
+          sessionId: 'child-session-1',
+        }),
+      ]);
     });
   });
 
@@ -957,6 +1159,10 @@ describe('useChatSessionActivation', () => {
       expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
       expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBe('turn-restored');
     });
+    expect(useAgentStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingSessionId: 'session-1',
+    });
   });
 
   it('prefers the runtime snapshot over stale buffered session status after hydration', async () => {
@@ -1094,6 +1300,10 @@ describe('useChatSessionActivation', () => {
     await waitFor(() => {
       expect(useAgentStore.getState().hasActiveLoopForSession('session-1')).toBe(true);
       expect(useSessionStore.getState().getSessionActiveTurnId('session-1')).toBe('turn-buffered');
+    });
+    expect(useAgentStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingSessionId: 'session-1',
     });
     expect(useAgentStore.getState().consumeBufferedSessionStatusSnapshots('session-1')).toEqual([]);
   });

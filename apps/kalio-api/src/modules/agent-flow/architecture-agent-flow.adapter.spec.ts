@@ -2887,6 +2887,55 @@ describe('ArchitectureAgentFlowAdapter', () => {
     expect(snapshot?.result).toBeUndefined();
   });
 
+  it('clears a stale input continuation when the resumed architecture run reaches a terminal failure', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-terminal-after-pause',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Resume after HITL',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'architecture-root',
+      status: 'failed',
+      createdAt: 1,
+      updatedAt: 5,
+      completedAt: 5,
+    };
+    const events: ArchitectureExecutionEvent[] = [{
+      id: 'event-failed',
+      runId: run.id,
+      sequence: 1,
+      type: 'node_failed',
+      nodeId: 'implementer',
+      message: 'Implementer failed.',
+      errorCode: 'CONTRACT_VIOLATION',
+      failure: {
+        code: 'CONTRACT_VIOLATION',
+        retryable: false,
+        message: 'Required tool evidence was not produced.',
+      },
+      createdAt: 5,
+    }];
+    const architectureRuntime = {
+      findRunDurable: vi.fn().mockResolvedValue(run),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot(run.id, {
+      flowId: 'goal_guard_delivery_loop',
+      goal: run.prompt,
+      parentSessionId: 'parent-1',
+      continuation: {
+        reason: 'runtime_pause',
+        waitingNodeId: 'orchestrator',
+        pendingNodeIds: ['orchestrator'],
+        visitCounts: {},
+      },
+    });
+
+    expect(snapshot?.run.status).toBe('failed');
+    expect(snapshot?.run.checkpoint?.continuation).toBeUndefined();
+  });
+
   it('maps typed run-stopped max-step events to waiting AgentFlow continuation', async () => {
     const run: ArchitectureRun = {
       id: 'run-stopped-waiting',
@@ -3212,5 +3261,68 @@ describe('ArchitectureAgentFlowAdapter', () => {
     });
     expect(snapshot?.result?.nextActions[0]).toContain('runtime watchdog detected stale running state');
     vi.useRealTimers();
+  });
+
+  it('projects a typed runtime pause as a durable continuation instead of stale running', async () => {
+    const run: ArchitectureRun = {
+      id: 'run-human-pause',
+      schemaId: 'goal-master-delivery-loop',
+      prompt: 'Wait for approval',
+      executionMode: 'subagent_execution',
+      rootSessionId: 'arch-run-human-pause-root',
+      status: 'running',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const events: ArchitectureExecutionEvent[] = [{
+      id: 'event-runtime-pause',
+      runId: run.id,
+      sequence: 1,
+      type: 'router_decision',
+      message: 'Implementer paused for human input.',
+      lifecycle: 'waiting_on_orchestrator',
+      status: 'waiting_on_orchestrator',
+      nodeId: 'implementer',
+      roleSlotId: 'implementer',
+      reasonCode: 'runtime_pause',
+      data: {
+        reasonCode: 'runtime_pause',
+        pendingNodeIds: ['implementer'],
+        visitCounts: { orchestrator: 1 },
+        waitEvent: 'tool:confirmation_required',
+        waitIdentity: {
+          requestId: 'confirm-1',
+          childSessionId: 'child-implementer',
+          childTurnId: 'turn-implementer',
+          promptMessageId: 'prompt-implementer',
+        },
+      },
+      createdAt: 2,
+    }];
+    const architectureRuntime = {
+      findRun: vi.fn().mockReturnValue(run),
+      findRunDurable: vi.fn(),
+      getEventsDurable: vi.fn().mockResolvedValue(events),
+    };
+    const adapter = new ArchitectureAgentFlowAdapter(architectureRuntime as unknown as ArchitectureRuntimeService);
+
+    const snapshot = await adapter.getSnapshot(run.id, {
+      flowId: 'goal_guard_delivery_loop',
+      goal: 'Wait for approval',
+      parentSessionId: 'parent-1',
+    });
+
+    expect(snapshot?.run.status).toBe('waiting_on_orchestrator');
+    expect(snapshot?.run.checkpoint?.continuation).toEqual(expect.objectContaining({
+      reason: 'runtime_pause',
+      waitingNodeId: 'implementer',
+      pendingNodeIds: ['implementer'],
+      waitIdentity: {
+        requestId: 'confirm-1',
+        childSessionId: 'child-implementer',
+        childTurnId: 'turn-implementer',
+        promptMessageId: 'prompt-implementer',
+      },
+    }));
   });
 });

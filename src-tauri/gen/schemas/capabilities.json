@@ -1,0 +1,1 @@
+{"main-capability":{"identifier":"main-capability","description":"Capabilities for the Kalio desktop window","local":true,"windows":["main"],"permissions":["core:default","updater:default","process:default"]}}

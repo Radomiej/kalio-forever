@@ -14,10 +14,14 @@ import type { AgentBudgetApprovalService } from './agent-budget-approval.service
 import type { SessionPipelineService } from './session-pipeline.service';
 import type { SessionsService } from './sessions.service';
 import type { ToolDispatchService } from './tool-dispatch.service';
+import type { HitlRequestService } from '../hitl/hitl-request.service';
 import type { AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../cli-agent/cli-agent-session-runtime.port';
+import type { ActiveSubagentRunStatus, SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { readPendingRAAppLaunchIntent } from './raapp-launch-intent';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
+import { safeLoadRuntimeSnapshotSessionMetadata } from './chat.runtime-session-metadata';
+import { mergePendingToolConfirmations } from './chat.runtime-hitl';
 
 interface RuntimeSnapshotLogger {
   warn(message: string): void;
@@ -28,10 +32,12 @@ export interface RuntimeActivitySnapshotDeps {
   status?: SocketEvents['session:status'];
   pipeline: Pick<SessionPipelineService, 'getSessionStatusWithRun'>;
   toolDispatch: Pick<ToolDispatchService, 'getPendingConfirmations'>;
+  hitlRequests?: Pick<HitlRequestService, 'listPendingToolConfirmations'>;
   agentBudgetApprovals: Pick<AgentBudgetApprovalService, 'getPendingApprovals'>;
   sessionsService: Pick<SessionsService, 'listChildren' | 'get' | 'getMessages'>;
   agentFlowRuntime?: AgentFlowRuntimePort;
   cliAgentSessionRuntime?: CLIAgentSessionRuntimePort;
+  subagentRuntime?: Pick<SubagentRuntimePort, 'getActiveRunStatus'>;
   logger?: RuntimeSnapshotLogger;
 }
 
@@ -95,7 +101,7 @@ function mapSubagentStatus(status: SocketEvents['session:status']): RuntimeChild
   if (status.active) {
     return 'running';
   }
-  return 'completed';
+  return 'idle';
 }
 
 function latestUnresolvedToolCall(messages: ChatMessage[]): UnresolvedToolCall | null {
@@ -252,6 +258,47 @@ async function preloadAgentFlowSnapshotsByParentSessionId(
   )));
 }
 
+function preloadActiveSubagentStatuses(
+  sessionIds: string[],
+  subagentRuntime: Pick<SubagentRuntimePort, 'getActiveRunStatus'> | undefined,
+): Record<string, SocketEvents['session:status']> {
+  if (!subagentRuntime?.getActiveRunStatus) {
+    return {};
+  }
+
+  const now = Date.now();
+  const entries = sessionIds
+    .map((sessionId) => subagentRuntime.getActiveRunStatus?.(sessionId))
+    .filter((status): status is ActiveSubagentRunStatus => status !== null && status !== undefined)
+    .map((status) => [status.sessionId, activeSubagentStatus(status, now)] as const);
+  return Object.fromEntries(entries);
+}
+
+function activeSubagentStatus(
+  status: ActiveSubagentRunStatus,
+  now: number,
+): SocketEvents['session:status'] {
+  return {
+    sessionId: status.sessionId,
+    active: true,
+    turnId: status.turnId,
+    queueLength: 0,
+    run: {
+      id: status.agentRun?.agentRunId ?? status.turnId,
+      sessionId: status.sessionId,
+      turnId: status.turnId,
+      revision: 1,
+      phase: 'llm_streaming',
+      status: 'active',
+      retryCount: 0,
+      safeResume: false,
+      startedAt: now,
+      updatedAt: now,
+      lastHeartbeatAt: now,
+    },
+  };
+}
+
 function buildToolActivitiesForSession(params: {
   sessionId: string;
   runtimeStatus: SocketEvents['session:status'];
@@ -373,10 +420,12 @@ export async function buildRuntimeActivitySnapshotBatch({
   rootSessionId,
   pipeline,
   toolDispatch,
+  hitlRequests,
   agentBudgetApprovals,
   sessionsService,
   agentFlowRuntime,
   cliAgentSessionRuntime,
+  subagentRuntime,
   logger,
   sessionTree,
   statusesBySessionId: existingStatusesBySessionId,
@@ -384,9 +433,15 @@ export async function buildRuntimeActivitySnapshotBatch({
   const resolvedSessionTree = sessionTree ?? await collectRuntimeSnapshotSessionTree(rootSessionId, sessionsService);
   const sessionIds = resolvedSessionTree.sessionIds;
   const statusesBySessionId = await preloadSessionStatuses(sessionIds, pipeline, existingStatusesBySessionId);
-  const pendingConfirmationsBySessionId = Object.fromEntries(
-    sessionIds.map((sessionId) => [sessionId, toolDispatch.getPendingConfirmations(sessionId)]),
-  );
+  const pendingConfirmationsBySessionId = Object.fromEntries(await Promise.all(
+    sessionIds.map(async (sessionId) => [
+      sessionId,
+      mergePendingToolConfirmations(
+        toolDispatch.getPendingConfirmations(sessionId),
+        hitlRequests ? await hitlRequests.listPendingToolConfirmations(sessionId) : [],
+      ),
+    ]),
+  ));
   const pendingBudgetApprovalsBySessionId = Object.fromEntries(
     sessionIds.map((sessionId) => [sessionId, agentBudgetApprovals.getPendingApprovals(sessionId)]),
   );
@@ -405,8 +460,10 @@ export async function buildRuntimeActivitySnapshotBatch({
   }));
 
   const agentFlowSnapshotsByParentSessionId = await preloadAgentFlowSnapshotsByParentSessionId(sessionIds, agentFlowRuntime);
+  const activeSubagentStatusesBySessionId = preloadActiveSubagentStatuses(sessionIds, subagentRuntime);
+  const rootSession = await safeLoadRuntimeSnapshotSessionMetadata(rootSessionId, sessionsService, logger);
   const sessionsBySessionId: Record<string, ChatSession> = {
-    [rootSessionId]: await sessionsService.get(rootSessionId),
+    ...(rootSession ? { [rootSessionId]: rootSession } : {}),
     ...resolvedSessionTree.childSessionsById,
   };
 
@@ -434,7 +491,8 @@ export async function buildRuntimeActivitySnapshotBatch({
       && childSession.parentSessionId
       && childSession.parentToolCallId
     ) {
-      subagentStatusesBySessionId[childSession.id] = statusesBySessionId[childSession.id]
+      subagentStatusesBySessionId[childSession.id] = activeSubagentStatusesBySessionId[childSession.id]
+        ?? statusesBySessionId[childSession.id]
         ?? await pipeline.getSessionStatusWithRun(childSession.id).catch((err: unknown) => {
           logger?.warn(
             `Unable to load subagent child status ${childSession.id} for runtime snapshot: ${err instanceof Error ? err.message : String(err)}`,
@@ -446,7 +504,7 @@ export async function buildRuntimeActivitySnapshotBatch({
 
   const snapshotsBySessionId: Record<string, SocketEvents['session:runtime_snapshot']> = {};
   sessionIds.forEach((sessionId) => {
-    const runtimeStatus = statusesBySessionId[sessionId];
+    const runtimeStatus = activeSubagentStatusesBySessionId[sessionId] ?? statusesBySessionId[sessionId];
     const pendingConfirmations = pendingConfirmationsBySessionId[sessionId] ?? [];
     const pendingBudgetApprovals = pendingBudgetApprovalsBySessionId[sessionId] ?? [];
     const updatedAt = Date.now();
@@ -531,10 +589,12 @@ export async function buildRuntimeActivitySnapshot({
   status,
   pipeline,
   toolDispatch,
+  hitlRequests,
   agentBudgetApprovals,
   sessionsService,
   agentFlowRuntime,
   cliAgentSessionRuntime,
+  subagentRuntime,
   logger,
 }: RuntimeActivitySnapshotDeps): Promise<SocketEvents['session:runtime_snapshot']> {
   const batch = await buildRuntimeActivitySnapshotBatch({
@@ -542,10 +602,12 @@ export async function buildRuntimeActivitySnapshot({
     statusesBySessionId: status ? { [sessionId]: status } : undefined,
     pipeline,
     toolDispatch,
+    hitlRequests,
     agentBudgetApprovals,
     sessionsService,
     agentFlowRuntime,
     cliAgentSessionRuntime,
+    subagentRuntime,
     logger,
   });
 

@@ -205,6 +205,11 @@ export class RunCliAgentTool {
       ),
     });
 
+    await this.cliAgentSessions.saveSessionMetadata(childSession.id, {
+      agentId,
+      workdir,
+    });
+
     request._emit?.('session:created', childSession);
     await this.cliAgentSessions.persistUserMessage(childSession.id, prompt);
     await this.cliAgentSessions.persistAssistantToolCallMessage(childSession.id, request.callId, {

@@ -26,13 +26,13 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
   return (
     <div
       className={`
-        group relative overflow-hidden rounded-lg select-none
+        group relative min-h-40 overflow-hidden rounded-xl select-none
         flex flex-col justify-end p-3
         transition-all duration-150 ease-out
-        hover:scale-[1.04] hover:brightness-110 hover:shadow-lg
-        active:scale-[0.97] active:brightness-95
+        hover:-translate-y-0.5 hover:brightness-105 hover:shadow-lg
+        active:translate-y-0 active:brightness-95
         animate-[fadeSlideIn_0.3s_ease-out_both]
-        ${size === 'wide' ? 'col-span-2 aspect-[2/1]' : 'aspect-square'}
+        ${size === 'wide' ? 'col-span-2' : ''}
       `}
       style={{
         backgroundColor: color.bg,
@@ -55,8 +55,8 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
       {/* Large background letter (only when no icon) */}
       {!iconUrl && (
         <span
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-black opacity-15 pointer-events-none leading-none"
-          style={{ fontSize: size === 'wide' ? '5rem' : '4rem' }}
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-black opacity-10 pointer-events-none leading-none"
+          style={{ fontSize: size === 'wide' ? '4rem' : '3.5rem' }}
         >
           {firstLetter}
         </span>
@@ -118,7 +118,7 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
           {name}
         </span>
         {description && (
-          <span className="mt-0.5 w-full break-words text-left text-[10px] leading-tight opacity-70">
+          <span className="mt-1 w-full break-words text-left text-xs leading-snug opacity-75">
             {description}
           </span>
         )}

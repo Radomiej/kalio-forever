@@ -61,16 +61,52 @@ function projectTurnsForRenderableMessages(
   });
 }
 
+function removeSupersededWorkflowEnvelopes(
+  messages: ChatMessage[],
+  turns: AgentTurn[],
+): ConversationTranscriptProjection {
+  const messagesById = new Map(messages.map((message) => [message.id, message]));
+  const turnHasTypedProjection = (turn: AgentTurn) => turn.items.some((item) =>
+    item.kind !== 'tool' && Boolean(messagesById.get(item.messageId)?.architectureRun));
+  const projectedPromptIds = new Set(
+    turns
+      .filter(turnHasTypedProjection)
+      .map((turn) => turn.promptMessageId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  if (projectedPromptIds.size === 0) return { messages, agentTurns: turns };
+
+  const removedMessageIds = new Set<string>();
+  const agentTurns = turns.filter((turn) => {
+    const superseded = turn.turnKind === 'workflow-envelope'
+      && !turn.done
+      && !turnHasTypedProjection(turn)
+      && Boolean(turn.promptMessageId && projectedPromptIds.has(turn.promptMessageId));
+    if (superseded) {
+      turn.items.forEach((item) => {
+        if (item.kind !== 'tool') removedMessageIds.add(item.messageId);
+      });
+    }
+    return !superseded;
+  });
+
+  return {
+    messages: messages.filter((message) => !removedMessageIds.has(message.id)),
+    agentTurns,
+  };
+}
+
 export function resolveRenderableConversationProjection({
   session,
   messages,
   agentTurns,
 }: ConversationTranscriptProjectionInput): ConversationTranscriptProjection {
+  const workflowProjection = removeSupersededWorkflowEnvelopes(messages, agentTurns);
   if (!session || architectureSessionSurfaceForSession(session) !== 'conversation-branch') {
-    return { messages, agentTurns };
+    return workflowProjection;
   }
 
-  const projectedMessages = messages.flatMap((message) => {
+  const projectedMessages = workflowProjection.messages.flatMap((message) => {
     const projected = sanitizeBranchMessageContent(message);
     return projected ? [projected] : [];
   });
@@ -78,6 +114,6 @@ export function resolveRenderableConversationProjection({
 
   return {
     messages: projectedMessages,
-    agentTurns: projectTurnsForRenderableMessages(agentTurns, keptMessageIds),
+    agentTurns: projectTurnsForRenderableMessages(workflowProjection.agentTurns, keptMessageIds),
   };
 }

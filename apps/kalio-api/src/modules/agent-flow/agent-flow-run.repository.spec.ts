@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { eq } from 'drizzle-orm';
 import Database from 'better-sqlite3';
 import type { AgentFlowRunSnapshot } from '@kalio/types';
 import type { DrizzleService } from '../../database/drizzle.service';
@@ -256,6 +257,9 @@ describe('AgentFlowRunRepository', () => {
         checkpoint text,
         result text,
         summary text,
+        revision integer NOT NULL DEFAULT 0,
+        lease_owner text,
+        lease_expires_at integer,
         created_at integer NOT NULL,
         updated_at integer NOT NULL,
         finished_at integer
@@ -317,6 +321,9 @@ describe('AgentFlowRunRepository', () => {
         checkpoint text,
         result text,
         summary text,
+        revision integer NOT NULL DEFAULT 0,
+        lease_owner text,
+        lease_expires_at integer,
         created_at integer NOT NULL,
         updated_at integer NOT NULL,
         finished_at integer
@@ -358,6 +365,69 @@ describe('AgentFlowRunRepository', () => {
       summary: 'Goal Guard completed with verified evidence.',
       finishedAt: 9,
     });
+    sqlite.close();
+  });
+
+  it('allows exactly one recovery claimant to acquire an expired lease', () => {
+    const sqlite = new Database(':memory:');
+    const db = drizzle(sqlite, { schema });
+    sqlite.exec(`
+      CREATE TABLE agent_flow_runs (
+        id text PRIMARY KEY NOT NULL,
+        parent_session_id text NOT NULL,
+        parent_tool_call_id text,
+        child_session_id text NOT NULL,
+        open_chat_session_id text,
+        open_graph_run_id text,
+        flow_definition_id text NOT NULL,
+        status text NOT NULL,
+        start_mode text NOT NULL,
+        return_mode text NOT NULL,
+        waiting_for_node_id text,
+        active_node_ids text,
+        completed_node_ids text,
+        active_phases text,
+        completed_phases text,
+        node_visit_counts text,
+        max_iterations integer,
+        return_to_orchestrator_count integer,
+        checkpoint text,
+        result text,
+        summary text,
+        revision integer NOT NULL DEFAULT 0,
+        lease_owner text,
+        lease_expires_at integer,
+        created_at integer NOT NULL,
+        updated_at integer NOT NULL,
+        finished_at integer
+      );
+      CREATE TABLE agent_flow_events (
+        id text PRIMARY KEY NOT NULL,
+        run_id text NOT NULL,
+        sequence integer NOT NULL,
+        type text NOT NULL,
+        status text,
+        message text NOT NULL,
+        event text NOT NULL,
+        created_at integer NOT NULL
+      );
+    `);
+    const drizzleService = { db } as unknown as DrizzleService;
+    const first = new AgentFlowRunRepository(drizzleService);
+    const second = new AgentFlowRunRepository(drizzleService);
+    first.saveSnapshot(snapshot());
+    const [recoverable] = first.findRecoverableRuns(Date.now());
+
+    expect(recoverable?.revision).toBe(0);
+    const firstClaim = first.claimRecovery('run-1', recoverable!.revision, 'worker-1', Date.now() + 60_000);
+    const secondClaim = second.claimRecovery('run-1', recoverable!.revision, 'worker-2', Date.now() + 60_000);
+    const row = db.select().from(schema.agentFlowRuns).where(
+      eq(schema.agentFlowRuns.id, 'run-1'),
+    ).get();
+
+    expect([firstClaim, secondClaim]).toEqual([true, false]);
+    expect(row).toMatchObject({ revision: 1, leaseOwner: 'worker-1' });
+    expect(first.findRecoverableRuns(Date.now())).toEqual([]);
     sqlite.close();
   });
 });

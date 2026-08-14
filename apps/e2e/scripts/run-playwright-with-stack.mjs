@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -84,8 +85,25 @@ function normalizedWindowsEnv(baseEnv) {
   }
 
   const nodeDir = dirname(process.execPath);
+  const programFilesNodeDir = resolve(baseEnv.ProgramFiles ?? 'C:/Program Files', 'nodejs');
+  const systemNodePath = resolve(programFilesNodeDir, 'node.exe');
+  const systemCorepackPath = resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js');
   const pathValue = baseEnv.PATH ?? baseEnv.Path ?? '';
-  env.Path = `${nodeDir};${pathValue}`;
+  const isUsingSystemNode = nodeDir.toLowerCase() === programFilesNodeDir.toLowerCase();
+  const pathHasCodexBundledRuntime = pathValue.toLowerCase().includes('.cache\\codex-runtimes')
+    || pathValue.toLowerCase().includes('.cache/codex-runtimes');
+  const systemOverrideDisabled = baseEnv.KALIO_PLAYWRIGHT_DISABLE_SYSTEM_NODE_OVERRIDE === '1';
+  const shouldPreferSystemNode = !systemOverrideDisabled
+    && existsSync(systemNodePath)
+    && (!isUsingSystemNode || pathHasCodexBundledRuntime);
+  const preferredNodeDir = shouldPreferSystemNode ? programFilesNodeDir : nodeDir;
+  env.Path = `${preferredNodeDir};${pathValue}`;
+  if (shouldPreferSystemNode) {
+    env.KALIO_PLAYWRIGHT_NODE_COMMAND = baseEnv.KALIO_PLAYWRIGHT_NODE_COMMAND ?? systemNodePath;
+  }
+  if (shouldPreferSystemNode && existsSync(systemCorepackPath)) {
+    env.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT = baseEnv.KALIO_PLAYWRIGHT_COREPACK_ENTRYPOINT ?? systemCorepackPath;
+  }
   return env;
 }
 
@@ -151,6 +169,8 @@ if (!memoryDbPathWasExplicit) {
 
 const playwrightBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${await getFreePort()}`;
 const playwrightApiOrigin = process.env.PLAYWRIGHT_API_ORIGIN ?? `http://127.0.0.1:${await getFreePort()}`;
+const playwrightControlPort = String(await getFreePort());
+const playwrightControlToken = randomBytes(32).toString('hex');
 const runId = `${Date.now()}-${process.pid}`;
 const playwrightStateDir = resolve(repoRoot, 'data/playwright-stack', runId);
 const playwrightDatabasePath = process.env.DATABASE_PATH ?? resolve(playwrightStateDir, 'kalio-e2e.db');
@@ -164,6 +184,8 @@ const stack = spawn(process.execPath, ['./scripts/start-playwright-stack.mjs'], 
     ...stackEnv,
     PLAYWRIGHT_BASE_URL: playwrightBaseUrl,
     PLAYWRIGHT_API_ORIGIN: playwrightApiOrigin,
+    KALIO_PLAYWRIGHT_CONTROL_PORT: playwrightControlPort,
+    KALIO_PLAYWRIGHT_CONTROL_TOKEN: playwrightControlToken,
     KALIO_PLAYWRIGHT_STATE_DIR: playwrightStateDir,
     DATABASE_PATH: playwrightDatabasePath,
     WORKSPACE_ROOT: playwrightWorkspaceRoot,
@@ -253,6 +275,8 @@ try {
     KALIO_PLAYWRIGHT_EXTERNAL_SERVER: '1',
     PLAYWRIGHT_BASE_URL: playwrightBaseUrl,
     PLAYWRIGHT_API_ORIGIN: playwrightApiOrigin,
+    KALIO_PLAYWRIGHT_CONTROL_PORT: playwrightControlPort,
+    KALIO_PLAYWRIGHT_CONTROL_TOKEN: playwrightControlToken,
     TEST_API_URL: `${playwrightApiOrigin}/api`,
     DATABASE_PATH: playwrightDatabasePath,
     WORKSPACE_ROOT: playwrightWorkspaceRoot,

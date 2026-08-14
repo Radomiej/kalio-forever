@@ -52,7 +52,9 @@ export function buildSessionLaunchRuntimeContext(
       return runtimeContext;
     }
 
-    const { projectPath: _projectPath, executionCwd: _executionCwd, ...nextArchitectureContext } = architectureContext;
+    const nextArchitectureContext = { ...architectureContext };
+    delete nextArchitectureContext.projectPath;
+    delete nextArchitectureContext.executionCwd;
     return Object.keys(nextArchitectureContext).length > 0
       ? { ...rest, architectureContext: nextArchitectureContext }
       : rest;
@@ -149,6 +151,7 @@ export function buildArchitectureRunContext(
   files: VFSFile[],
   activeToolNames: string[] = [],
   projectPath = '',
+  promptMessageId?: string,
 ): ArchitectureRuntimeContext {
   const projectScope = buildLaunchProjectScope(projectPath);
   const context: ArchitectureRuntimeContext = {
@@ -158,6 +161,9 @@ export function buildArchitectureRunContext(
     historySessionId: sessionId,
     sessionSurface: 'host-envelope',
   };
+  if (promptMessageId && promptMessageId.trim().length > 0) {
+    context.promptMessageId = promptMessageId.trim();
+  }
   if (projectScope) {
     Object.assign(context, projectScope);
   }
@@ -177,9 +183,10 @@ export function buildGoalGuardRunContext(
   files: VFSFile[],
   activeToolNames: string[] = [],
   projectPath = '',
+  promptMessageId?: string,
 ): Record<string, unknown> {
   return {
-    ...buildArchitectureRunContext(sessionId, files, activeToolNames, projectPath),
+    ...buildArchitectureRunContext(sessionId, files, activeToolNames, projectPath, promptMessageId),
     requireGoalMasterLoopProof: true,
     requireImplementerWriteProof: true,
   };

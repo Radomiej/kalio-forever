@@ -3,7 +3,12 @@ import type { ArchitectureRoleSlot } from '@kalio/types';
 import {
   createArchitectureBranchSessionRuntimeContext,
   createArchitectureRootSessionRuntimeContext,
+  getArchitectureHostSessionId,
   getArchitectureHistorySessionId,
+  getArchitectureParentSessionId,
+  getPersistedArchitectureHistorySessionId,
+  getPersistedArchitectureHostSessionId,
+  getPersistedArchitectureParentSessionId,
 } from './architecture-session-context';
 
 function roleSlot(overrides: Pick<ArchitectureRoleSlot, 'id' | 'label' | 'slotType'>): ArchitectureRoleSlot {
@@ -96,5 +101,16 @@ describe('architecture-session-context', () => {
     expect(getArchitectureHistorySessionId({
       hostSessionId: 'host-1',
     })).toBe('host-1');
+  });
+
+  it('keeps the Architect UI surface logical while excluding it from persisted session links', () => {
+    const context = { parentSessionId: 'architect-ui' };
+
+    expect(getArchitectureParentSessionId(context)).toBe('architect-ui');
+    expect(getArchitectureHostSessionId(context)).toBe('architect-ui');
+    expect(getArchitectureHistorySessionId(context)).toBe('architect-ui');
+    expect(getPersistedArchitectureParentSessionId(context)).toBeUndefined();
+    expect(getPersistedArchitectureHostSessionId(context)).toBeUndefined();
+    expect(getPersistedArchitectureHistorySessionId(context)).toBeUndefined();
   });
 });

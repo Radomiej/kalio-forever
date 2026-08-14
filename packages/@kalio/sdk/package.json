@@ -1,6 +1,6 @@
 {
   "name": "@kalio/sdk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,8 +11,8 @@
     }
   },
   "scripts": {
-    "typecheck": "pnpm --filter @kalio/types build && tsc --noEmit",
-    "build": "pnpm --filter @kalio/types build && tsc --build",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --build",
     "clean": "node ../../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo"
   },
   "dependencies": {

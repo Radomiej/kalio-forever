@@ -2266,6 +2266,7 @@ describe('ArchitectureRoleExecutorService', () => {
     const result = await service.execute({
       schema,
       run: createRun('subagent_execution'),
+      node: { id: 'router', label: 'Router', kind: 'router', roleSlotId: slot.id, x: 0, y: 0 },
       slot,
       branchSessionId: 'branch-1',
       personaId: slot.defaultPersonaId,
@@ -2276,6 +2277,8 @@ describe('ArchitectureRoleExecutorService', () => {
       targetNodeId: 'implementer',
       response: 'Fix the failed build without adding dependencies.',
     });
+    expect(result.message).toContain('handed off to implementer');
+    expect(result.message).toContain('Fix the failed build without adding dependencies.');
   });
 
   it('keeps structured finalize routerOutput without inventing route_to control data', async () => {
@@ -2577,6 +2580,74 @@ describe('ArchitectureRoleExecutorService', () => {
     const objective = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective ?? '';
     expect(objective).toContain('toolEvidence=4 result(s), successful=fs_list, fs_read');
     expect(objective).toContain('incomplete=Subagent exhausted its tool loop without producing a final answer.');
+  });
+
+  it('adds typed router handoff packets to downstream objectives', async () => {
+    const schema = getSchema();
+    const finalizer = schema.roleSlots.find((slot) => slot.slotType === 'finalizer');
+    if (!finalizer) throw new Error('Expected finalizer slot');
+    const subagentRuntime: SubagentRuntimePort = {
+      runSubagent: vi.fn(async () => ({
+        result: 'Finalizer result',
+        taskId: 'task-finalizer',
+        childSessionId: 'branch-finalizer',
+        parentSessionId: 'root-1',
+        vfsMode: 'shared' as const,
+        vfsSessionId: 'root-1',
+        copiedFiles: [],
+        durationMs: 1,
+      })),
+    };
+    const service = new ArchitectureRoleExecutorService(subagentRuntime);
+
+    await service.execute({
+      schema,
+      run: {
+        ...createRun('subagent_execution'),
+        branchSessionIds: { finalizer: 'branch-finalizer' },
+      },
+      slot: finalizer,
+      branchSessionId: 'branch-finalizer',
+      personaId: finalizer.defaultPersonaId,
+      incomingEvents: [
+        {
+          id: 'event-router',
+          runId: 'run-1',
+          sequence: 2,
+          type: 'router_decision',
+          message: 'Router selected final artifact.',
+          nodeId: 'router',
+          roleSlotId: 'router',
+          routerOutput: {
+            selectedStrategy: 'final-artifact',
+            mergedDecision: 'Finalize from accepted backend and frontend evidence.',
+            acceptedInputs: [
+              { fromSlot: 'backend', insight: 'API runtime state is typed.', whyAccepted: 'direct evidence' },
+              { fromSlot: 'frontend', insight: 'Execution graph uses backend projection.', whyAccepted: 'visible UI proof' },
+            ],
+            rejectedInputs: [
+              { fromSlot: 'shadow', insight: 'Rewrite the graph editor now.', whyRejected: 'outside release scope' },
+            ],
+            unresolvedConflicts: ['Need explicit release caveat for auth hardening.'],
+            risks: [{ risk: 'Frontend auth is weak.', mitigation: 'Call it out as a blocker before public release.', sourceSlot: 'frontend' }],
+            confidence: 0.7,
+            nextAction: 'route_to',
+            targetNodeId: 'final-artifact',
+            response: 'Write a Polish recommendation with evidence, risks, and next step.',
+          },
+          createdAt: 2,
+        },
+      ],
+    });
+
+    const objective = vi.mocked(subagentRuntime.runSubagent).mock.calls[0]?.[0].objective ?? '';
+    expect(objective).toContain('Incoming handoff packets:');
+    expect(objective).toContain('from=router target=final-artifact action=route_to confidence=70%');
+    expect(objective).toContain('response=Write a Polish recommendation with evidence, risks, and next step.');
+    expect(objective).toContain('accepted=backend: API runtime state is typed. (direct evidence) | frontend: Execution graph uses backend projection. (visible UI proof)');
+    expect(objective).toContain('rejected=shadow: Rewrite the graph editor now. (outside release scope)');
+    expect(objective).toContain('conflicts=Need explicit release caveat for auth hardening.');
+    expect(objective).toContain('risks=frontend: Frontend auth is weak. -> Call it out as a blocker before public release.');
   });
 
   it('gives judge slots a strict evidence-only continuation contract', async () => {

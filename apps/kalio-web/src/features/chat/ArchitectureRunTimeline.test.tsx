@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArchitectureChatRunSummary, ArchitectureGraphProjection, ChatSession } from '@kalio/types';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
+import { statusForStep } from './ArchitectureRunTimeline.stages';
 
 type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
   graphNodes?: ArchitectureGraphProjection['nodes'];
@@ -9,6 +10,46 @@ type ArchitectureRunWithGraph = ArchitectureChatRunSummary & {
 };
 
 describe('ArchitectureRunTimeline', () => {
+  it('does not derive running status from planned graph status alone', () => {
+    expect(statusForStep({
+      speaker: 'finalizer',
+      content: '',
+      nodeId: 'final-artifact',
+      plannedLabel: 'Finalizer',
+      plannedStatus: 'running',
+    })).toBe(null);
+  });
+
+  it('maps typed waiting and blocked lifecycle states before content fallbacks', () => {
+    expect(statusForStep({
+      speaker: 'router',
+      content: 'Router finished prose that should not mask waiting state.',
+      nodeId: 'router',
+      status: 'waiting_on_orchestrator',
+    })).toBe('waiting');
+
+    expect(statusForStep({
+      speaker: 'participant',
+      content: 'Branch completed its role-specific response.',
+      nodeId: 'analyst',
+      status: 'blocked',
+    })).toBe('failed');
+
+    expect(statusForStep({
+      speaker: 'participant',
+      content: '',
+      nodeId: 'analyst',
+      status: 'queued',
+    })).toBe('running');
+
+    expect(statusForStep({
+      speaker: 'finalizer',
+      content: '',
+      nodeId: 'final-artifact',
+      status: 'done',
+    })).toBe('completed');
+  });
+
   it('renders a partial trace step without throwing when typed projection fields are missing', () => {
     const partialStep = {
       content: 'Partial runtime event during reconnect.',
@@ -200,6 +241,111 @@ describe('ArchitectureRunTimeline', () => {
 
     expect(onOpenBranch).toHaveBeenCalledWith('arch-run-router-session-router');
     expect(onOpenStep).not.toHaveBeenCalled();
+  });
+
+  it('renders terminal graph node statuses from typed projection without falling back to pending text', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-terminal-status',
+      schemaId: 'strategic-decision-council',
+      status: 'failed',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'router',
+          label: 'Router',
+          kind: 'router',
+          status: 'failed',
+          eventIds: ['run-terminal-status:event:1'],
+        },
+        {
+          id: 'final-artifact',
+          label: 'Finalizer',
+          kind: 'artifact',
+          status: 'cancelled',
+          eventIds: [],
+        },
+      ],
+      graphEdges: [
+        { id: 'edge-final', fromNodeId: 'router', toNodeId: 'final-artifact' },
+      ],
+      trace: [],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-router')).toHaveAttribute('data-status', 'failed');
+    expect(screen.getByTestId('architecture-route-router')).toHaveTextContent('failed');
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'cancelled');
+    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('cancelled');
+    expect(screen.getByTestId('architecture-route-finalizer')).not.toHaveTextContent('pending');
+  });
+
+  it('does not reuse completed action copy for cancelled trace steps', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-cancelled-copy',
+      schemaId: 'Architecture Debate',
+      status: 'cancelled',
+      routeHops: [],
+      trace: [
+        {
+          speaker: 'participant',
+          nodeId: 'analyst',
+          content: 'Branch completed its role-specific response.',
+          actionSummary: 'Branch completed its role-specific response.',
+          status: 'cancelled',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    const agentCard = screen.getByTestId('architecture-route-agent');
+    expect(agentCard).toHaveAttribute('data-status', 'cancelled');
+    expect(agentCard).toHaveTextContent('Branch was cancelled before producing its role-specific response.');
+    expect(agentCard).not.toHaveTextContent('Branch completed its role-specific response.');
+  });
+
+  it('does not reuse completed finalizer copy for cancelled finalizer steps', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-cancelled-finalizer-copy',
+      schemaId: 'Architecture Debate',
+      status: 'cancelled',
+      routeHops: [],
+      trace: [
+        {
+          speaker: 'finalizer',
+          nodeId: 'final-artifact',
+          content: 'Final answer produced from the routed graph outputs.',
+          actionSummary: 'Final answer produced from the routed graph outputs.',
+          status: 'cancelled',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    const finalizerCard = screen.getByTestId('architecture-route-finalizer');
+    expect(finalizerCard).toHaveAttribute('data-status', 'cancelled');
+    expect(finalizerCard).toHaveTextContent('Finalizer was cancelled before producing the final answer.');
+    expect(finalizerCard).not.toHaveTextContent('Final answer produced from the routed graph outputs.');
   });
 
   it('renders the orchestrator actor label while keeping router semantics in secondary metadata', () => {
@@ -420,7 +566,7 @@ describe('ArchitectureRunTimeline', () => {
     expect(onOpenStep).not.toHaveBeenCalled();
   });
 
-  it('renders planned pending stages from graph nodes before the trace completes', () => {
+  it('does not render unevidenced pending finalizer while earlier nodes are still running', () => {
     const run: ArchitectureRunWithGraph = {
       runId: 'run-live',
       schemaId: 'Strategic Decision Council',
@@ -484,14 +630,64 @@ describe('ArchitectureRunTimeline', () => {
 
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Sub-agents 5');
-    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-route-shell')).not.toHaveTextContent('Finalizer');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('Parallel sub-agents');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('pending');
     expect(screen.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'running');
     expect(screen.getAllByTestId('architecture-route-router')).toHaveLength(2);
-    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
-    expect(screen.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'pending');
+    expect(screen.queryByTestId('architecture-route-finalizer')).toBeNull();
+  });
+
+  it('does not treat preallocated finalizer session id as runtime evidence', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-preallocated-finalizer',
+      schemaId: 'Lab Bug Hunter',
+      status: 'running',
+      routeHops: [],
+      graphNodes: [
+        {
+          id: 'orchestrator',
+          label: 'Orchestrator',
+          kind: 'router',
+          status: 'running',
+          hasRuntimeEvidence: true,
+          eventIds: ['run-preallocated-finalizer:event:1'],
+        },
+        {
+          id: 'final-artifact',
+          label: 'Finalizer',
+          kind: 'artifact',
+          status: 'running',
+          sessionId: 'arch-run-preallocated-finalizer-final-artifact',
+          hasRuntimeEvidence: false,
+          eventIds: [],
+        },
+      ],
+      graphEdges: [
+        { id: 'e1', fromNodeId: 'orchestrator', toNodeId: 'final-artifact' },
+      ],
+      trace: [
+        {
+          speaker: 'router',
+          content: 'Orchestrator is still routing.',
+          eventId: 'run-preallocated-finalizer:event:1',
+          nodeId: 'orchestrator',
+          nextNodeId: 'final-artifact',
+        },
+      ],
+    };
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
+    expect(screen.queryByTestId('architecture-route-finalizer')).toBeNull();
   });
 
   it('renders graph-only pending stages before any trace messages exist', () => {
@@ -536,8 +732,8 @@ describe('ArchitectureRunTimeline', () => {
 
     expect(screen.getByText('running / 8 graph steps')).toBeTruthy();
     expect(screen.getByTestId('architecture-route-parallel-agents')).toHaveTextContent('5');
-    expect(screen.getAllByText('pending').length).toBeGreaterThanOrEqual(6);
-    expect(screen.getByTestId('architecture-route-finalizer')).toHaveTextContent('pending');
+    expect(screen.getAllByText('pending').length).toBeGreaterThanOrEqual(5);
+    expect(screen.queryByTestId('architecture-route-finalizer')).toBeNull();
   });
 
   it('treats precreated placeholder branch ids as non-openable when they are not in the known branch set', () => {

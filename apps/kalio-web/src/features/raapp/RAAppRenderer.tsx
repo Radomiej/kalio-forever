@@ -137,14 +137,16 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
     );
   }
 
-  const pendingApprovals = block.pendingApprovals ?? result?.pendingApprovals ?? [];
-  const nativeResults = block.nativeResults ?? result?.nativeResults ?? [];
+  const nativeResults = result?.nativeResults ?? block.nativeResults ?? [];
+  const pendingApprovals = result?.nativeResults
+    ? result.pendingApprovals ?? []
+    : block.pendingApprovals ?? result?.pendingApprovals ?? [];
 
   const content = result?.renderedContent ?? block.content;
 
   const hitlOverlay =
     pendingApprovals.length > 0 ? (
-      <RaAppHITLOverlay pendingApprovals={pendingApprovals} />
+      <RaAppHITLOverlay pendingApprovals={pendingApprovals} sessionId={sessionId} />
     ) : null;
   const nativeResultsPanel = <NativeResultsPanel results={nativeResults} />;
 

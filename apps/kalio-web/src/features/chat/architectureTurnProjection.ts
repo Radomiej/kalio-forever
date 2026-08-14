@@ -120,16 +120,22 @@ export function resolveArchitectureRunTurnUpdate({
 }: ResolveArchitectureRunTurnUpdateOptions): ResolvedArchitectureRunTurnUpdate {
   const projectionDone = (result.run.status !== 'queued' && result.run.status !== 'running')
     || result.agentFlowStatus === 'waiting_on_orchestrator';
+  const turnId = `architecture-turn-${result.run.id}`;
+  const linkedProjectionMessages = projection.messages.map((message) => ({
+    ...message,
+    turnId,
+    promptMessageId,
+  }));
   const staleWorkflowEnvelopeMessageIds = workflowEnvelopeMessageIdsForPrompt(currentTurns, promptMessageId);
   staleWorkflowEnvelopeMessageIds.add(pendingAssistantMessageId);
   const messages = [
     ...currentMessages
       .filter((message) => !staleWorkflowEnvelopeMessageIds.has(message.id))
       .filter((message) => !isArchitectureRunProjectionMessage(message, result.run.id)),
-    ...projection.messages,
+    ...linkedProjectionMessages,
   ];
   const nextTurn: AgentTurn = {
-    id: `architecture-turn-${result.run.id}`,
+    id: turnId,
     sessionId,
     promptMessageId,
     turnKind: projection.turnKind,

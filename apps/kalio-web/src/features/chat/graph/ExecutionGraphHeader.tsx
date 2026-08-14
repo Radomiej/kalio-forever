@@ -1,9 +1,13 @@
 import { Maximize2, MoreHorizontal, RefreshCw, Wrench, ZoomIn, ZoomOut, Zap } from 'lucide-react';
 import { useState } from 'react';
 import type { ToolActivity } from '../../../store/agentStore';
+import type { Project } from '@kalio/types';
 import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import type { ExecutionGraphFocusMode } from './executionGraphFocus';
 import type { ExecutionGraphHydrationStatus } from './executionGraphHydration';
+import type { TalkView } from '../../../App.types';
+import { TalkViewSwitcher } from '../TalkViewSwitcher';
+import { ProjectPicker } from '../../projects/ProjectPicker';
 
 interface ExecutionGraphHeaderProps {
   cardDensity: GraphCardDensity;
@@ -21,6 +25,11 @@ interface ExecutionGraphHeaderProps {
   sessionTitleById: Map<string, string>;
   showFocusToggle: boolean;
   zoom: number;
+  talkView?: TalkView;
+  onTalkViewChange?: (view: TalkView) => void;
+  projectId?: string;
+  onProjectChange?: (project: Project) => void;
+  projectPickerDisabled?: boolean;
 }
 
 function formatLoopLabel(
@@ -56,7 +65,13 @@ export function ExecutionGraphHeader({
   sessionTitleById,
   showFocusToggle,
   zoom,
+  talkView,
+  onTalkViewChange = () => undefined,
+  projectId,
+  onProjectChange,
+  projectPickerDisabled = false,
 }: ExecutionGraphHeaderProps) {
+  talkView ??= 'graph';
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -89,8 +104,20 @@ export function ExecutionGraphHeader({
   return (
     <>
       <div className="px-3 py-2 border-b border-base-300 bg-base-100 flex flex-wrap items-center justify-between gap-2 shrink-0">
-        <div>
+        <div className="flex min-w-0 items-center gap-3">
           <h2 className="text-lg font-semibold tracking-tight">Execution Graph</h2>
+          <TalkViewSwitcher value={talkView} onChange={onTalkViewChange} />
+          {projectId && onProjectChange && (
+            <div className="hidden w-56 md:block">
+              <ProjectPicker
+                value={projectId}
+                onChange={onProjectChange}
+                disabled={projectPickerDisabled}
+                testId="graph-header-project-picker"
+                label="Projekt"
+              />
+            </div>
+          )}
         </div>
 
         <div className="relative flex flex-wrap items-center gap-1.5 justify-end">

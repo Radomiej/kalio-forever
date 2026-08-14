@@ -64,8 +64,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
     );
     const insertMessage = db.prepare(
       `INSERT INTO messages (
-        id, session_id, role, content, thinking, tool_calls, tool_call_id, attachments, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, session_id, role, content, thinking, tool_calls, tool_call_id, turn_id, prompt_message_id, attachments, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     const seed = db.transaction(() => {
@@ -112,6 +112,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        null,
+        null,
         stamp + 10,
       );
       insertMessage.run(
@@ -122,6 +124,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        `master-turn-1-${stamp}`,
+        `master-user-1-${stamp}`,
         null,
         stamp + 20,
       );
@@ -138,6 +142,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        null,
+        null,
         stamp + 30,
       );
       insertMessage.run(
@@ -145,6 +151,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         fixture.masterSessionId,
         'user',
         'dodaj obrazek to designu',
+        null,
+        null,
         null,
         null,
         null,
@@ -160,6 +168,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        null,
+        null,
         stamp + 50,
       );
       insertMessage.run(
@@ -170,6 +180,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        `master-turn-2-${stamp}`,
+        `master-user-3-${stamp}`,
         null,
         stamp + 60,
       );
@@ -186,6 +198,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        null,
+        null,
         stamp + 70,
       );
 
@@ -194,6 +208,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         fixture.olderChildSessionId,
         'user',
         'Create a single-page coffee landing page with warm colors.',
+        null,
+        null,
         null,
         null,
         null,
@@ -208,6 +224,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        `older-child-turn-${stamp}`,
+        `older-child-user-${stamp}`,
         null,
         stamp + 120,
       );
@@ -217,6 +235,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         fixture.newerChildSessionId,
         'user',
         fixture.newerChildPrompt,
+        null,
+        null,
         null,
         null,
         null,
@@ -231,6 +251,8 @@ function seedOrderingFixture(): SeededOrderingFixture {
         null,
         null,
         null,
+        `newer-child-turn-${stamp}`,
+        `newer-child-user-${stamp}`,
         null,
         stamp + 320,
       );

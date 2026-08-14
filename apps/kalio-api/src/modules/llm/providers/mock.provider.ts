@@ -23,6 +23,7 @@ import {
   hasTool,
   isFastMockMode,
   mockScriptDelay,
+  MOCK_ARCHITECTURE_ROUTER_MALFORMED_OUTPUT_TRIGGER,
   MOCK_ERROR_429_MESSAGE,
   MOCK_ERROR_429_TRIGGER,
   MOCK_FS_WRITE_TRIGGER,
@@ -52,7 +53,26 @@ export class MockLLMProvider implements ILLMProvider {
   ): Promise<LLMToolCall[]> {
     const { sessionId, messageId, onChunk, abortSignal } = options;
     const lastMessage = getLastUserMessageText(messages);
+    if (
+      options.structuredOutput?.name === 'architecture_router_output'
+      && lastMessage.includes(MOCK_RUN_SUBAGENT_HITL_TRIGGER)
+      && hasTool(tools, 'run_subagent')
+      && !hasPriorToolResult(messages, 'run_subagent')
+      && !hasPriorAssistantToolCall(messages, 'run_subagent')
+    ) {
+      const toolCall = createRunSubagentToolCall(false);
+      emitMockToolArgProgress(options, toolCall);
+      return [toolCall];
+    }
     if (options.structuredOutput?.name === 'architecture_router_output') {
+      if (lastMessage.includes(MOCK_ARCHITECTURE_ROUTER_MALFORMED_OUTPUT_TRIGGER)) {
+        options.onStructuredOutput?.({
+          nextAction: 'route_to',
+          targetNodeId: 123,
+          response: 'Mock malformed router structured output.',
+        });
+        return [];
+      }
       const targetNodeId = firstAvailableNextNode(lastMessage);
       options.onStructuredOutput?.({
         selectedStrategy: targetNodeId ?? 'finalize',
@@ -74,6 +94,26 @@ export class MockLLMProvider implements ILLMProvider {
         blockingReason: null,
         evidence: ['Mock structured final artifact.'],
         answer: 'Mock structured final artifact.',
+      });
+      return [];
+    }
+    if (options.structuredOutput?.name === 'data_analyst_query_plan') {
+      options.onStructuredOutput?.(createMockDataAnalystPlan(lastMessage));
+      return [];
+    }
+    if (options.structuredOutput?.name === 'data_analyst_explanation') {
+      options.onStructuredOutput?.({
+        explanation: [
+          '## Analiza i wnioski',
+          'Mock Kalio potwierdziło wykonanie deterministycznej analizy w lokalnym DuckDB.',
+          '',
+          '## Kluczowe fakty',
+          '- Wyniki pochodzą z backendowego silnika obliczeniowego, nie z obliczeń LLM.',
+          '',
+          '## Rekomendowane pytania szczegółowe',
+          '- Jak wynik zmienia się w czasie?',
+          '- Które segmenty odpowiadają za największą część wyniku?',
+        ].join('\n'),
       });
       return [];
     }
@@ -122,6 +162,10 @@ export class MockLLMProvider implements ILLMProvider {
         if (abortSignal?.aborted) return [];
         if (action.kind === 'wait') {
           await (this.options.delay ?? mockScriptDelay)(action.ms);
+          continue;
+        }
+        if (action.kind === 'hold') {
+          await (this.options.delay ?? defaultDelay)(action.ms);
           continue;
         }
         onChunk({ delta: action.text, done: false, sessionId, messageId });
@@ -264,4 +308,42 @@ function firstAvailableNextNode(message: string): string | null {
   const match = /Available next nodes:\s*([^\n]+)/.exec(message);
   const first = match?.[1]?.split(',')[0]?.trim();
   return first && /^[A-Za-z0-9_.:-]+$/.test(first) ? first : null;
+}
+
+function createMockDataAnalystPlan(message: string): Record<string, unknown> {
+  const dimension = extractSemanticColumn(message, 'dimension|date')
+    ?? extractSemanticColumn(message, 'id')
+    ?? 'Dimension';
+  const targetMetric = extractSemanticColumn(message, 'measure')
+    ?? extractSemanticColumn(message, 'id')
+    ?? 'Metric';
+  const aggregation = extractSemanticAggregation(message, targetMetric) ?? 'sum';
+  const quotedDimension = `"${dimension.replace(/"/g, '""')}"`;
+  const quotedMetric = `"${targetMetric.replace(/"/g, '""')}"`;
+
+  return {
+    title: `Analiza ${targetMetric} według ${dimension}`,
+    targetMetric,
+    dimension,
+    aggregation,
+    chartType: 'bar',
+    filters: [],
+    dateColumn: null,
+    dateGrain: null,
+    sql: `SELECT ${quotedDimension}, ${aggregation.toUpperCase()}(${quotedMetric}) AS ${quotedMetric} FROM dataset GROUP BY ${quotedDimension}`,
+  };
+}
+
+function extractSemanticColumn(message: string, semanticTypes: string): string | null {
+  const match = new RegExp(`^- "([^"]+)" .*typ=(${semanticTypes})\\b`, 'm').exec(message);
+  return match?.[1] ?? null;
+}
+
+function extractSemanticAggregation(message: string, column: string): string | null {
+  const escapedColumn = column.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(
+    `^- "${escapedColumn}" .*agregacja=(sum|avg|count|min|max)\\b`,
+    'm',
+  ).exec(message);
+  return match?.[1] ?? null;
 }

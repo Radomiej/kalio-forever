@@ -8,6 +8,7 @@ import { ImageHydratorService } from './image-hydrator.service';
 import { prepareHistoryForLLM, sanitizeToolResultContentForLLM } from './llm-history.utils';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { CredentialsService } from '../credentials/credentials.service';
+import { RunJournalService } from './run-journal.service';
 
 /**
  * Manages chat message persistence and history conversion.
@@ -19,6 +20,7 @@ export class SessionManagerService {
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
     private readonly imageHydrator: ImageHydratorService,
     private readonly credentialsService: CredentialsService,
+    private readonly runJournal: RunJournalService,
   ) {}
 
   private buildTurnLink(
@@ -38,7 +40,7 @@ export class SessionManagerService {
 
   async loadHistory(
     sessionId: string,
-    options?: { historySessionId?: string },
+    options?: { historySessionId?: string; excludeTurnIds?: ReadonlySet<string> },
   ): Promise<ContextManagedLLMMessage[]> {
     const historySessionId = options?.historySessionId;
     const sessionHistories = historySessionId && historySessionId !== sessionId
@@ -56,6 +58,7 @@ export class SessionManagerService {
         messageIndex,
         message,
       })))
+      .filter((entry) => !entry.message.turnId || !options?.excludeTurnIds?.has(entry.message.turnId))
       .sort((left, right) => {
         if (left.message.createdAt !== right.message.createdAt) {
           return left.message.createdAt - right.message.createdAt;
@@ -76,7 +79,14 @@ export class SessionManagerService {
     sessionId: string,
     options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string },
   ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean }> {
-    const rawHistory = await this.loadHistory(sessionId, { historySessionId: options.historySessionId });
+    const historySessionIds = options.historySessionId && options.historySessionId !== sessionId
+      ? [options.historySessionId, sessionId]
+      : [sessionId];
+    const excludeTurnIds = await this.runJournal.getNonReplayableTurnIds(historySessionIds);
+    const rawHistory = await this.loadHistory(sessionId, {
+      historySessionId: options.historySessionId,
+      excludeTurnIds,
+    });
     const contextWindowSize = await this.credentialsService.getContextWindowSize();
     const prepared = prepareHistoryForLLM(
       rawHistory,
@@ -137,9 +147,9 @@ export class SessionManagerService {
     sessionId: string,
     content: string,
     attachments?: ChatAttachment[],
-    turnLink?: { turnId?: string },
+    turnLink?: { turnId?: string; messageId?: string },
   ): Promise<ChatMessage> {
-    const messageId = nanoid();
+    const messageId = turnLink?.messageId ?? nanoid();
     const msg: ChatMessage = {
       id: messageId,
       sessionId,

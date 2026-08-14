@@ -112,6 +112,8 @@ export function ArchitectPage() {
       || Object.keys(contextPolicyOverrides).length > 0
       || Object.keys(graphDraft.nodePositions).length > 0
       || Object.keys(graphDraft.nodeBehaviors).length > 0
+      || Object.keys(graphDraft.nodeMaxToolAttempts).length > 0
+      || Object.keys(graphDraft.nodeToolOverrides).length > 0
       || graphDraft.addedNodes.length > 0
       || graphDraft.edges !== null,
     [contextPolicyOverrides, graphDraft, nodeKindOverrides, personaOverrides],
@@ -121,6 +123,8 @@ export function ArchitectPage() {
       || Object.keys(contextPolicyOverrides).length > 0
       || Object.keys(graphDraft.nodePositions).length > 0
       || Object.keys(graphDraft.nodeBehaviors).length > 0
+      || Object.keys(graphDraft.nodeMaxToolAttempts).length > 0
+      || Object.keys(graphDraft.nodeToolOverrides).length > 0
       || graphDraft.addedNodes.length > 0
       || graphDraft.edges !== null,
     [contextPolicyOverrides, graphDraft, nodeKindOverrides],
@@ -620,26 +624,30 @@ export function ArchitectPage() {
           collapsed={registryCollapsed}
           onCollapsedChange={setRegistryCollapsed}
         />
-        <div className="relative flex min-w-0 flex-1 overflow-hidden">
-          <ArchitectGraphCanvas
-            schema={editableSchema}
-            selectedNodeId={selectedNodeId}
-            selectedSlotId={selectedSlotId}
-            onSelectNode={selectNode}
-            onSelectSlot={(nodeId, slotId) => {
-              setSelectedNodeId(nodeId);
-              setSelectedSlotId(slotId);
-            }}
-            onMoveNode={moveGraphNode}
-            onAddNode={addGraphNode}
-            onToggleEdge={toggleGraphEdge}
-            onAutoLayout={autoLayoutGraph}
-            routeHops={run?.graph.routeHops}
-            runtimeMode={running}
-          />
-          <div className={`absolute bottom-3 z-10 overflow-hidden rounded-lg border border-base-300/80 bg-base-100/95 shadow-xl backdrop-blur ${
-            showProjectionDetails ? 'left-3 right-3 max-h-[min(22rem,calc(100%-1.5rem))]' : 'left-3 w-max max-w-[calc(100%-1.5rem)]'
-          }`}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <ArchitectGraphCanvas
+              schema={editableSchema}
+              selectedNodeId={selectedNodeId}
+              selectedSlotId={selectedSlotId}
+              onSelectNode={selectNode}
+              onSelectSlot={(nodeId, slotId) => {
+                setSelectedNodeId(nodeId);
+                setSelectedSlotId(slotId);
+              }}
+              onMoveNode={moveGraphNode}
+              onAddNode={addGraphNode}
+              onToggleEdge={toggleGraphEdge}
+              onAutoLayout={autoLayoutGraph}
+              routeHops={run?.graph.routeHops}
+              runtimeMode={running}
+            />
+          </div>
+          <div
+            className={`shrink-0 overflow-hidden border-t border-base-300/70 bg-base-100/95 ${
+              showProjectionDetails ? 'max-h-[22rem]' : ''
+            }`}
+            data-testid="architect-projection-region"
           >
             <ArchitectRunProjection
               activeTab={projectionTab}

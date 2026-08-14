@@ -108,6 +108,42 @@ describe('ToolPanel', () => {
     expect(screen.getByTitle('MCP serverKey: toml::docs')).toBeInTheDocument();
   });
 
+  it('filters tools by name, description, and MCP server key', async () => {
+    apiGet.mockResolvedValue({
+      data: [
+        makeTool({ name: 'web_search', description: 'Search the public web' }),
+        makeTool({ name: 'vfs_read', description: 'Read workspace files' }),
+        makeTool({ name: 'mcp_toml::docs_search', description: 'Look up references', serverKey: 'toml::docs' }),
+      ],
+    });
+
+    render(<ToolPanel />);
+    await screen.findByText('3 tools');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search tools' }), {
+      target: { value: 'workspace' },
+    });
+
+    expect(screen.getByText('vfs_read')).toBeInTheDocument();
+    expect(screen.queryByText('web_search')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search tools' }), {
+      target: { value: 'toml::docs' },
+    });
+
+    expect(screen.getByText('mcp_toml::docs_search')).toBeInTheDocument();
+  });
+
+  it('shows confirmation state with text as well as an icon', async () => {
+    apiGet.mockResolvedValue({
+      data: [makeTool({ name: 'dangerous_tool', requiresConfirmation: true })],
+    });
+
+    render(<ToolPanel />);
+
+    expect(await screen.findByText('Confirmation')).toBeInTheDocument();
+  });
+
   it('reverts the optimistic toggle when the patch call fails', async () => {
     apiGet.mockResolvedValue({
       data: [makeTool({ name: 'dangerous_tool', requiresConfirmation: false })],

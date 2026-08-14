@@ -227,8 +227,71 @@ describe('agentRuntimeSelectors', () => {
         label: 'Architecture Debate: Orchestrator',
         detail: 'Backend restarted during LLM work. Retry is safe from the current transcript.',
         actionable: false,
+        occurredAt: 2,
       }),
     ]);
+  });
+
+  it('groups root and child failures for one typed architecture run and navigates to its root session', () => {
+    const architectureContext = {
+      architectureRunId: 'architecture-run-1',
+      hostSessionId: 'host-session',
+    };
+    const rootSession = {
+      ...makeSession('architecture-root', 'Architecture: Review project'),
+      runtimeContext: {
+        runtimeKind: 'agent-flow-root' as const,
+        architectureContext,
+      },
+    };
+    const childSession = {
+      ...makeSession('architecture-child', 'Architecture Debate: Orchestrator'),
+      kind: 'subagent' as const,
+      parentSessionId: rootSession.id,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch' as const,
+        architectureContext,
+      },
+    };
+
+    const items = selectRuntimeAttentionItems({
+      sessions: [makeSession('host-session', 'New Chat'), rootSession, childSession],
+      sessionMessages: {
+        [rootSession.id]: [],
+        [childSession.id]: [],
+      },
+      runtimeActivitySnapshots: {
+        [rootSession.id]: makeRuntimeSnapshot(rootSession.id, {
+          active: false,
+          run: {
+            ...makeRuntimeSnapshot(rootSession.id).run!,
+            sessionId: rootSession.id,
+            status: 'failed',
+            errorCode: 'PROVIDER_UNAVAILABLE',
+            updatedAt: 30,
+          },
+        }),
+        [childSession.id]: makeRuntimeSnapshot(childSession.id, {
+          active: false,
+          run: {
+            ...makeRuntimeSnapshot(childSession.id).run!,
+            sessionId: childSession.id,
+            status: 'failed',
+            errorCode: 'PROVIDER_UNAVAILABLE',
+            updatedAt: 20,
+          },
+        }),
+      },
+    });
+
+    expect(items).toEqual([expect.objectContaining({
+      id: 'runtime_error:architecture:architecture-run-1',
+      sessionId: rootSession.id,
+      navigationSessionId: rootSession.id,
+      sourceSessionIds: [childSession.id, rootSession.id],
+      label: 'Architecture: Review project',
+      occurredAt: 30,
+    })]);
   });
 
   it('builds running loop summaries from runtime snapshots when legacy loops are missing', () => {
@@ -751,6 +814,61 @@ describe('agentRuntimeSelectors', () => {
         }],
       },
     })).toBe(2);
+  });
+
+  it('counts RA-App pending approvals from structured tool results', () => {
+    expect(selectPendingApprovalCount({
+      sessionMessages: {
+        'session-raapp': [
+          makeToolResultMessage('session-raapp', {
+            status: 'ready',
+            type: 'html',
+            mode: 'interactive',
+            content: '<p>Approve write</p>',
+            pendingApprovals: [{
+              id: 'raapp-approval-1',
+              system: 'vfs_write',
+              displayLabel: 'write architecture.md',
+              args: { path: 'architecture.md' },
+            }],
+          }),
+        ],
+      },
+    })).toBe(1);
+  });
+
+  it('projects RA-App pending approvals ahead of passive runtime attention', () => {
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots: {
+        'session-raapp': makeWaitingRuntimeSnapshot('session-raapp'),
+      },
+      sessions: [makeSession('session-raapp', 'RA-App delivery')],
+      sessionMessages: {
+        'session-raapp': [
+          makeToolResultMessage('session-raapp', {
+            status: 'ready',
+            type: 'html',
+            mode: 'interactive',
+            content: '<p>Approve write</p>',
+            pendingApprovals: [{
+              id: 'raapp-approval-1',
+              system: 'vfs_write',
+              displayLabel: 'write architecture.md',
+              args: { path: 'architecture.md' },
+            }],
+          }),
+        ],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        id: 'raapp:session-raapp:raapp-approval-1',
+        sessionId: 'session-raapp',
+        kind: 'hitl',
+        label: 'RA-App approval',
+        detail: 'write architecture.md',
+        actionable: true,
+      }),
+    ]);
   });
 
   it('keeps actionable approvals ahead of passive runtime waiting and avoids duplicate attention rows for the same session', () => {

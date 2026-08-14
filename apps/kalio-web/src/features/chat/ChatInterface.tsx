@@ -13,15 +13,15 @@ import { useContextPreview } from './hooks/useContextPreview';
 import { useChatSessionActivation } from './hooks/useChatSessionActivation';
 import { useChatSocketEvents } from './hooks/useChatSocketEvents';
 import { useChatComposerActions } from './hooks/useChatComposerActions';
+import { useAwaitingFirstChunk } from './hooks/useAwaitingFirstChunk';
 import { buildTurnsFromHistory, computeAnsweredCallIds, buildConversationTimeline, mergeFetchedMessages } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
+import type { TalkView } from '../../App.types';
 import { getArchitectureSchemas } from '../architect/architect.api';
+import { ARCHITECTURE_REGISTRY_CHANGED_EVENT } from '../architect/architectureRegistryEvents';
 import type { ArchitectSchema } from '../architect/architect.types';
-import {
-  getLaunchProjectPath,
-  persistSessionLaunchPersona,
-} from './launch/launchContext';
+import { persistSessionLaunchPersona } from './launch/launchContext';
 import { useLaunchPersonas } from './launch/useLaunchPersonas';
 import {
   buildCopiedChatText,
@@ -37,6 +37,8 @@ import { resolveRenderableConversationProjection } from './conversationTranscrip
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
 import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
 import { useChatAutoScroll } from './useChatAutoScroll';
+import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
+import { useChatProjectSelection } from './useChatProjectSelection';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -79,7 +81,12 @@ function shouldRequestGeneratedTitle(
   return false;
 }
 
-export function ChatInterface() {
+export interface ChatInterfaceProps {
+  talkView?: TalkView;
+  onTalkViewChange?: (view: TalkView) => void;
+}
+
+export function ChatInterface({ talkView = 'conversation', onTalkViewChange = () => undefined }: ChatInterfaceProps = {}) {
   const {
     messages, activeSessionId, sessions, addMessage, setMessages,
     agentTurns, setAgentTurns, updateAgentTurn, updateSession,
@@ -128,25 +135,43 @@ export function ChatInterface() {
     eventBus.connected ? 'connected' : 'connecting',
   );
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
-  const [awaitingFirstChunk, setAwaitingFirstChunk] = useState(false);
+  const [awaitingFirstChunk, setAwaitingFirstChunk] = useAwaitingFirstChunk();
   const lastSentContentRef = useRef<string>('');
   const [architectures, setArchitectures] = useState<ArchitectSchema[]>([]);
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
-  const [projectPath, setProjectPath] = useState('');
   const [draftUserMessage, setDraftUserMessage] = useState('');
   const [contextPreviewRefreshKey, setContextPreviewRefreshKey] = useState(0);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
 
-  useEffect(() => {
-    setProjectPath(getLaunchProjectPath(activeSession?.runtimeContext));
-  }, [activeSession?.runtimeContext, activeSessionId]);
+  const { projectPath, setProjectPath, projectId, handleProjectChange } = useChatProjectSelection({
+    activeSession,
+    activeSessionId,
+    updateSession,
+    onError: setError,
+  });
 
-  useEffect(() => {
+  const refreshArchitectures = useCallback(() => {
     getArchitectureSchemas()
-      .then((schemas) => setArchitectures(schemas))
+      .then((schemas) => {
+        setArchitectures(schemas);
+        setSelectedArchitectureId((current) => (
+          current === 'single-chat' || schemas.some((schema) => schema.id === current)
+            ? current
+            : 'single-chat'
+        ));
+      })
       .catch((err: unknown) => console.error('[ChatInterface] architecture registry load failed', err));
   }, []);
+
+  useEffect(() => {
+    refreshArchitectures();
+  }, [refreshArchitectures]);
+
+  useEffect(() => {
+    window.addEventListener(ARCHITECTURE_REGISTRY_CHANGED_EVENT, refreshArchitectures);
+    return () => window.removeEventListener(ARCHITECTURE_REGISTRY_CHANGED_EVENT, refreshArchitectures);
+  }, [refreshArchitectures]);
 
   useEffect(() => {
     apiClient
@@ -173,6 +198,9 @@ export function ChatInterface() {
     renderableConversationProjection.messages,
     renderableConversationProjection.agentTurns,
   );
+  const activeSessionHasVisibleAgentTurn = activeSessionId
+    ? conversationTimeline.some((entry) => entry.kind === 'agent_turn' && entry.turn.sessionId === activeSessionId)
+    : false;
   const liveTurnState = resolveLiveTurnState({
     sessionId: activeSessionId,
     sessionMessages: messages,
@@ -280,7 +308,7 @@ export function ChatInterface() {
     setToolArgProgress(null);
     setDraftUserMessage('');
     invalidateContextPreview();
-  }, [activeSessionId, invalidateContextPreview, setToolArgProgress]);
+  }, [activeSessionId, invalidateContextPreview, setAwaitingFirstChunk, setToolArgProgress]);
 
   useEffect(() => {
     if (activeSessionId && connectionState === 'connected') {
@@ -472,6 +500,11 @@ export function ChatInterface() {
             error: contextPreview.error,
           }}
           vfsRefreshSignal={vfsRefreshSignal}
+          talkView={talkView}
+          onTalkViewChange={onTalkViewChange}
+          projectId={projectId}
+          onProjectChange={handleProjectChange}
+          projectPickerDisabled={isStreamingForActiveSession}
         />
       )}
 
@@ -509,11 +542,13 @@ export function ChatInterface() {
               onDraftChange={setDraftUserMessage}
               onPersonaChange={setSelectedPersonaId}
               onProjectPathChange={setProjectPath}
+              onProjectChange={handleProjectChange}
               onSend={(content, personaId) => {
                 void handleLaunchSend(content, personaId);
               }}
               personas={personas}
               projectPath={projectPath}
+              projectId={projectId}
               selectedPersonaId={selectedPersonaId}
               selectedArchitectureId={selectedArchitectureId}
             />
@@ -534,7 +569,10 @@ export function ChatInterface() {
           ))}
 
           {conversationShellState.mode !== 'pending-child-session' && liveTurnState.showPlaceholderBubble && (
-            <PendingAssistantBubble liveTurnState={liveTurnState} />
+            <>
+              <SessionBudgetApprovalBanner sessionId={activeSessionHasVisibleAgentTurn ? null : activeSessionId} />
+              <PendingAssistantBubble liveTurnState={liveTurnState} />
+            </>
           )}
 
           <div />

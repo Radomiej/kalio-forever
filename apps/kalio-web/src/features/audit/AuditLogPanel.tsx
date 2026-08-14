@@ -8,6 +8,7 @@ const TYPE_CONFIG: Record<AuditLogEntry['type'], { icon: React.ReactNode; cls: s
   tool_call:            { icon: <Wrench size={12} />,        cls: 'text-emerald-400', short: 'Tool →' },
   tool_result:          { icon: <CheckCircle2 size={12} />,  cls: 'text-emerald-400', short: '← Tool' },
   architecture_event:   { icon: <Zap size={12} />,           cls: 'text-warning',     short: 'Arch' },
+  runtime_event:        { icon: <Zap size={12} />,           cls: 'text-cyan-300',    short: 'Run' },
   error:                { icon: <XCircle size={12} />,       cls: 'text-error',       short: 'Error' },
   raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     short: 'RA call' },
   raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     short: 'RA ok' },

@@ -61,6 +61,52 @@ function sanitizeJsonValue(value: unknown, root: Record<string, unknown> | null)
   return sanitized;
 }
 
+function isAgentFlowToolResultPayload(value: unknown): value is Record<string, unknown> {
+  return isRecord(value)
+    && typeof value['flowRunId'] === 'string'
+    && typeof value['childSessionId'] === 'string';
+}
+
+function copySanitizedField(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  key: string,
+): void {
+  if (!(key in source)) {
+    return;
+  }
+  target[key] = sanitizeJsonValue(source[key], source);
+}
+
+function summarizeAgentFlowToolResultPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const summarized: Record<string, unknown> = {};
+  for (const key of [
+    'flowRunId',
+    'flowDefinitionId',
+    'parentSessionId',
+    'parentToolCallId',
+    'childSessionId',
+    'status',
+    'summary',
+    'decisions',
+    'nextActions',
+    'artifacts',
+    'returnToOrchestratorCount',
+    'openChatSessionId',
+    'openGraphRunId',
+  ]) {
+    copySanitizedField(summarized, payload, key);
+  }
+
+  if (Array.isArray(payload['tracePreview'])) {
+    summarized['tracePreview'] = [{
+      omitted: payload['tracePreview'].length,
+      reason: 'omitted for context safety',
+    }];
+  }
+  return summarized;
+}
+
 export function estimateContentTokens(content: ContextManagedLLMMessage['content']): number {
   if (typeof content === 'string') {
     return estimateTextTokens(content);
@@ -257,6 +303,9 @@ export function sanitizeToolResultContentForLLM(content: string): string {
     const parsed = JSON.parse(content) as unknown;
     if (isWebSearchPayload(parsed)) {
       return sanitizeWebSearchPayload(parsed);
+    }
+    if (isAgentFlowToolResultPayload(parsed)) {
+      return JSON.stringify(summarizeAgentFlowToolResultPayload(parsed));
     }
     const sanitized = sanitizeJsonValue(parsed, isRecord(parsed) ? parsed : null);
     const serialized = JSON.stringify(sanitized);

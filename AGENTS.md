@@ -188,6 +188,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - For Kalio-Forever development, repo/dev-managed MCP config is canonical in `<repo>/.kalio/config.toml` or `~/.kalio/config.toml`; SQLite remains the app-local MCP store, and `.vscode/mcp.json` import is legacy/manual, not the normal dev path.
 - When diagnosing Kalio MCP state, do not use `~/.codex/config.toml` as evidence; that file configures Codex, not the Kalio app.
 - Backend is the durable runtime source of truth; frontend state for chat/appflow/runtime must stay rebuildable from backend snapshots after F5/reconnect.
+- `project-spec.md` is the durable cross-session product/runtime boundary spec; update it when architecture/runtime decisions or non-negotiable boundaries change.
 - Prefer extending shared runtime contracts and selectors over adding panel-local state channels, duplicated truth maps, or one-off socket event handling.
 - Treat CLI agents, subagents, and AgentFlow children as one child-execution model whenever the UI/runtime needs shared lifecycle handling.
 - For chat/appflow changes, verify FE-first parity across Talk, Session Panel, Canvas, and Execution Graph instead of proving behavior only through API polling.
@@ -243,10 +244,17 @@ When the user corrects your approach, append a one-line rule here before ending 
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
 - On Windows, run `better-sqlite3`-backed Kalio API tests and rebuilds outside the sandbox with system Node on PATH; sandboxed or non-system Node runs are not valid evidence for SQLite failures.
+- On Windows, run Kalio Playwright/QA stack commands outside the sandbox with system Node on PATH; sandboxed runs can fail on pnpm junctions with `EPERM` or false `MODULE_NOT_FOUND` for declared deps such as `ajv`, and are not valid runtime evidence.
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
 - For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
+- Workspace package scripts invoked by root gates must call local tools directly and never invoke nested `pnpm`/`npm` orchestration; root workspace commands own package order and dependency resolution.
+- Runtime E2E for one workflow must use scoped session/children endpoints for that host session instead of fetching global `/api/sessions` and filtering the entire QA database.
+- Persisted chat-history fixtures must seed assistant messages with durable `turn_id` and `prompt_message_id`; chronological reconstruction is only a legacy fallback, not an E2E contract.
+- After rebuilding the frontend while a random-port QA stack is already running, refresh `apps/kalio-web/dist/runtime-config.js` from the managed stack state before Playwright/release gates so API and Socket.IO origins stay authoritative.
+- Never treat fixed-duration waits as an architecture fix; sleeps are only diagnostic/test fallbacks, while runtime stability must use typed state, drain/ack barriers, or explicit lifecycle events.
+- Treat Data Analyst MCP as a session-scoped, composable data/artifact engine for agents; keep one-click `run_analysis` only as a compatibility facade, not the native agent workflow.
 
 ---
 

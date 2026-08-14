@@ -185,5 +185,6 @@ export function groupToolsByPrefix(tools: ToolMeta[]): Array<{ label: string; to
 export function getToolGroupKey(tool: ToolMeta): string {
   const domainGroup = TOOL_GROUPS.find((group) => tool.domain && group.domains.includes(tool.domain))?.key;
   if (domainGroup) return domainGroup;
+  if (typeof tool.serverKey === 'string' && tool.serverKey.trim().length > 0) return MCP_TOOL_GROUP.key;
   return getNativeToolGroupKey(tool.name);
 }

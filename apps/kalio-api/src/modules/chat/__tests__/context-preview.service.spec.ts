@@ -9,6 +9,7 @@ import { ImageHydratorService } from '../image-hydrator.service';
 import { MESSAGE_REPOSITORY } from '../chat.tokens';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { RunJournalService } from '../run-journal.service';
 import { PersonaService } from '../../persona/persona.service';
 import { SkillsService } from '../../skills/skills.service';
 import { ToolDispatchService } from '../tool-dispatch.service';
@@ -47,6 +48,7 @@ describe('ContextPreviewService', () => {
           inject: [PersonaService, SkillsService, ToolDispatchService],
         },
         SessionManagerService,
+        { provide: RunJournalService, useValue: { getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set()) } },
         { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
@@ -122,6 +124,7 @@ describe('ContextPreviewService', () => {
           inject: [PersonaService, SkillsService, ToolDispatchService],
         },
         SessionManagerService,
+        { provide: RunJournalService, useValue: { getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set()) } },
         { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
@@ -173,6 +176,7 @@ describe('ContextPreviewService', () => {
           inject: [PersonaService, SkillsService, ToolDispatchService],
         },
         SessionManagerService,
+        { provide: RunJournalService, useValue: { getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set()) } },
         { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
@@ -223,6 +227,7 @@ describe('ContextPreviewService', () => {
           inject: [PersonaService, SkillsService, ToolDispatchService],
         },
         SessionManagerService,
+        { provide: RunJournalService, useValue: { getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set()) } },
         { provide: SessionsService, useValue: sessions },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
@@ -302,6 +307,7 @@ describe('ContextPreviewService', () => {
           inject: [PersonaService, SkillsService, ToolDispatchService],
         },
         SessionManagerService,
+        { provide: RunJournalService, useValue: { getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set()) } },
         { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'branch-session', personaId: 'persona-1', title: 'Branch', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },

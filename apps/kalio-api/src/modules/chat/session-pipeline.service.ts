@@ -5,6 +5,14 @@ import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { PerKeyMutex } from './per-key-mutex';
 import { RunJournalService } from './run-journal.service';
+import { ActiveSessionRegistry } from './active-session-registry.service';
+import {
+  claimQueuedDispatchItem,
+  persistQueuedChatRun,
+  queuedRunPosition,
+  type DispatchItem,
+  type QueuedItem,
+} from './session-pipeline-queue.utils';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -16,11 +24,6 @@ interface ActiveSlot {
   seeded?: boolean;
   turnId: string;
   startedAt: number;
-}
-
-interface QueuedItem {
-  payload: ChatSendPayload;
-  emit: EmitFn;
 }
 
 export interface SessionRuntimeStatus {
@@ -57,7 +60,18 @@ export class SessionPipelineService {
   constructor(
     private readonly chat: ChatService,
     @Optional() private readonly runJournal?: RunJournalService,
+    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
   ) {}
+
+  private setActive(sessionId: string, slot: ActiveSlot): void {
+    this.active.set(sessionId, slot);
+    this.activeSessionRegistry?.markActive(sessionId);
+  }
+
+  private deleteActive(sessionId: string): void {
+    this.active.delete(sessionId);
+    this.activeSessionRegistry?.markInactive(sessionId);
+  }
 
   private createActiveSlot(turnId: string, options?: { seeded?: boolean }): ActiveSlot {
     let resolveDone!: () => void;
@@ -102,6 +116,17 @@ export class SessionPipelineService {
       }
       if (this.active.has(sid)) {
         const queue = this.queues.get(sid) ?? [];
+        if (payload.clientMessageId && this.runJournal) {
+          const existingRun = await this.runJournal.findRunByQueueKey(sid, payload.clientMessageId);
+          if (existingRun) {
+            emit('chat:queued', {
+              sessionId: sid,
+              queueLength: queue.length,
+              position: queuedRunPosition(queue, existingRun.id),
+            });
+            return { kind: 'queued' };
+          }
+        }
         if (queue.length >= QUEUE_CAP) {
           emit('chat:error', {
             sessionId: sid,
@@ -111,7 +136,43 @@ export class SessionPipelineService {
           });
           return { kind: 'rejected' };
         }
-        queue.push({ payload, emit });
+        const turnId = nanoid();
+        let queuedItem: QueuedItem;
+        if (this.runJournal) {
+          const persistence = await persistQueuedChatRun({
+            runJournal: this.runJournal,
+            sessionId: sid,
+            turnId,
+            payload,
+            emit,
+          });
+          if (persistence.kind === 'duplicate') {
+            emit('chat:queued', {
+              sessionId: sid,
+              queueLength: queue.length,
+              position: queuedRunPosition(queue, persistence.runId),
+            });
+            return { kind: 'queued' };
+          }
+          if (persistence.kind === 'rejected') {
+            this.logger.error(`Unable to persist queued chat run for session ${sid}: ${persistence.message}`);
+            emit('chat:error', {
+              sessionId: sid,
+              code: 'RUNTIME_PERSISTENCE_FAILED',
+              message: 'Unable to persist runtime state. The queued turn was not accepted.',
+              hadContent: false,
+            });
+            return { kind: 'rejected' };
+          }
+          queuedItem = persistence.item;
+        } else {
+          queuedItem = {
+            emit,
+            turnId,
+            payload,
+          };
+        }
+        queue.push(queuedItem);
         this.queues.set(sid, queue);
         emit('chat:queued', {
           sessionId: sid,
@@ -123,7 +184,7 @@ export class SessionPipelineService {
       // Idle session: claim the active slot before releasing the lock so
       // any concurrent submit will see us as active.
       const turnId = nanoid();
-      this.active.set(sid, this.createActiveSlot(turnId));
+      this.setActive(sid, this.createActiveSlot(turnId));
       return { kind: 'dispatch', turnId };
     });
 
@@ -141,11 +202,45 @@ export class SessionPipelineService {
       // Re-claim the slot atomically before dispatching the interrupting
       // payload (the prior turn just released it).
       await this.mutex.runExclusive(sid, async () => {
-        this.active.set(sid, this.createActiveSlot(decision.turnId));
+        this.setActive(sid, this.createActiveSlot(decision.turnId));
       });
     }
 
-    await this.runWithDrain(payload, emit, decision.turnId);
+    await this.runWithDrain({
+      payload,
+      emit,
+      turnId: decision.turnId,
+    });
+  }
+
+  async resumeQueuedSession(sessionId: string, emit: EmitFn): Promise<void> {
+    if (!this.runJournal) return;
+
+    const first = await this.mutex.runExclusive<QueuedItem | null>(sessionId, async () => {
+      if (this.active.has(sessionId)) return null;
+      const durableQueue = await this.runJournal!.listQueuedRuns(sessionId);
+      if (durableQueue.length === 0) return null;
+
+      const items = durableQueue.map((run): QueuedItem => ({
+        emit,
+        turnId: run.turnId,
+        runId: run.id,
+      }));
+      const head = items.shift()!;
+      if (items.length > 0) this.queues.set(sessionId, items);
+      this.setActive(sessionId, this.createActiveSlot(head.turnId));
+      return head;
+    });
+
+    if (!first) return;
+    const dispatch = await this.toDispatchItem(sessionId, first);
+    if (!dispatch) {
+      await this.mutex.runExclusive(sessionId, async () => {
+        this.deleteActive(sessionId);
+      });
+      return;
+    }
+    void this.runWithDrain(dispatch);
   }
 
   /**
@@ -166,10 +261,10 @@ export class SessionPipelineService {
     void this.mutex.runExclusive(sessionId, async () => {
       if (this.active.has(sessionId)) {
         this.chat.abort(sessionId);
-        this.active.delete(sessionId);
+        this.deleteActive(sessionId);
       }
       // Drop queued items too — user explicitly stopped this session
-      this.dropQueuedItems(sessionId);
+      await this.dropQueuedItems(sessionId);
     });
   }
 
@@ -185,7 +280,7 @@ export class SessionPipelineService {
       if (slot) {
         this.chat.abort(sessionId);
       }
-      this.dropQueuedItems(sessionId);
+      await this.dropQueuedItems(sessionId);
       return slot;
     });
 
@@ -200,8 +295,8 @@ export class SessionPipelineService {
     }
 
     await this.mutex.runExclusive(sessionId, async () => {
-      this.active.delete(sessionId);
-      this.dropQueuedItems(sessionId);
+      this.deleteActive(sessionId);
+      await this.dropQueuedItems(sessionId);
     });
   }
 
@@ -230,11 +325,11 @@ export class SessionPipelineService {
   }
 
   seedActiveTurn(sessionId: string, turnId: string): void {
-    this.active.set(sessionId, this.createActiveSlot(turnId, { seeded: true }));
+    this.setActive(sessionId, this.createActiveSlot(turnId, { seeded: true }));
   }
 
   clearSeededActiveTurn(sessionId: string): void {
-    this.active.delete(sessionId);
+    this.deleteActive(sessionId);
     this.queues.delete(sessionId);
   }
 
@@ -243,20 +338,31 @@ export class SessionPipelineService {
    * given session. Used on socket disconnect.
    */
   abortAll(sessionId: string): void {
-    if (this.active.has(sessionId)) {
-      this.chat.abort(sessionId);
-    }
-    this.dropQueuedItems(sessionId);
+    void this.mutex.runExclusive(sessionId, async () => {
+      if (this.active.has(sessionId)) {
+        this.chat.abort(sessionId);
+      }
+      await this.dropQueuedItems(sessionId);
+    });
   }
 
-  private dropQueuedItems(sessionId: string): void {
+  private async dropQueuedItems(sessionId: string): Promise<void> {
     const queue = this.queues.get(sessionId);
     if (!queue || queue.length === 0) {
       this.queues.delete(sessionId);
       return;
     }
 
+    this.queues.delete(sessionId);
     for (const item of queue) {
+      if (item.runId) {
+        try {
+          await this.runJournal?.cancelQueuedRun(item.runId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Unable to cancel queued chat run ${item.runId} for session ${sessionId}: ${message}`);
+        }
+      }
       item.emit('chat:error', {
         sessionId,
         code: 'QUEUE_DROPPED',
@@ -264,53 +370,100 @@ export class SessionPipelineService {
         hadContent: false,
       });
     }
-    this.queues.delete(sessionId);
   }
 
-  private async runWithDrain(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
-    const sid = payload.sessionId;
-    let current: { payload: ChatSendPayload; emit: EmitFn; turnId: string } | null = { payload, emit, turnId };
+  private async runWithDrain(initial: DispatchItem): Promise<void> {
+    const sid = initial.payload.sessionId;
+    let current: DispatchItem | null = initial;
     while (current) {
-      await this.runOne(current.payload, current.emit, current.turnId);
+      await this.runOne(current);
       // Pop next queued item OR release active slot, atomically.
       // Without the mutex a concurrent submit could observe `active=false`
       // (briefly between iterations) and start a parallel drain.
-      current = await this.mutex.runExclusive<
-        { payload: ChatSendPayload; emit: EmitFn; turnId: string } | null
-      >(sid, async () => {
+      current = await this.mutex.runExclusive<DispatchItem | null>(sid, async () => {
         const queue = this.queues.get(sid);
-        if (!queue || queue.length === 0) {
-          this.queues.delete(sid);
-          this.active.delete(sid);
-          return null;
+        while (queue && queue.length > 0) {
+          const next = queue.shift()!;
+          if (queue.length === 0) {
+            this.queues.delete(sid);
+          }
+          const dispatch = await this.toDispatchItem(sid, next);
+          if (!dispatch) {
+            continue;
+          }
+          // Keep `active` set so concurrent submits enqueue rather than dispatch.
+          this.setActive(sid, this.createActiveSlot(dispatch.turnId));
+          return dispatch;
         }
-        const next = queue.shift()!;
-        // Keep `active` set so concurrent submits enqueue rather than dispatch.
-        const nextTurnId = nanoid();
-        this.active.set(sid, this.createActiveSlot(nextTurnId));
-        return { ...next, turnId: nextTurnId };
+        this.queues.delete(sid);
+        this.deleteActive(sid);
+        return null;
       });
     }
   }
 
-  private async runOne(payload: ChatSendPayload, emit: EmitFn, turnId: string): Promise<void> {
-    const sid = payload.sessionId;
-    const slot = this.active.get(sid) ?? this.createActiveSlot(turnId);
-    const run = await this.runJournal?.startRun({
-      sessionId: sid,
-      turnId,
+  private async toDispatchItem(sessionId: string, queued: QueuedItem): Promise<DispatchItem | null> {
+    return claimQueuedDispatchItem({
+      sessionId,
+      queued,
+      runJournal: this.runJournal,
+      onError: (message) => this.logger.error(message),
     });
-    const executionPromise = this.chat
-      .handleTurn(sid, payload.content, payload.personaId, emit, payload.attachments, turnId, run?.id)
-      .catch((err) => {
-        // ChatService.handleTurn already swallows its own errors, but be
-        // defensive so a thrown error never wedges the pipeline state.
-        this.logger.error(
-          `handleTurn rejected for session ${sid}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+  }
 
+  private async runOne(current: DispatchItem): Promise<void> {
+    const sid = current.payload.sessionId;
+    const slot = this.active.get(sid) ?? this.createActiveSlot(current.turnId);
     try {
+      let run: ChatRunSnapshot | undefined;
+      try {
+        run = current.runId
+          ? {
+            id: current.runId,
+            sessionId: sid,
+            turnId: current.turnId,
+            phase: 'started',
+            status: 'active',
+            retryCount: 0,
+            safeResume: false,
+            startedAt: 0,
+            updatedAt: 0,
+            lastHeartbeatAt: 0,
+          }
+          : await this.runJournal?.startRun({
+            sessionId: sid,
+            turnId: current.turnId,
+          });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Unable to start durable chat run for session ${sid}: ${message}`);
+        current.emit('chat:error', {
+          sessionId: sid,
+          code: 'RUNTIME_PERSISTENCE_FAILED',
+          message: 'Unable to persist runtime state. The turn was not started.',
+          hadContent: false,
+        });
+        return;
+      }
+
+      const executionPromise = this.chat
+        .handleTurn(
+          sid,
+          current.payload.content,
+          current.payload.personaId,
+          current.emit,
+          current.payload.attachments,
+          current.turnId,
+          run?.id,
+          current.payload.clientMessageId,
+        )
+        .catch((err) => {
+          // ChatService.handleTurn already swallows its own errors, but be
+          // defensive so a thrown error never wedges the pipeline state.
+          this.logger.error(
+            `handleTurn rejected for session ${sid}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
       await executionPromise;
     } finally {
       slot.resolveDone();

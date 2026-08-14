@@ -40,8 +40,9 @@ function shortSummary(step: TraceStep, maxLength = 120): string {
 
 function activitySummary(step: TraceStep, maxLength = 120): string {
   const status = step.stream?.status;
-  const summary = status === 'started' || status === 'streaming' || status === 'failed'
-    ? architectureTraceActivitySummary(step.speaker, status)
+  const lifecycleStatus = statusForStep(step) ?? undefined;
+  const summary = lifecycleStatus === 'cancelled' || lifecycleStatus === 'failed' || status === 'started' || status === 'streaming' || status === 'failed'
+    ? architectureTraceActivitySummary(step.speaker, status, lifecycleStatus)
     : step.actionSummary ?? shortSummary(step, maxLength);
   if (summary.length <= maxLength) {
     return summary;

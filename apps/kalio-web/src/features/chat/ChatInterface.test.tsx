@@ -14,6 +14,7 @@ import { computeAnsweredCallIds } from './chatUtils';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import type { ChatMessage, ChatSession, VFSFile } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
+import { ARCHITECTURE_REGISTRY_CHANGED_EVENT } from '../architect/architectureRegistryEvents';
 import type { AgentTurn } from '../../store/sessionStore';
 
 // jsdom does not implement scrollIntoView
@@ -228,7 +229,10 @@ const addTurnItem = vi.fn();
 const clearAgentTurns = vi.fn();
 const clearPendingChunks = vi.fn();
 const flushStreamingChunks = vi.fn();
-const getSessionMessages = vi.fn((_sessionId: string | null) => [] as ChatMessage[]);
+const getSessionMessages = vi.fn((sessionId: string | null) => {
+  void sessionId;
+  return [] as ChatMessage[];
+});
 const updateSession = vi.fn((sessionId: string, patch: { title?: string; personaId?: string }) => {
   mockSessions = mockSessions.map((session) =>
     session.id === sessionId ? { ...session, ...patch } : session,
@@ -557,12 +561,12 @@ describe('ChatInterface event wiring', () => {
       await flushReactEffects();
     });
 
-    expect(mockSendMessage).toHaveBeenCalledWith({
+    expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       content: 'What can you do?',
       personaId: 'p1',
       interrupt: false,
-    });
+    }));
     expect(screen.queryByTestId('welcome-screen')).toBeNull();
     expect(screen.getByTestId('pending-agent-bubble')).toBeInTheDocument();
   });
@@ -613,7 +617,11 @@ describe('ChatInterface event wiring', () => {
 
     await renderChatInterface();
 
-    expect(screen.getByTestId('welcome-prompt-input')).toBeInTheDocument();
+    const promptInput = screen.getByTestId('welcome-prompt-input');
+    expect(promptInput).toBeInTheDocument();
+    expect(promptInput).not.toBeDisabled();
+    fireEvent.change(promptInput, { target: { value: 'Start another chat' } });
+    expect(screen.getByTestId('welcome-run-prompt')).not.toBeDisabled();
     expect(screen.queryByTestId('pending-agent-bubble')).toBeNull();
   });
 
@@ -651,6 +659,19 @@ describe('ChatInterface event wiring', () => {
       historySessionId: 'session-1',
       sessionSurface: 'host-envelope',
       launchAllowedToolNames: ['vfs_read'],
+    });
+  });
+
+  it('includes the real prompt message id in architecture launch context when provided', () => {
+    expect(buildArchitectureRunContext('session-1', [], [], '', 'user-1')).toEqual({
+      maxArchitectureSteps: 64,
+      maxArchitectureNodeVisits: 4,
+      maxArchitectureSubagentIterations: 30,
+      parentSessionId: 'session-1',
+      hostSessionId: 'session-1',
+      historySessionId: 'session-1',
+      sessionSurface: 'host-envelope',
+      promptMessageId: 'user-1',
     });
   });
 
@@ -697,6 +718,41 @@ describe('ChatInterface event wiring', () => {
 
     expect(mockStartArchitectureRun).toHaveBeenCalled();
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
+  });
+
+  it('refreshes Talk architecture options when the registry changes', async () => {
+    const baseSchema = {
+      id: 'strategic-decision-council',
+      name: 'Strategic Decision Council',
+      version: '0.1.0',
+      description: '',
+      nodes: [],
+      edges: [],
+      roleSlots: [],
+    };
+    const variantSchema = {
+      ...baseSchema,
+      id: 'strategic-decision-council-variant-99',
+      name: 'UI Saved Variant',
+    };
+    mockGetArchitectureSchemas
+      .mockResolvedValueOnce([baseSchema])
+      .mockResolvedValueOnce([baseSchema, variantSchema]);
+
+    await renderChatInterface();
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('welcome-mode-workflow'));
+      await flushReactEffects();
+    });
+    await screen.findByRole('option', { name: 'Strategic Decision Council' });
+    expect(screen.queryByRole('option', { name: 'UI Saved Variant' })).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new Event(ARCHITECTURE_REGISTRY_CHANGED_EVENT));
+      await flushReactEffects();
+    });
+
+    expect(await screen.findByRole('option', { name: 'UI Saved Variant' })).toBeInTheDocument();
   });
 
   it('passes the active project path into non-goal architecture launches from chat', async () => {
@@ -1211,9 +1267,10 @@ describe('ChatInterface event wiring', () => {
       'branch-1': mockMessages,
       'host-1': [],
     };
-    getSessionMessages.mockImplementation((sessionId: string | null) =>
-      sessionId === 'branch-1' ? mockMessages : [],
-    );
+    getSessionMessages.mockImplementation((sessionId: string | null) => {
+      const messages = sessionId === 'branch-1' ? mockMessages : [];
+      return messages;
+    });
 
     await renderChatInterface();
 

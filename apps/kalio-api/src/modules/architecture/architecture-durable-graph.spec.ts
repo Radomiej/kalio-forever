@@ -111,6 +111,61 @@ describe('reconstructDurableArchitectureGraph', () => {
     ]));
   });
 
+  it('uses typed architecture event ids and treats tool call ids as opaque fallbacks', async () => {
+    const runId = 'durable-typed-event-id-run';
+    const registry = new ArchitectureRegistryService();
+    const sessions = createPersistedSessions({
+      [`arch-${runId}-root`]: [
+        {
+          id: `architecture:${runId}:user`,
+          sessionId: `arch-${runId}-root`,
+          role: 'user',
+          content: '[Architecture: strategic-decision-council]\nAssess architecture.',
+          createdAt: 100,
+        },
+        {
+          id: `architecture:${runId}:tool-calls`,
+          sessionId: `arch-${runId}-root`,
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            {
+              id: `architecture:${runId}:legacy-pragmatist-event`,
+              name: 'run_subagent',
+              args: {
+                architectureRunId: runId,
+                nodeId: 'pragmatist',
+                architectureEventId: 'typed-pragmatist-event',
+              },
+            },
+            {
+              id: `architecture:${runId}:legacy-analyst-event`,
+              name: 'run_subagent',
+              args: {
+                architectureRunId: runId,
+                nodeId: 'analyst',
+              },
+            },
+          ],
+          createdAt: 101,
+        },
+      ],
+    });
+
+    const graph = await reconstructDurableArchitectureGraph(runId, sessions, registry);
+
+    expect(graph?.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'pragmatist',
+        eventIds: ['typed-pragmatist-event'],
+      }),
+      expect.objectContaining({
+        id: 'analyst',
+        eventIds: [`architecture:${runId}:legacy-analyst-event`],
+      }),
+    ]));
+  });
+
   it('projects persisted CLI child evidence from expected files and keeps completed status over stale running snapshots', async () => {
     const runId = 'durable-child-proof-run';
     const registry = new ArchitectureRegistryService();

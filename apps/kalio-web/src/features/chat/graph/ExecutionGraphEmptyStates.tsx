@@ -1,4 +1,4 @@
-import type { Persona } from '@kalio/types';
+import type { Persona, Project } from '@kalio/types';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import { NewChatScreen } from '../launch/NewChatScreen';
 
@@ -12,9 +12,11 @@ type GraphLaunchStateProps = {
   onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
+  onProjectChange?: (project: Project) => void;
   onRunPrompt: (content: string) => void;
   personas: Persona[];
   projectPath: string;
+  projectId?: string;
   screenKey: string;
   selectedPersonaId: string;
   selectedArchitectureId: string;
@@ -30,9 +32,11 @@ function GraphLaunchState({
   onDraftChange,
   onPersonaChange,
   onProjectPathChange,
+  onProjectChange,
   onRunPrompt,
   personas,
   projectPath,
+  projectId,
   screenKey,
   selectedPersonaId,
   selectedArchitectureId,
@@ -49,9 +53,11 @@ function GraphLaunchState({
         onDraftChange={onDraftChange}
         onPersonaChange={onPersonaChange}
         onProjectPathChange={onProjectPathChange}
+        onProjectChange={onProjectChange}
         onRunPrompt={onRunPrompt}
         personas={personas}
         projectPath={projectPath}
+        projectId={projectId}
         selectedPersonaId={selectedPersonaId}
         selectedArchitectureId={selectedArchitectureId}
         subtitle="AI assistant - build apps, query data, generate images, run tools"

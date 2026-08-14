@@ -1,7 +1,9 @@
-import type { ActiveSection, AppViewState, MindTab, TalkTab, TalkView, ToolsTab } from './App.types';
+import type { ActiveSection, AppViewState, MindTab, TalkGrouping, TalkTab, TalkView, ToolsTab } from './App.types';
 
 export const APP_VIEW_STATE_STORAGE_KEY = 'kalio:app-view-state';
 export const LAST_TALK_ACTIVE_STORAGE_KEY = 'kalio:last-talk-active-at';
+export const TALK_VIEW_STORAGE_KEY = 'kalio:talk-view';
+export const TALK_GROUPING_STORAGE_KEY = 'kalio:talk-grouping';
 const RECENT_CHAT_FALLBACK_MS = 24 * 60 * 60 * 1000;
 
 export const DEFAULT_APP_VIEW_STATE: AppViewState = {
@@ -28,6 +30,32 @@ function isTalkTab(value: unknown): value is TalkTab {
 
 function isTalkView(value: unknown): value is TalkView {
   return value === 'conversation' || value === 'graph';
+}
+
+function isTalkGrouping(value: unknown): value is TalkGrouping {
+  return value === 'project' || value === 'history';
+}
+
+export function loadTalkViewPreference(): TalkView {
+  if (typeof window === 'undefined') return 'conversation';
+  return isTalkView(window.localStorage.getItem(TALK_VIEW_STORAGE_KEY))
+    ? window.localStorage.getItem(TALK_VIEW_STORAGE_KEY) as TalkView
+    : 'conversation';
+}
+
+export function persistTalkViewPreference(value: TalkView): void {
+  if (typeof window !== 'undefined') window.localStorage.setItem(TALK_VIEW_STORAGE_KEY, value);
+}
+
+export function loadTalkGroupingPreference(): TalkGrouping {
+  if (typeof window === 'undefined') return 'project';
+  return isTalkGrouping(window.localStorage.getItem(TALK_GROUPING_STORAGE_KEY))
+    ? window.localStorage.getItem(TALK_GROUPING_STORAGE_KEY) as TalkGrouping
+    : 'project';
+}
+
+export function persistTalkGroupingPreference(value: TalkGrouping): void {
+  if (typeof window !== 'undefined') window.localStorage.setItem(TALK_GROUPING_STORAGE_KEY, value);
 }
 
 function isToolsTab(value: unknown): value is ToolsTab {

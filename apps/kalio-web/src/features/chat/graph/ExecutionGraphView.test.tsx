@@ -61,6 +61,7 @@ const {
   sessionState,
   agentState,
   apiGetMock,
+  getProjectsMock,
   getSessionVfsFilesMock,
   apiPostMock,
   apiPatchMock,
@@ -120,6 +121,7 @@ const {
       Object.values(agentState.activeAgentLoops).some((loop) => loop.sessionId === sessionId),
   },
   apiGetMock: vi.fn(),
+  getProjectsMock: vi.fn(),
   getSessionVfsFilesMock: vi.fn().mockResolvedValue({ files: [] }),
   apiPostMock: vi.fn(),
   apiPatchMock: vi.fn(),
@@ -150,6 +152,7 @@ vi.mock('../../../services/apiClient', () => ({
     patch: apiPatchMock,
   },
   getSessionVfsFiles: getSessionVfsFilesMock,
+  getProjects: getProjectsMock,
 }));
 
 vi.mock('../../architect/architect.api', async () => {
@@ -191,6 +194,11 @@ async function renderExecutionGraphView(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+function selectGraphProject(): void {
+  fireEvent.click(screen.getByTestId('graph-empty-project-picker-trigger'));
+  fireEvent.click(screen.getByRole('option', { name: /Kalio Forever/ }));
 }
 
 function openGraphControlsMenu(): void {
@@ -260,7 +268,32 @@ describe('ExecutionGraphView empty-session state', () => {
     sessionState.updateSession.mockReset();
     sessionState.hydratedSessionIds = {};
     sessionState.markSessionHydrated.mockReset();
-    apiGetMock.mockResolvedValue({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
+    apiGetMock.mockImplementation((url: string) => {
+      if (url.startsWith('/api/agent-flows/runs?')) {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.resolve({ data: [makePersona(), makePersona({ id: 'persona-child', name: 'UX Designer', model: 'claude-sonnet-4.6' })] });
+    });
+    getProjectsMock.mockResolvedValue([
+      {
+        id: 'project-1',
+        name: 'Kalio Forever',
+        path: 'C:\\Projekty\\kalio-forever',
+        kind: 'workspace',
+        isSystem: false,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'system:none',
+        name: 'Bez projektu',
+        path: null,
+        kind: 'none',
+        isSystem: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
     apiPostMock.mockReset();
     apiPatchMock.mockReset();
     startArchitectureRunMock.mockReset();
@@ -330,7 +363,7 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(screen.getByTestId('graph-empty-screen')).toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-persona-select')).toBeInTheDocument();
     expect(screen.queryByTestId('graph-empty-architecture-select')).not.toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-project-path-input')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-empty-project-picker-trigger')).toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Chat runtime: RaBuilder');
     expect(screen.queryByTestId('execution-graph-live-sidebar')).not.toBeInTheDocument();
   });
@@ -348,6 +381,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
+      projectId: 'system:none',
       title: 'New Chat',
     }));
     expect(sessionState.addSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'new-graph-session' }));
@@ -357,12 +391,13 @@ describe('ExecutionGraphView empty-session state', () => {
       role: 'user',
       content: 'Start from graph',
     }));
-    expect(sendMessageMock).toHaveBeenCalledWith({
+    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'new-graph-session',
       content: 'Start from graph',
       personaId: 'default',
       interrupt: false,
-    });
+      clientMessageId: expect.any(String),
+    }));
   });
 
   it('creates a new chat with the selected persona in chat mode', async () => {
@@ -371,9 +406,8 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-persona-select'), {
-      target: { value: 'persona-child' },
-    });
+    fireEvent.click(screen.getByTestId('graph-empty-persona-select'));
+    fireEvent.click(screen.getByRole('option', { name: 'UX Designer' }));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Start with the specialist' },
     });
@@ -381,14 +415,16 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'persona-child',
+      projectId: 'system:none',
       title: 'New Chat',
     }));
-    expect(sendMessageMock).toHaveBeenCalledWith({
+    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'new-graph-session',
       content: 'Start with the specialist',
       personaId: 'persona-child',
       interrupt: false,
-    });
+      clientMessageId: expect.any(String),
+    }));
   });
 
   it('persists the project path on graph launch and sends it with the created session', async () => {
@@ -397,9 +433,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
-      target: { value: 'C:\\Projekty\\kalio-forever' },
-    });
+    selectGraphProject();
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Start scoped graph' },
     });
@@ -407,6 +441,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await waitFor(() => expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
+      projectId: 'project-1',
       runtimeContext: {
         runtimeKind: 'chat',
         architectureContext: {
@@ -453,12 +488,13 @@ describe('ExecutionGraphView empty-session state', () => {
     }));
     expect(agentState.clearToolActivities).toHaveBeenCalledWith('session-1');
     expect(agentState.setStreaming).toHaveBeenCalledWith(true, undefined, 'session-1');
-    expect(sendMessageMock).toHaveBeenCalledWith({
+    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       content: 'Start this graph session',
       personaId: 'default',
       interrupt: false,
-    });
+      clientMessageId: expect.any(String),
+    }));
   });
 
   it('runs the selected workflow when the launch screen switches to workflow mode', async () => {
@@ -512,9 +548,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
-      target: { value: 'C:\\Projekty\\kalio-forever' },
-    });
+    selectGraphProject();
     fireEvent.click(screen.getByTestId('graph-empty-mode-workflow'));
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument());
     fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
@@ -529,6 +563,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', {
       personaId: 'default',
+      projectId: 'project-1',
       runtimeContext: {
         runtimeKind: 'chat',
         architectureContext: {
@@ -624,9 +659,7 @@ describe('ExecutionGraphView empty-session state', () => {
 
     await renderExecutionGraphView();
 
-    fireEvent.change(screen.getByTestId('graph-empty-project-path-input'), {
-      target: { value: 'C:\\Projekty\\kalio-forever' },
-    });
+    selectGraphProject();
     fireEvent.click(screen.getByTestId('graph-empty-mode-workflow'));
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toBeInTheDocument());
     fireEvent.change(screen.getByTestId('graph-empty-architecture-select'), {
@@ -1645,7 +1678,7 @@ describe('ExecutionGraphView empty-session state', () => {
     };
     sessionState.sessions = [
       { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 12 },
-      { id: 'sub-outer', personaId: 'default', title: 'Outer subagent', kind: 'subagent', parentSessionId: 'session-1', createdAt: 2, updatedAt: 12 },
+      { id: 'sub-outer', personaId: 'default', title: 'Outer subagent', kind: 'subagent', parentSessionId: 'session-1', parentToolCallId: 'call-sub-outer', createdAt: 2, updatedAt: 12 },
       { id: 'sub-nested', personaId: 'default', title: 'Nested subagent', kind: 'subagent', parentSessionId: 'sub-outer', createdAt: 3, updatedAt: 12 },
       { id: 'cli-child-1', personaId: 'default', title: 'Codex CLI', kind: 'cli-agent', parentSessionId: 'sub-nested', createdAt: 4, updatedAt: 12 },
     ];
@@ -1657,12 +1690,23 @@ describe('ExecutionGraphView empty-session state', () => {
       'cli-child-1': cliTurns,
     };
     agentState.toolActivities = [];
+    agentState.pendingConfirmations = {
+      'sub-outer': [{
+        requestId: 'req-sub-outer',
+        toolCallId: 'call-child-write',
+        sessionId: 'sub-outer',
+        toolName: 'vfs_write',
+        args: { path: 'result.txt' },
+        timeoutMs: 0,
+      }],
+    };
 
     await renderExecutionGraphView();
 
-    expect(screen.getByTestId('graph-node-subagent:sub-outer')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-node-subagent:sub-nested')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-node-cli-agent:cli-child-1')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-subagent:sub-outer')).toHaveAttribute('data-session-id', 'sub-outer');
+    expect(screen.getByTestId('graph-node-status-subagent:sub-outer')).toHaveAttribute('aria-label', 'Status: waiting');
+    expect(screen.getByTestId('graph-node-subagent:sub-nested')).toHaveAttribute('data-session-id', 'sub-nested');
+    expect(screen.getByTestId('graph-node-cli-agent:cli-child-1')).toHaveAttribute('data-session-id', 'cli-child-1');
 
     fireEvent.click(screen.getByTestId('graph-node-cli-agent:cli-child-1'));
 
@@ -1767,5 +1811,57 @@ describe('ExecutionGraphView empty-session state', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open child graph' }));
     expect(sessionState.setActiveSession).toHaveBeenLastCalledWith('arch-flow-1-root');
+  });
+
+  it('renders active session graph from sessionMessages when the global message buffer is stale', async () => {
+    const promptOnly = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Run Goal Guard flow', createdAt: 1 }),
+    ];
+    const fullMessages = [
+      promptOnly[0],
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        createdAt: 2,
+        toolCalls: [{
+          id: 'call-flow-1',
+          name: 'run_sub_agentflow',
+          args: { flowId: 'goal_guard_delivery_loop', goal: 'Verify delivery' },
+        }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'call-flow-1',
+        content: JSON.stringify({
+          flowRunId: 'flow-1',
+          childSessionId: 'arch-flow-1-root',
+          openChatSessionId: 'arch-flow-1-root',
+          openGraphRunId: 'flow-1',
+          status: 'done',
+          summary: 'Final response produced.',
+          decisions: [],
+          nextActions: [],
+          artifacts: [],
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    sessionState.activeSessionId = 'session-1';
+    sessionState.messages = promptOnly;
+    sessionState.sessionMessages = { 'session-1': fullMessages };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Main', createdAt: 1, updatedAt: 3 },
+      { id: 'arch-flow-1-root', personaId: 'default', title: 'Goal Guard AgentFlow', kind: 'chat', parentSessionId: 'session-1', createdAt: 2, updatedAt: 3 },
+    ];
+    sessionState.agentTurns = [];
+    sessionState.sessionAgentTurns = { 'session-1': buildTurnsFromHistory(fullMessages, 'session-1') };
+    agentState.toolActivities = [];
+
+    await renderExecutionGraphView();
+
+    expect(screen.getByTestId('graph-node-tool:call-flow-1')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-agent-flow:flow-1')).toBeInTheDocument();
   });
 });

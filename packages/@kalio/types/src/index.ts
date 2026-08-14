@@ -73,6 +73,7 @@ export type WorkflowConversationVisibility = 'visible' | 'hidden';
 export interface ArchitectureRuntimeContext extends Record<string, unknown> {
   parentSessionId?: ID;
   parentToolCallId?: ID;
+  promptMessageId?: ID;
   architectureRunId?: ID;
   hostSessionId?: ID;
   historySessionId?: ID;
@@ -375,6 +376,32 @@ export interface ChatMessage {
 
 export type ChatSessionKind = 'chat' | 'subagent' | 'cli-agent' | 'agent-flow';
 
+export type ProjectKind = 'workspace' | 'none' | 'external' | 'audit' | 'other';
+
+export interface Project {
+  id: ID;
+  name: string;
+  path: string | null;
+  kind: ProjectKind;
+  isSystem: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CreateProjectDto {
+  name: string;
+  path: string;
+}
+
+export interface UpdateProjectDto {
+  name: string;
+}
+
+export interface AssignSessionProjectDto {
+  projectId: ID;
+  pathOverride?: string | null;
+}
+
 export interface ChatSession {
   id: ID;
   personaId: ID;
@@ -383,6 +410,7 @@ export interface ChatSession {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  projectId?: ID;
   runtimeContext?: SessionRuntimeContext;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -395,6 +423,8 @@ export interface CreateSessionDto {
   parentSessionId?: ID;
   parentTurnId?: ID;
   parentToolCallId?: ID;
+  projectId?: ID;
+  projectPathOverride?: string;
   runtimeContext?: SessionRuntimeContext;
 }
 
@@ -657,6 +687,12 @@ export interface AgentFlowContinuationCursor {
   visitCounts: Record<ID, number>;
   lastCompletedNodeId?: ID;
   lastRoute?: AgentFlowRouteCheckpoint;
+  waitIdentity?: {
+    requestId: ID;
+    childSessionId: ID;
+    childTurnId: ID;
+    promptMessageId?: ID;
+  };
   message?: string;
 }
 
@@ -727,6 +763,8 @@ export interface AgentFlowRunSnapshot {
 
 export interface ToolCallRequest {
   sessionId: ID;
+  turnId?: ID;
+  promptMessageId?: ID;
   vfsSessionId?: ID;
   toolName: string;
   args: Record<string, unknown>;
@@ -764,6 +802,8 @@ export interface ToolConfirmationRequest {
   requestId: string;          // unique per confirmation instance
   toolCallId: string;         // the LLM tool call ID (matches ToolResult.callId)
   sessionId: ID;
+  turnId?: ID;
+  promptMessageId?: ID;
   toolName: string;
   args: Record<string, unknown>;
   timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
@@ -784,6 +824,8 @@ export type AgentBudgetApprovalDecision = 'block' | 'allow_one' | 'allow_ten' | 
 export interface AgentBudgetApprovalRequest {
   requestId: string;
   sessionId: ID;
+  turnId?: ID;
+  promptMessageId?: ID;
   scope: Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
   usedIterations: number;
   currentLimit: number;
@@ -929,6 +971,13 @@ export interface RaAppPendingApproval {
   args: Record<string, unknown>;        // resolved args to be executed on approval
 }
 
+export interface RaAppPendingApprovalSnapshot extends RaAppPendingApproval {
+  sessionId: ID;
+  toolCallId: ID;
+  status: 'pending';
+  createdAt: number;
+}
+
 // Native execution result pushed back to FE after approve/cancel
 export interface RaAppNativeResult {
   id: string;                           // matches RaAppPendingApproval.id
@@ -1051,11 +1100,21 @@ export type ChatRunPhase =
   | 'failed';
 
 export type ChatRunStatus =
+  | 'queued'
   | 'active'
+  | 'waiting_for_human'
   | 'completed'
   | 'failed'
+  | 'cancelled'
   | 'interrupted'
   | 'interrupted_needs_retry';
+
+export interface ChatQueuedPayload {
+  content: string;
+  personaId: ID;
+  attachments?: ChatAttachment[];
+  clientMessageId?: ID;
+}
 
 export interface ChatRunSnapshot {
   id: ID;
@@ -1065,10 +1124,22 @@ export interface ChatRunSnapshot {
   status: ChatRunStatus;
   provider?: string;
   model?: string;
+  /** Backend-owned monotonic order for projections of this run. Required after the revision migration. */
+  revision?: number;
   retryCount: number;
   safeResume: boolean;
   errorCode?: string;
   errorMessage?: string;
+  queueIdempotencyKey?: string;
+  queuedPayload?: ChatQueuedPayload;
+  queuedAt?: Timestamp;
+  queueClaimedAt?: Timestamp;
+  queueCancelledAt?: Timestamp;
+  outcome?: {
+    finalText: string;
+    structuredOutput?: unknown;
+    messageId?: ID;
+  };
   startedAt: Timestamp;
   updatedAt: Timestamp;
   lastHeartbeatAt: Timestamp;
@@ -1182,7 +1253,7 @@ export interface RuntimeActivitySnapshot {
 // COMPLETE contract between FE and BE. All Socket.IO events defined here.
 export interface SocketEvents {
   // Chat — client → server
-  'chat:send': { sessionId: ID; content: string; personaId: ID; interrupt?: boolean; attachments?: ChatAttachment[] };
+  'chat:send': { sessionId: ID; content: string; personaId: ID; interrupt?: boolean; attachments?: ChatAttachment[]; clientMessageId?: ID };
   /** Client requests immediate abort of the active agent loop for sessionId. No new turn is started. */
   'chat:stop': { sessionId: ID };
 
@@ -1215,6 +1286,7 @@ export interface SocketEvents {
       | 'INTERRUPTED'
       | 'QUEUE_FULL'
       | 'QUEUE_DROPPED'
+      | 'RUNTIME_PERSISTENCE_FAILED'
       | 'MAX_ITERATIONS_REACHED';
     message: string;
     agentRun?: AgentRunContext;
@@ -1235,7 +1307,7 @@ export interface SocketEvents {
   'agent:budget_approve': { requestId: string; sessionId: ID; decision: AgentBudgetApprovalDecision };
 
   // Tool execution lifecycle — server → client
-  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; agentRun?: AgentRunContext };
+  'tool:start': { callId: ID; toolName: string; args: Record<string, unknown>; sessionId?: ID; turnId?: ID; agentRun?: AgentRunContext };
 
   // Tool result — server → client
   'tool:result': ToolResult;
@@ -1248,7 +1320,7 @@ export interface SocketEvents {
   'raapp:native_result': { toolCallId: string; sessionId: ID; results: RaAppNativeResult[] };
 
   // Agent loop lifecycle — server → client
-  'agent:start': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
+  'agent:start': { sessionId: ID; turnId: ID; promptMessageId?: ID; agentRun?: AgentRunContext };
   'agent:done': { sessionId: ID; turnId: ID; agentRun?: AgentRunContext };
   'agent:budget_progress': ToolBudgetProgress;
   'agent:budget_required': AgentBudgetApprovalRequest;
@@ -1477,6 +1549,7 @@ export interface RAAppGroup {
 export type AuditType =
   | 'llm_request'
   | 'llm_response'
+  | 'runtime_event'
   | 'tool_call'
   | 'tool_result'
   | 'architecture_event'
@@ -1891,7 +1964,10 @@ export interface ArchitectureGraphProjection {
     actionSummary?: string;
     action?: ArchitectureEventAction;
     detail?: string;
+    errorCode?: WorkflowErrorCode;
+    failure?: WorkflowFailure;
     visitCount?: number;
+    hasRuntimeEvidence?: boolean;
     eventIds: ID[];
     toolEvidence?: Record<string, unknown>;
     incompleteReason?: string;

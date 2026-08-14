@@ -20,7 +20,7 @@ export interface SettingsBlock {
 }
 
 export const SETTINGS_BLOCKS: SettingsBlock[] = [
-  { id: 'llm',          label: 'LLM Settings',     icon: <Bot size={16} />,      component: LLMPanel },
+  { id: 'llm',          label: 'LLM Settings',     icon: <Bot size={16} />,      component: () => <LLMPanel mode="providers" /> },
   { id: 'runtime',      label: 'Runtime Settings', icon: <Gauge size={16} />,    component: () => <LLMPanel mode="runtime" /> },
   { id: 'conversation', label: 'Conversation',     icon: <MessageSquareText size={16} />, component: ConversationSettingsPanel },
   { id: 'hitl',         label: 'HITL Approvals',   icon: <ShieldAlert size={16} />, component: HITLSettingsPanel },

@@ -84,6 +84,21 @@ function seedRuntimeAttentionMessages(fixture: SeededRuntimeAttentionFixture): v
         null,
         stamp + 20,
       );
+      insertMessage.run(
+        `timeout-tool-result-${stamp}`,
+        fixture.timeoutSessionId,
+        'tool_result',
+        JSON.stringify({
+          status: 'failed',
+          toolResultErrorCode: 'SUBAGENT_TIMEOUT',
+          toolResultErrorMessage: 'Sub-agent timed out after 300000ms.',
+        }),
+        null,
+        null,
+        'timeout-tool-call',
+        null,
+        stamp + 30,
+      );
 
       insertMessage.run(
         `budget-user-${stamp}`,
@@ -106,6 +121,21 @@ function seedRuntimeAttentionMessages(fixture: SeededRuntimeAttentionFixture): v
         null,
         null,
         stamp + 220,
+      );
+      insertMessage.run(
+        `budget-tool-result-${stamp}`,
+        fixture.budgetSessionId,
+        'tool_result',
+        JSON.stringify({
+          status: 'failed',
+          toolResultErrorCode: 'MAX_TOOL_CALLS_REACHED',
+          toolResultErrorMessage: 'Tool budget reached before the branch could finish.',
+        }),
+        null,
+        null,
+        'budget-tool-call',
+        null,
+        stamp + 230,
       );
     });
 

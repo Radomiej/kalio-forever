@@ -5,12 +5,14 @@ import { StreamProcessorService } from './stream-processor.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
+import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
-import type { LLMStructuredOutputRequest, SocketEvents, ToolResult } from '@kalio/types';
+import type { LLMStructuredOutputRequest, SocketEvents, ToolResult, WorkflowErrorCode } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
+import { buildEmptyNoToolRuntimeAuditEvent } from './llm-turn-runtime-audit.events';
 import {
   estimateContentTokens,
   estimateTextTokens,
@@ -37,12 +39,13 @@ export class LLMTurnRuntimeService {
     private readonly sessionManager: SessionManagerService,
     private readonly toolDispatch: ToolDispatchService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly runtimeAudit?: RuntimeAuditLogger,
   ) {}
 
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
     const maxEmptyNoToolRetries = request.maxEmptyNoToolRetries ?? 0;
-    let iteration = 0;
-    let currentLimit = request.maxIterations;
+    let iteration = request.resumeState?.iteration ?? 0;
+    let currentLimit = request.resumeState?.currentLimit ?? request.maxIterations;
     let emptyNoToolRetries = 0;
     let emptyNoToolRetriesExhausted = false;
     let latestText = '';
@@ -79,9 +82,15 @@ export class LLMTurnRuntimeService {
       let state = new TurnState();
       let ctx: StreamContext = {
         sessionId: request.sessionId,
+        runId: request.runId,
         turnId: request.turnId,
         promptMessageId: request.promptMessageId,
         vfsSessionId: request.vfsSessionId,
+        historySessionId: request.historySessionId,
+        runtimeKind: request.runtimeKind,
+        iteration,
+        currentLimit,
+        markWaitingForHuman: request.callbacks?.onWaitingForHuman,
         messageId,
         abortSignal: request.abortSignal,
         state,
@@ -103,6 +112,18 @@ export class LLMTurnRuntimeService {
       }
 
       const turnStart = performance.now();
+      await this.runtimeAudit?.log({
+        eventName: 'llm.turn.started',
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        status: 'started',
+        data: {
+          runtimeKind: request.runtimeKind,
+          iteration,
+          limit: currentLimit,
+          model: request.model,
+        },
+      });
       await this.audit?.log({
         sessionId: request.sessionId,
         type: 'llm_request',
@@ -185,6 +206,19 @@ export class LLMTurnRuntimeService {
             this.structuredOutputRepairMessage(request.structuredOutput, error),
           ]);
         } else {
+          await this.runtimeAudit?.log({
+            eventName: 'llm.turn.failed',
+            sessionId: request.sessionId,
+            turnId: request.turnId,
+            status: 'failed',
+            errorCode: workflowErrorCodeFromThrown(error),
+            durationMs: Math.round(performance.now() - turnStart),
+            data: {
+              runtimeKind: request.runtimeKind,
+              iteration,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
           throw error;
         }
       }
@@ -203,6 +237,22 @@ export class LLMTurnRuntimeService {
           toolCallCount: state.toolCalls.length,
           usage,
           estimatedOutputTokens: estimateTextTokens(state.text) + estimateTextTokens(state.thinking),
+          ...(structuredOutputRepairRetried ? { structuredOutputRepairRetry: true } : {}),
+        },
+      });
+      await this.runtimeAudit?.log({
+        eventName: 'llm.turn.completed',
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        status: 'completed',
+        durationMs: Math.round(performance.now() - turnStart),
+        data: {
+          runtimeKind: request.runtimeKind,
+          iteration,
+          textLength: state.text.length,
+          thinkingLength: state.thinking.length,
+          toolCallCount: state.toolCalls.length,
+          ...(usage ? { usage } : {}),
           ...(structuredOutputRepairRetried ? { structuredOutputRepairRetry: true } : {}),
         },
       });
@@ -231,6 +281,11 @@ export class LLMTurnRuntimeService {
             ctx,
             request.toolMetas,
           );
+          const content = serializeToolResultContent(effectiveToolCall.name, result);
+          await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
+            turnId: request.turnId,
+            promptMessageId: request.promptMessageId,
+          });
           request.emit('tool:result', result);
           await this.audit?.log({
             sessionId: request.sessionId,
@@ -245,11 +300,6 @@ export class LLMTurnRuntimeService {
               request.callbacks?.onEscalation?.(message);
             }
           }
-          const content = serializeToolResultContent(effectiveToolCall.name, result);
-          await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
-            turnId: request.turnId,
-            promptMessageId: request.promptMessageId,
-          });
         }
       }
 
@@ -258,12 +308,28 @@ export class LLMTurnRuntimeService {
         if (!hasAssistantOutput && maxEmptyNoToolRetries > 0) {
           emptyNoToolRetries++;
           if (emptyNoToolRetries <= maxEmptyNoToolRetries) {
+            await this.runtimeAudit?.log(buildEmptyNoToolRuntimeAuditEvent({
+              eventName: 'llm.turn.empty_no_tool_retry',
+              request,
+              iteration,
+              retryCount: emptyNoToolRetries,
+              retryLimit: maxEmptyNoToolRetries,
+              state,
+            }));
             this.logger.warn(
               `Agent produced empty no-tool iteration for session ${request.sessionId} at iteration ${iteration}; retry ${emptyNoToolRetries}/${maxEmptyNoToolRetries}`,
             );
             iteration--;
             continue;
           }
+          await this.runtimeAudit?.log(buildEmptyNoToolRuntimeAuditEvent({
+            eventName: 'llm.turn.empty_no_tool_exhausted',
+            request,
+            iteration,
+            retryCount: emptyNoToolRetries,
+            retryLimit: maxEmptyNoToolRetries,
+            state,
+          }));
           emptyNoToolRetriesExhausted = true;
           break;
         }
@@ -287,7 +353,11 @@ export class LLMTurnRuntimeService {
     });
     if (approvedLimit && approvedLimit > currentLimit) {
       currentLimit = approvedLimit;
-      return this.runAgentLoop({ ...request, maxIterations: currentLimit });
+      return this.runAgentLoop({
+        ...request,
+        maxIterations: currentLimit,
+        resumeState: { iteration, currentLimit },
+      });
     }
     if (request.runtimeKind !== 'chat') {
       this.logger.warn(`Subagent exceeded ${currentLimit} iterations session=${request.sessionId}`);
@@ -411,6 +481,7 @@ export class LLMTurnRuntimeService {
         toolName: toolCall.name,
         args: toolCall.args,
         sessionId: request.sessionId,
+        turnId: request.turnId,
         agentRun: request.agentRun,
       };
     }
@@ -418,6 +489,7 @@ export class LLMTurnRuntimeService {
       callId: toolCall.id,
       toolName: toolCall.name,
       args: toolCall.args,
+      turnId: request.turnId,
     };
   }
 
@@ -457,7 +529,27 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function serializeToolResultContent(toolName: string, result: ToolResult): string {
+function workflowErrorCodeFromThrown(error: unknown): WorkflowErrorCode {
+  const code = typeof (error as { code?: unknown })?.code === 'string'
+    ? (error as { code: string }).code
+    : undefined;
+  switch (code) {
+    case 'LLM_AUTH':
+      return 'PROVIDER_UNAUTHORIZED';
+    case 'LLM_RATE_LIMIT':
+      return 'RATE_LIMITED';
+    case 'LLM_TIMEOUT':
+      return 'TIMEOUT';
+    case 'LLM_PROVIDER_DOWN':
+      return 'PROVIDER_UNAVAILABLE';
+    case 'LLM_BAD_STRUCTURED_OUTPUT':
+      return 'CONTRACT_VIOLATION';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+export function serializeToolResultContent(toolName: string, result: ToolResult): string {
   const fallbackErrorMessage = result.errorMessage ?? (
     result.status === 'cancelled' ? `Tool ${toolName} was cancelled or not approved.` : ''
   );

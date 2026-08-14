@@ -4,6 +4,7 @@ import { CanvasPanel } from './CanvasPanel';
 import type { ChatMessage, ChatSession, RuntimeActivitySnapshot, ToolResult } from '@kalio/types';
 import type { CLIChildProjection } from './cliChildProjection.model';
 import type { ArchitectureRunSummaryWithGraph } from './architectureChatSummary';
+import { clearSessionWatchRegistry } from '../../services/sessionWatchRegistry';
 
 interface MockAgentState {
   toolActivities: Array<{
@@ -231,6 +232,7 @@ vi.mock('../../store/sessionStore', () => {
 describe('CanvasPanel subagent grouping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSessionWatchRegistry();
     mockApiPost.mockRejectedValue(new Error('unexpected apiClient.post call'));
     agentState.toolActivities = [
       {
@@ -384,12 +386,18 @@ describe('CanvasPanel subagent grouping', () => {
           childSessionId: 'sub-session-1',
           parentToolCallId: 'master-call',
           label: 'Designer sub-agent',
-          status: 'running',
+          status: 'completed',
           updatedAt: 2,
         }],
         updatedAt: 2,
       },
     };
+    agentState.pendingConfirmations = { 'sub-session-1': [{}] };
+
+    mockApiGet.mockResolvedValue({
+      data: sessionState.sessionMessages['sub-session-1'],
+      headers: {},
+    });
 
     render(<CanvasPanel />);
 
@@ -397,14 +405,14 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByTestId('canvas-subagent-card-sub-session-1')).toHaveAttribute('data-session-id', 'sub-session-1');
     expect(screen.getByTestId('canvas-open-subagent-sub-session-1')).toHaveAttribute('data-session-id', 'sub-session-1');
     expect(screen.getByText('Designer sub-agent')).toBeDefined();
-    expect(screen.getByTestId('canvas-subagent-status-sub-session-1')).toHaveTextContent('running');
+    expect(screen.getByTestId('canvas-subagent-status-sub-session-1')).toHaveAttribute('data-status', 'waiting');
     expect(screen.getByText('Sub-agent tools (1)')).toBeDefined();
     expect(screen.getByText('vfs_write')).toBeDefined();
     expect(screen.queryByText('Tools (1)')).toBeNull();
     expect(screen.queryByText('run_subagent')).toBeNull();
   });
 
-  it('derives live canvas state from the active session runtime without relying on the global streaming bit', () => {
+  it('derives live canvas state from the active session runtime without relying on the global streaming bit', async () => {
     agentState.isStreaming = false;
     sessionState.agentTurns = [{ id: 'turn-1', sessionId: 'session-1', done: false, items: [] }];
     sessionState.getSessionActiveTurnId = () => 'turn-1';
@@ -434,12 +442,15 @@ describe('CanvasPanel subagent grouping', () => {
       },
     };
 
-    render(<CanvasPanel />);
+    await act(async () => {
+      render(<CanvasPanel />);
+      await Promise.resolve();
+    });
 
     expect(screen.getByText('Live')).toBeInTheDocument();
   });
 
-  it('shows architecture run detail with branch open controls', () => {
+  it('shows architecture run detail with branch open controls', async () => {
     agentState.canvasFocus = { kind: 'architecture-run', runId: 'run-1' };
     sessionState.messages = [
       {
@@ -518,6 +529,13 @@ describe('CanvasPanel subagent grouping', () => {
     fireEvent.click(screen.getByTestId('architecture-open-branch-sub-session-1'));
 
     expect(agentState.setCanvasFocus).toHaveBeenCalledWith({ kind: 'architecture-branch', sessionId: 'sub-session-1' });
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/sub-session-1/messages', expect.objectContaining({
+      params: expect.objectContaining({ limit: 24 }),
+    })));
+    await waitFor(() => expect(sessionState.sessionMessages['sub-session-1']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'branch-user' }),
+      expect.objectContaining({ id: 'branch-agent' }),
+    ])));
   });
 
   it('does not duplicate architecture branch sessions in the generic sub-agents canvas section', () => {
@@ -708,11 +726,11 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Router dispatch');
     expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Parallel sub-agents');
     expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Router merge');
-    expect(screen.getByTestId('architecture-run-flow')).toHaveTextContent('Finalizer');
+    expect(screen.getByTestId('architecture-run-flow')).not.toHaveTextContent('Finalizer');
     expect(screen.getByTestId('architecture-run-branch-count')).toHaveTextContent('5');
     expect(screen.getByTestId('architecture-run-branches')).toHaveTextContent('pending');
     expect(screen.getByTestId('architecture-run-step-synthesizer')).toHaveTextContent('pending');
-    expect(screen.getByTestId('architecture-run-step-final-artifact')).toHaveTextContent('pending');
+    expect(screen.queryByTestId('architecture-run-step-final-artifact')).toBeNull();
     expect(screen.getByTestId('architecture-run-internal-transcript')).toHaveTextContent('Orchestrator is dispatching the council.');
     expect(screen.getAllByTestId('architecture-run-transcript-entry')).toHaveLength(2);
   });
@@ -740,6 +758,45 @@ describe('CanvasPanel subagent grouping', () => {
     fireEvent.click(screen.getByTestId('canvas-focus-open-session-sub-session-1'));
 
     expect(sessionState.setActiveSession).toHaveBeenCalledWith('sub-session-1');
+  });
+
+  it('starts focused architecture branch hydration when opening it as the active chat', async () => {
+    let resolveHistory!: (value: { data: ChatMessage[]; headers?: Record<string, string> }) => void;
+    const historyPromise = new Promise<{ data: ChatMessage[]; headers?: Record<string, string> }>((resolve) => {
+      resolveHistory = resolve;
+    });
+    mockApiGet.mockReturnValueOnce(historyPromise);
+    agentState.toolActivities = [];
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-branch', sessionId: 'sub-session-1', label: 'Pragmatist' };
+    sessionState.sessionMessages = {
+      'session-1': [{ id: 'm1', sessionId: 'session-1', role: 'user', content: 'parent task', createdAt: 1 }],
+    };
+    sessionState.messages = sessionState.sessionMessages['session-1'];
+
+    render(<CanvasPanel />);
+
+    fireEvent.click(screen.getByTestId('canvas-focus-open-session-sub-session-1'));
+
+    expect(mockApiGet).toHaveBeenCalledWith('/api/sessions/sub-session-1/messages', expect.objectContaining({
+      params: expect.objectContaining({ limit: 24 }),
+    }));
+    expect(sessionState.setActiveSession).toHaveBeenCalledWith('sub-session-1');
+
+    await act(async () => {
+      resolveHistory({
+        data: [
+          { id: 'branch-user', sessionId: 'sub-session-1', role: 'user', content: 'Pragmatist branch prompt', createdAt: 4 },
+          { id: 'branch-agent', sessionId: 'sub-session-1', role: 'assistant', content: 'Pragmatist branch answer', createdAt: 5 },
+        ],
+      });
+      await historyPromise;
+    });
+
+    expect(sessionState.sessionMessages['sub-session-1']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'branch-user', content: 'Pragmatist branch prompt' }),
+      expect.objectContaining({ id: 'branch-agent', content: 'Pragmatist branch answer' }),
+    ]));
   });
 
   it('hides branch open controls and transcripts for synthetic architecture branch ids missing from sessions', () => {
@@ -1417,6 +1474,84 @@ describe('CanvasPanel subagent grouping', () => {
     expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Resume AgentFlow');
   });
 
+  it('shows the focused AgentFlow canvas section from live runtime activity before history is persisted', async () => {
+    agentState.activeAgentLoops = {};
+    agentState.canvasFocus = { kind: 'architecture-run', runId: 'flow-linked-graph' };
+    agentState.toolActivities = [
+      {
+        callId: 'agentflow-call-1',
+        toolName: 'run_sub_agentflow',
+        args: {},
+        status: 'success',
+        startedAt: 1,
+        finishedAt: 2,
+        result: {
+          callId: 'agentflow-call-1',
+          status: 'success',
+          data: {
+            flowRunId: 'flow-run-1',
+            flowDefinitionId: 'goal_guard_delivery_loop',
+            childSessionId: 'flow-child-source',
+            status: 'done',
+            summary: 'Goal Guard accepted live runtime evidence.',
+            decisions: [],
+            nextActions: [],
+            artifacts: [],
+            openChatSessionId: 'flow-linked-chat',
+            openGraphRunId: 'flow-linked-graph',
+          },
+        },
+      },
+    ];
+    agentState.runtimeActivitySnapshots = {
+      'session-1': {
+        sessionId: 'session-1',
+        active: false,
+        queueLength: 0,
+        pendingConfirmations: [],
+        pendingBudgetApprovals: [],
+        childExecutions: [
+          {
+            id: 'child-flow-1',
+            kind: 'agent_flow',
+            parentSessionId: 'session-1',
+            childSessionId: 'flow-linked-chat',
+            parentToolCallId: 'agentflow-call-1',
+            flowRunId: 'flow-run-1',
+            label: 'Goal Guard',
+            status: 'completed',
+            updatedAt: 3,
+          },
+        ],
+        toolActivities: [],
+        updatedAt: 3,
+      },
+    };
+    sessionState.messages = [
+      { id: 'm1', sessionId: 'session-1', role: 'user', content: 'build with goal guard', createdAt: 1 },
+    ];
+    sessionState.sessionMessages = { 'session-1': sessionState.messages };
+    sessionState.sessions = [
+      { id: 'session-1', personaId: 'default', title: 'Master', createdAt: 1, updatedAt: 1 },
+      {
+        id: 'flow-linked-chat',
+        personaId: 'default',
+        title: 'Goal Guard AgentFlow',
+        kind: 'agent-flow',
+        parentSessionId: 'session-1',
+        parentToolCallId: 'agentflow-call-1',
+        createdAt: 2,
+        updatedAt: 3,
+      },
+    ];
+
+    render(<CanvasPanel />);
+
+    await waitFor(() => expect(screen.getByTestId('agentflow-canvas-section')).toBeDefined());
+    expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('done');
+    expect(screen.getByTestId('agentflow-canvas-section')).toHaveTextContent('Goal Guard accepted live runtime evidence.');
+  });
+
   it('shows the same resume action for a hydrated waiting AgentFlow preview', async () => {
     mockApiPost.mockResolvedValueOnce({
       data: {
@@ -1623,8 +1758,11 @@ describe('CanvasPanel CLI children section', () => {
     agentState.canvasOpen = true;
   });
 
-  it('renders CLI child cards from projections in the canvas section', () => {
-    render(<CanvasPanel />);
+  it('renders CLI child cards from projections in the canvas section', async () => {
+    await act(async () => {
+      render(<CanvasPanel />);
+      await Promise.resolve();
+    });
 
     expect(screen.getByTestId('canvas-cli-children-section')).toBeInTheDocument();
     expect(screen.getByTestId('cli-child-card-cli-child-1')).toBeInTheDocument();

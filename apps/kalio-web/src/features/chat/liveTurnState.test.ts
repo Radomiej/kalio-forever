@@ -266,4 +266,131 @@ describe('resolveLiveTurnState', () => {
     expect(state.workflowActive).toBe(true);
     expect(state.showPlaceholderBubble).toBe(true);
   });
+
+  it('does not keep stop active for a terminal workflow envelope projection', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-1',
+      sessionMessages: [message({
+        id: 'assistant-1',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'cancelled',
+          trace: [],
+          routeHops: [],
+          hostProjectionKind: 'workflow-envelope',
+        },
+      })],
+      agentTurns: [turn({
+        turnKind: 'workflow-envelope',
+        items: [{ kind: 'text', messageId: 'assistant-1' }],
+        done: false,
+      })],
+      activeTurnId: 'turn-1',
+      isStreaming: false,
+      streamingSessionId: null,
+      awaitingFirstChunk: false,
+      hasActiveLoop: false,
+      queuedDepth: 0,
+      activeToolActivities: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('idle');
+    expect(state.stoppable).toBe(false);
+    expect(state.workflowActive).toBe(false);
+    expect(state.showPlaceholderBubble).toBe(false);
+  });
+
+  it('lets a terminal workflow projection override a stale active loop signal', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-1',
+      sessionMessages: [message({
+        id: 'assistant-1',
+        architectureRun: {
+          runId: 'run-1',
+          schemaId: 'strategic-decision-council',
+          status: 'cancelled',
+          trace: [],
+          routeHops: [],
+          hostProjectionKind: 'workflow-envelope',
+        },
+      })],
+      agentTurns: [turn({
+        turnKind: 'workflow-envelope',
+        items: [{ kind: 'text', messageId: 'assistant-1' }],
+        done: false,
+      })],
+      activeTurnId: 'turn-1',
+      isStreaming: false,
+      streamingSessionId: null,
+      awaitingFirstChunk: false,
+      hasActiveLoop: true,
+      queuedDepth: 0,
+      activeToolActivities: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('idle');
+    expect(state.stoppable).toBe(false);
+    expect(state.workflowActive).toBe(false);
+  });
+
+  it('does not keep a stale pending workflow turn alive after the same prompt has a terminal projection', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-1',
+      sessionMessages: [
+        message({
+          id: 'pending-message',
+          content: 'Architecture run is starting.',
+        }),
+        message({
+          id: 'completed-message',
+          architectureRun: {
+            runId: 'run-1',
+            schemaId: 'strategic-decision-council',
+            status: 'completed',
+            trace: [],
+            routeHops: [],
+            hostProjectionKind: 'workflow-envelope',
+          },
+        }),
+      ],
+      agentTurns: [
+        turn({
+          id: 'architecture-turn-pending',
+          promptMessageId: 'user-2',
+          turnKind: 'workflow-envelope',
+          items: [{ kind: 'text', messageId: 'pending-message' }],
+          done: false,
+        }),
+        turn({
+          id: 'architecture-turn-run-1',
+          promptMessageId: 'user-2',
+          turnKind: 'workflow-envelope',
+          items: [{ kind: 'text', messageId: 'completed-message' }],
+          done: true,
+        }),
+      ],
+      activeTurnId: 'architecture-turn-pending',
+      isStreaming: false,
+      streamingSessionId: null,
+      awaitingFirstChunk: false,
+      hasActiveLoop: true,
+      queuedDepth: 0,
+      activeToolActivities: [],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('idle');
+    expect(state.stoppable).toBe(false);
+    expect(state.workflowActive).toBe(false);
+    expect(state.showPlaceholderBubble).toBe(false);
+  });
 });

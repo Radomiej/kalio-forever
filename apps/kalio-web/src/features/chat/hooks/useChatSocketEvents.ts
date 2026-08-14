@@ -4,9 +4,10 @@ import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
 import { identifyWatchedSession } from '../../../services/sessionWatchRegistry';
 import { shouldRefreshVfsForToolResult, type ChatConnectionState } from '../ChatInterface.Parts';
-import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolArgProgressHandlers, findPendingConfirmationForToolResult, mergeRaAppNativeResultIntoMessages, type ReconnectUiState, type UseChatSocketEventsOptions } from './useChatSocketEvents.helpers';
+import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolArgProgressHandlers, findPendingConfirmationForToolResult, materializeToolStartTurn, mergeRaAppNativeResultIntoMessages, type ReconnectUiState, type UseChatSocketEventsOptions } from './useChatSocketEvents.helpers';
 import { handleCliChildProgress, handleCliChildToolResult, isCliChildToolName, resolveCliToolName } from './useChatSocketEvents.cliChild';
 import { registerConnectionRecoveryHandlers, registerSessionLifecycleHandlers } from './useChatSocketEvents.lifecycle';
+import { projectSubAgentFlowArchitectureResult } from '../architectureAgentFlowProjection';
 
 export function useChatSocketEvents({
   hasPendingChunksForSession,
@@ -69,8 +70,6 @@ export function useChatSocketEvents({
   const { addSession } = useSessionStore();
 
   useEffect(() => {
-    if (!eventBus.connected) eventBus.connect();
-
     const { markToolArgProgressSeen, clearToolArgProgressTracking, ensureSyntheticToolIntent } = createToolArgProgressHandlers({
       toolArgProgressSeenRef,
       setToolArgProgress,
@@ -277,15 +276,14 @@ export function useChatSocketEvents({
         startedAt: Date.now(),
       });
       if (payloadSessionId) {
-        const { getSessionActiveTurnId, getSessionAgentTurns, addTurnItem } = useSessionStore.getState();
-        const currentTurnId = getSessionActiveTurnId(payloadSessionId);
-        if (currentTurnId) {
-          const turn = getSessionAgentTurns(payloadSessionId).find((item) => item.id === currentTurnId);
-          const hasItem = turn?.items.some((item) => item.kind === 'tool' && item.callId === payload.callId) ?? false;
-          if (!hasItem) {
-            addTurnItem({ kind: 'tool', callId: payload.callId }, payloadSessionId);
-          }
-        }
+        const { getSessionActiveTurnId, getSessionAgentTurns, startAgentTurn, addTurnItem } = useSessionStore.getState();
+        materializeToolStartTurn(payload, payloadSessionId, {
+          getSessionActiveTurnId,
+          getSessionAgentTurns,
+          addActiveAgentLoop,
+          startAgentTurn,
+          addTurnItem,
+        });
       }
       clearToolArgProgressTracking(payloadSessionId);
     });
@@ -305,7 +303,7 @@ export function useChatSocketEvents({
     const offAgentStart = eventBus.onAgentStart((payload) => {
       clearToolArgProgressTracking(payload.sessionId);
       addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
-      startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun);
+      startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun, payload.promptMessageId);
       clearToolActivities(payload.sessionId);
       setPendingConfirmation(payload.sessionId, null);
       setPendingBudgetApproval?.(payload.sessionId, null);
@@ -320,7 +318,7 @@ export function useChatSocketEvents({
       removeActiveAgentLoop(payload.sessionId, payload.agentRun);
       clearToolBudgetProgress?.(payload.sessionId);
       clearToolArgProgressTracking(payload.sessionId);
-      finalizeAgentTurn(payload.sessionId);
+      finalizeAgentTurn(payload.sessionId, payload.turnId);
       if (hasPendingChunksForSession(payload.sessionId)) {
         flushThinkingChunks(payload.sessionId);
         flushStreamingChunks(payload.sessionId);
@@ -330,7 +328,6 @@ export function useChatSocketEvents({
         setAwaitingFirstChunk(false);
       }
       setPendingConfirmation(payload.sessionId, null);
-      setPendingBudgetApproval?.(payload.sessionId, null);
     });
 
     const offContext = eventBus.onContext((payload) => {
@@ -370,6 +367,19 @@ export function useChatSocketEvents({
         if (toolResultMsg) {
           addMessage(toolResultMsg);
         }
+        void projectSubAgentFlowArchitectureResult({
+          toolName,
+          resultData: result.data,
+          resultSessionId,
+          toolResultMessageId: toolResultMsg?.id,
+          getSessionMessages: (sessionId) => useSessionStore.getState().getSessionMessages(sessionId),
+          getSessionAgentTurns: (sessionId) => useSessionStore.getState().getSessionAgentTurns(sessionId),
+          getSessionActiveTurnId: (sessionId) => useSessionStore.getState().getSessionActiveTurnId(sessionId),
+          setMessages,
+          setAgentTurns,
+        }).catch((error: unknown) => {
+          console.error('[EventBus] run_sub_agentflow architecture projection failed', error);
+        });
       }
       onContextInvalidated?.();
       if (
@@ -398,6 +408,7 @@ export function useChatSocketEvents({
       addActiveAgentLoop,
       removeActiveAgentLoop,
       startAgentTurn,
+      finalizeAgentTurn,
       setAwaitingFirstChunk,
       setStreaming,
       setQueuedDepth,
@@ -440,6 +451,9 @@ export function useChatSocketEvents({
       setAgentTurns,
       onContextInvalidated,
     });
+    if (!eventBus.connected) {
+      eventBus.connect();
+    }
 
     return () => {
       offChunk();

@@ -143,9 +143,22 @@ interface LiveSessionStatusMaterializationDeps {
   addActiveAgentLoop: (sessionId: string, turnId: string) => void;
   startAgentTurn: (turnId: string, sessionId: string) => void;
   getActiveSessionId?: () => string | null;
+  finalizeAgentTurn?: (sessionId: string, expectedTurnId?: string) => void;
   removeActiveAgentLoop?: (sessionId: string) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
   setStreaming?: (value: boolean, messageId?: string, sessionId?: string | null) => void;
+}
+
+interface ToolStartTurnMaterializationDeps {
+  getSessionActiveTurnId: (sessionId: string) => string | null;
+  getSessionAgentTurns: (sessionId: string) => Array<{ id: string; items: Array<{ kind: string; callId?: string }> }>;
+  addActiveAgentLoop: (sessionId: string, turnId: string, agentRun?: SocketEvents['tool:start']['agentRun']) => void;
+  startAgentTurn: (
+    turnId: string,
+    sessionId: string,
+    agentRun?: SocketEvents['tool:start']['agentRun'],
+  ) => void;
+  addTurnItem: (item: { kind: 'tool'; callId: string }, sessionId: string) => void;
 }
 
 function materializeLiveTurn(
@@ -163,10 +176,35 @@ function materializeLiveTurn(
   deps.setStreaming?.(true, undefined, sessionId);
 }
 
+export function materializeToolStartTurn(
+  payload: SocketEvents['tool:start'],
+  sessionId: string,
+  deps: ToolStartTurnMaterializationDeps,
+): void {
+  const currentTurnId = deps.getSessionActiveTurnId(sessionId);
+  const effectiveTurnId = payload.turnId ?? currentTurnId;
+  if (!effectiveTurnId) {
+    return;
+  }
+
+  if (payload.turnId && currentTurnId !== payload.turnId) {
+    deps.addActiveAgentLoop(sessionId, payload.turnId, payload.agentRun);
+    deps.startAgentTurn(payload.turnId, sessionId, payload.agentRun);
+  }
+
+  const turn = deps.getSessionAgentTurns(sessionId).find((item) => item.id === effectiveTurnId);
+  const hasItem = turn?.items.some((item) => item.kind === 'tool' && item.callId === payload.callId) ?? false;
+  if (!hasItem) {
+    deps.addTurnItem({ kind: 'tool', callId: payload.callId }, sessionId);
+  }
+}
+
 function releaseLiveTurn(
   sessionId: string,
+  expectedTurnId: string | undefined,
   deps: LiveSessionStatusMaterializationDeps,
 ): void {
+  deps.finalizeAgentTurn?.(sessionId, expectedTurnId);
   deps.removeActiveAgentLoop?.(sessionId);
   deps.setStreaming?.(false, undefined, sessionId);
   if (deps.getActiveSessionId?.() === sessionId) {
@@ -195,6 +233,7 @@ export function runtimeSnapshotKeepsSessionLive(
     || snapshot.toolActivities.some((activity) => (
       activity.status === 'running' || activity.status === 'pending_confirmation'
     ))
+    || snapshot.pendingBudgetApprovals.length > 0
     || snapshot.childExecutions.some((execution) => (
       execution.status === 'running' || execution.status === 'waiting'
     ));
@@ -236,6 +275,10 @@ export function selectReplayableSessionStatusSnapshot(
   return finalSnapshot;
 }
 
+function sessionStatusUpdatedAt(snapshot: SocketEvents['session:status'] | undefined): number {
+  return snapshot?.run?.updatedAt ?? snapshot?.run?.lastHeartbeatAt ?? 0;
+}
+
 export function materializeLiveTurnFromHydratedRuntimeState(
   params: {
     runtimeSnapshot: RuntimeActivitySnapshot | null | undefined;
@@ -246,6 +289,16 @@ export function materializeLiveTurnFromHydratedRuntimeState(
 ): void {
   if (params.runtimeSnapshot) {
     materializeLiveTurnFromRuntimeActivitySnapshot(params.runtimeSnapshot, deps);
+    if (runtimeSnapshotKeepsSessionLive(params.runtimeSnapshot)) {
+      return;
+    }
+    const replayableSnapshot = selectReplayableSessionStatusSnapshot(
+      params.bufferedSessionStatusSnapshots,
+      params.latestSessionStatusSnapshot,
+    );
+    if (sessionStatusUpdatedAt(replayableSnapshot) > params.runtimeSnapshot.updatedAt) {
+      materializeLiveTurnFromSessionStatusSnapshot(replayableSnapshot, deps);
+    }
     return;
   }
 
@@ -268,6 +321,7 @@ export function handleSessionStatusEvent(
     setRecoveryNotice: (value: string) => void;
     addActiveAgentLoop: (sessionId: string, turnId: string) => void;
     startAgentTurn: (turnId: string, sessionId: string) => void;
+    finalizeAgentTurn?: (sessionId: string, expectedTurnId?: string) => void;
     removeActiveAgentLoop: (sessionId: string) => void;
     setAwaitingFirstChunk: (value: boolean) => void;
     setStreaming: (value: boolean, messageId?: string, sessionId?: string | null) => void;
@@ -294,7 +348,7 @@ export function handleSessionStatusEvent(
       materializeLiveTurnFromSessionStatusSnapshot(payload, deps);
       return;
     }
-    releaseLiveTurn(payload.sessionId, deps);
+    releaseLiveTurn(payload.sessionId, payload.turnId, deps);
   }
 }
 
@@ -310,8 +364,6 @@ export function handleConnectionStateEvent(
 ): void {
   const previousState = deps.getConnectionState();
   const reconnectUiState = deps.getReconnectUiState();
-  let nextReconnectUiState = reconnectUiState;
-
   deps.setConnectionState(state.status);
 
   if (state.status === 'connected') {
@@ -323,11 +375,10 @@ export function handleConnectionStateEvent(
     ) {
       deps.setRecoveryNotice('Recovered missed stream events after reconnect.');
     }
-    nextReconnectUiState = {
+    deps.setReconnectUiState({
       hasConnectedOnce: true,
       hadRealDisconnect: false,
-    };
-    deps.setReconnectUiState(nextReconnectUiState);
+    });
     return;
   }
 
@@ -335,11 +386,10 @@ export function handleConnectionStateEvent(
     (state.status === 'reconnecting' || state.status === 'disconnected')
     && reconnectUiState.hasConnectedOnce
   ) {
-    nextReconnectUiState = {
+    deps.setReconnectUiState({
       hasConnectedOnce: true,
       hadRealDisconnect: true,
-    };
-    deps.setReconnectUiState(nextReconnectUiState);
+    });
   }
 
   if (state.status === 'reconnecting' && reconnectUiState.hasConnectedOnce) {
@@ -352,13 +402,52 @@ export function mergeRaAppNativeResultIntoMessages(
   toolCallId: string,
   results: unknown,
 ): ChatMessage[] {
+  const nativeResults = Array.isArray(results) ? results : [];
+  const completedApprovalIds = new Set(
+    nativeResults
+      .map((result) => {
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+          return null;
+        }
+        const id = (result as Record<string, unknown>).id;
+        return typeof id === 'string' ? id : null;
+      })
+      .filter((id): id is string => Boolean(id)),
+  );
+
   return messages.map((message) => {
-    if (message.toolCallId !== toolCallId || message.role !== 'tool_result') return message;
+    if (message.role !== 'tool_result') return message;
     try {
       const data = JSON.parse(message.content) as Record<string, unknown>;
+      const pendingApprovals = Array.isArray(data.pendingApprovals)
+        ? data.pendingApprovals
+        : [];
+      const matchesToolCall = message.toolCallId === toolCallId;
+      const matchesApprovalId = pendingApprovals.some((approval) => {
+        if (!approval || typeof approval !== 'object' || Array.isArray(approval)) {
+          return false;
+        }
+        const id = (approval as Record<string, unknown>).id;
+        return typeof id === 'string' && completedApprovalIds.has(id);
+      });
+
+      if (!matchesToolCall && !matchesApprovalId) {
+        return message;
+      }
+
+      const nextPendingApprovals = matchesToolCall
+        ? []
+        : pendingApprovals.filter((approval) => {
+          if (!approval || typeof approval !== 'object' || Array.isArray(approval)) {
+            return true;
+          }
+          const id = (approval as Record<string, unknown>).id;
+          return typeof id !== 'string' || !completedApprovalIds.has(id);
+        });
+
       return {
         ...message,
-        content: JSON.stringify({ ...data, nativeResults: results, pendingApprovals: [] }),
+        content: JSON.stringify({ ...data, nativeResults: results, pendingApprovals: nextPendingApprovals }),
       };
     } catch (err) {
       console.error('[ChatInterface] failed to merge RA-App native result', err instanceof Error ? err : new Error(String(err)));

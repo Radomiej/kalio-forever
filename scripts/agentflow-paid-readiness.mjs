@@ -14,6 +14,12 @@ export async function collectPaidReadinessChecks(options = {}) {
     options.maxRecentProviderFailureMs ?? process.env.AGENTFLOW_RECENT_PROVIDER_FAILURE_AGE_MS ?? 60 * 60 * 1000,
   );
   const requiredHighLevelModel = options.requiredHighLevelModel ?? process.env.AGENTFLOW_REQUIRED_HIGH_LEVEL_MODEL;
+  const requiredPersonaId = options.requiredPersonaId ?? process.env.AGENTFLOW_REQUIRED_PERSONA_ID;
+  const requiredPersonaModel = options.requiredPersonaModel ?? process.env.AGENTFLOW_REQUIRED_PERSONA_MODEL;
+  const staticOnly = options.staticOnly ?? readBooleanFlag(
+    resolveBooleanFlagFromArgv(options.argv, '--static-only'),
+    false,
+  );
   const requireWebSearch = options.requireWebSearch ?? readBooleanFlag(
     resolveBooleanFlagFromArgv(options.argv, '--require-web-search') ?? process.env.AGENTFLOW_REQUIRE_WEB_SEARCH,
     false,
@@ -28,10 +34,18 @@ export async function collectPaidReadinessChecks(options = {}) {
   const runs = await checkJson(fetchJson, checks, `${apiBase}/agent-flows/runs`, 'AgentFlow runs endpoint is reachable');
   const sessions = await checkJson(fetchJson, checks, `${apiBase}/sessions`, 'Sessions endpoint is reachable');
   const codexConfig = await checkJson(fetchJson, checks, `${apiBase}/cli-agents/codex/config`, 'Codex CLI config endpoint is reachable');
+  const requiredPersona = typeof requiredPersonaId === 'string' && requiredPersonaId.trim().length > 0
+    ? await checkJson(
+        fetchJson,
+        checks,
+        `${apiBase}/personas/${encodeURIComponent(requiredPersonaId.trim())}`,
+        `Required persona endpoint is reachable (${requiredPersonaId.trim()})`,
+      )
+    : null;
   const searchConfig = requireWebSearch
     ? await checkJson(fetchJson, checks, `${apiBase}/search/config`, 'Web Search config endpoint is reachable')
     : null;
-  const searchTest = requireWebSearch
+  const searchTest = requireWebSearch && !staticOnly
     ? await checkJson(
         fetchJson,
         checks,
@@ -60,6 +74,27 @@ export async function collectPaidReadinessChecks(options = {}) {
       `LLM model is set (${llmConfig.model})`,
       'LLM model is empty.',
     );
+  }
+
+  if (requiredPersona) {
+    const personaId = requiredPersonaId.trim();
+    const expectedModel = typeof requiredPersonaModel === 'string' && requiredPersonaModel.trim().length > 0
+      ? requiredPersonaModel.trim()
+      : null;
+    passOrFail(
+      checks,
+      expectedModel !== null,
+      `Required persona model is set (${expectedModel})`,
+      `Required persona ${personaId} was selected without AGENTFLOW_REQUIRED_PERSONA_MODEL.`,
+    );
+    if (expectedModel) {
+      passOrFail(
+        checks,
+        requiredPersona.model === expectedModel,
+        `Persona ${personaId} uses required request model ${expectedModel}`,
+        `Persona ${personaId} uses request model ${requiredPersona.model ?? '(empty)'} instead of required ${expectedModel}`,
+      );
+    }
   }
 
   if (Array.isArray(credentials)) {
@@ -95,52 +130,61 @@ export async function collectPaidReadinessChecks(options = {}) {
           `Active credential provider test failed: ${credentialCheck.error ?? 'unknown error'}`,
         );
       }
-      const completionCheck = await checkJson(
-        fetchJson,
-        checks,
-        `${apiBase}/credentials/${active.credentialId}/test-completion`,
-        'Active credential completion smoke endpoint is reachable',
-        { method: 'POST' },
-      );
-      const stableCompletionCheck = completionCheck && isRetryableProviderSmokeFailure(completionCheck)
-        ? await retryCompletionSmoke(
-            fetchJson,
-            checks,
-            `${apiBase}/credentials/${active.credentialId}/test-completion`,
-            'Active credential completion smoke retry after provider cross-border failure',
-            { method: 'POST' },
-          )
-        : completionCheck;
-      if (stableCompletionCheck) {
-        passOrFail(
+      if (staticOnly) {
+        checks.push({ ok: true, message: 'Completion smoke is disabled for this static-only readiness profile' });
+      } else {
+        const completionInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ maxOutputTokens: 64 }),
+        };
+        const completionCheck = await checkJson(
+          fetchJson,
           checks,
-          stableCompletionCheck.ok === true,
-          `Active credential completion smoke passed (` +
-            `${stableCompletionCheck.provider ?? 'unknown'} / ${stableCompletionCheck.model ?? 'unknown'} / ${stableCompletionCheck.source ?? 'unknown'})`,
-          `Active credential completion smoke failed: ${stableCompletionCheck.error ?? 'unknown error'}`,
+          `${apiBase}/credentials/${active.credentialId}/test-completion`,
+          'Active credential completion smoke endpoint is reachable',
+          completionInit,
         );
-        if (stableCompletionCheck.ok === true && llmConfig) {
+        const stableCompletionCheck = completionCheck && isRetryableProviderSmokeFailure(completionCheck)
+          ? await retryCompletionSmoke(
+              fetchJson,
+              checks,
+              `${apiBase}/credentials/${active.credentialId}/test-completion`,
+              'Active credential completion smoke retry after provider cross-border failure',
+              completionInit,
+            )
+          : completionCheck;
+        if (stableCompletionCheck) {
           passOrFail(
             checks,
-            stableCompletionCheck.provider === llmConfig.provider,
-            `Active completion smoke used effective provider (${stableCompletionCheck.provider ?? 'unknown'})`,
-            `Active completion smoke used ${stableCompletionCheck.provider ?? 'unknown'} but effective provider is ${llmConfig.provider ?? 'unknown'}`,
+            stableCompletionCheck.ok === true,
+            `Active credential completion smoke passed (` +
+              `${stableCompletionCheck.provider ?? 'unknown'} / ${stableCompletionCheck.model ?? 'unknown'} / ${stableCompletionCheck.source ?? 'unknown'})`,
+            `Active credential completion smoke failed: ${stableCompletionCheck.error ?? 'unknown error'}`,
           );
-          passOrFail(
-            checks,
-            stableCompletionCheck.model === llmConfig.model,
-            `Active completion smoke model matches effective model (${stableCompletionCheck.model ?? 'unknown'})`,
-            `Active completion smoke model ${stableCompletionCheck.model ?? 'unknown'} does not match effective model ${llmConfig.model ?? 'unknown'}`,
-          );
-          passOrFail(
-            checks,
-            stableCompletionCheck.source === llmConfig.source,
-            `Active completion smoke source matches effective source (${stableCompletionCheck.source ?? 'unknown'})`,
-            `Active completion smoke source ${stableCompletionCheck.source ?? 'unknown'} does not match effective source ${llmConfig.source ?? 'unknown'}`,
-          );
+          if (stableCompletionCheck.ok === true && llmConfig) {
+            passOrFail(
+              checks,
+              stableCompletionCheck.provider === llmConfig.provider,
+              `Active completion smoke used effective provider (${stableCompletionCheck.provider ?? 'unknown'})`,
+              `Active completion smoke used ${stableCompletionCheck.provider ?? 'unknown'} but effective provider is ${llmConfig.provider ?? 'unknown'}`,
+            );
+            passOrFail(
+              checks,
+              stableCompletionCheck.model === llmConfig.model,
+              `Active completion smoke model matches effective model (${stableCompletionCheck.model ?? 'unknown'})`,
+              `Active completion smoke model ${stableCompletionCheck.model ?? 'unknown'} does not match effective model ${llmConfig.model ?? 'unknown'}`,
+            );
+            passOrFail(
+              checks,
+              stableCompletionCheck.source === llmConfig.source,
+              `Active completion smoke source matches effective source (${stableCompletionCheck.source ?? 'unknown'})`,
+              `Active completion smoke source ${stableCompletionCheck.source ?? 'unknown'} does not match effective source ${llmConfig.source ?? 'unknown'}`,
+            );
+          }
         }
       }
-      if (typeof requiredHighLevelModel === 'string' && requiredHighLevelModel.trim().length > 0) {
+      if (!staticOnly && typeof requiredHighLevelModel === 'string' && requiredHighLevelModel.trim().length > 0) {
         const model = requiredHighLevelModel.trim();
         const highLevelCompletionCheck = await checkJson(
           fetchJson,
@@ -150,7 +194,7 @@ export async function collectPaidReadinessChecks(options = {}) {
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model }),
+            body: JSON.stringify({ model, maxOutputTokens: 64 }),
           },
         );
         const stableHighLevelCompletionCheck = highLevelCompletionCheck && isRetryableProviderSmokeFailure(highLevelCompletionCheck)
@@ -162,7 +206,7 @@ export async function collectPaidReadinessChecks(options = {}) {
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model }),
+                body: JSON.stringify({ model, maxOutputTokens: 64 }),
               },
             )
           : highLevelCompletionCheck;
@@ -249,6 +293,9 @@ export async function collectPaidReadinessChecks(options = {}) {
       'Web Search smoke passed',
       `Web Search smoke failed: ${searchTest.error ?? 'unknown error'}`,
     );
+  }
+  if (requireWebSearch && staticOnly) {
+    checks.push({ ok: true, message: 'Web Search smoke is disabled for this static-only readiness profile' });
   }
   if (!requireWebSearch) {
     checks.push({ ok: true, message: 'Web Search is not required for this readiness profile' });

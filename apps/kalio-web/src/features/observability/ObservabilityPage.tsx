@@ -16,6 +16,7 @@ const TYPE_CONFIG: Record<AuditType, { icon: React.ReactNode; cls: string; bg: s
   tool_call:            { icon: <Wrench size={12} />,        cls: 'text-emerald-400', bg: 'bg-emerald-400/10', short: 'Tool →',  label: 'Tool Call' },
   tool_result:          { icon: <CheckCircle2 size={12} />,  cls: 'text-emerald-400', bg: 'bg-emerald-400/10', short: '← Tool',  label: 'Tool Result' },
   architecture_event:   { icon: <Zap size={12} />,           cls: 'text-warning',     bg: 'bg-warning/10',     short: 'Arch',    label: 'Architecture Event' },
+  runtime_event:        { icon: <Zap size={12} />,           cls: 'text-cyan-300',    bg: 'bg-cyan-400/10',    short: 'Run',     label: 'Runtime Event' },
   error:                { icon: <XCircle size={12} />,       cls: 'text-error',       bg: 'bg-error/10',       short: 'Error',   label: 'Error' },
   raapp_native_call:    { icon: <Zap size={12} />,           cls: 'text-warning',     bg: 'bg-warning/10',     short: 'RA call', label: 'RA-App Native Call' },
   raapp_native_approved:{ icon: <CheckCircle2 size={12} />,  cls: 'text-warning',     bg: 'bg-warning/10',     short: 'RA ok',   label: 'RA-App Approved' },
@@ -645,7 +646,7 @@ export function ObservabilityPage() {
     <div className="flex h-full min-w-0 flex-col overflow-x-hidden bg-base-100">
 
       {/* ── Top toolbar ── */}
-      <div className="min-w-0 shrink-0 space-y-2 overflow-x-hidden border-b border-base-300 px-4 py-2">
+      <div className="min-w-0 shrink-0 space-y-3 overflow-x-hidden border-b border-base-300/70 bg-base-100 px-4 py-3">
         {/* Row 1: title + stats + refresh */}
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <span className="text-sm font-semibold text-base-content">Audit Truth Board</span>
@@ -659,7 +660,7 @@ export function ObservabilityPage() {
             disabled={loading}
           >
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline text-[10px]">Refresh</span>
+            <span className="hidden text-xs sm:inline">Refresh</span>
           </button>
           <button
             className={`btn btn-ghost btn-xs gap-1 text-error/60 hover:text-error ${clearing ? 'opacity-60' : ''}`}
@@ -668,7 +669,7 @@ export function ObservabilityPage() {
             disabled={clearing}
           >
             <Trash2 size={12} />
-            <span className="hidden sm:inline text-[10px]">Clear</span>
+            <span className="hidden text-xs sm:inline">Clear</span>
           </button>
           <button
             className={`btn btn-ghost btn-xs gap-1 ${autoRefresh ? 'text-sky-400' : 'text-base-content/65'}`}
@@ -676,7 +677,7 @@ export function ObservabilityPage() {
             title={autoRefresh ? 'Pause auto-refresh' : 'Resume auto-refresh'}
           >
             {autoRefresh ? <Pause size={12} /> : <Play size={12} />}
-            <span className="hidden sm:inline text-[10px]">{autoRefresh ? 'Live' : 'Paused'}</span>
+            <span className="hidden text-xs sm:inline">{autoRefresh ? 'Live' : 'Paused'}</span>
           </button>
         </div>
 
@@ -689,7 +690,7 @@ export function ObservabilityPage() {
             type="button"
             data-testid="audit-view-workflow"
             onClick={() => setViewMode('workflow')}
-            className={`min-h-[28px] px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors ${
+            className={`min-h-8 rounded-md border px-3 py-1 text-xs font-semibold transition-colors ${
               viewMode === 'workflow'
                 ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
                 : 'border-base-300 text-base-content/65 hover:border-base-content/50 hover:text-base-content/80'
@@ -702,7 +703,7 @@ export function ObservabilityPage() {
             type="button"
             data-testid="audit-view-tools"
             onClick={() => setViewMode('tools')}
-            className={`min-h-[28px] px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors ${
+            className={`min-h-8 rounded-md border px-3 py-1 text-xs font-semibold transition-colors ${
               viewMode === 'tools'
                 ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
                 : 'border-base-300 text-base-content/65 hover:border-base-content/50 hover:text-base-content/80'
@@ -715,7 +716,7 @@ export function ObservabilityPage() {
             type="button"
             data-testid="audit-view-all"
             onClick={() => setViewMode('all')}
-            className={`min-h-[28px] px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors ${
+            className={`min-h-8 rounded-md border px-3 py-1 text-xs font-semibold transition-colors ${
               viewMode === 'all'
                 ? 'bg-base-300 text-base-content/75 border-base-300'
                 : 'border-base-300 text-base-content/65 hover:border-base-content/50 hover:text-base-content/80'
@@ -729,7 +730,7 @@ export function ObservabilityPage() {
             <button
               key={r.id}
               onClick={() => setTimeRange(r.id)}
-              className={`min-h-[28px] px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+              className={`min-h-8 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                 timeRange === r.id
                   ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
                   : 'border-base-300 text-base-content/50 hover:border-base-content/30 hover:text-base-content/70'
@@ -739,13 +740,13 @@ export function ObservabilityPage() {
             </button>
           ))}
           <span className="text-base-content/20 text-xs ml-1">|</span>
-          <span className="text-[11px] text-base-content/65 font-mono">{filtered.length} events</span>
+          <span className="font-mono text-xs text-base-content/65">{filtered.length} events</span>
         </div>
 
         {/* Row 3: type filter chips */}
         <div className="flex items-center gap-1 flex-wrap">
           <button
-            className={`min-h-[28px] px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+            className={`min-h-8 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${
               allSelected
                 ? 'bg-base-300 text-base-content/70 border-base-300'
                 : 'border-dashed border-base-300 text-base-content/65'
@@ -761,7 +762,7 @@ export function ObservabilityPage() {
               <button
                 key={t}
                 onClick={() => toggleType(t)}
-                className={`flex min-h-[28px] items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                className={`flex min-h-8 items-center gap-1 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   active
                     ? `${cfg.bg} ${cfg.cls} border-current/30`
                     : 'border-base-300 text-base-content/65 opacity-80'

@@ -1,0 +1,5 @@
+[mcp_servers.data-analyst]
+enabled = true
+required = false
+url = "http://127.0.0.1:3000/mcp"
+bearer_token_env_var = "DA_MCP_TOKEN"

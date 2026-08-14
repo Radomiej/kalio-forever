@@ -513,6 +513,83 @@ describe('buildExecutionGraphModel', () => {
     ]));
   });
 
+  it('prefers durable AgentFlow child execution status over stale run_sub_agentflow tool result', () => {
+    const messages: ChatMessage[] = [
+      makeMessage({ id: 'u1', role: 'user', content: 'Run Goal Guard', createdAt: 1 }),
+      makeMessage({
+        id: 'a1',
+        role: 'assistant',
+        content: '',
+        createdAt: 2,
+        toolCalls: [{
+          id: 'flow-call-1',
+          name: 'run_sub_agentflow',
+          args: {
+            flowId: 'goal_guard_delivery_loop',
+            goal: 'Run Goal Guard',
+          },
+        }],
+      }),
+      makeMessage({
+        id: 'tr1',
+        role: 'tool_result',
+        toolCallId: 'flow-call-1',
+        content: JSON.stringify({
+          flowRunId: 'agent-flow-1',
+          childSessionId: 'arch-flow-1-root',
+          flowDefinitionId: 'goal_guard_delivery_loop',
+          status: 'running',
+          summary: 'Goal Guard flow started.',
+          decisions: [],
+          nextActions: ['Wait for evidence.'],
+          artifacts: [],
+          openChatSessionId: 'arch-flow-1-root',
+          openGraphRunId: 'goal-run-1',
+        }),
+        createdAt: 3,
+      }),
+    ];
+
+    const model = buildExecutionGraphModel({
+      sessionId: 'session-1',
+      messages,
+      turns: buildTurnsFromHistory(messages, 'session-1'),
+      toolActivities: [],
+      activeAgentLoops: {},
+      childExecutions: [{
+        id: 'agent-flow-1',
+        kind: 'agent_flow',
+        parentSessionId: 'session-1',
+        childSessionId: 'arch-flow-1-root',
+        parentToolCallId: 'flow-call-1',
+        flowRunId: 'goal-run-1',
+        label: 'Goal Master Delivery Loop',
+        status: 'completed',
+        lastOutput: 'Final response produced.',
+        updatedAt: 20,
+      }],
+      sessions: [
+        makeSession(),
+        makeSession({ id: 'arch-flow-1-root', kind: 'agent-flow', title: 'Goal Guard flow' }),
+      ],
+      sessionMessages: {
+        'session-1': messages,
+        'arch-flow-1-root': [],
+      },
+    });
+
+    expect(model.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'agent-flow:agent-flow-1',
+        kind: 'agent-flow',
+        title: 'Goal Master Delivery Loop',
+        subtitle: 'Goal Master Delivery Loop / completed',
+        detail: 'Final response produced.',
+        status: 'success',
+      }),
+    ]));
+  });
+
   it('does not render malformed run_sub_agentflow results as child flow nodes', () => {
     const messages: ChatMessage[] = [
       makeMessage({ id: 'u1', role: 'user', content: 'Build the project with Goal Guard', createdAt: 1 }),

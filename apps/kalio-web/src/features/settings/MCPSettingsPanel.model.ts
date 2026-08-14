@@ -43,7 +43,6 @@ function normalizeOriginSource(server: SettingsMCPServer, store: MCPServerStore)
 
 function normalizeEffectiveState(
   server: SettingsMCPServer,
-  _store: MCPServerStore,
 ): MCPServerEffectiveState {
   if (server.effectiveState) {
     return server.effectiveState;
@@ -67,7 +66,7 @@ export function normalizeSettingsServer(server: SettingsMCPServer): SettingsMCPS
   const store = normalizeStore(server);
   const serverKey = server.serverKey.trim();
   const originSource = normalizeOriginSource(server, store);
-  const effectiveState = normalizeEffectiveState(server, store);
+  const effectiveState = normalizeEffectiveState(server);
   const conflictGroup = normalizeConflictGroup(server, serverKey);
   const testIdSuffix = sanitizeForTestId(`${serverKey}-${store}`);
 

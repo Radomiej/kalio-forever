@@ -5,6 +5,7 @@ import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
 import { TimeoutSettingsService } from './timeout-settings.service';
 import { LLMService } from '../llm/llm.service';
+import { CredentialsRuntimeController } from '../llm/credentials-runtime.controller';
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
 
@@ -22,6 +23,7 @@ function makeCredential(overrides: Partial<Credential> = {}): Credential {
 
 describe('CredentialsController', () => {
   let controller: CredentialsController;
+  let runtimeController: CredentialsRuntimeController;
   let app: INestApplication | null = null;
   const mockService = {
     findAll: vi.fn(),
@@ -53,7 +55,7 @@ describe('CredentialsController', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [CredentialsController],
+      controllers: [CredentialsController, CredentialsRuntimeController],
       providers: [
         { provide: CredentialsService, useValue: mockService },
         { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
@@ -62,6 +64,7 @@ describe('CredentialsController', () => {
     }).compile();
 
     controller = module.get(CredentialsController);
+    runtimeController = module.get(CredentialsRuntimeController);
     vi.clearAllMocks();
     mockTimeoutSettings.getTimeoutSettings.mockResolvedValue({
       webSearchTimeoutMs: 120000,
@@ -123,7 +126,7 @@ describe('CredentialsController', () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: 'mimo-v2.5-pro', baseUrl: undefined })]);
       mockService.getApiKey.mockResolvedValue('xiao-completion-key');
 
-      const result = await controller.testCompletionById('cred-1');
+      const result = await runtimeController.testCompletionById('cred-1');
 
       expect(result).toEqual(expect.objectContaining({
         ok: true,
@@ -153,7 +156,7 @@ describe('CredentialsController', () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'mock', model: 'mock' })]);
       mockService.getApiKey.mockResolvedValue('mock');
 
-      const result = await controller.testCompletionById('cred-1');
+      const result = await runtimeController.testCompletionById('cred-1');
 
       expect(result.mode).toBe('runtime_smoke');
       expect(result.ok).toBe(true);
@@ -173,7 +176,7 @@ describe('CredentialsController', () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: 'mimo-v2.5', baseUrl: undefined })]);
       mockService.getApiKey.mockResolvedValue('xiao-completion-key');
 
-      const result = await controller.testCompletionById('cred-1', { model: 'mimo-v2.5-pro' });
+      const result = await runtimeController.testCompletionById('cred-1', { model: 'mimo-v2.5-pro' });
 
       expect(result).toEqual(expect.objectContaining({
         ok: true,
@@ -191,11 +194,39 @@ describe('CredentialsController', () => {
       );
     });
 
+    it('passes a bounded output token limit to the provider runtime', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openrouter', model: 'tencent/hy3' })]);
+      mockService.getApiKey.mockResolvedValue('openrouter-test-key');
+
+      const result = await runtimeController.testCompletionById('cred-1', { maxOutputTokens: 64 });
+
+      expect(result.ok).toBe(true);
+      expect(mockLLMService.streamChatWithConfig).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Array),
+        expect.any(Array),
+        expect.objectContaining({ maxOutputTokens: 64 }),
+      );
+    });
+
+    it('rejects an unbounded completion smoke token limit before calling the provider', async () => {
+      mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openrouter', model: 'tencent/hy3' })]);
+      mockService.getApiKey.mockResolvedValue('openrouter-test-key');
+
+      const result = await runtimeController.testCompletionById('cred-1', { maxOutputTokens: 4096 });
+
+      expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        error: 'maxOutputTokens must be an integer between 1 and 256',
+      }));
+      expect(mockLLMService.streamChatWithConfig).not.toHaveBeenCalled();
+    });
+
     it('can smoke-test a requested model even when the saved credential model is empty', async () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'xiaomimimo', model: '', baseUrl: undefined })]);
       mockService.getApiKey.mockResolvedValue('xiao-completion-key');
 
-      const result = await controller.testCompletionById('cred-1', { model: 'mimo-v2.5-pro' });
+      const result = await runtimeController.testCompletionById('cred-1', { model: 'mimo-v2.5-pro' });
 
       expect(result).toEqual(expect.objectContaining({
         ok: true,
@@ -217,7 +248,7 @@ describe('CredentialsController', () => {
       mockService.findAll.mockResolvedValue([makeCredential({ provider: 'openai' })]);
       mockService.getApiKey.mockResolvedValue('');
 
-      const result = await controller.testCompletionById('cred-1');
+      const result = await runtimeController.testCompletionById('cred-1');
 
       expect(result).toEqual(expect.objectContaining({
         ok: false,
@@ -231,7 +262,7 @@ describe('CredentialsController', () => {
       mockService.getApiKey.mockResolvedValue('xiao-completion-key');
       mockLLMService.streamChatWithConfig.mockRejectedValueOnce(new Error('451 Unavailable For Legal Reasons'));
 
-      const result = await controller.testCompletionById('cred-1');
+      const result = await runtimeController.testCompletionById('cred-1');
 
       expect(result).toEqual(expect.objectContaining({
         ok: false,
@@ -261,7 +292,7 @@ describe('CredentialsController', () => {
 
     it('routes DELETE /credentials/active to clearActiveCredential instead of remove(id)', async () => {
       const module: TestingModule = await Test.createTestingModule({
-        controllers: [CredentialsController],
+        controllers: [CredentialsController, CredentialsRuntimeController],
         providers: [
           { provide: CredentialsService, useValue: mockService },
           { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
@@ -290,7 +321,7 @@ describe('CredentialsController', () => {
 
     it('REGRESSION: routes POST /credentials/test to testConnection instead of testById', async () => {
       const module: TestingModule = await Test.createTestingModule({
-        controllers: [CredentialsController],
+        controllers: [CredentialsController, CredentialsRuntimeController],
         providers: [
           { provide: CredentialsService, useValue: mockService },
           { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
@@ -324,7 +355,7 @@ describe('CredentialsController', () => {
   describe('settings endpoints - HTTP integration pass', () => {
     async function startHttpApp(): Promise<number> {
       const module: TestingModule = await Test.createTestingModule({
-        controllers: [CredentialsController],
+        controllers: [CredentialsController, CredentialsRuntimeController],
         providers: [
           { provide: CredentialsService, useValue: mockService },
           { provide: TimeoutSettingsService, useValue: mockTimeoutSettings },
@@ -684,7 +715,7 @@ describe('CredentialsController', () => {
 
   describe('testConnection()', () => {
     it('returns a local validation error for custom providers without baseUrl', async () => {
-      const result = await controller.testConnection({
+      const result = await runtimeController.testConnection({
         provider: 'custom',
         apiKey: 'sk-test',
         model: 'custom-model',
@@ -699,7 +730,7 @@ describe('CredentialsController', () => {
 
     it('returns ok=false on LLM stream failure', async () => {
       mockLLMService.streamChatWithConfig.mockRejectedValueOnce(new Error('stream failure'));
-      const result = await controller.testConnection({
+      const result = await runtimeController.testConnection({
         provider: 'mock',
         apiKey: 'bad-key',
         model: 'mock',

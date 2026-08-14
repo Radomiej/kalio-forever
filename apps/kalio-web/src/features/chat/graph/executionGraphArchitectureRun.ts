@@ -124,6 +124,8 @@ function architectureExecutionStatus(
   if (traceStatus === 'failed' || traceStatus === 'cancelled') return 'error' as const;
   if (traceStatus === 'done') return 'success' as const;
   if (runStatus === 'failed' || runStatus === 'cancelled') return 'error' as const;
+  if (runStatus === 'completed') return 'success' as const;
+  if (runStatus === 'queued') return 'idle' as const;
   if (traceStatus === 'queued') return 'idle' as const;
   if (traceStatus === 'waiting_on_orchestrator' || traceStatus === 'blocked') {
     return 'waiting' as const;
@@ -137,7 +139,7 @@ function architectureExecutionStatus(
   if (streamStatus === 'started' || streamStatus === 'streaming' || runStatus === 'running') {
     return 'running' as const;
   }
-  return 'success' as const;
+  return 'idle' as const;
 }
 
 function architectureRouteLayout(

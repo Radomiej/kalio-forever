@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import {
   API_BASE,
   expectComposerEnabled,
@@ -10,9 +10,40 @@ function uniqueSessionTitle(prefix: string): string {
   return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+async function latestTurnOutcome(request: APIRequestContext, sessionId: string): Promise<string> {
+  const response = await request.get(`${API_BASE}/sessions/${sessionId}/messages`);
+  expect(response.ok()).toBeTruthy();
+  const messages = await response.json() as Array<{ role?: string; content?: string }>;
+  const durableAssistantText = messages
+    .filter((message) => message.role === 'assistant' && typeof message.content === 'string')
+    .map((message) => message.content?.trim() ?? '')
+    .filter(Boolean)
+    .at(-1) ?? '';
+  if (durableAssistantText) {
+    return 'assistant';
+  }
+
+  const auditResponse = await request.get(`${API_BASE}/audit-log?limit=20&type=runtime_event&sessionId=${encodeURIComponent(sessionId)}`);
+  expect(auditResponse.ok()).toBeTruthy();
+  const auditPayload = await auditResponse.json() as
+    | Array<{ data?: { eventName?: string; status?: string; errorCode?: string } }>
+    | { value?: Array<{ data?: { eventName?: string; status?: string; errorCode?: string } }> };
+  const auditRows = Array.isArray(auditPayload) ? auditPayload : auditPayload.value ?? [];
+  const failedEvent = auditRows.find((entry) => (
+    entry.data?.eventName === 'llm.turn.failed'
+    && entry.data.status === 'failed'
+  ));
+  if (failedEvent?.data?.errorCode) {
+    return `failed:${failedEvent.data.errorCode}`;
+  }
+
+  return 'running';
+}
+
 // AC-10: Streaming content appears token-by-token in agent turn bubble
 test.describe('AC-10: Streaming visibility', () => {
   test('agent response streams and is visible during and after streaming', async ({ page, request }) => {
+    test.setTimeout(90_000);
     const title = uniqueSessionTitle('AC10 Streaming Test');
 
     // Pre-create session via API
@@ -40,9 +71,18 @@ test.describe('AC-10: Streaming visibility', () => {
     // Wait for streaming to complete
     await expectComposerEnabled(page, 30_000);
 
-    // Verify content is present after completion
-    const bubbleText = await agentBubble.textContent();
-    expect(bubbleText?.length).toBeGreaterThan(0);
+    // Verify durable content is present after completion. A visible bubble alone
+    // is not enough: live providers can return an empty no-tool attempt that the
+    // runtime retries, and the test must not delete the session before that retry
+    // reaches a real terminal state.
+    await expect
+      .poll(() => latestTurnOutcome(request, session.id), {
+        timeout: 60_000,
+        message: 'Expected a durable assistant answer or a typed runtime failure',
+      })
+      .not.toBe('running');
+    const outcome = await latestTurnOutcome(request, session.id);
+    expect(outcome).toBe('assistant');
 
     // Cleanup
     await request.delete(`${API_BASE}/sessions/${session.id}`);

@@ -3,9 +3,15 @@ import type { EmitFn } from './interfaces/stream-context.interface';
 
 export type LLMRuntimeKind = Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
 
+export interface LLMAgentLoopResumeState {
+  iteration: number;
+  currentLimit: number;
+}
+
 export interface LLMAgentLoopCallbacks {
   onBeforeIteration?: (iteration: number, messageId: string, currentLimit: number) => Promise<void>;
   onToolPending?: () => Promise<void>;
+  onWaitingForHuman?: () => Promise<void>;
   onToolRunning?: () => Promise<void>;
   onEscalation?: (message: string) => void;
   onIterationLimitReached?: (state: { iterationCount: number; currentLimit: number }) => Promise<number | null>;
@@ -14,6 +20,7 @@ export interface LLMAgentLoopCallbacks {
 export interface LLMAgentLoopRequest {
   runtimeKind: LLMRuntimeKind;
   sessionId: string;
+  runId?: string;
   historySessionId?: string;
   turnId?: string;
   promptMessageId?: string;
@@ -26,6 +33,7 @@ export interface LLMAgentLoopRequest {
   abortSignal: AbortSignal;
   emit: EmitFn;
   maxIterations: number;
+  resumeState?: LLMAgentLoopResumeState;
   maxEmptyNoToolRetries?: number;
   rawXmlToolNames?: string[];
   structuredOutput?: LLMStructuredOutputRequest;

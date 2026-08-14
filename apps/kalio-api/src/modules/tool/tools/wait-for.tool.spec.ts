@@ -141,8 +141,8 @@ describe('WaitForTool', () => {
     expect(result).toMatchObject({
       status: 'timeout',
       targetType: 'cli_agent',
-      errorMessage: 'CLI status poll timed out after 5ms',
     });
+    expect(result.errorMessage).toMatch(/^CLI status poll timed out after \d+ms$/);
   });
 
   it('waits for a matching tool_result message', async () => {

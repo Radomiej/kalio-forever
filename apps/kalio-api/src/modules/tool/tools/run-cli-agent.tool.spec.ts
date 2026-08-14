@@ -54,6 +54,7 @@ function makeCLIAgentSessions(): CLIAgentSessionService {
     persistUserMessage: vi.fn().mockResolvedValue(undefined),
     persistAssistantToolCallMessage: vi.fn().mockResolvedValue(undefined),
     persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
+    saveSessionMetadata: vi.fn().mockResolvedValue(undefined),
     saveToolResult: vi.fn().mockResolvedValue(undefined),
   } as unknown as CLIAgentSessionService;
 }
@@ -234,6 +235,10 @@ describe('RunCliAgentTool', () => {
       kind: 'cli-agent',
       parentSessionId: 'sess-1',
     }));
+    expect(cliAgentSessions.saveSessionMetadata).toHaveBeenCalledWith('cli-child-1', {
+      agentId: 'codex',
+      workdir: '/projects/app',
+    });
     expect(cliAgentSessions.persistUserMessage).toHaveBeenCalledWith('cli-child-1', 'do task');
     expect(cliAgentSessions.persistAssistantToolCallMessage).toHaveBeenCalledWith(
       'cli-child-1',

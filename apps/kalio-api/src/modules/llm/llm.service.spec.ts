@@ -27,6 +27,7 @@ describe('LLMService - DB credential overrides env', () => {
       setEnvModelOverride: vi.fn(),
       getModelsForProviderConfig: vi.fn().mockResolvedValue([]),
       getContextWindowSize: vi.fn().mockResolvedValue(32000),
+      getGenerationSettings: vi.fn().mockResolvedValue({ temperature: 0.7, maxTokens: 4096 }),
     };
   }
 
@@ -207,6 +208,38 @@ describe('LLMService - DB credential overrides env', () => {
   });
 
   describe('streamChat()', () => {
+    it('uses the persisted generation token limit when a request does not override it', async () => {
+      credentialsService.getActiveProviderConfig.mockResolvedValue({
+        provider: 'openrouter',
+        apiKey: 'test-key',
+        model: 'tencent/hy3',
+        baseUrl: 'https://openrouter.test/api/v1',
+      });
+      credentialsService.getGenerationSettings.mockResolvedValue({ temperature: 0.7, maxTokens: 96 });
+      const originalFetch = globalThis.fetch;
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response('data: [DONE]\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      );
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      try {
+        await service.streamChat(
+          [{ role: 'user', content: 'hello' }],
+          [],
+          { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
+        );
+
+        const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+        const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
+        expect(body['max_tokens']).toBe(96);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it('calls underlying provider streamChat and returns tool calls', async () => {
       const mockToolCalls = [{ id: 'call-1', name: 'my_tool', input: {} }];
       const mockStreamChat = vi.fn().mockResolvedValue(mockToolCalls);

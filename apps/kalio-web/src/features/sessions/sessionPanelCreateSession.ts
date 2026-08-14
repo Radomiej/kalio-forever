@@ -11,6 +11,7 @@ interface StartPendingSessionFromPanelParams {
   setMessages: (messages: ChatMessage[], sessionId?: string | null) => void;
   setAgentTurns: (turns: AgentTurn[], sessionId?: string | null) => void;
   removeSession: (sessionId: string) => void;
+  getActiveSessionId: () => string | null;
   onSelect?: () => void;
 }
 
@@ -22,6 +23,7 @@ export async function startPendingSessionFromPanel({
   setMessages,
   setAgentTurns,
   removeSession,
+  getActiveSessionId,
   onSelect,
 }: StartPendingSessionFromPanelParams): Promise<void> {
   const pendingSession = createPendingHostSession({ personaId, title: 'New Chat' });
@@ -39,12 +41,16 @@ export async function startPendingSessionFromPanel({
       setActiveSession,
       setMessages,
       setAgentTurns,
+      canActivate: () => getActiveSessionId() === pendingSession.id,
       reason: 'select',
     });
     removeSession(pendingSession.id);
   } catch (err) {
+    const shouldRestorePreviousSession = getActiveSessionId() === pendingSession.id;
     removeSession(pendingSession.id);
-    setActiveSession(previousActiveSessionId);
+    if (shouldRestorePreviousSession) {
+      setActiveSession(previousActiveSessionId);
+    }
     throw err;
   }
 }

@@ -1,16 +1,20 @@
-import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type {
   AgentFlowRun,
   AgentFlowPhase,
   AgentFlowRunStatus,
   AgentFlowTraceItem,
+  AuditType,
   AvatarPaletteKey,
   AvatarVariant,
   ChatAttachment,
+  ChatQueuedPayload,
   ChatRunPhase,
+  ChatRunSnapshot,
   ChatRunStatus,
   LLMToolCall,
   MCPPolicy,
+  ProjectKind,
   SessionRuntimeContext,
   SubAgentFlowResult,
 } from '@kalio/types';
@@ -32,6 +36,20 @@ export const personas = sqliteTable('personas', {
   updatedAt:    integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+export const projects = sqliteTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  path: text('path'),
+  normalizedPath: text('normalized_path'),
+  kind: text('kind').$type<ProjectKind>().notNull(),
+  isSystem: integer('is_system', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+}, (table) => ({
+  normalizedPathIdx: uniqueIndex('projects_normalized_path_unique').on(table.normalizedPath),
+  kindIdx: index('projects_kind_idx').on(table.kind),
+}));
+
 // ─── sessions ─────────────────────────────────────────────────────────────────
 export const sessions = sqliteTable('sessions', {
   id:          text('id').primaryKey(),
@@ -41,6 +59,7 @@ export const sessions = sqliteTable('sessions', {
   parentSessionId: text('parent_session_id'),
   parentTurnId: text('parent_turn_id'),
   parentToolCallId: text('parent_tool_call_id'),
+  projectId: text('project_id').notNull().default('system:none').references(() => projects.id),
   runtimeContext: text('runtime_context', { mode: 'json' }).$type<SessionRuntimeContext | null>(),
   archivedAt:  integer('archived_at', { mode: 'timestamp_ms' }),
   createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),
@@ -70,15 +89,25 @@ export const chatRuns = sqliteTable('chat_runs', {
   status:    text('status').$type<ChatRunStatus>().notNull(),
   provider:  text('provider'),
   model:     text('model'),
+  revision:  integer('revision').notNull().default(1),
   retryCount: integer('retry_count').notNull().default(0),
   safeResume: integer('safe_resume', { mode: 'boolean' }).notNull().default(false),
   errorCode: text('error_code'),
   errorMessage: text('error_message'),
+  queueIdempotencyKey: text('queue_idempotency_key'),
+  queuedPayload: text('queued_payload', { mode: 'json' }).$type<ChatQueuedPayload>(),
+  queuedAt: integer('queued_at', { mode: 'timestamp_ms' }),
+  queueClaimedAt: integer('queue_claimed_at', { mode: 'timestamp_ms' }),
+  queueCancelledAt: integer('queue_cancelled_at', { mode: 'timestamp_ms' }),
+  outcome: text('outcome', { mode: 'json' }).$type<ChatRunSnapshot['outcome']>(),
   startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   lastHeartbeatAt: integer('last_heartbeat_at', { mode: 'timestamp_ms' }).notNull(),
   completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
-});
+}, (table) => ({
+  sessionStatusQueuedAtIdx: index('chat_runs_session_status_queued_at_idx').on(table.sessionId, table.status, table.queuedAt),
+  sessionQueueIdempotencyKeyIdx: uniqueIndex('chat_runs_session_queue_idempotency_key_idx').on(table.sessionId, table.queueIdempotencyKey),
+}));
 
 export const agentFlowRuns = sqliteTable('agent_flow_runs', {
   id: text('id').primaryKey(),
@@ -102,12 +131,16 @@ export const agentFlowRuns = sqliteTable('agent_flow_runs', {
   checkpoint: text('checkpoint', { mode: 'json' }).$type<AgentFlowRun['checkpoint']>(),
   result: text('result', { mode: 'json' }).$type<SubAgentFlowResult>(),
   summary: text('summary'),
+  revision: integer('revision').notNull().default(0),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: integer('lease_expires_at'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   finishedAt: integer('finished_at'),
 }, (table) => ({
   parentUpdatedAtIdx: index('agent_flow_runs_parent_updated_at_idx').on(table.parentSessionId, table.updatedAt),
   statusUpdatedAtIdx: index('agent_flow_runs_status_updated_at_idx').on(table.status, table.updatedAt),
+  statusLeaseIdx: index('agent_flow_runs_status_lease_idx').on(table.status, table.leaseExpiresAt),
 }));
 
 export const agentFlowEvents = sqliteTable('agent_flow_events', {
@@ -229,13 +262,30 @@ export const raappPendingApprovals = sqliteTable('raapp_pending_approvals', {
   createdAt:   integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
+export const hitlRequests = sqliteTable('hitl_requests', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['tool_confirmation', 'raapp_native', 'tool_budget'] }).notNull(),
+  status: text('status', { enum: ['pending', 'approved', 'denied', 'cancelled'] }).notNull().default('pending'),
+  sessionId: text('session_id').notNull(),
+  turnId: text('turn_id'),
+  runId: text('run_id'),
+  toolCallId: text('tool_call_id'),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  continuation: text('continuation', { mode: 'json' }).$type<Record<string, unknown>>(),
+  outcome: text('outcome', { mode: 'json' }).$type<Record<string, unknown>>(),
+  revision: integer('revision').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp_ms' }),
+});
+
 // ─── audit_log ────────────────────────────────────────────────────────────────
 export const auditLog = sqliteTable('audit_log', {
   id:         text('id').primaryKey(),
   sessionId:  text('session_id'),
   type:       text('type', {
-    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'architecture_event', 'error', 'raapp_native_call', 'raapp_native_approved', 'external_hitl', 'escalation'],
-  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'architecture_event' | 'error' | 'raapp_native_call' | 'raapp_native_approved' | 'external_hitl' | 'escalation'>(),
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'architecture_event', 'runtime_event', 'error', 'raapp_native_call', 'raapp_native_approved', 'external_hitl', 'escalation'],
+  }).notNull().$type<AuditType>(),
   label:      text('label').notNull(),
   data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
   durationMs: integer('duration_ms'),
@@ -251,8 +301,8 @@ export const auditLogArchive = sqliteTable('audit_log_archive', {
   id:         text('id').primaryKey(),
   sessionId:  text('session_id'),
   type:       text('type', {
-    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'architecture_event', 'error', 'raapp_native_call', 'raapp_native_approved', 'external_hitl', 'escalation'],
-  }).notNull().$type<'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'architecture_event' | 'error' | 'raapp_native_call' | 'raapp_native_approved' | 'external_hitl' | 'escalation'>(),
+    enum: ['llm_request', 'llm_response', 'tool_call', 'tool_result', 'architecture_event', 'runtime_event', 'error', 'raapp_native_call', 'raapp_native_approved', 'external_hitl', 'escalation'],
+  }).notNull().$type<AuditType>(),
   label:      text('label').notNull(),
   data:       text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
   durationMs: integer('duration_ms'),
@@ -282,6 +332,7 @@ export type AuditLogArchiveRow = typeof auditLogArchive.$inferSelect;
 export type AppSettingRow      = typeof appSettings.$inferSelect;
 export type AllowedPathRow     = typeof allowedPaths.$inferSelect;
 export type RaappPendingApprovalRow = typeof raappPendingApprovals.$inferSelect;
+export type HitlRequestRow = typeof hitlRequests.$inferSelect;
 
 export type InsertPersona      = typeof personas.$inferInsert;
 export type InsertSession      = typeof sessions.$inferInsert;

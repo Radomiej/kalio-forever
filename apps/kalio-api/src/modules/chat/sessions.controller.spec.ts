@@ -21,6 +21,8 @@ const mockMessage: ChatMessage = {
 function makeService() {
   return {
     list: vi.fn().mockResolvedValue([mockSession]),
+    listChildren: vi.fn().mockResolvedValue([mockSession]),
+    get: vi.fn().mockResolvedValue(mockSession),
     create: vi.fn().mockResolvedValue(mockSession),
     getMessages: vi.fn().mockResolvedValue([mockMessage]),
     getMessagePage: vi.fn().mockResolvedValue({
@@ -33,6 +35,7 @@ function makeService() {
     archive: vi.fn().mockResolvedValue(undefined),
     restore: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue(undefined),
+    assignProject: vi.fn().mockResolvedValue({ id: 'sess-1', projectId: 'project-1' }),
     generateTitle: vi.fn().mockResolvedValue({ title: 'Generated Title' }),
   };
 }
@@ -71,9 +74,15 @@ function makeContextPreviewService() {
   };
 }
 
-function makeSessionPipeline() {
+function makeRuntimeStop() {
   return {
-    stopAndDrain: vi.fn().mockResolvedValue(undefined),
+    stopSessionTree: vi.fn().mockResolvedValue({
+      rootSessionId: 'sess-1',
+      sessionIds: ['sess-1'],
+      directChildIdsBySessionId: { 'sess-1': [] },
+      descendantIdsBySessionId: { 'sess-1': [] },
+      childSessionsById: {},
+    }),
   };
 }
 
@@ -91,21 +100,21 @@ describe('SessionsController', () => {
   let svc: ReturnType<typeof makeService>;
   let runJournal: ReturnType<typeof makeRunJournal>;
   let contextPreview: ReturnType<typeof makeContextPreviewService>;
-  let sessionPipeline: ReturnType<typeof makeSessionPipeline>;
   let runtimeWatchlist: ReturnType<typeof makeRuntimeWatchlist>;
+  let runtimeStop: ReturnType<typeof makeRuntimeStop>;
 
   beforeEach(() => {
     svc = makeService();
     runJournal = makeRunJournal();
     contextPreview = makeContextPreviewService();
-    sessionPipeline = makeSessionPipeline();
     runtimeWatchlist = makeRuntimeWatchlist();
+    runtimeStop = makeRuntimeStop();
     controller = new SessionsController(
       svc as never,
       runJournal as never,
       contextPreview as never,
-      sessionPipeline as never,
       runtimeWatchlist as never,
+      runtimeStop as never,
     );
   });
 
@@ -119,6 +128,11 @@ describe('SessionsController', () => {
     it('passes includeArchived through to the service', async () => {
       await controller.list('true');
       expect(svc.list).toHaveBeenCalledWith({ includeArchived: true });
+    });
+
+    it('passes explicit session list limit through to the service', async () => {
+      await controller.list(undefined, '75');
+      expect(svc.list).toHaveBeenCalledWith({ includeArchived: false, limit: 75 });
     });
   });
 
@@ -136,6 +150,23 @@ describe('SessionsController', () => {
       const result = await controller.listRuntimeWatchTargets();
       expect(runtimeWatchlist.list).toHaveBeenCalledWith();
       expect(result).toEqual([{ sessionId: 'sess-1', reasons: ['active'] }]);
+    });
+  });
+
+  describe('listChildren()', () => {
+    it('returns only children for the requested parent session', async () => {
+      const result = await controller.listChildren('parent-session');
+      expect(svc.listChildren).toHaveBeenCalledWith('parent-session');
+      expect(result).toEqual([mockSession]);
+    });
+  });
+
+  describe('get()', () => {
+    it('returns a single session by id without listing the full session history', async () => {
+      const result = await controller.get('sess-1');
+      expect(svc.get).toHaveBeenCalledWith('sess-1');
+      expect(svc.list).not.toHaveBeenCalled();
+      expect(result).toEqual(mockSession);
     });
   });
 
@@ -207,14 +238,41 @@ describe('SessionsController', () => {
   });
 
   describe('delete()', () => {
-    it('drains the session pipeline before deleting a session', async () => {
+    it('stops the runtime tree before deleting a session', async () => {
       await controller.delete('sess-1');
 
-      expect(sessionPipeline.stopAndDrain).toHaveBeenCalledWith('sess-1');
+      expect(runtimeStop.stopSessionTree).toHaveBeenCalledWith('sess-1');
       expect(svc.delete).toHaveBeenCalledWith('sess-1');
-      expect(sessionPipeline.stopAndDrain.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(runtimeStop.stopSessionTree.mock.invocationCallOrder[0]).toBeLessThan(
         svc.delete.mock.invocationCallOrder[0],
       );
+    });
+
+    it('deletes descendants before deleting the root session', async () => {
+      runtimeStop.stopSessionTree.mockResolvedValueOnce({
+        rootSessionId: 'sess-1',
+        sessionIds: ['sess-1', 'child-1', 'grandchild-1'],
+        directChildIdsBySessionId: {
+          'sess-1': ['child-1'],
+          'child-1': ['grandchild-1'],
+          'grandchild-1': [],
+        },
+        descendantIdsBySessionId: {
+          'sess-1': ['child-1', 'grandchild-1'],
+          'child-1': ['grandchild-1'],
+          'grandchild-1': [],
+        },
+        childSessionsById: {
+          'child-1': { ...mockSession, id: 'child-1', parentSessionId: 'sess-1' },
+          'grandchild-1': { ...mockSession, id: 'grandchild-1', parentSessionId: 'child-1' },
+        },
+      });
+
+      await controller.delete('sess-1');
+
+      expect(svc.delete).toHaveBeenNthCalledWith(1, 'grandchild-1');
+      expect(svc.delete).toHaveBeenNthCalledWith(2, 'child-1');
+      expect(svc.delete).toHaveBeenNthCalledWith(3, 'sess-1');
     });
   });
 
@@ -286,6 +344,15 @@ describe('SessionsController', () => {
           },
         },
       });
+    });
+  });
+
+  describe('assignProject()', () => {
+    it('delegates project assignment to the session service', async () => {
+      const result = await controller.assignProject('sess-1', { projectId: 'project-1' });
+
+      expect(svc.assignProject).toHaveBeenCalledWith('sess-1', { projectId: 'project-1' });
+      expect(result).toEqual({ id: 'sess-1', projectId: 'project-1' });
     });
   });
 

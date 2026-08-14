@@ -1,11 +1,29 @@
+import { existsSync, statSync } from 'node:fs';
 import { expect, test, type APIRequestContext, type Browser } from '@playwright/test';
 import {
   API_BASE,
   deleteSessionIfExists,
+  ensureProjectForPath,
   selectArchitectureInComposer,
+  selectProjectInWelcome,
   selectSession,
   selectSessionOriginFilter,
 } from './helpers/test-config';
+
+const PROCESS_ENV = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+
+function requireProjectPath(): string {
+  const projectPath = PROCESS_ENV?.KALIO_E2E_PROJECT_PATH?.trim();
+  if (!projectPath) {
+    throw new Error('KALIO_E2E_PROJECT_PATH must point to an existing project directory.');
+  }
+  if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) {
+    throw new Error(`KALIO_E2E_PROJECT_PATH is not an existing project directory: ${projectPath}`);
+  }
+  return projectPath;
+}
+
+const projectPath = requireProjectPath();
 
 type SessionListItem = {
   id: string;
@@ -90,18 +108,18 @@ async function openTalkAndSelectHost(browser: Browser, hostSessionId: string, ho
 test.describe('Architecture workflow replay across a new UI session', () => {
   test('a second browser session restores host state, child transcripts, and technical node notes', async ({ page, request, browser }, testInfo) => {
     test.setTimeout(420_000);
-    const projectPath = 'C:\\Projekty\\kalio-forever';
     let hostSessionId: string | null = null;
     let hostTitle = '';
 
     try {
+      await ensureProjectForPath(request, projectPath);
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
-      await page.getByTestId('welcome-project-path-input').fill(projectPath);
+      await selectProjectInWelcome(page, projectPath);
       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
       await page.getByTestId('welcome-run-prompt').click();
       await expect
@@ -136,7 +154,7 @@ test.describe('Architecture workflow replay across a new UI session', () => {
       expect(sessionsResponse.ok()).toBeTruthy();
       const persistedSessions = await sessionsResponse.json() as SessionListItem[];
       const hostSession = persistedSessions.find((candidate) => candidate.id === hostSessionId);
-      expect(hostSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath);
+      expect(hostSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath.replaceAll('\\', '/'));
 
       const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
       const workflowSessions = persistedSessions.filter((candidate) => isWorkflowDescendant(sessionById, hostSessionId!, candidate));

@@ -148,7 +148,10 @@ function toFlowRunWithContinuation(
   summaryOverride?: string,
 ): AgentFlowRun {
   const status = statusOverride ?? normalizeAgentFlowStatus(architectureRun.status);
-  const effectiveStatus = (status === 'running' || status === 'failed') && continuation ? 'waiting_on_orchestrator' : status;
+  const effectiveContinuation = continuation ?? (status === 'running' ? args.continuation : undefined);
+  const effectiveStatus = (status === 'running' || status === 'failed') && effectiveContinuation
+    ? 'waiting_on_orchestrator'
+    : status;
   return {
     id: architectureRun.id,
     parentSessionId: args.parentSessionId,
@@ -170,7 +173,7 @@ function toFlowRunWithContinuation(
       vfsMode: args.vfsMode,
       copyBack: args.copyBack,
       maxSteps: args.maxSteps,
-      continuation: continuation ?? args.continuation,
+      continuation: effectiveContinuation,
     },
     createdAt: architectureRun.createdAt,
     updatedAt: architectureRun.updatedAt,
@@ -618,15 +621,33 @@ function maxStepContinuation(events: ArchitectureExecutionEvent[]): AgentFlowCon
     const pendingNodeIds = stringArray(event.data['pendingNodeIds']);
     const isReturnToOrchestrator = reasonCode === 'return_to_orchestrator';
     const isMaxStepContinuation = reasonCode === 'max_steps';
-    if (pendingNodeIds.length === 0 || (!isMaxStepContinuation && !isReturnToOrchestrator)) {
+    const isRuntimePause = reasonCode === 'runtime_pause';
+    if (pendingNodeIds.length === 0 || (!isMaxStepContinuation && !isReturnToOrchestrator && !isRuntimePause)) {
       continue;
     }
     if (index < events.length - 1) {
       continue;
     }
     const routeEvent = lastRouteEvent(events.slice(0, index + 1));
+    const waitIdentity = isRecord(event.data['waitIdentity'])
+      && typeof event.data['waitIdentity']['requestId'] === 'string'
+      && typeof event.data['waitIdentity']['childSessionId'] === 'string'
+      && typeof event.data['waitIdentity']['childTurnId'] === 'string'
+      ? {
+          requestId: event.data['waitIdentity']['requestId'],
+          childSessionId: event.data['waitIdentity']['childSessionId'],
+          childTurnId: event.data['waitIdentity']['childTurnId'],
+          ...(typeof event.data['waitIdentity']['promptMessageId'] === 'string'
+            ? { promptMessageId: event.data['waitIdentity']['promptMessageId'] }
+            : {}),
+        }
+      : undefined;
     return {
-      reason: isReturnToOrchestrator ? 'return_to_orchestrator' : 'max_steps',
+      reason: isReturnToOrchestrator
+        ? 'return_to_orchestrator'
+        : isRuntimePause
+          ? 'runtime_pause'
+          : 'max_steps',
       waitingNodeId: pendingNodeIds[0],
       pendingNodeIds,
       visitCounts: numberRecord(event.data['visitCounts']),
@@ -640,6 +661,7 @@ function maxStepContinuation(events: ArchitectureExecutionEvent[]): AgentFlowCon
             response: routeEvent.route.response,
           }
         : undefined,
+      waitIdentity,
       message: event.message,
     };
   }

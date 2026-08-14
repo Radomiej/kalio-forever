@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { RAAppRenderer } from './RAAppRenderer';
 
 vi.mock('./HtmlIframeRenderer', () => ({
@@ -32,10 +32,26 @@ vi.mock('../../store/agentStore', () => ({
   useAgentStore: (selector: (state: typeof agentState) => unknown) => selector(agentState),
 }));
 
-const { addMessage, enqueueUserAction, getSessionActiveTurnId, sendMessage, sessions } = vi.hoisted(() => ({
+const {
+  addMessage,
+  approveRaApp,
+  cancelRaApp,
+  enqueueUserAction,
+  getSessionActiveTurnId,
+  raAppNativeHandlers,
+  sendMessage,
+  sessions,
+} = vi.hoisted(() => ({
   addMessage: vi.fn(),
+  approveRaApp: vi.fn(),
+  cancelRaApp: vi.fn(),
   enqueueUserAction: vi.fn(),
   getSessionActiveTurnId: vi.fn(() => null),
+  raAppNativeHandlers: [] as Array<(payload: {
+    sessionId: string;
+    toolCallId: string;
+    results: Array<{ id: string; system: string; status: 'executed' | 'cancelled' | 'error' }>;
+  }) => void>,
   sendMessage: vi.fn(),
   sessions: [{ id: 'session-1', personaId: 'persona-1', title: 'Test', createdAt: 0, updatedAt: 0 }],
 }));
@@ -78,6 +94,21 @@ vi.mock('../../store/sessionStore', () => ({
 
 vi.mock('../../services/eventBus', () => ({
   eventBus: {
+    approveRaApp,
+    cancelRaApp,
+    onRaAppNativeResult: (handler: (payload: {
+      sessionId: string;
+      toolCallId: string;
+      results: Array<{ id: string; system: string; status: 'executed' | 'cancelled' | 'error' }>;
+    }) => void) => {
+      raAppNativeHandlers.push(handler);
+      return () => {
+        const index = raAppNativeHandlers.indexOf(handler);
+        if (index >= 0) {
+          raAppNativeHandlers.splice(index, 1);
+        }
+      };
+    },
     sendMessage,
   },
 }));
@@ -85,6 +116,7 @@ vi.mock('../../services/eventBus', () => ({
 describe('RAAppRenderer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    raAppNativeHandlers.splice(0, raAppNativeHandlers.length);
     agentState.getToolActivitiesForSession.mockReturnValue([]);
     agentState.hasActiveLoopForSession.mockReturnValue(false);
     agentState.queuedDepthBySession = {};
@@ -123,6 +155,72 @@ describe('RAAppRenderer', () => {
     expect(screen.getByText('Native operations')).toBeInTheDocument();
     expect(screen.getByText('vfs_write')).toBeInTheDocument();
     expect(screen.getByText(/drafts\/result\.txt/)).toBeInTheDocument();
+  });
+
+  it('hides stale pending approvals after native results are merged', () => {
+    render(
+      <RAAppRenderer
+        block={{
+          type: 'html',
+          mode: 'display',
+          content: '<main>Preview</main>',
+          pendingApprovals: [{
+            id: 'approval-1',
+            system: 'vfs_write',
+            displayLabel: 'write file',
+            args: { path: 'architecture.md' },
+          }],
+        }}
+        result={{
+          status: 'ready',
+          nativeResults: [{
+            id: 'approval-1',
+            system: 'vfs_write',
+            status: 'executed',
+            result: { path: 'architecture.md' },
+          }],
+          pendingApprovals: [],
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('raapp-hitl-overlay')).not.toBeInTheDocument();
+    expect(screen.getByText('Native operations')).toBeInTheDocument();
+  });
+
+  it('settles the HITL overlay from a typed RA-App native result event', () => {
+    render(
+      <RAAppRenderer
+        block={{
+          type: 'html',
+          mode: 'display',
+          content: '<main>Preview</main>',
+          pendingApprovals: [{
+            id: 'approval-1',
+            system: 'vfs_write',
+            displayLabel: 'write file',
+            args: { path: 'architecture.md' },
+          }],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('raapp-hitl-approve'));
+
+    expect(approveRaApp).toHaveBeenCalledWith({
+      requestIds: ['approval-1'],
+      sessionId: 'session-1',
+    });
+
+    act(() => {
+      raAppNativeHandlers.forEach((handler) => handler({
+        sessionId: 'session-1',
+        toolCallId: 'tool-call-1',
+        results: [{ id: 'approval-1', system: 'vfs_write', status: 'executed' }],
+      }));
+    });
+
+    expect(screen.queryByTestId('raapp-hitl-overlay')).not.toBeInTheDocument();
   });
 
   it('passes html block mode to HtmlIframeRenderer', () => {

@@ -1,7 +1,15 @@
-import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Inject, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { nanoid } from 'nanoid';
-import { eq, desc, isNull } from 'drizzle-orm';
-import type { ChatSession, ChatMessage, ChatSessionKind, CreateSessionDto, SessionRuntimeContext } from '@kalio/types';
+import { eq, desc, inArray, isNull } from 'drizzle-orm';
+import type {
+  AssignSessionProjectDto,
+  ChatSession,
+  ChatMessage,
+  ChatSessionKind,
+  CreateSessionDto,
+  SessionRuntimeContext,
+} from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
@@ -9,31 +17,29 @@ import type { IMessageRepository } from './interfaces/message-repository.interfa
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
 import { LLMService } from '../llm/llm.service';
-import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
+import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
+import { ActiveSessionRegistry } from './active-session-registry.service';
+import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
+import {
+  buildTitlePrompt as buildSessionTitlePrompt,
+  deriveFallbackTitle as deriveSessionFallbackTitle,
+  normalizeGeneratedTitle as normalizeSessionTitle,
+  normalizedUserPrompt as normalizeSessionPrompt,
+} from './sessions-title.utils';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
-const MAX_TITLE_LENGTH = 60;
+const MAX_SESSION_LIST_LIMIT = 500;
 interface SessionRuntimeScopeOptions {
   registerRuntimeProjectPath?: boolean;
 }
 
-const TITLE_SYSTEM_PROMPT = [
-  'Generate a concise conversation title.',
-  'Summarize the real user goal instead of copying the prompt.',
-  'Return plain title text only.',
-  'Use 2 to 6 words when possible.',
-  `Never exceed ${MAX_TITLE_LENGTH} characters.`,
-  'No quotes, markdown, or trailing punctuation.',
-].join(' ');
-const TITLE_STOPWORDS = new Set([
-  'a', 'an', 'and', 'as', 'at', 'be', 'by', 'do', 'for', 'from', 'if', 'in', 'into', 'is', 'it', 'its', 'of', 'ok',
-  'on', 'or', 'out', 'reply', 'that', 'the', 'this', 'to', 'use', 'with', 'without', 'you',
-  'ale', 'bo', 'by', 'co', 'czy', 'dla', 'do', 'i', 'jak', 'na', 'nie', 'oraz', 'po', 'to', 'użyj', 'uzyj', 'w',
-  'we', 'z',
-]);
+interface SessionListOptions {
+  includeArchived?: boolean;
+  limit?: number;
+}
 
 @Injectable()
 export class SessionsService {
@@ -46,15 +52,20 @@ export class SessionsService {
     @Inject(MESSAGE_REPOSITORY) private readonly repo: IMessageRepository,
     private readonly llm: LLMService,
     private readonly allowedPaths: AllowedPathsService,
+    private readonly projects: ProjectsService,
+    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
-  async list(options: { includeArchived?: boolean } = {}): Promise<ChatSession[]> {
+  async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
+    const limit = normalizeSessionListLimit(options);
     const query = this.drizzle.db
       .select()
       .from(sessions);
-    const rows = await (options.includeArchived
+    const orderedQuery = options.includeArchived
       ? query.orderBy(desc(sessions.updatedAt))
-      : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt)));
+      : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt));
+    const rows = await (limit === undefined ? orderedQuery : orderedQuery.limit(limit));
     return rows.map(this.toChatSession);
   }
 
@@ -67,7 +78,8 @@ export class SessionsService {
     dto: CreateSessionDto,
     options: SessionRuntimeScopeOptions = {},
   ): Promise<ChatSession> {
-    await this.registerRuntimeProjectPathIfRequested(dto.runtimeContext, options);
+    const scope = await this.resolveProjectScope(dto);
+    await this.registerRuntimeProjectPathIfRequested(scope.runtimeContext ?? undefined, options);
     const now = new Date();
     const row = {
       id,
@@ -77,7 +89,8 @@ export class SessionsService {
       parentSessionId: dto.parentSessionId ?? null,
       parentTurnId: dto.parentTurnId ?? null,
       parentToolCallId: dto.parentToolCallId ?? null,
-      runtimeContext: dto.runtimeContext ?? null,
+      projectId: scope.projectId,
+      runtimeContext: scope.runtimeContext ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -145,6 +158,64 @@ export class SessionsService {
     return this.updateWithOptions(id, patch);
   }
 
+
+  async assignProject(id: string, dto: AssignSessionProjectDto): Promise<ChatSession> {
+    await this.assertExists(id);
+    const projectId = dto.projectId.trim();
+    if (!projectId) {
+      throw new BadRequestException('Project id is required.');
+    }
+    const project = projectId === SYSTEM_PROJECT_IDS.none
+      ? undefined
+      : await this.projects.assertAssignable(projectId);
+    if (projectId === SYSTEM_PROJECT_IDS.none && dto.pathOverride?.trim()) {
+      throw new BadRequestException('The no-project session cannot have a path override.');
+    }
+    const current = await this.get(id);
+    const hasPathChange = dto.pathOverride !== undefined;
+    const path = hasPathChange
+      ? (dto.pathOverride?.trim() || project?.path) ?? null
+      : undefined;
+    if (path && hasPathChange) {
+      await this.allowedPaths.ensurePath(path);
+    }
+
+    const descendants = await this.collectDescendantIds(id);
+    const activeSessionId = descendants.find((sessionId) => this.activeSessionRegistry?.isActive(sessionId))
+      ?? this.getArchitectureRuntimeStopPort()?.findActiveSessionIdForSessions?.(descendants);
+    if (activeSessionId) {
+      throw new ConflictException({
+        message: 'Project cannot be changed while this conversation is generating.',
+        sessionId: activeSessionId,
+      });
+    }
+    const runtimeContext = hasPathChange
+      ? this.applyProjectPath(current.runtimeContext, path ?? null)
+      : undefined;
+    const affectedSessions = hasPathChange
+      ? await Promise.all(descendants.map((sessionId) => this.get(sessionId)))
+      : [];
+    this.drizzle.db.transaction((tx) => {
+      tx.update(sessions)
+        .set({ projectId })
+        .where(inArray(sessions.id, descendants))
+        .run();
+      if (runtimeContext !== undefined) {
+        for (const affectedSession of affectedSessions) {
+          tx.update(sessions)
+            .set({ runtimeContext: this.applyProjectPath(affectedSession.runtimeContext, path ?? null) })
+            .where(eq(sessions.id, affectedSession.id))
+            .run();
+        }
+      }
+    });
+    for (const descendantId of descendants) {
+      const session = await this.get(descendantId);
+      this.sessionEvents.emitSessionUpdated(session);
+    }
+    return this.get(id);
+  }
+
   async updateWithOptions(
     id: string,
     patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
@@ -194,13 +265,14 @@ export class SessionsService {
     }
 
     const generated = await this.tryGenerateConversationTitle(id, history);
-    const title = normalizeGeneratedTitle(generated) ?? deriveFallbackTitle(history, row.runtimeContext);
+    const title = normalizeSessionTitle(generated)
+      ?? deriveSessionFallbackTitle(history, row.runtimeContext, DEFAULT_SESSION_TITLE);
     await this.update(id, { title });
     return { title };
   }
 
   private async tryGenerateConversationTitle(id: string, history: ChatMessage[]): Promise<string | null> {
-    const messages = buildTitlePrompt(history);
+    const messages = buildSessionTitlePrompt(history);
     let rawResponse = '';
 
     try {
@@ -218,19 +290,112 @@ export class SessionsService {
       return null;
     }
 
-    const normalized = normalizeGeneratedTitle(rawResponse);
+    const normalized = normalizeSessionTitle(rawResponse);
     if (!normalized) {
       return null;
     }
 
-    const promptText = normalizedUserPrompt(history);
+    const promptText = normalizeSessionPrompt(history);
     if (normalized.startsWith('[MockLLM] Echo:')) {
       return null;
     }
-    if (promptText && normalized.toLowerCase() === (normalizeGeneratedTitle(promptText)?.toLowerCase() ?? '')) {
+    if (promptText && normalized.toLowerCase() === (normalizeSessionTitle(promptText)?.toLowerCase() ?? '')) {
       return null;
     }
     return normalized;
+  }
+
+  private async resolveProjectScope(dto: CreateSessionDto): Promise<{
+    projectId: string;
+    runtimeContext: SessionRuntimeContext | null | undefined;
+  }> {
+    const requestedProjectId = dto.projectId?.trim() || undefined;
+    const hostSessionId = dto.runtimeContext?.architectureContext?.hostSessionId;
+    const parentSessionId = dto.parentSessionId ?? hostSessionId;
+    const parent = parentSessionId ? await this.get(parentSessionId) : undefined;
+    const inheritedProjectId = parent?.projectId ?? SYSTEM_PROJECT_IDS.none;
+    if (parent && requestedProjectId && requestedProjectId !== inheritedProjectId) {
+      throw new BadRequestException('A child session must use its host project.');
+    }
+
+    const projectId = inheritedProjectId !== SYSTEM_PROJECT_IDS.none && parent
+      ? inheritedProjectId
+      : requestedProjectId ?? inheritedProjectId;
+    if (projectId === SYSTEM_PROJECT_IDS.none) {
+      if (requestedProjectId === SYSTEM_PROJECT_IDS.none && dto.projectPathOverride?.trim()) {
+        throw new BadRequestException('The no-project session cannot have a path override.');
+      }
+      return {
+        projectId,
+        runtimeContext: requestedProjectId === SYSTEM_PROJECT_IDS.none
+          ? this.clearProjectPath(dto.runtimeContext)
+          : dto.runtimeContext,
+      };
+    }
+
+    const project = await this.projects.assertAssignable(projectId);
+    const path = dto.projectPathOverride === undefined ? project.path : dto.projectPathOverride.trim() || null;
+    if (dto.projectPathOverride !== undefined && path) {
+      await this.allowedPaths.ensurePath(path);
+    }
+    return {
+      projectId,
+      runtimeContext: this.applyProjectPath(dto.runtimeContext, path),
+    };
+  }
+
+  private applyProjectPath(
+    runtimeContext: SessionRuntimeContext | null | undefined,
+    path: string | null,
+  ): SessionRuntimeContext | null | undefined {
+    if (!path) return this.clearProjectPath(runtimeContext);
+    const architectureContext = {
+      ...(runtimeContext?.architectureContext ?? {}),
+      projectPath: path,
+      executionCwd: path,
+    };
+    return {
+      ...(runtimeContext ?? { runtimeKind: 'chat' }),
+      architectureContext,
+    };
+  }
+
+  private clearProjectPath(
+    runtimeContext: SessionRuntimeContext | null | undefined,
+  ): SessionRuntimeContext | null | undefined {
+    if (!runtimeContext?.architectureContext) return runtimeContext;
+    const architectureContext = { ...runtimeContext.architectureContext };
+    delete architectureContext.projectPath;
+    delete architectureContext.executionCwd;
+    return {
+      ...runtimeContext,
+      architectureContext,
+    };
+  }
+
+  private async collectDescendantIds(id: string): Promise<string[]> {
+    const rows = await this.drizzle.db
+      .select({ id: sessions.id, parentSessionId: sessions.parentSessionId })
+      .from(sessions);
+    const childrenByParent = new Map<string, string[]>();
+    for (const row of rows) {
+      if (!row.parentSessionId) continue;
+      childrenByParent.set(row.parentSessionId, [
+        ...(childrenByParent.get(row.parentSessionId) ?? []),
+        row.id,
+      ]);
+    }
+    const result: string[] = [];
+    const pending = [id];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const currentId = pending.shift();
+      if (!currentId || visited.has(currentId)) continue;
+      visited.add(currentId);
+      result.push(currentId);
+      pending.push(...(childrenByParent.get(currentId) ?? []));
+    }
+    return result;
   }
 
   private async assertExists(id: string): Promise<void> {
@@ -245,6 +410,7 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
+    projectId?: string | null;
     runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
@@ -265,11 +431,23 @@ export class SessionsService {
     if (!options.registerRuntimeProjectPath) {
       return;
     }
-    const projectPath = projectPathFromRuntimeContext(runtimeContext);
+    const projectPathValue = runtimeContext?.architectureContext?.['projectPath'];
+    const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
+    const projectPath = typeof projectPathValue === 'string' && projectPathValue.trim().length > 0
+      ? projectPathValue.trim()
+      : typeof executionCwd === 'string' && executionCwd.trim().length > 0 ? executionCwd.trim() : undefined;
     if (!projectPath) {
       return;
     }
     await this.allowedPaths.ensurePath(projectPath);
+  }
+
+  private getArchitectureRuntimeStopPort(): ArchitectureRuntimeStopPort | undefined {
+    try {
+      return this.moduleRef?.get<ArchitectureRuntimeStopPort>(ARCHITECTURE_RUNTIME_STOP, { strict: false });
+    } catch {
+      return undefined;
+    }
   }
 
   private toChatSession(row: {
@@ -280,6 +458,7 @@ export class SessionsService {
     parentSessionId?: string | null;
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
+    projectId?: string | null;
     runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
@@ -292,6 +471,7 @@ export class SessionsService {
       parentSessionId: row.parentSessionId ?? undefined,
       parentTurnId: row.parentTurnId ?? undefined,
       parentToolCallId: row.parentToolCallId ?? undefined,
+      ...(row.projectId ? { projectId: row.projectId } : {}),
       runtimeContext: row.runtimeContext ?? undefined,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),
@@ -299,120 +479,9 @@ export class SessionsService {
   }
 }
 
-function projectPathFromRuntimeContext(runtimeContext: SessionRuntimeContext | null | undefined): string | undefined {
-  const projectPath = runtimeContext?.architectureContext?.['projectPath'];
-  if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
-    return projectPath.trim();
+function normalizeSessionListLimit(options: SessionListOptions): number | undefined {
+  if (typeof options.limit === 'number' && Number.isFinite(options.limit)) {
+    return Math.min(MAX_SESSION_LIST_LIMIT, Math.max(1, Math.trunc(options.limit)));
   }
-
-  const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
-  if (typeof executionCwd === 'string' && executionCwd.trim().length > 0) {
-    return executionCwd.trim();
-  }
-
   return undefined;
-}
-
-function buildTitlePrompt(history: ChatMessage[]): ContextManagedLLMMessage[] {
-  const userPrompt = normalizedUserPrompt(history);
-  const latestAssistant = [...history]
-    .reverse()
-    .find((message) => message.role === 'assistant' && normalizeConversationLine(message.content).length > 0);
-
-  return [
-    {
-      role: 'system',
-      content: TITLE_SYSTEM_PROMPT,
-    },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        firstUserMessage: userPrompt,
-        latestAssistantMessage: latestAssistant ? normalizeConversationLine(latestAssistant.content).slice(0, 600) : null,
-      }),
-    },
-  ];
-}
-
-function normalizedUserPrompt(history: ChatMessage[]): string {
-  const firstUser = history.find((message) => message.role === 'user');
-  return firstUser ? stripArchitecturePrefix(normalizeConversationLine(firstUser.content)) : '';
-}
-
-function normalizeConversationLine(content: unknown): string {
-  if (typeof content !== 'string') {
-    return '';
-  }
-
-  return content.replace(/\s+/g, ' ').trim();
-}
-
-function normalizeGeneratedTitle(raw: string | null | undefined): string | null {
-  if (!raw) {
-    return null;
-  }
-
-  const normalized = raw
-    .replace(/^```[\w-]*\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.?!,:;\-–—]+$/u, '')
-    .trim();
-
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  const bounded = normalized.length > MAX_TITLE_LENGTH
-    ? normalized.slice(0, MAX_TITLE_LENGTH).trimEnd()
-    : normalized;
-  return bounded.length > 0 ? bounded : null;
-}
-
-function deriveFallbackTitle(history: ChatMessage[], runtimeContext: SessionRuntimeContext | null | undefined): string {
-  const firstUser = normalizedUserPrompt(history);
-  if (!firstUser) {
-    return DEFAULT_SESSION_TITLE;
-  }
-
-  const projectName = projectNameFromRuntimeContext(runtimeContext);
-  if (/(architektur|architecture)/iu.test(firstUser)) {
-    const architectureTitle = projectName ? `Architecture Review ${projectName}` : 'Architecture Review';
-    return normalizeGeneratedTitle(architectureTitle) ?? DEFAULT_SESSION_TITLE;
-  }
-
-  const firstSentence = firstUser.split(/[.!?]/u).find((segment) => segment.trim().length > 0)?.trim() ?? firstUser;
-  const titleTokens = (firstSentence.match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? [])
-    .filter((token) => token.length > 1)
-    .filter((token) => !TITLE_STOPWORDS.has(token.toLowerCase()))
-    .slice(0, 4);
-
-  if (titleTokens.length > 0) {
-    const candidate = titleTokens.map(titleTokenCase).join(' ');
-    return normalizeGeneratedTitle(candidate) ?? DEFAULT_SESSION_TITLE;
-  }
-
-  return normalizeGeneratedTitle(firstSentence) ?? DEFAULT_SESSION_TITLE;
-}
-
-function stripArchitecturePrefix(content: string): string {
-  return content.replace(/^\[Architecture:\s*[^\]]+\]\s*/i, '').trim();
-}
-
-function projectNameFromRuntimeContext(runtimeContext: SessionRuntimeContext | null | undefined): string | null {
-  const projectPath = projectPathFromRuntimeContext(runtimeContext);
-  if (!projectPath) {
-    return null;
-  }
-  const normalized = projectPath.replaceAll('\\', '/').split('/').filter(Boolean);
-  return normalized.at(-1) ?? null;
-}
-
-function titleTokenCase(token: string): string {
-  if (token.toUpperCase() === token) {
-    return token;
-  }
-  return `${token[0]?.toUpperCase() ?? ''}${token.slice(1).toLowerCase()}`;
 }

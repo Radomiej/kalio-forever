@@ -17,12 +17,15 @@ export type SubagentEmit = <K extends keyof SocketEvents>(event: K, data: Socket
 
 export interface RunSubagentRequest {
   parentSessionId: string;
+  parentTurnId?: string;
+  parentPromptMessageId?: string;
   parentToolCallId: string;
   objective: string;
   attachments?: string[];
   auditContext?: Record<string, unknown>;
   autoApproveTools?: string[];
   childSessionId?: string;
+  resumeTurnId?: string;
   personaId?: string;
   model?: string;
   availableTools?: ToolMeta[];
@@ -54,6 +57,16 @@ export interface RunSubagentResult {
   durationMs: number;
 }
 
+export interface ActiveSubagentRunStatus {
+  sessionId: string;
+  parentSessionId: string;
+  turnId: string;
+  promptMessageId?: string;
+  agentRun?: AgentRunContext;
+}
+
 export interface SubagentRuntimePort {
   runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult>;
+  getActiveRunStatus?(sessionId: string): ActiveSubagentRunStatus | null;
+  stopAndDrainSessions?(sessionIds: readonly string[]): Promise<void>;
 }

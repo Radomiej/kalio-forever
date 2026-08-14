@@ -1,182 +1,226 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
-import { DrizzleService } from './drizzle.service';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { DrizzleService, reconcileLegacyPrimarySchema } from './drizzle.service';
 
-function createMigrationsFolder(journalTags: string[]): string {
-  const folder = mkdtempSync(join(tmpdir(), 'kalio-migrations-'));
-  mkdirSync(join(folder, 'meta'), { recursive: true });
-  writeFileSync(
-    join(folder, 'meta', '_journal.json'),
-    JSON.stringify({ entries: journalTags.map((tag) => ({ tag })) }),
-  );
-  writeFileSync(
-    join(folder, '0017_mcp_server_origin_source.sql'),
-    "ALTER TABLE `mcp_servers` ADD COLUMN `origin_source` text NOT NULL DEFAULT 'manual';",
-  );
-  return folder;
+const migrationsFolder = resolve(__dirname, 'migrations');
+const requiredColumns = [
+  ['agent_flow_runs', 'parent_tool_call_id'],
+  ['agent_flow_runs', 'revision'],
+  ['agent_flow_runs', 'lease_owner'],
+  ['agent_flow_runs', 'lease_expires_at'],
+  ['chat_runs', 'revision'],
+  ['chat_runs', 'outcome'],
+  ['chat_runs', 'queue_idempotency_key'],
+  ['chat_runs', 'queued_payload'],
+  ['chat_runs', 'queued_at'],
+  ['chat_runs', 'queue_claimed_at'],
+  ['chat_runs', 'queue_cancelled_at'],
+  ['hitl_requests', 'continuation'],
+  ['hitl_requests', 'outcome'],
+  ['hitl_requests', 'revision'],
+  ['messages', 'turn_id'],
+  ['messages', 'prompt_message_id'],
+  ['sessions', 'project_id'],
+  ['projects', 'normalized_path'],
+] as const;
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function createTemporaryDatabasePath(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'kalio-drizzle-'));
+  temporaryDirectories.push(directory);
+  return join(directory, 'kalio.db');
 }
 
-describe('DrizzleService AgentFlow bootstrap repair', () => {
-  it('backfills new agent_flow_runs columns on an existing older table', () => {
-    const sqlite = new Database(':memory:');
-    sqlite.exec(`
-      CREATE TABLE agent_flow_runs (
-        id text PRIMARY KEY NOT NULL,
-        parent_session_id text NOT NULL,
-        child_session_id text NOT NULL,
-        flow_definition_id text NOT NULL,
-        status text NOT NULL,
-        start_mode text NOT NULL,
-        return_mode text NOT NULL,
-        result text,
-        created_at integer NOT NULL,
-        updated_at integer NOT NULL
-      );
-    `);
-    const service = new DrizzleService(null as never);
-    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+function createMigrationFixtureAt(index: number): string {
+  const sourceJournalPath = join(migrationsFolder, 'meta', '_journal.json');
+  const journal = JSON.parse(readFileSync(sourceJournalPath, 'utf8')) as {
+    entries: Array<{ tag: string }>;
+  };
+  const fixture = mkdtempSync(join(tmpdir(), 'kalio-migrations-'));
+  temporaryDirectories.push(fixture);
+  cpSync(migrationsFolder, fixture, { recursive: true });
+  writeFileSync(
+    join(fixture, 'meta', '_journal.json'),
+    `${JSON.stringify({ ...journal, entries: journal.entries.slice(0, index + 1) }, null, 2)}\n`,
+  );
+  return fixture;
+}
 
-    (service as unknown as { ensureAgentFlowTables: () => void }).ensureAgentFlowTables();
-
-    const columns = sqlite.prepare('PRAGMA table_info(agent_flow_runs)').all() as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      'open_chat_session_id',
-      'parent_tool_call_id',
-      'open_graph_run_id',
-      'waiting_for_node_id',
-      'active_node_ids',
-      'completed_node_ids',
-      'active_phases',
-      'completed_phases',
-      'node_visit_counts',
-      'max_iterations',
-      'return_to_orchestrator_count',
-      'checkpoint',
-      'summary',
-      'finished_at',
-    ]));
+function migrateDatabase(dbPath: string, folder: string): void {
+  const sqlite = new Database(dbPath);
+  try {
+    sqlite.pragma('foreign_keys = ON');
+    reconcileLegacyPrimarySchema(sqlite, folder);
+    migrate(drizzle(sqlite), { migrationsFolder: folder });
+  } finally {
     sqlite.close();
+  }
+}
+
+function expectRequiredColumns(dbPath: string): void {
+  const sqlite = new Database(dbPath, { readonly: true });
+  try {
+    for (const [table, column] of requiredColumns) {
+      const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      expect(columns.map((entry) => entry.name)).toContain(column);
+    }
+  } finally {
+    sqlite.close();
+  }
+}
+
+function expectSessionProjectDefault(dbPath: string): void {
+  const sqlite = new Database(dbPath, { readonly: true });
+  try {
+    const sessions = sqlite.prepare('PRAGMA table_info(sessions)').all() as Array<{
+      name: string;
+      dflt_value: string | null;
+    }>;
+    expect(sessions.find((column) => column.name === 'project_id')?.dflt_value).toBe("'system:none'");
+  } finally {
+    sqlite.close();
+  }
+}
+
+describe('DrizzleService fail-fast migrations', () => {
+  it('creates a fresh database with every schema column from the migration journal', () => {
+    const dbPath = createTemporaryDatabasePath();
+
+    migrateDatabase(dbPath, migrationsFolder);
+
+    expectRequiredColumns(dbPath);
+    expectSessionProjectDefault(dbPath);
   });
 
-  it('backfills new personas columns on an existing older table', () => {
-    const sqlite = new Database(':memory:');
-    sqlite.exec(`
-      CREATE TABLE personas (
-        id text PRIMARY KEY NOT NULL,
-        name text NOT NULL,
-        system_prompt text NOT NULL DEFAULT '',
-        model text NOT NULL,
-        allowed_tools text NOT NULL DEFAULT '[]',
-        created_at integer NOT NULL,
-        updated_at integer NOT NULL
-      );
-    `);
-    const service = new DrizzleService(null as never);
-    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+  it('upgrades a legal database at migration 0016 without relying on runtime repairs', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, createMigrationFixtureAt(16));
 
-    (service as unknown as { ensurePersonaColumns: () => void }).ensurePersonaColumns();
+    const beforeUpgrade = new Database(dbPath);
+    beforeUpgrade.prepare(
+      "INSERT INTO mcp_servers (id, name, created_at) VALUES ('mcp-1', 'MCP before upgrade', 1)",
+    ).run();
+    beforeUpgrade.close();
 
-    const columns = sqlite.prepare('PRAGMA table_info(personas)').all() as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      'mcp_policy',
-      'avatar_seed',
-      'avatar_variant',
-      'avatar_palette_key',
-      'avatar_index',
-      'skill_ids',
-      'max_tool_attempts',
-    ]));
-    sqlite.close();
+    migrateDatabase(dbPath, migrationsFolder);
+    expectRequiredColumns(dbPath);
+
+    const afterUpgrade = new Database(dbPath, { readonly: true });
+    try {
+      expect(afterUpgrade.prepare('SELECT origin_source FROM mcp_servers WHERE id = ?').get('mcp-1')).toEqual({
+        origin_source: 'manual',
+      });
+    } finally {
+      afterUpgrade.close();
+    }
   });
 
-  it('backfills new mcp_servers columns on an existing older table', () => {
-    const sqlite = new Database(':memory:');
-    sqlite.exec(`
-      CREATE TABLE mcp_servers (
-        id text PRIMARY KEY NOT NULL,
-        name text NOT NULL,
-        transport text NOT NULL DEFAULT 'http',
-        url text,
-        command text,
-        args text,
-        env_vars text,
-        headers text,
-        enabled integer NOT NULL DEFAULT 1,
-        status text NOT NULL DEFAULT 'disconnected',
-        tool_count integer NOT NULL DEFAULT 0,
-        last_error text,
-        created_at integer NOT NULL
-      );
-    `);
-    const service = new DrizzleService(null as never);
-    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+  it('reconciles an exact historically repaired 0023 before applying later migrations', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, createMigrationFixtureAt(23));
 
-    (service as unknown as { ensureMcpServerColumns: () => void }).ensureMcpServerColumns();
+    const repaired = new Database(dbPath);
+    repaired.exec([
+      'ALTER TABLE agent_flow_runs ADD COLUMN parent_tool_call_id text',
+      'ALTER TABLE messages ADD COLUMN turn_id text',
+      'ALTER TABLE messages ADD COLUMN prompt_message_id text',
+    ].join(';'));
+    repaired.close();
 
-    const columns = sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      'origin_source',
-    ]));
-    sqlite.close();
+    migrateDatabase(dbPath, migrationsFolder);
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const journalRows = sqlite.prepare(
+        'SELECT hash, created_at AS createdAt FROM "__drizzle_migrations" ORDER BY id ASC',
+      ).all() as Array<{ hash: string; createdAt: number }>;
+      expect(journalRows).toHaveLength(27);
+      expect(sqlite.prepare(
+        'SELECT 1 FROM sqlite_master WHERE type = \'index\' AND name = \'messages_session_tool_result_unique\'',
+      ).get()).toBeTruthy();
+    } finally {
+      sqlite.close();
+    }
   });
 
-  it('does not warn when origin_source column and migration journal agree', () => {
-    const sqlite = new Database(':memory:');
-    const migrationsFolder = createMigrationsFolder(['0017_mcp_server_origin_source']);
-    sqlite.exec(`
-      CREATE TABLE mcp_servers (
-        id text PRIMARY KEY NOT NULL,
-        origin_source text NOT NULL DEFAULT 'manual'
-      );
-    `);
-    const service = new DrizzleService(null as never);
-    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+  it('backfills project membership from the root runtime path with foreign keys enabled', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, createMigrationFixtureAt(24));
 
-    expect((service as unknown as { describeMigrationDrift: (folder: string) => string | null }).describeMigrationDrift(migrationsFolder)).toBeNull();
+    const beforeUpgrade = new Database(dbPath);
+    beforeUpgrade.prepare(
+      "INSERT INTO personas (id, name, model, created_at, updated_at) VALUES ('persona-1', 'Test', 'test', 1, 1)",
+    ).run();
+    beforeUpgrade.prepare(
+      "INSERT INTO sessions (id, persona_id, title, kind, runtime_context, created_at, updated_at) VALUES ('root-1', 'persona-1', 'Root', 'chat', ?, 1, 1)",
+    ).run(JSON.stringify({ architectureContext: { projectPath: 'C:\\Work\\Kalio' } }));
+    beforeUpgrade.prepare(
+      "INSERT INTO sessions (id, persona_id, title, kind, parent_session_id, created_at, updated_at) VALUES ('child-1', 'persona-1', 'Child', 'subagent', 'root-1', 2, 2)",
+    ).run();
+    beforeUpgrade.close();
 
-    sqlite.close();
-    rmSync(migrationsFolder, { recursive: true, force: true });
+    migrateDatabase(dbPath, migrationsFolder);
+
+    const afterUpgrade = new Database(dbPath, { readonly: true });
+    try {
+      const projects = afterUpgrade.prepare(
+        "SELECT id, normalized_path FROM projects WHERE kind = 'workspace'",
+      ).all() as Array<{ id: string; normalized_path: string }>;
+      expect(projects).toEqual([{ id: 'legacy:c:/work/kalio', normalized_path: 'c:/work/kalio' }]);
+      expect(afterUpgrade.prepare(
+        'SELECT id, project_id FROM sessions ORDER BY id',
+      ).all()).toEqual([
+        { id: 'child-1', project_id: 'legacy:c:/work/kalio' },
+        { id: 'root-1', project_id: 'legacy:c:/work/kalio' },
+      ]);
+      expect(afterUpgrade.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally {
+      afterUpgrade.close();
+    }
   });
 
-  it('warns when origin_source column exists but its migration is missing from the journal', () => {
-    const sqlite = new Database(':memory:');
-    const migrationsFolder = createMigrationsFolder([]);
-    sqlite.exec(`
-      CREATE TABLE mcp_servers (
-        id text PRIMARY KEY NOT NULL,
-        origin_source text NOT NULL DEFAULT 'manual'
-      );
-    `);
-    const service = new DrizzleService(null as never);
-    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+  it('prevents Nest lifecycle initialization when a real migration cannot be applied', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, createMigrationFixtureAt(16));
 
-    expect((service as unknown as { describeMigrationDrift: (folder: string) => string | null }).describeMigrationDrift(migrationsFolder)).toContain(
-      'mcp_servers.origin_source exists before migration 0017_mcp_server_origin_source is recorded',
-    );
-
+    const sqlite = new Database(dbPath);
+    sqlite.exec("ALTER TABLE mcp_servers ADD COLUMN origin_source text NOT NULL DEFAULT 'manual'");
     sqlite.close();
-    rmSync(migrationsFolder, { recursive: true, force: true });
+
+    const service = new DrizzleService({ get: () => dbPath } as never);
+
+    try {
+      expect(() => service.onModuleInit()).toThrow('Database migration failed');
+    } finally {
+      service.onModuleDestroy();
+    }
   });
 
-  it('warns when migration journal records origin_source but the column is missing', () => {
-    const sqlite = new Database(':memory:');
-    const migrationsFolder = createMigrationsFolder(['0017_mcp_server_origin_source']);
-    sqlite.exec(`
-      CREATE TABLE mcp_servers (
-        id text PRIMARY KEY NOT NULL
-      );
-    `);
-    const service = new DrizzleService(null as never);
-    (service as unknown as { sqlite: Database.Database }).sqlite = sqlite;
+  it('rejects a journal-complete database whose migrated schema is incomplete', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, migrationsFolder);
 
-    expect((service as unknown as { describeMigrationDrift: (folder: string) => string | null }).describeMigrationDrift(migrationsFolder)).toContain(
-      'migration 0017_mcp_server_origin_source is recorded but mcp_servers.origin_source is missing',
-    );
-
+    const sqlite = new Database(dbPath);
+    sqlite.exec('ALTER TABLE messages DROP COLUMN turn_id');
     sqlite.close();
-    rmSync(migrationsFolder, { recursive: true, force: true });
+
+    const service = new DrizzleService({ get: () => dbPath } as never);
+
+    try {
+      expect(() => service.onModuleInit()).toThrow('Database schema validation failed');
+    } finally {
+      service.onModuleDestroy();
+    }
   });
 });

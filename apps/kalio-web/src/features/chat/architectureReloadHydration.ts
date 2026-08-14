@@ -6,10 +6,13 @@ import type {
   ChatSession,
 } from '@kalio/types';
 import { useSessionStore } from '../../store/sessionStore';
+import { useAgentStore } from '../../store/agentStore';
 import { apiClient } from '../../services/apiClient';
 import { buildArchitectureRunMetadata, findArchitectureRunInMessages } from './architectureChatSummary';
+import { budgetApprovalsBySessionFromArchitectureEvents } from './architectureBudgetApprovalProjection';
 import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 import { architectureRunIdForSession } from '../sessions/sessionTreeDisplay';
+import { extractSubAgentFlowResult } from './subAgentFlowResult.parser';
 import {
   DEFAULT_CHILD_SESSION_HISTORY_LIMIT,
   DEFAULT_SESSION_HISTORY_LIMIT,
@@ -24,6 +27,7 @@ type SetMessages = (messages: ChatMessage[], sessionId?: string | null) => void;
 type SetAgentTurns = (turns: ReturnType<typeof buildTurnsFromHistory>, sessionId?: string | null) => void;
 type SetSessionHistoryMeta = (sessionId: string, meta: SessionHistoryMeta | null) => void;
 type FetchMessages = (sessionId: string) => Promise<SessionHistoryFetchResult>;
+type ArchitectureRunSummary = NonNullable<ReturnType<typeof findArchitectureRunInMessages>>;
 export type FetchArchitectureRunProjection = (
   runId: string,
 ) => Promise<{
@@ -63,13 +67,24 @@ function defaultFetchArchitectureRunProjection(
 function buildReloadedArchitectureSummaryMessage(
   sessionId: string,
   messages: ChatMessage[],
-  summary: NonNullable<ReturnType<typeof findArchitectureRunInMessages>>,
+  summary: ArchitectureRunSummary,
 ): ChatMessage {
-  const firstAssistantAt = messages
+  const turnId = `architecture-turn-${summary.runId}`;
+  const fallbackPromptMessageId = `architecture:${summary.runId}:user`;
+  const promptMessageId = promptMessageIdForArchitectureRun(messages, summary.runId)
+    ?? fallbackPromptMessageId;
+  const relatedMessages = messages.filter((message) => (
+    message.architectureRun?.runId === summary.runId
+    || message.turnId === turnId
+    || message.id === promptMessageId
+    || message.promptMessageId === promptMessageId
+  ));
+  const timestampMessages = relatedMessages.length > 0 ? relatedMessages : messages;
+  const firstAssistantAt = timestampMessages
     .filter((message) => message.role === 'assistant')
     .map((message) => message.createdAt)
     .sort((left, right) => left - right)[0];
-  const lastUserAt = [...messages]
+  const lastUserAt = [...timestampMessages]
     .reverse()
     .find((message) => message.role === 'user')
     ?.createdAt ?? Date.now();
@@ -79,6 +94,8 @@ function buildReloadedArchitectureSummaryMessage(
     sessionId,
     role: 'assistant',
     content: '',
+    turnId,
+    promptMessageId,
     architectureRun: {
       ...summary,
       finalArtifact: undefined,
@@ -87,10 +104,108 @@ function buildReloadedArchitectureSummaryMessage(
   };
 }
 
+function promptMessageIdForArchitectureRun(messages: ChatMessage[], runId: string): string | null {
+  for (const message of messages) {
+    if (
+      message.architectureRun?.runId === runId
+      && typeof message.promptMessageId === 'string'
+      && message.promptMessageId.trim().length > 0
+    ) {
+      return message.promptMessageId;
+    }
+    if (
+      message.toolCalls?.some((toolCall) => toolCall.args['architectureRunId'] === runId) === true
+      && typeof message.promptMessageId === 'string'
+      && message.promptMessageId.trim().length > 0
+    ) {
+      return message.promptMessageId;
+    }
+  }
+  const subAgentFlowCallId = subAgentFlowCallIdForArchitectureRun(messages, runId);
+  if (subAgentFlowCallId) {
+    const toolCallMessage = messages.find((message) => (
+      message.role === 'assistant'
+      && message.toolCalls?.some((toolCall) => toolCall.id === subAgentFlowCallId) === true
+    ));
+    if (
+      toolCallMessage
+      && typeof toolCallMessage.promptMessageId === 'string'
+      && toolCallMessage.promptMessageId.trim().length > 0
+    ) {
+      return toolCallMessage.promptMessageId;
+    }
+    const toolCallCreatedAt = toolCallMessage?.createdAt;
+    return [...messages]
+      .filter((message) => (
+        message.role === 'user'
+        && (typeof toolCallCreatedAt !== 'number' || message.createdAt <= toolCallCreatedAt)
+      ))
+      .at(-1)
+      ?.id ?? null;
+  }
+  return null;
+}
+
+function subAgentFlowCallIdForArchitectureRun(messages: ChatMessage[], runId: string): string | null {
+  const subAgentFlowCallIds = new Set(messages
+    .filter((message) => message.role === 'assistant' && message.toolCalls)
+    .flatMap((message) => message.toolCalls ?? [])
+    .filter((toolCall) => toolCall.name === 'run_sub_agentflow')
+    .map((toolCall) => toolCall.id));
+
+  for (const message of messages) {
+    if (
+      message.role !== 'tool_result'
+      || typeof message.toolCallId !== 'string'
+      || !subAgentFlowCallIds.has(message.toolCallId)
+    ) {
+      continue;
+    }
+    const result = extractSubAgentFlowResult(parseToolResultContent(message.content));
+    if (result?.openGraphRunId === runId) {
+      return message.toolCallId;
+    }
+  }
+  return null;
+}
+
+function architectureRunIdsFromSubAgentFlowResults(messages: ChatMessage[]): string[] {
+  const subAgentFlowCallIds = new Set(messages
+    .filter((message) => message.role === 'assistant' && message.toolCalls)
+    .flatMap((message) => message.toolCalls ?? [])
+    .filter((toolCall) => toolCall.name === 'run_sub_agentflow')
+    .map((toolCall) => toolCall.id));
+  const runIds: string[] = [];
+
+  for (const message of messages) {
+    if (
+      message.role !== 'tool_result'
+      || typeof message.toolCallId !== 'string'
+      || !subAgentFlowCallIds.has(message.toolCallId)
+    ) {
+      continue;
+    }
+    const result = extractSubAgentFlowResult(parseToolResultContent(message.content));
+    const runId = result?.openGraphRunId?.trim();
+    if (runId && !runIds.includes(runId)) {
+      runIds.push(runId);
+    }
+  }
+  return runIds;
+}
+
+function parseToolResultContent(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
 function mergeReloadedArchitectureSummaryMessage(
   sessionId: string,
   messages: ChatMessage[],
-  summary: NonNullable<ReturnType<typeof findArchitectureRunInMessages>>,
+  summary: ArchitectureRunSummary,
 ): ChatMessage[] {
   const syntheticMessage = buildReloadedArchitectureSummaryMessage(sessionId, messages, summary);
   const withoutPreviousSummary = messages.filter((message) => (
@@ -98,6 +213,17 @@ function mergeReloadedArchitectureSummaryMessage(
     && message.architectureRun?.runId !== summary.runId
   ));
   return [...withoutPreviousSummary, syntheticMessage].sort((left, right) => left.createdAt - right.createdAt);
+}
+
+function mergeReloadedArchitectureSummaryMessages(
+  sessionId: string,
+  messages: ChatMessage[],
+  summaries: ArchitectureRunSummary[],
+): ChatMessage[] {
+  return summaries.reduce(
+    (nextMessages, summary) => mergeReloadedArchitectureSummaryMessage(sessionId, nextMessages, summary),
+    messages,
+  );
 }
 
 function buildArchitectureRunSummaryFromProjection(
@@ -158,15 +284,51 @@ function isUsableArchitectureProjection(
   ));
 }
 
+function syncBudgetApprovalsFromArchitectureProjection(
+  projection: {
+    events: ArchitectureExecutionEvent[];
+  },
+): void {
+  const approvalsBySession = budgetApprovalsBySessionFromArchitectureEvents(projection.events);
+  if (approvalsBySession.size === 0) {
+    return;
+  }
+  const store = useAgentStore.getState();
+  for (const [sessionId, approvals] of approvalsBySession) {
+    for (const approval of approvals) {
+      store.setPendingBudgetApproval(sessionId, approval);
+    }
+  }
+}
+
+async function fetchArchitectureRunProjectionAndSync(
+  runId: string,
+  fetchArchitectureRunProjection: FetchArchitectureRunProjection,
+): Promise<Awaited<ReturnType<FetchArchitectureRunProjection>>> {
+  const projection = await fetchArchitectureRunProjection(runId);
+  syncBudgetApprovalsFromArchitectureProjection(projection);
+  return projection;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function persistedArchitectureRunInMessages(
   messages: ChatMessage[],
-): NonNullable<ReturnType<typeof findArchitectureRunInMessages>> | null {
-  const persisted = [...messages].reverse().find((message) => message.architectureRun)?.architectureRun;
-  return persisted ?? null;
+): ArchitectureRunSummary | null {
+  return persistedArchitectureRunsInMessages(messages).at(-1) ?? null;
+}
+
+function persistedArchitectureRunsInMessages(messages: ChatMessage[]): ArchitectureRunSummary[] {
+  const summariesByRunId = new Map<string, ArchitectureRunSummary>();
+  for (const message of messages) {
+    const summary = message.architectureRun;
+    if (summary) {
+      summariesByRunId.set(summary.runId, summary);
+    }
+  }
+  return [...summariesByRunId.values()];
 }
 
 export function hasUsableArchitectureRunSummary(messages: ChatMessage[]): boolean {
@@ -175,7 +337,7 @@ export function hasUsableArchitectureRunSummary(messages: ChatMessage[]): boolea
 }
 
 function isUsablePersistedArchitectureSummary(
-  summary: NonNullable<ReturnType<typeof findArchitectureRunInMessages>>,
+  summary: ArchitectureRunSummary,
 ): boolean {
   const graphNodes = (summary as { graphNodes?: unknown }).graphNodes;
   return summary.hostProjectionKind === 'workflow-envelope'
@@ -287,7 +449,7 @@ async function hydrateArchitectureActivityForSession(
 
   const syntheticMessage = buildSyntheticArchitectureChildMessage(
     session,
-    await fetchArchitectureRunProjection(runId),
+    await fetchArchitectureRunProjectionAndSync(runId, fetchArchitectureRunProjection),
   );
   return syntheticMessage ? [syntheticMessage] : null;
 }
@@ -304,23 +466,34 @@ export async function hydrateArchitectureProjectionFromDescendants(
   getSessions: GetSessions = () => [],
   getSessionMessages: GetSessionMessages = () => [],
 ): Promise<ChatMessage[]> {
-  const persistedSummary = persistedArchitectureRunInMessages(mergedMessages);
-  if (persistedSummary) {
-    try {
-      const projection = await fetchArchitectureRunProjection(persistedSummary.runId);
-      const typedSummary = buildArchitectureRunSummaryFromProjection(persistedSummary.runId, projection);
+  const persistedSummaries = persistedArchitectureRunsInMessages(mergedMessages);
+  if (persistedSummaries.length > 0) {
+    let hydratedMessages = mergedMessages;
+    let hydratedAny = false;
+
+    for (const persistedSummary of persistedSummaries) {
+      let summaryToMerge: ArchitectureRunSummary | null = null;
+      try {
+        const projection = await fetchArchitectureRunProjectionAndSync(persistedSummary.runId, fetchArchitectureRunProjection);
+        summaryToMerge = buildArchitectureRunSummaryFromProjection(persistedSummary.runId, projection);
+      } catch (error) {
+        void error;
+        // TODO: legacy fallback - projection fetch is best-effort during reconnect hydration.
+      }
       if (getActiveSessionId() !== activeSessionId) {
         return mergedMessages;
       }
-      if (typedSummary) {
-        return mergeReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, typedSummary);
+      if (!summaryToMerge && isUsablePersistedArchitectureSummary(persistedSummary)) {
+        summaryToMerge = persistedSummary;
       }
-    } catch (error) {
-      void error;
-      // TODO: legacy fallback - projection fetch is best-effort during reconnect hydration.
+      if (summaryToMerge) {
+        hydratedMessages = mergeReloadedArchitectureSummaryMessage(activeSessionId, hydratedMessages, summaryToMerge);
+        hydratedAny = true;
+      }
     }
-    if (isUsablePersistedArchitectureSummary(persistedSummary)) {
-      return mergedMessages;
+
+    if (hydratedAny) {
+      return hydratedMessages;
     }
   }
 
@@ -328,7 +501,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
   if (inferredSummary?.hostProjectionKind === 'workflow-envelope') {
     let typedSummary = inferredSummary;
     try {
-      const projection = await fetchArchitectureRunProjection(inferredSummary.runId);
+      const projection = await fetchArchitectureRunProjectionAndSync(inferredSummary.runId, fetchArchitectureRunProjection);
       typedSummary = buildArchitectureRunSummaryFromProjection(inferredSummary.runId, projection) ?? inferredSummary;
     } catch (error) {
       void error;
@@ -341,6 +514,35 @@ export async function hydrateArchitectureProjectionFromDescendants(
     return mergeReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, typedSummary);
   }
 
+  const subAgentFlowRunIds = architectureRunIdsFromSubAgentFlowResults(mergedMessages);
+  if (subAgentFlowRunIds.length > 0) {
+    const derivedSummariesByRunId = new Map<string, ArchitectureRunSummary>();
+    for (const runId of subAgentFlowRunIds) {
+      let projection: Awaited<ReturnType<FetchArchitectureRunProjection>>;
+      try {
+        projection = await fetchArchitectureRunProjectionAndSync(runId, fetchArchitectureRunProjection);
+      } catch (error) {
+        void error;
+        // TODO: legacy fallback - run_sub_agentflow results may outlive a transient projection fetch failure.
+        continue;
+      }
+      if (getActiveSessionId() !== activeSessionId) {
+        return mergedMessages;
+      }
+      const derivedSummary = buildArchitectureRunSummaryFromProjection(runId, projection);
+      if (derivedSummary) {
+        derivedSummariesByRunId.set(derivedSummary.runId, derivedSummary);
+      }
+    }
+    if (derivedSummariesByRunId.size > 0) {
+      return mergeReloadedArchitectureSummaryMessages(
+        activeSessionId,
+        mergedMessages,
+        [...derivedSummariesByRunId.values()],
+      );
+    }
+  }
+
   const candidateSessions = getSessions().filter((session) => (
     session.parentSessionId === activeSessionId
     && architectureRunIdForSession(session)
@@ -349,7 +551,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
     return mergedMessages;
   }
 
-  let derivedSummary: ReturnType<typeof findArchitectureRunInMessages> = null;
+  const derivedSummariesByRunId = new Map<string, ArchitectureRunSummary>();
   for (const session of candidateSessions) {
     const currentChildMessages = getSessionMessages(session.id);
     const fetchedWindow = currentChildMessages.length > 0 ? null : toSessionHistoryWindow(await fetchMessages(session.id));
@@ -364,10 +566,13 @@ export async function hydrateArchitectureProjectionFromDescendants(
       setMessages(childMessages, session.id);
       setAgentTurns(buildTurnsFromHistory(childMessages, session.id), session.id);
     }
-    derivedSummary ??= findArchitectureRunInMessages(childMessages);
+    const childSummary = findArchitectureRunInMessages(childMessages);
+    if (childSummary) {
+      derivedSummariesByRunId.set(childSummary.runId, childSummary);
+    }
   }
 
-  if (!derivedSummary) {
+  if (derivedSummariesByRunId.size === 0) {
     const candidateRunIds = [...new Set(
       candidateSessions
         .map((session) => architectureRunIdForSession(session))
@@ -376,7 +581,7 @@ export async function hydrateArchitectureProjectionFromDescendants(
     for (const runId of candidateRunIds) {
       let projection: Awaited<ReturnType<FetchArchitectureRunProjection>>;
       try {
-        projection = await fetchArchitectureRunProjection(runId);
+        projection = await fetchArchitectureRunProjectionAndSync(runId, fetchArchitectureRunProjection);
       } catch (error) {
         void error;
         // TODO: legacy fallback - projection fetch is best-effort during reconnect hydration.
@@ -385,18 +590,22 @@ export async function hydrateArchitectureProjectionFromDescendants(
       if (getActiveSessionId() !== activeSessionId) {
         return mergedMessages;
       }
-      derivedSummary = buildArchitectureRunSummaryFromProjection(runId, projection);
+      const derivedSummary = buildArchitectureRunSummaryFromProjection(runId, projection);
       if (derivedSummary) {
-        break;
+        derivedSummariesByRunId.set(derivedSummary.runId, derivedSummary);
       }
     }
   }
 
-  if (!derivedSummary) {
+  if (derivedSummariesByRunId.size === 0) {
     return mergedMessages;
   }
 
-  return mergeReloadedArchitectureSummaryMessage(activeSessionId, mergedMessages, derivedSummary);
+  return mergeReloadedArchitectureSummaryMessages(
+    activeSessionId,
+    mergedMessages,
+    [...derivedSummariesByRunId.values()],
+  );
 }
 
 export async function reloadSessionHistoryWithArchitectureProjection({

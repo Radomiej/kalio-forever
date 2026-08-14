@@ -39,12 +39,6 @@ test.describe('Memory API Integration Tests', () => {
         },
       });
 
-      // Skip if embedding API fails (no real API key)
-      if (response.status() === 500) {
-        test.skip();
-        return;
-      }
-
       expect(response.ok()).toBeTruthy();
 
       const body = await response.json();
@@ -65,11 +59,6 @@ test.describe('Memory API Integration Tests', () => {
           personaId,
         },
       });
-      // Skip if embedding API fails
-      if (response.status() === 500) {
-        test.skip();
-        return;
-      }
       // Should either succeed with 0 chunks or fail gracefully
       expect(response.status()).toBeGreaterThanOrEqual(200);
     });
@@ -82,12 +71,6 @@ test.describe('Memory API Integration Tests', () => {
           personaId,
         },
       });
-
-      // Skip if embedding API fails
-      if (response.status() === 500) {
-        test.skip();
-        return;
-      }
 
       expect(response.ok()).toBeTruthy();
 
@@ -105,12 +88,6 @@ test.describe('Memory API Integration Tests', () => {
           ],
         },
       });
-
-      // Skip if embedding API fails
-      if (response.status() === 500) {
-        test.skip();
-        return;
-      }
 
       expect(response.ok()).toBeTruthy();
 

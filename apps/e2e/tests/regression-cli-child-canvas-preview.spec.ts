@@ -210,7 +210,7 @@ test.describe('REGRESSION: CLI child canvas preview', () => {
     await expect(reloadedMasterSession).toBeVisible({ timeout: 10_000 });
     await reloadedMasterSession.click();
 
-    await page.getByTestId('talk-sidebar-graph-entry').click();
+    await page.getByTestId('talk-graph-switcher').click();
     await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
 
     const cliGraphNode = page.getByTestId(`graph-node-cli-agent:${fixture.cliChildSessionId}`);
