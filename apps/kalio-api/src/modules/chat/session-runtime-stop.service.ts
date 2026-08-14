@@ -36,14 +36,26 @@ export class SessionRuntimeStopService {
   async stopSessionTree(rootSessionId: string): Promise<RuntimeSnapshotSessionTree> {
     const sessionTree = await collectRuntimeSnapshotSessionTree(rootSessionId, this.sessionsService);
     const sessionIds = sessionTree.sessionIds;
+    const failures: string[] = [];
+    const attempt = async (label: string, operation: () => Promise<void>): Promise<void> => {
+      try {
+        await operation();
+      } catch (error) {
+        failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
 
-    await this.stopArchitectureRunsForSessions(sessionIds);
-    await this.stopAgentFlowRunsForSessions(sessionIds);
-    await this.stopSubagentRunsForSessions(sessionIds);
+    await attempt('Architecture runtime stop', () => this.stopArchitectureRunsForSessions(sessionIds));
+    await attempt('AgentFlow runtime stop', () => this.stopAgentFlowRunsForSessions(sessionIds));
+    await attempt('Subagent runtime stop', () => this.stopSubagentRunsForSessions(sessionIds));
 
     for (const sessionId of sessionIds) {
-      await this.stopCliAgentSessionIfNeeded(sessionId);
-      await this.pipeline.stopAndDrain(sessionId);
+      await attempt(`CLI agent stop for ${sessionId}`, () => this.stopCliAgentSessionIfNeeded(sessionId));
+      await attempt(`Chat pipeline drain for ${sessionId}`, () => this.pipeline.stopAndDrain(sessionId));
+    }
+
+    if (failures.length > 0) {
+      throw new Error(`Session runtime did not become quiescent: ${failures.join('; ')}`);
     }
 
     return sessionTree;
@@ -57,7 +69,9 @@ export class SessionRuntimeStopService {
     try {
       await subagentRuntime.stopAndDrainSessions(sessionIds);
     } catch (error) {
-      this.logger.warn(`Failed to stop subagent runs: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Failed to stop subagent runs: ${message}`);
+      throw error instanceof Error ? error : new Error(message);
     }
   }
 
@@ -69,7 +83,9 @@ export class SessionRuntimeStopService {
     try {
       await architectureRuntime.stopRunsForSessions(sessionIds);
     } catch (error) {
-      this.logger.warn(`Failed to stop Architecture runs: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Failed to stop Architecture runs: ${message}`);
+      throw error instanceof Error ? error : new Error(message);
     }
   }
 
@@ -82,6 +98,7 @@ export class SessionRuntimeStopService {
     const snapshots = await findAgentFlowSnapshotsForSessions(agentFlowRuntime, sessionIds);
     const activeSnapshots = snapshots.filter((snapshot) => this.isAgentFlowSnapshotForSessions(snapshot, sessionIdSet));
     const stoppedRunIds = new Set<string>();
+    const failures: string[] = [];
     for (const snapshot of activeSnapshots) {
       if (stoppedRunIds.has(snapshot.run.id)) {
         continue;
@@ -90,8 +107,13 @@ export class SessionRuntimeStopService {
       try {
         await agentFlowRuntime.stop(snapshot.run.id);
       } catch (error) {
-        this.logger.warn(`Failed to stop AgentFlow run ${snapshot.run.id}: ${error instanceof Error ? error.message : String(error)}`);
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Failed to stop AgentFlow run ${snapshot.run.id}: ${message}`);
+        failures.push(`${snapshot.run.id}: ${message}`);
       }
+    }
+    if (failures.length > 0) {
+      throw new Error(`AgentFlow runs did not stop: ${failures.join('; ')}`);
     }
   }
 
@@ -119,7 +141,9 @@ export class SessionRuntimeStopService {
       }
       await cliRuntime.stopSession(session.parentSessionId, sessionId);
     } catch (error) {
-      this.logger.warn(`CLI agent stop failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`CLI agent stop failed for ${sessionId}: ${message}`);
+      throw error instanceof Error ? error : new Error(message);
     }
   }
 

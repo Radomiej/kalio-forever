@@ -15,7 +15,13 @@ export const SYSTEM_PROJECT_IDS = {
 } as const;
 
 export function normalizeProjectPath(path: string): string {
-  return normalizeProjectPathForStorage(path).toLowerCase();
+  const trimmedPath = path.trim();
+  const normalized = normalizeProjectPathForStorage(path);
+  return (process.platform === 'win32' || isWindowsPath(trimmedPath)) ? normalized.toLowerCase() : normalized;
+}
+
+function isWindowsPath(path: string): boolean {
+  return /^[a-z]:[\\/]/i.test(path) || path.startsWith('\\\\') || path.startsWith('//');
 }
 
 export function normalizeProjectPathForStorage(path: string): string {

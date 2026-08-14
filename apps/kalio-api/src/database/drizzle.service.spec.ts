@@ -5,7 +5,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DrizzleService } from './drizzle.service';
+import { DrizzleService, reconcileLegacyPrimarySchema } from './drizzle.service';
 
 const migrationsFolder = resolve(__dirname, 'migrations');
 const requiredColumns = [
@@ -61,6 +61,7 @@ function migrateDatabase(dbPath: string, folder: string): void {
   const sqlite = new Database(dbPath);
   try {
     sqlite.pragma('foreign_keys = ON');
+    reconcileLegacyPrimarySchema(sqlite, folder);
     migrate(drizzle(sqlite), { migrationsFolder: folder });
   } finally {
     sqlite.close();
@@ -122,6 +123,34 @@ describe('DrizzleService fail-fast migrations', () => {
       });
     } finally {
       afterUpgrade.close();
+    }
+  });
+
+  it('reconciles an exact historically repaired 0023 before applying later migrations', () => {
+    const dbPath = createTemporaryDatabasePath();
+    migrateDatabase(dbPath, createMigrationFixtureAt(23));
+
+    const repaired = new Database(dbPath);
+    repaired.exec([
+      'ALTER TABLE agent_flow_runs ADD COLUMN parent_tool_call_id text',
+      'ALTER TABLE messages ADD COLUMN turn_id text',
+      'ALTER TABLE messages ADD COLUMN prompt_message_id text',
+    ].join(';'));
+    repaired.close();
+
+    migrateDatabase(dbPath, migrationsFolder);
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const journalRows = sqlite.prepare(
+        'SELECT hash, created_at AS createdAt FROM "__drizzle_migrations" ORDER BY id ASC',
+      ).all() as Array<{ hash: string; createdAt: number }>;
+      expect(journalRows).toHaveLength(27);
+      expect(sqlite.prepare(
+        'SELECT 1 FROM sqlite_master WHERE type = \'index\' AND name = \'messages_session_tool_result_unique\'',
+      ).get()).toBeTruthy();
+    } finally {
+      sqlite.close();
     }
   });
 

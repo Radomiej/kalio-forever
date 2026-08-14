@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Inject, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { nanoid } from 'nanoid';
 import { eq, desc, inArray, isNull } from 'drizzle-orm';
 import type {
@@ -16,17 +17,21 @@ import type { IMessageRepository } from './interfaces/message-repository.interfa
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
 import { LLMService } from '../llm/llm.service';
-import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
 import { ActiveSessionRegistry } from './active-session-registry.service';
+import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
+import {
+  buildTitlePrompt as buildSessionTitlePrompt,
+  deriveFallbackTitle as deriveSessionFallbackTitle,
+  normalizeGeneratedTitle as normalizeSessionTitle,
+  normalizedUserPrompt as normalizeSessionPrompt,
+} from './sessions-title.utils';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
-const DEFAULT_ACTIVE_SESSION_LIST_LIMIT = 250;
 const MAX_SESSION_LIST_LIMIT = 500;
-const MAX_TITLE_LENGTH = 60;
 interface SessionRuntimeScopeOptions {
   registerRuntimeProjectPath?: boolean;
 }
@@ -35,21 +40,6 @@ interface SessionListOptions {
   includeArchived?: boolean;
   limit?: number;
 }
-
-const TITLE_SYSTEM_PROMPT = [
-  'Generate a concise conversation title.',
-  'Summarize the real user goal instead of copying the prompt.',
-  'Return plain title text only.',
-  'Use 2 to 6 words when possible.',
-  `Never exceed ${MAX_TITLE_LENGTH} characters.`,
-  'No quotes, markdown, or trailing punctuation.',
-].join(' ');
-const TITLE_STOPWORDS = new Set([
-  'a', 'an', 'and', 'as', 'at', 'be', 'by', 'do', 'for', 'from', 'if', 'in', 'into', 'is', 'it', 'its', 'of', 'ok',
-  'on', 'or', 'out', 'reply', 'that', 'the', 'this', 'to', 'use', 'with', 'without', 'you',
-  'ale', 'bo', 'by', 'co', 'czy', 'dla', 'do', 'i', 'jak', 'na', 'nie', 'oraz', 'po', 'to', 'użyj', 'uzyj', 'w',
-  'we', 'z',
-]);
 
 @Injectable()
 export class SessionsService {
@@ -64,6 +54,7 @@ export class SessionsService {
     private readonly allowedPaths: AllowedPathsService,
     private readonly projects: ProjectsService,
     @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -190,7 +181,8 @@ export class SessionsService {
     }
 
     const descendants = await this.collectDescendantIds(id);
-    const activeSessionId = descendants.find((sessionId) => this.activeSessionRegistry?.isActive(sessionId));
+    const activeSessionId = descendants.find((sessionId) => this.activeSessionRegistry?.isActive(sessionId))
+      ?? this.getArchitectureRuntimeStopPort()?.findActiveSessionIdForSessions?.(descendants);
     if (activeSessionId) {
       throw new ConflictException({
         message: 'Project cannot be changed while this conversation is generating.',
@@ -273,13 +265,14 @@ export class SessionsService {
     }
 
     const generated = await this.tryGenerateConversationTitle(id, history);
-    const title = normalizeGeneratedTitle(generated) ?? deriveFallbackTitle(history, row.runtimeContext);
+    const title = normalizeSessionTitle(generated)
+      ?? deriveSessionFallbackTitle(history, row.runtimeContext, DEFAULT_SESSION_TITLE);
     await this.update(id, { title });
     return { title };
   }
 
   private async tryGenerateConversationTitle(id: string, history: ChatMessage[]): Promise<string | null> {
-    const messages = buildTitlePrompt(history);
+    const messages = buildSessionTitlePrompt(history);
     let rawResponse = '';
 
     try {
@@ -297,16 +290,16 @@ export class SessionsService {
       return null;
     }
 
-    const normalized = normalizeGeneratedTitle(rawResponse);
+    const normalized = normalizeSessionTitle(rawResponse);
     if (!normalized) {
       return null;
     }
 
-    const promptText = normalizedUserPrompt(history);
+    const promptText = normalizeSessionPrompt(history);
     if (normalized.startsWith('[MockLLM] Echo:')) {
       return null;
     }
-    if (promptText && normalized.toLowerCase() === (normalizeGeneratedTitle(promptText)?.toLowerCase() ?? '')) {
+    if (promptText && normalized.toLowerCase() === (normalizeSessionTitle(promptText)?.toLowerCase() ?? '')) {
       return null;
     }
     return normalized;
@@ -438,11 +431,23 @@ export class SessionsService {
     if (!options.registerRuntimeProjectPath) {
       return;
     }
-    const projectPath = projectPathFromRuntimeContext(runtimeContext);
+    const projectPathValue = runtimeContext?.architectureContext?.['projectPath'];
+    const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
+    const projectPath = typeof projectPathValue === 'string' && projectPathValue.trim().length > 0
+      ? projectPathValue.trim()
+      : typeof executionCwd === 'string' && executionCwd.trim().length > 0 ? executionCwd.trim() : undefined;
     if (!projectPath) {
       return;
     }
     await this.allowedPaths.ensurePath(projectPath);
+  }
+
+  private getArchitectureRuntimeStopPort(): ArchitectureRuntimeStopPort | undefined {
+    try {
+      return this.moduleRef?.get<ArchitectureRuntimeStopPort>(ARCHITECTURE_RUNTIME_STOP, { strict: false });
+    } catch {
+      return undefined;
+    }
   }
 
   private toChatSession(row: {
@@ -474,127 +479,9 @@ export class SessionsService {
   }
 }
 
-function projectPathFromRuntimeContext(runtimeContext: SessionRuntimeContext | null | undefined): string | undefined {
-  const projectPath = runtimeContext?.architectureContext?.['projectPath'];
-  if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
-    return projectPath.trim();
-  }
-
-  const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
-  if (typeof executionCwd === 'string' && executionCwd.trim().length > 0) {
-    return executionCwd.trim();
-  }
-
-  return undefined;
-}
-
 function normalizeSessionListLimit(options: SessionListOptions): number | undefined {
   if (typeof options.limit === 'number' && Number.isFinite(options.limit)) {
     return Math.min(MAX_SESSION_LIST_LIMIT, Math.max(1, Math.trunc(options.limit)));
   }
-  return options.includeArchived ? undefined : DEFAULT_ACTIVE_SESSION_LIST_LIMIT;
-}
-
-function buildTitlePrompt(history: ChatMessage[]): ContextManagedLLMMessage[] {
-  const userPrompt = normalizedUserPrompt(history);
-  const latestAssistant = [...history]
-    .reverse()
-    .find((message) => message.role === 'assistant' && normalizeConversationLine(message.content).length > 0);
-
-  return [
-    {
-      role: 'system',
-      content: TITLE_SYSTEM_PROMPT,
-    },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        firstUserMessage: userPrompt,
-        latestAssistantMessage: latestAssistant ? normalizeConversationLine(latestAssistant.content).slice(0, 600) : null,
-      }),
-    },
-  ];
-}
-
-function normalizedUserPrompt(history: ChatMessage[]): string {
-  const firstUser = history.find((message) => message.role === 'user');
-  return firstUser ? stripArchitecturePrefix(normalizeConversationLine(firstUser.content)) : '';
-}
-
-function normalizeConversationLine(content: unknown): string {
-  if (typeof content !== 'string') {
-    return '';
-  }
-
-  return content.replace(/\s+/g, ' ').trim();
-}
-
-function normalizeGeneratedTitle(raw: string | null | undefined): string | null {
-  if (!raw) {
-    return null;
-  }
-
-  const normalized = raw
-    .replace(/^```[\w-]*\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.?!,:;\-–—]+$/u, '')
-    .trim();
-
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  const bounded = normalized.length > MAX_TITLE_LENGTH
-    ? normalized.slice(0, MAX_TITLE_LENGTH).trimEnd()
-    : normalized;
-  return bounded.length > 0 ? bounded : null;
-}
-
-function deriveFallbackTitle(history: ChatMessage[], runtimeContext: SessionRuntimeContext | null | undefined): string {
-  const firstUser = normalizedUserPrompt(history);
-  if (!firstUser) {
-    return DEFAULT_SESSION_TITLE;
-  }
-
-  const projectName = projectNameFromRuntimeContext(runtimeContext);
-  if (/(architektur|architecture)/iu.test(firstUser)) {
-    const architectureTitle = projectName ? `Architecture Review ${projectName}` : 'Architecture Review';
-    return normalizeGeneratedTitle(architectureTitle) ?? DEFAULT_SESSION_TITLE;
-  }
-
-  const firstSentence = firstUser.split(/[.!?]/u).find((segment) => segment.trim().length > 0)?.trim() ?? firstUser;
-  const titleTokens = (firstSentence.match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? [])
-    .filter((token) => token.length > 1)
-    .filter((token) => !TITLE_STOPWORDS.has(token.toLowerCase()))
-    .slice(0, 4);
-
-  if (titleTokens.length > 0) {
-    const candidate = titleTokens.map(titleTokenCase).join(' ');
-    return normalizeGeneratedTitle(candidate) ?? DEFAULT_SESSION_TITLE;
-  }
-
-  return normalizeGeneratedTitle(firstSentence) ?? DEFAULT_SESSION_TITLE;
-}
-
-function stripArchitecturePrefix(content: string): string {
-  return content.replace(/^\[Architecture:\s*[^\]]+\]\s*/i, '').trim();
-}
-
-function projectNameFromRuntimeContext(runtimeContext: SessionRuntimeContext | null | undefined): string | null {
-  const projectPath = projectPathFromRuntimeContext(runtimeContext);
-  if (!projectPath) {
-    return null;
-  }
-  const normalized = projectPath.replaceAll('\\', '/').split('/').filter(Boolean);
-  return normalized.at(-1) ?? null;
-}
-
-function titleTokenCase(token: string): string {
-  if (token.toUpperCase() === token) {
-    return token;
-  }
-  return `${token[0]?.toUpperCase() ?? ''}${token.slice(1).toLowerCase()}`;
+  return undefined;
 }

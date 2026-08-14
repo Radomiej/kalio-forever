@@ -6,6 +6,13 @@ import type { EmitFn } from './interfaces/stream-context.interface';
 import { PerKeyMutex } from './per-key-mutex';
 import { RunJournalService } from './run-journal.service';
 import { ActiveSessionRegistry } from './active-session-registry.service';
+import {
+  claimQueuedDispatchItem,
+  persistQueuedChatRun,
+  queuedRunPosition,
+  type DispatchItem,
+  type QueuedItem,
+} from './session-pipeline-queue.utils';
 
 type ChatSendPayload = SocketEvents['chat:send'];
 
@@ -17,20 +24,6 @@ interface ActiveSlot {
   seeded?: boolean;
   turnId: string;
   startedAt: number;
-}
-
-interface QueuedItem {
-  emit: EmitFn;
-  turnId: string;
-  runId?: string;
-  payload?: ChatSendPayload;
-}
-
-interface DispatchItem {
-  payload: ChatSendPayload;
-  emit: EmitFn;
-  turnId: string;
-  runId?: string;
 }
 
 export interface SessionRuntimeStatus {
@@ -123,6 +116,17 @@ export class SessionPipelineService {
       }
       if (this.active.has(sid)) {
         const queue = this.queues.get(sid) ?? [];
+        if (payload.clientMessageId && this.runJournal) {
+          const existingRun = await this.runJournal.findRunByQueueKey(sid, payload.clientMessageId);
+          if (existingRun) {
+            emit('chat:queued', {
+              sessionId: sid,
+              queueLength: queue.length,
+              position: queuedRunPosition(queue, existingRun.id),
+            });
+            return { kind: 'queued' };
+          }
+        }
         if (queue.length >= QUEUE_CAP) {
           emit('chat:error', {
             sessionId: sid,
@@ -135,26 +139,23 @@ export class SessionPipelineService {
         const turnId = nanoid();
         let queuedItem: QueuedItem;
         if (this.runJournal) {
-          try {
-            const queuedRun = await this.runJournal.acceptQueuedRun({
+          const persistence = await persistQueuedChatRun({
+            runJournal: this.runJournal,
+            sessionId: sid,
+            turnId,
+            payload,
+            emit,
+          });
+          if (persistence.kind === 'duplicate') {
+            emit('chat:queued', {
               sessionId: sid,
-              turnId,
-              queueIdempotencyKey: payload.clientMessageId ?? turnId,
-              queuedPayload: {
-                content: payload.content,
-                personaId: payload.personaId,
-                attachments: payload.attachments,
-                clientMessageId: payload.clientMessageId,
-              },
+              queueLength: queue.length,
+              position: queuedRunPosition(queue, persistence.runId),
             });
-            queuedItem = {
-              emit,
-              turnId: queuedRun.turnId,
-              runId: queuedRun.id,
-            };
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.logger.error(`Unable to persist queued chat run for session ${sid}: ${message}`);
+            return { kind: 'queued' };
+          }
+          if (persistence.kind === 'rejected') {
+            this.logger.error(`Unable to persist queued chat run for session ${sid}: ${persistence.message}`);
             emit('chat:error', {
               sessionId: sid,
               code: 'RUNTIME_PERSISTENCE_FAILED',
@@ -163,6 +164,7 @@ export class SessionPipelineService {
             });
             return { kind: 'rejected' };
           }
+          queuedItem = persistence.item;
         } else {
           queuedItem = {
             emit,
@@ -401,56 +403,12 @@ export class SessionPipelineService {
   }
 
   private async toDispatchItem(sessionId: string, queued: QueuedItem): Promise<DispatchItem | null> {
-    if (queued.payload) {
-      return {
-        payload: queued.payload,
-        emit: queued.emit,
-        turnId: queued.turnId,
-        runId: queued.runId,
-      };
-    }
-
-    const claimed = await this.runJournal?.claimQueuedRun(sessionId, queued.runId);
-    if (!claimed) {
-      this.logger.error(`Queued chat run claim returned no durable run for session ${sessionId}`);
-      queued.emit('chat:error', {
-        sessionId,
-        code: 'RUNTIME_PERSISTENCE_FAILED',
-        message: 'Unable to recover queued runtime state. The queued turn was dropped.',
-        hadContent: false,
-      });
-      return null;
-    }
-
-    if (claimed.id !== queued.runId || claimed.turnId !== queued.turnId) {
-      this.logger.error(
-        `Queued chat run claim mismatch for session ${sessionId}: expected ${queued.runId ?? 'unknown'}/${queued.turnId}, got ${claimed.id}/${claimed.turnId}`,
-      );
-    }
-
-    if (!claimed.queuedPayload) {
-      this.logger.error(`Queued chat run ${claimed.id} for session ${sessionId} has no durable payload`);
-      queued.emit('chat:error', {
-        sessionId,
-        code: 'RUNTIME_PERSISTENCE_FAILED',
-        message: 'Unable to recover queued runtime payload. The queued turn was dropped.',
-        hadContent: false,
-      });
-      return null;
-    }
-
-    return {
-      payload: {
-        sessionId,
-        content: claimed.queuedPayload.content,
-        personaId: claimed.queuedPayload.personaId,
-        attachments: claimed.queuedPayload.attachments,
-        clientMessageId: claimed.queuedPayload.clientMessageId,
-      },
-      emit: queued.emit,
-      turnId: claimed.turnId,
-      runId: claimed.id,
-    };
+    return claimQueuedDispatchItem({
+      sessionId,
+      queued,
+      runJournal: this.runJournal,
+      onError: (message) => this.logger.error(message),
+    });
   }
 
   private async runOne(current: DispatchItem): Promise<void> {

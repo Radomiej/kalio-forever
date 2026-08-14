@@ -314,7 +314,7 @@ describe('SessionsService', () => {
       expect(result.map((session) => session.id)).toEqual(['visible', 'archived']);
     });
 
-    it('limits the default active session list for large histories', async () => {
+    it('returns the full default active session list for large histories', async () => {
       for (let index = 0; index < 260; index += 1) {
         rows.push({
           id: `session-${index}`,
@@ -328,9 +328,9 @@ describe('SessionsService', () => {
 
       const result = await service.list();
 
-      expect(result).toHaveLength(250);
+      expect(result).toHaveLength(260);
       expect(result.at(0)?.id).toBe('session-0');
-      expect(result.at(-1)?.id).toBe('session-249');
+      expect(result.at(-1)?.id).toBe('session-259');
     });
 
     it('clamps explicit active session limits to the release-safe maximum', async () => {

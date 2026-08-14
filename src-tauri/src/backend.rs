@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use tauri::{App, AppHandle, Manager};
 
 const BACKEND_PORT: u16 = 4516;
-const TAURI_ORIGIN: &str = "http://tauri.localhost";
+const TAURI_ORIGIN: &str = "http://tauri.localhost,tauri://localhost";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Clone, Default)]

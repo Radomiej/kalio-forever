@@ -58,22 +58,29 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
       return null;
     }
 
-    const eventTypes = records
-      .map((record) => architectureAuditStringField(record, 'eventType'))
-      .filter((type): type is string => Boolean(type));
-    const events: Array<{ type: string; reasonCode?: WorkflowReasonCode }> = [];
+    const events: Array<{
+      type: string;
+      reasonCode?: WorkflowReasonCode;
+      status?: ArchitectureExecutionEvent['status'];
+    }> = [];
     for (const record of records) {
+      if (record.kind === 'architecture_error') {
+        events.push({ type: 'architecture_error', status: 'failed' });
+        continue;
+      }
       const type = architectureAuditStringField(record, 'eventType');
       if (!type || !isArchitectureExecutionEventType(type)) continue;
+      const status = architectureAuditStringField(record, 'status');
       events.push({
         type,
         reasonCode: architectureAuditWorkflowReasonCodeField(record, 'reasonCode')
           ?? architectureAuditWorkflowReasonCodeField(architectureAuditRecordField(record, 'data'), 'reasonCode'),
+        ...(status === 'failed' || status === 'blocked' || status === 'cancelled'
+          ? { status }
+          : {}),
       });
     }
-    const hasFinalArtifact = eventTypes.includes('final_artifact');
-    const hasError = Boolean(error);
-    const status: ArchitectureRun['status'] = hasError ? 'failed' : hasFinalArtifact ? 'completed' : statusFromArchitectureAuditEventSummary(events);
+    const status = statusFromArchitectureAuditEventSummary(events);
     const createdAt = Math.min(...rows.map((row) => row.createdAt));
     const updatedAt = Math.max(...rows.map((row) => row.createdAt));
     const executionMode = architectureAuditExecutionMode(source);
@@ -197,6 +204,7 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
     const rows = await this.audit.listEntries({
       limit: 5000,
       source: 'all',
+      runId,
     });
     return rows
       .filter((row) => {

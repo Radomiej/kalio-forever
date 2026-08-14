@@ -89,6 +89,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { $missing += 'WINDOWS_CERTIFICATE_PASSWORD' }
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) { $missing += 'WINDOWS_TIMESTAMP_URL' }
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { $missing += 'TAURI_SIGNING_PRIVATE_KEY' }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { $missing += 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD' }
           if ([string]::IsNullOrWhiteSpace($env:TAURI_UPDATER_PUBLIC_KEY)) { $missing += 'TAURI_UPDATER_PUBLIC_KEY' }
           if ($missing.Count -gt 0) {
             throw "Tagged releases require GitHub Actions secrets: $($missing -join ', ')"
@@ -281,6 +282,7 @@ jobs:
         run: |
           missing=()
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || missing+=(TAURI_SIGNING_PRIVATE_KEY)
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] || missing+=(TAURI_SIGNING_PRIVATE_KEY_PASSWORD)
           [ -n "$TAURI_UPDATER_PUBLIC_KEY" ] || missing+=(TAURI_UPDATER_PUBLIC_KEY)
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "Tagged releases require GitHub Actions secrets: ${missing[*]}"
@@ -400,6 +402,7 @@ jobs:
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME @assets --clobber
+            gh release edit $env:GITHUB_REF_NAME --draft=false
           } else {
-            gh release create $env:GITHUB_REF_NAME --draft --generate-notes --title "Kalio $env:GITHUB_REF_NAME" @assets
+            gh release create $env:GITHUB_REF_NAME --generate-notes --title "Kalio $env:GITHUB_REF_NAME" @assets
           }

@@ -101,6 +101,10 @@ export class RunJournalService implements OnModuleInit {
     return existing;
   }
 
+  async findRunByQueueKey(sessionId: string, queueIdempotencyKey: string): Promise<ChatRunSnapshot | null> {
+    return this.getRunByQueueKey(sessionId, queueIdempotencyKey);
+  }
+
   async checkpoint(id: string, patch: CheckpointInput): Promise<void> {
     const now = new Date();
     const set: Record<string, unknown> = {

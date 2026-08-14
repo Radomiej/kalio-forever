@@ -49,6 +49,9 @@ export function statusFromArchitectureAuditEventSummary(
     if (event?.type === 'run_stopped') {
       return 'cancelled';
     }
+    if (event?.type === 'final_artifact') {
+      return 'completed';
+    }
     if (event?.type === 'node_failed') {
       return 'failed';
     }

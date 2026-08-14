@@ -309,14 +309,39 @@ export class ToolConfirmationService {
         ctx.abortSignal?.removeEventListener('abort', handleAbort);
       };
 
-      const handleAbort = () => {
+      const handleAbort = async (): Promise<void> => {
         const pending = this.pending.get(requestId);
-        if (pending) {
-          this.pending.delete(requestId);
-          this.emitConfirmationInvalidated(pending, 'cancelled', `Tool confirmation aborted for ${toolName}.`);
-          this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'abort');
-          void this.logRuntimeConfirmation(pending, 'tool.confirmation.cancelled', 'cancelled');
+        if (!pending) {
+          cleanupAbortListener();
+          return;
         }
+        const abortMessage = `Tool confirmation aborted for ${toolName}.`;
+        if (this.hitlRequests && pending.revision !== undefined) {
+          let persisted = false;
+          try {
+            persisted = await this.hitlRequests.resolve(
+              requestId,
+              pending.revision,
+              'cancelled',
+              { message: abortMessage },
+            );
+          } catch (error) {
+            this.logger.error(
+              `Unable to persist aborted HITL confirmation ${requestId}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          if (!persisted) {
+            this.logger.error(`Aborted HITL confirmation ${requestId} was not persisted; keeping it pending.`);
+            return;
+          }
+        }
+        if (this.pending.get(requestId) !== pending) {
+          return;
+        }
+        this.pending.delete(requestId);
+        this.emitConfirmationInvalidated(pending, 'cancelled', abortMessage);
+        this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'abort');
+        void this.logRuntimeConfirmation(pending, 'tool.confirmation.cancelled', 'cancelled');
         if (timeout) clearTimeout(timeout);
         cleanupAbortListener();
         resolve({ status: 'rejected', requestId });
@@ -340,7 +365,7 @@ export class ToolConfirmationService {
       });
 
       if (ctx.abortSignal?.aborted) {
-        handleAbort();
+        void handleAbort();
         return;
       }
       ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });

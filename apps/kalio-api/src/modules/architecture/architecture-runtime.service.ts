@@ -341,6 +341,27 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     return stoppedRunIds;
   }
 
+  findActiveSessionIdForSessions(sessionIds: readonly string[]): string | undefined {
+    const sessionIdSet = new Set(sessionIds.filter((sessionId) => sessionId.trim().length > 0));
+    for (const run of this.runs.values()) {
+      if (run.status !== 'running' && run.status !== 'queued') {
+        continue;
+      }
+      const runSessionIds = [
+        run.rootSessionId,
+        ...Object.values(run.branchSessionIds ?? {}),
+        getArchitectureParentSessionId(run.context),
+        getArchitectureHostSessionId(run.context),
+        getArchitectureHistorySessionId(run.context),
+      ].filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0);
+      const activeSessionId = runSessionIds.find((sessionId) => sessionIdSet.has(sessionId));
+      if (activeSessionId) {
+        return activeSessionId;
+      }
+    }
+    return undefined;
+  }
+
   private runBelongsToSessionSet(run: ArchitectureRun, sessionIds: ReadonlySet<string>): boolean {
     const runSessionIds = [
       run.rootSessionId,

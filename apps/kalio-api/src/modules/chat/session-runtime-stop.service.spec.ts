@@ -130,7 +130,7 @@ describe('SessionRuntimeStopService', () => {
     expect(pipeline.stopAndDrain).toHaveBeenNthCalledWith(3, 'cli-session');
   });
 
-  it('logs subagent stop failures and still drains the chat pipeline', async () => {
+  it('propagates subagent stop failures after draining the chat pipeline', async () => {
     const sessions = {
       listChildren: vi.fn(async () => []),
       get: vi.fn(async () => rootSession),
@@ -154,9 +154,8 @@ describe('SessionRuntimeStopService', () => {
       'warn',
     ).mockImplementation(() => undefined);
 
-    const sessionTree = await service.stopSessionTree('root-session');
+    await expect(service.stopSessionTree('root-session')).rejects.toThrow('transport down');
 
-    expect(sessionTree.sessionIds).toEqual(['root-session']);
     expect(stopAndDrainSubagents).toHaveBeenCalledWith(['root-session']);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Failed to stop subagent runs: transport down'));
     expect(pipeline.stopAndDrain).toHaveBeenCalledTimes(1);

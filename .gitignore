@@ -34,4 +34,5 @@ docs/sessions/
 apps/output/
 src-tauri/resources/
 src-tauri/target/
+.tauri-signing/
 release/

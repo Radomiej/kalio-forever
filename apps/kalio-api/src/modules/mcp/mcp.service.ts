@@ -34,6 +34,7 @@ import {
   rowToMcpHandle,
   type ServerHandle,
 } from './mcp-runtime.utils';
+import { rebuildMcpToolNameMap } from './mcp-tool-name-map.utils';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
@@ -46,6 +47,8 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MCPService.name);
   private handles = new Map<string, ServerHandle>();
   private toolNameMap = new Map<string, { serverKey: string; originalName: string }>();
+  private ambiguousToolNames = new Set<string>();
+  private toolOriginalNames = new WeakMap<MCPTool, string>();
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private gatewayRef?: { emitToAll(event: string, data: unknown): void };
 
@@ -155,7 +158,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     }
     await this.disconnectHandle(resolvedServerKey);
     this.handles.delete(resolvedServerKey);
-    this.removeToolRefs(resolvedServerKey);
+    this.removeToolRefs();
     await this.drizzle.db.delete(mcpServers).where(eq(mcpServers.id, parsed.id));
     await this.reconcileRuntime();
   }
@@ -225,6 +228,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`[MCP] Tool discovery failed for ${handle.serverKey}: ${err}`);
       handle.tools = [];
     }
+    this.rebuildToolNameMap();
 
     transport.onclose = () => {
       if (handle.status === 'connected') {
@@ -252,6 +256,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     try { await handle.rawTransport?.close(); } catch (err) { this.logger.warn(`[MCP] Error closing transport for ${handle.serverKey}`, err instanceof Error ? err.stack : String(err)); }
     handle.status = 'disconnected';
     handle.tools = [];
+    this.rebuildToolNameMap();
     await this.persistStatus(handle);
     this.emitStatus(handle);
   }
@@ -265,16 +270,18 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       const result = await client.listTools(cursor ? { cursor } : undefined);
       for (const t of result.tools) {
         const tool = buildMcpToolPayload(serverKey, t);
+        this.toolOriginalNames.set(tool, t.name);
         const ref = { serverKey, originalName: t.name };
         for (const name of [tool.name, ...(tool.aliases ?? [])]) {
+          if (this.ambiguousToolNames.has(name)) {
+            continue;
+          }
           const existing = this.toolNameMap.get(name);
           if (!existing) {
             this.toolNameMap.set(name, ref);
-          } else if (
-            existing.serverKey !== serverKey
-            || existing.originalName !== t.name
-          ) {
+          } else if (existing.serverKey !== ref.serverKey || existing.originalName !== ref.originalName) {
             this.toolNameMap.delete(name);
+            this.ambiguousToolNames.add(name);
           }
         }
         tools.push(tool);
@@ -336,10 +343,16 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       .map(([id, server]) => configToMcpHandle(id, server));
   }
 
-  private removeToolRefs(serverKey: string): void {
-    for (const [name, info] of this.toolNameMap) {
-      if (info.serverKey === serverKey) this.toolNameMap.delete(name);
-    }
+  private removeToolRefs(): void {
+    this.rebuildToolNameMap();
+  }
+
+  private rebuildToolNameMap(): void {
+    const rebuilt = rebuildMcpToolNameMap(this.handles.values(), this.toolOriginalNames);
+    this.toolNameMap.clear();
+    for (const [name, ref] of rebuilt.map) this.toolNameMap.set(name, ref);
+    this.ambiguousToolNames.clear();
+    for (const name of rebuilt.ambiguous) this.ambiguousToolNames.add(name);
   }
 
   private async loadRegistryEntries(enabledRowsOnly = false): Promise<{
@@ -403,7 +416,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       }
       await this.disconnectHandle(existingKey);
       this.handles.delete(existingKey);
-      this.removeToolRefs(existingKey);
+      this.removeToolRefs();
     }
 
     const scheduled: ServerHandle[] = [];
@@ -423,7 +436,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
       if (currentHandle) {
         await this.disconnectHandle(entry.serverKey);
         this.handles.delete(entry.serverKey);
-        this.removeToolRefs(entry.serverKey);
+        this.removeToolRefs();
       }
 
       await this.connectHandle(desiredHandle);
