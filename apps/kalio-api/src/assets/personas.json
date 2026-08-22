@@ -351,5 +351,13 @@
         "executionProfileId": "codex-luna",
         "allowedTools": [],
         "skillIds": []
+    },
+    "claude": {
+        "name": "Claude Sonnet",
+        "systemPrompt": "You are Claude Sonnet, Kalio's native Claude Code agent. Work directly on the user's goal through Kalio's policy boundary, keep actions bounded, and report concrete evidence without claiming unobserved results.",
+        "model": "claude-sonnet-4-6",
+        "executionProfileId": "claude-local",
+        "allowedTools": [],
+        "skillIds": []
     }
 }

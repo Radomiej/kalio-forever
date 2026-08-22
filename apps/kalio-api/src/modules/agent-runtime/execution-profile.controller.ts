@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
-import type { CreateExecutionProfileDto, UpdateExecutionProfileDto } from '@kalio/types';
+import type { CreateExecutionProfileDto, ResolveDirectExecutionProfileDto, UpdateExecutionProfileDto } from '@kalio/types';
 import { ExecutionProfileService } from './execution-profile.service';
 import { CodexAppServerHost } from './codex-app-server.host';
 
@@ -23,6 +23,11 @@ export class ExecutionProfileController {
   @Post()
   create(@Body() dto: CreateExecutionProfileDto) {
     return this.profiles.create(dto);
+  }
+
+  @Post('direct/resolve')
+  resolveDirect(@Body() dto: ResolveDirectExecutionProfileDto) {
+    return this.profiles.resolveDirect(dto);
   }
 
   @Patch(':id')

@@ -9,6 +9,7 @@ export const envSchema = Joi.object({
   KALIO_HOME:          Joi.string().optional(),
   KALIO_DATA_ROOT:     Joi.string().optional(),
   KALIO_CODEX_INHERIT_MCP: Joi.boolean().default(false),
+  KALIO_MCP_BRIDGE_TOKEN: Joi.string().min(1).optional(),
   KALIO_SQLITE_DRIVER: Joi.string().valid('auto', 'node', 'bun').default('auto'),
   KALIO_RUNTIME_VERSION: Joi.string().optional(),
   KALIO_API_PROTOCOL_VERSION: Joi.string().default('1'),

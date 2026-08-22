@@ -218,6 +218,27 @@
       "when": 1787405100000,
       "tag": "0030_codex_luna_strict",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787405200000,
+      "tag": "0031_claude_local_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1787405300000,
+      "tag": "0032_claude_current_model_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1787405400000,
+      "tag": "0033_persona_provider_tools",
+      "breakpoints": true
     }
   ]
 }

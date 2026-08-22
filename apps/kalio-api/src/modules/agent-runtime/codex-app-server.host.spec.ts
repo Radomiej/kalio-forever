@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CodexAppServerHost, CodexAppServerProtocolRouter, buildCodexAppServerArgs, buildCodexSpawnSpec } from './codex-app-server.host';
+import {
+  CodexAppServerHost,
+  CodexAppServerProtocolRouter,
+  buildCodexAppServerArgs,
+  buildCodexSpawnSpec,
+  type CodexAppServerConnection,
+} from './codex-app-server.host';
 
 describe('CodexAppServerProtocolRouter', () => {
   it('blocks inherited Codex MCP servers unless explicitly opted in', () => {
@@ -71,6 +77,9 @@ describe('CodexAppServerProtocolRouter', () => {
     host.registerThread('chatgpt-default', 'thread-2');
     expect(host.getStatus('chatgpt-default').openSessionCount).toBe(2);
 
+    host.unregisterThread('chatgpt-default', 'thread-1');
+    expect(host.getStatus('chatgpt-default').openSessionCount).toBe(1);
+
     await host.reset('chatgpt-default');
     expect(host.getStatus('chatgpt-default')).toMatchObject({
       status: 'offline',
@@ -78,4 +87,45 @@ describe('CodexAppServerProtocolRouter', () => {
       openSessionCount: 0,
     });
   });
+
+  it('does not resurrect a process that reset invalidated while it was starting', async () => {
+    let resolveFirst!: (connection: CodexAppServerConnection) => void;
+    let resolveSecond!: (connection: CodexAppServerConnection) => void;
+    const firstStart = new Promise<CodexAppServerConnection>((resolve) => { resolveFirst = resolve; });
+    const secondStart = new Promise<CodexAppServerConnection>((resolve) => { resolveSecond = resolve; });
+    const first = makeConnection('epoch-first');
+    const second = makeConnection('epoch-second');
+    const factory = vi.fn()
+      .mockImplementationOnce(() => firstStart)
+      .mockImplementationOnce(() => secondStart);
+    const host = new CodexAppServerHost(undefined, factory);
+
+    const firstRequest = host.getConnection('chatgpt-default', 'read-only');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(factory).toHaveBeenCalledOnce();
+
+    const reset = host.reset('chatgpt-default');
+    const secondRequest = host.getConnection('chatgpt-default', 'read-only');
+    resolveFirst(first);
+    await expect(firstRequest).rejects.toThrow('was reset while starting');
+    await reset;
+
+    resolveSecond(second);
+    await expect(secondRequest).resolves.toBe(second);
+    expect(host.getStatus('chatgpt-default')).toMatchObject({ status: 'online', connected: true });
+    expect(first.close).toHaveBeenCalledOnce();
+  });
 });
+
+function makeConnection(processEpoch: string): CodexAppServerConnection {
+  return {
+    processEpoch,
+    request: vi.fn(async () => undefined),
+    notify: vi.fn(),
+    respond: vi.fn(),
+    onRequest: vi.fn(() => () => undefined),
+    onNotification: vi.fn(() => () => undefined),
+    close: vi.fn(async () => undefined),
+    isClosed: () => false,
+  };
+}

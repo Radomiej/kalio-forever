@@ -65,6 +65,7 @@ const REQUIRED_MIGRATED_COLUMNS = [
     'skill_ids',
     'max_tool_attempts',
     'execution_profile_id',
+    'provider_tool_names',
   ]],
   ['projects', ['default_execution_profile_id']],
   ['mcp_servers', ['origin_source']],

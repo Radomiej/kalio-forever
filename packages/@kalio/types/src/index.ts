@@ -224,7 +224,7 @@ export type LLMProviderType =
   | 'custom'
   | 'mock';
 
-export type ExecutionProfileKind = 'direct-llm' | 'codex-app-server';
+export type ExecutionProfileKind = 'direct-llm' | 'codex-app-server' | 'claude-agent-sdk';
 export type ExecutionApprovalMode = 'codex_guard' | 'kalio_strict';
 
 export interface ExecutionProfile {
@@ -251,6 +251,11 @@ export interface CreateExecutionProfileDto {
   reasoningEffort?: string;
   approvalMode?: ExecutionApprovalMode;
   enabled?: boolean;
+}
+
+export interface ResolveDirectExecutionProfileDto {
+  credentialId: ID;
+  model: string;
 }
 
 export interface UpdateExecutionProfileDto {
@@ -288,6 +293,7 @@ export interface Persona {
   executionProfileId?: ID;
   maxToolAttempts?: number | null;
   allowedTools: string[];  // native tool names available to this persona (tool allowlist)
+  providerToolNames?: string[]; // provider-owned tools enabled for this persona (e.g. Claude Code Read/WebSearch)
   skillIds: string[];      // IDs of Skill entities whose prompts are injected into system prompt
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this persona
   avatarSeed: string;
@@ -312,6 +318,7 @@ export interface PersonaSessionConfig {
   executionProfileId?: ID;
   maxToolAttempts?: number | null;
   allowedTools: string[];  // filtered tool list for this session
+  providerToolNames?: string[]; // provider-owned tools enabled for this session
   skillIds: string[];      // Skill entity IDs whose prompts get injected
   mcpPolicy: MCPPolicy;    // how MCP tools are filtered for this session
   kv: Record<string, string>; // all KV entries for this persona
@@ -324,6 +331,7 @@ export interface CreatePersonaDto {
   executionProfileId?: ID;
   maxToolAttempts?: number;
   allowedTools: string[];
+  providerToolNames?: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
   avatarSeed?: string;
@@ -339,6 +347,7 @@ export interface UpdatePersonaDto {
   executionProfileId?: ID;
   maxToolAttempts?: number | null;
   allowedTools?: string[];
+  providerToolNames?: string[];
   skillIds?: string[];
   mcpPolicy?: MCPPolicy;
   avatarSeed?: string;

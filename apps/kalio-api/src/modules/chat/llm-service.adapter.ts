@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { LLMStreamChunk } from '@kalio/types';
 import { LLMService } from '../llm/llm.service';
 import type { ILLMSource, LLMSourceParams } from './interfaces/llm-source.interface';
 import type { InternalLLMChunk, ToolArgProgressChunk } from './interfaces/llm-chunk.types';
@@ -106,39 +107,40 @@ export class LLMServiceAdapter implements ILLMSource {
     // Fire the stream — do NOT await here so we can yield concurrently
     const onToolArgChunk = makeToolArgRateTracker(chunk => enqueue(chunk));
 
-    void this.llm
-      .streamChat(
-        params.messages,
-        toolMetas,
-        {
-          sessionId: params.sessionId,
-          messageId: params.messageId,
-          modelOverride: params.model,
-          structuredOutput: params.structuredOutput,
-          abortSignal: controller.signal,
-          onToolArgChunk,
-          onStructuredOutput: (value) => {
-            enqueue({ type: 'structured_output', value });
-          },
-          onChunk: (chunk) => {
-          if (chunk.usage) {
-            enqueue({
-              type: 'usage',
-              promptTokens: chunk.usage.promptTokens,
-              completionTokens: chunk.usage.completionTokens,
-              totalTokens: chunk.usage.totalTokens,
-            });
+    const streamOptions = {
+      sessionId: params.sessionId,
+      messageId: params.messageId,
+      modelOverride: params.executionProfile?.kind === 'direct-llm' ? undefined : params.model,
+      structuredOutput: params.structuredOutput,
+      abortSignal: controller.signal,
+      onToolArgChunk,
+      onStructuredOutput: (value: unknown) => {
+        enqueue({ type: 'structured_output', value });
+      },
+      onChunk: (chunk: LLMStreamChunk) => {
+        if (chunk.usage) {
+          enqueue({
+            type: 'usage',
+            promptTokens: chunk.usage.promptTokens,
+            completionTokens: chunk.usage.completionTokens,
+            totalTokens: chunk.usage.totalTokens,
+          });
+        }
+        if (chunk.delta) {
+          if (chunk.thinking) {
+            enqueue({ type: 'thinking_delta', delta: chunk.delta });
+          } else {
+            enqueue({ type: 'text_delta', delta: chunk.delta });
           }
-          if (chunk.delta) {
-            if (chunk.thinking) {
-              enqueue({ type: 'thinking_delta', delta: chunk.delta });
-            } else {
-              enqueue({ type: 'text_delta', delta: chunk.delta });
-            }
-          }
-          },
-        },
-      )
+        }
+      },
+    };
+
+    const stream = params.executionProfile?.kind === 'direct-llm'
+      ? this.llm.streamChatWithExecutionProfile(params.executionProfile, params.messages, toolMetas, streamOptions)
+      : this.llm.streamChat(params.messages, toolMetas, streamOptions);
+
+    void stream
       .then(toolCalls => {
         if (controller.signal.aborted) {
           enqueue(null);

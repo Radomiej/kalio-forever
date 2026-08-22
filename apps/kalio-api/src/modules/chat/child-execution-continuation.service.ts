@@ -108,9 +108,10 @@ export class ChildExecutionContinuationService implements OnApplicationBootstrap
         effectiveSystemPrompt: assembled.effectiveSystemPrompt,
         toolMetas: assembled.toolMetas,
         model: assembled.model,
+        providerToolNames: assembled.personaConfig?.providerToolNames,
         executionProfile,
         externalThreadId: parent.externalThreadId,
-         providerCompletesTurn: executionProfile?.kind === 'codex-app-server',
+         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk',
          onExternalRuntimeLost: () => controller.abort(),
          onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
           sessions: this.sessions,

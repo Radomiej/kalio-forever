@@ -49,6 +49,11 @@ export interface CodexAppServerConnection {
   close(): Promise<void>;
 }
 
+export type CodexAppServerConnectionFactory = (
+  logger: Logger,
+  options: { command?: string; disabledFeatures?: string[]; env?: NodeJS.ProcessEnv; inheritConfiguredMcp?: boolean },
+) => Promise<CodexAppServerConnection>;
+
 export type CodexAppServerConnectionStatus = 'offline' | 'starting' | 'online' | 'error';
 
 export interface CodexAppServerHostStatus {
@@ -301,12 +306,20 @@ export class CodexAppServerHost implements OnModuleDestroy {
   private readonly connections = new Map<string, Promise<CodexAppServerConnection>>();
   private readonly resolvedConnections = new Map<string, CodexAppServerConnection>();
   private readonly connectionStates = new Map<string, { status: CodexAppServerConnectionStatus; lastError?: string }>();
+  /**
+   * Monotonic per-profile generation used to discard a process that finishes
+   * starting after reset/close has already invalidated it.
+   */
+  private readonly connectionGenerations = new Map<string, number>();
   private readonly threadIds = new Map<string, Set<string>>();
   private readonly lifecycleListeners = new Set<(event: CodexAppServerLifecycleEvent) => void>();
   private readonly connectionCloseUnsubs = new Map<string, () => void>();
   private readonly notifiedProcessEpochs = new Set<string>();
 
-  constructor(@Optional() private readonly codexMcpPolicy?: CodexMcpPolicyService) {}
+  constructor(
+    @Optional() private readonly codexMcpPolicy?: CodexMcpPolicyService,
+    @Optional() private readonly connectionFactory: CodexAppServerConnectionFactory = (logger, options) => StdioCodexAppServerConnection.start(logger, options),
+  ) {}
 
   onConnectionLost(listener: (event: CodexAppServerLifecycleEvent) => void): () => void {
     this.lifecycleListeners.add(listener);
@@ -334,7 +347,15 @@ export class CodexAppServerHost implements OnModuleDestroy {
     this.threadIds.set(authProfileId, threads);
   }
 
+  unregisterThread(authProfileId: string, threadId: string): void {
+    const threads = this.threadIds.get(authProfileId);
+    if (!threads) return;
+    threads.delete(threadId);
+    if (threads.size === 0) this.threadIds.delete(authProfileId);
+  }
+
   async reset(authProfileId: string): Promise<void> {
+    const resetGeneration = this.advanceGeneration(authProfileId);
     const currentConnection = this.resolvedConnections.get(authProfileId);
     if (currentConnection) {
       this.notifyConnectionLost(authProfileId, currentConnection, 'reset');
@@ -349,7 +370,9 @@ export class CodexAppServerHost implements OnModuleDestroy {
 
     try {
       const connection = await connectionPromise;
-      if (!currentConnection) {
+      // A new connection may have been requested while the old process was
+      // still resolving. Do not let this reset notify or mutate that process.
+      if (!currentConnection && this.connectionGenerations.get(authProfileId) === resetGeneration) {
         this.notifyConnectionLost(authProfileId, connection, 'reset');
       }
       await connection.close();
@@ -365,33 +388,43 @@ export class CodexAppServerHost implements OnModuleDestroy {
     const key = authProfileId;
     const existing = this.connections.get(key);
     if (existing) {
+      const existingGeneration = this.connectionGenerations.get(key) ?? 0;
       const connection = await existing;
+      if (this.connections.get(key) !== existing || this.connectionGenerations.get(key) !== existingGeneration) {
+        throw new Error('Codex App Server connection was reset while starting.');
+      }
       if (!connection.isClosed?.()) return connection;
       this.detachConnection(key);
       this.connections.delete(key);
       this.resolvedConnections.delete(key);
     }
+    const generation = this.advanceGeneration(key);
     this.connectionStates.set(key, { status: 'starting' });
     const mcpPolicy = await this.codexMcpPolicy?.get(authProfileId);
-    const connection = StdioCodexAppServerConnection.start(this.logger, {
+    const connection = this.connectionFactory(this.logger, {
       env: codexAuthEnvironment(authProfileId),
       inheritConfiguredMcp: mcpPolicy?.inheritConfiguredMcp,
     });
     this.connections.set(key, connection);
     try {
       const resolved = await connection;
+      if (this.connections.get(key) !== connection || this.connectionGenerations.get(key) !== generation) {
+        throw new Error('Codex App Server connection was reset while starting.');
+      }
       this.resolvedConnections.set(key, resolved);
       this.attachConnection(key, resolved);
       this.connectionStates.set(key, { status: 'online' });
       return resolved;
     } catch (error) {
-      this.detachConnection(key);
-      this.connections.delete(key);
-      this.resolvedConnections.delete(key);
-      this.connectionStates.set(key, {
-        status: 'error',
-        lastError: error instanceof Error ? error.message : String(error),
-      });
+      if (this.connections.get(key) === connection && this.connectionGenerations.get(key) === generation) {
+        this.detachConnection(key);
+        this.connections.delete(key);
+        this.resolvedConnections.delete(key);
+        this.connectionStates.set(key, {
+          status: 'error',
+          lastError: error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
     }
   }
@@ -402,6 +435,9 @@ export class CodexAppServerHost implements OnModuleDestroy {
   }
 
   async close(): Promise<void> {
+    for (const authProfileId of new Set([...this.connections.keys(), ...this.connectionStates.keys()])) {
+      this.advanceGeneration(authProfileId);
+    }
     for (const [authProfileId, connection] of this.resolvedConnections) {
       this.notifyConnectionLost(authProfileId, connection, 'closed');
     }
@@ -437,6 +473,8 @@ export class CodexAppServerHost implements OnModuleDestroy {
     connection: CodexAppServerConnection,
     reason: CodexAppServerLifecycleEvent['reason'],
   ): void {
+    const activeConnection = this.resolvedConnections.get(authProfileId);
+    if (activeConnection && activeConnection.processEpoch !== connection.processEpoch) return;
     if (this.notifiedProcessEpochs.has(connection.processEpoch)) return;
     this.notifiedProcessEpochs.add(connection.processEpoch);
     this.threadIds.delete(authProfileId);
@@ -455,6 +493,12 @@ export class CodexAppServerHost implements OnModuleDestroy {
         this.logger.warn(`Codex App Server lifecycle listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  }
+
+  private advanceGeneration(authProfileId: string): number {
+    const generation = (this.connectionGenerations.get(authProfileId) ?? 0) + 1;
+    this.connectionGenerations.set(authProfileId, generation);
+    return generation;
   }
 }
 

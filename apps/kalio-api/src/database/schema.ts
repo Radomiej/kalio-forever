@@ -48,6 +48,7 @@ export const personas = sqliteTable('personas', {
   executionProfileId: text('execution_profile_id').notNull().default('local-direct-default').references(() => executionProfiles.id),
   maxToolAttempts: integer('max_tool_attempts'),
   allowedTools: text('allowed_tools', { mode: 'json' }).$type<string[]>().notNull().default([]),
+  providerToolNames: text('provider_tool_names', { mode: 'json' }).$type<string[]>().notNull().default([]),
   skillIds:     text('skill_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
   mcpPolicy:    text('mcp_policy').$type<MCPPolicy>().notNull().default('allow_all'),
   avatarSeed:   text('avatar_seed'),
