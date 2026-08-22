@@ -39,36 +39,12 @@ import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sess
 import { useChatAutoScroll } from './useChatAutoScroll';
 import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
 import { useChatProjectSelection } from './useChatProjectSelection';
+import { useRuntimeProfileLabel } from './useRuntimeProfileLabel';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
 
 const DEFAULT_SESSION_TITLE = 'New Chat';
-
-function resolveRuntimeProvider(executionProfileId: string | undefined, provider: string | undefined): string | null {
-  const profileId = executionProfileId?.trim().toLowerCase();
-  if (profileId?.startsWith('codex-')) {
-    return 'Codex';
-  }
-
-  const providerLabels: Record<string, string> = {
-    openai: 'ChatGPT',
-    openrouter: 'OpenRouter',
-    cometapi: 'CometAPI',
-    xiaomimimo: 'MiMo',
-    ollama: 'Ollama',
-    deepseek: 'DeepSeek',
-    bitnet: 'BitNet',
-    custom: 'Custom LLM',
-    mock: 'Local LLM',
-  };
-  return provider ? providerLabels[provider.toLowerCase()] ?? provider : null;
-}
-
-function resolveRuntimeModel(model: string | undefined): string | null {
-  const normalized = model?.trim();
-  return normalized && normalized.toLowerCase() !== 'mock' ? normalized : null;
-}
 
 function buildOptimisticSessionTitle(content: string): string {
   const preview = content.slice(0, 50).trim();
@@ -214,11 +190,14 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     setSelectedPersonaId,
   } = useLaunchPersonas(activeSession?.personaId);
   const activePersona = personas.find((persona) => persona.id === activeSession?.personaId);
-  const activeModel = resolveRuntimeModel(activePersona?.model || backendModel);
-  const activeProvider = resolveRuntimeProvider(
-    activeSession?.executionProfileId ?? activePersona?.executionProfileId,
-    backendProvider,
-  );
+  const runtimeProfileLabel = useRuntimeProfileLabel({
+    executionProfileId: activeSession?.executionProfileId ?? activePersona?.executionProfileId,
+    provider: backendProvider,
+    personaModel: activePersona?.model,
+    backendModel,
+  });
+  const activeModel = runtimeProfileLabel.model;
+  const activeProvider = runtimeProfileLabel.provider;
 
   const renderableConversationProjection = resolveRenderableConversationProjection({
     session: activeSession,

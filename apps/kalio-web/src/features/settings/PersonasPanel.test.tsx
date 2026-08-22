@@ -116,6 +116,8 @@ describe('PersonasPanel', () => {
     const fetchMock = installFetchQueue({
       'GET /api/personas': [[], [createdPersona]],
       'GET /api/tools': [TOOLS, TOOLS],
+      'GET /api/runtime/profiles': [[]],
+      'GET /api/credentials': [[]],
       'POST /api/personas': [createdPersona],
     });
 
@@ -147,6 +149,7 @@ describe('PersonasPanel', () => {
         systemPrompt: 'Investigate carefully',
         model: 'gpt-4.1',
         allowedTools: ['shell_exec'],
+        providerToolNames: [],
       });
     });
 
@@ -164,6 +167,8 @@ describe('PersonasPanel', () => {
     const fetchMock = installFetchQueue({
       'GET /api/personas': [[CUSTOM_PERSONA], [updatedPersona], []],
       'GET /api/tools': [TOOLS, TOOLS, TOOLS],
+      'GET /api/runtime/profiles': [[], []],
+      'GET /api/credentials': [[], []],
       'PUT /api/personas/builder': [updatedPersona],
       'DELETE /api/personas/builder': [204],
     });
@@ -191,6 +196,7 @@ describe('PersonasPanel', () => {
         systemPrompt: 'Build safer things',
         model: 'claude-opus',
         allowedTools: ['web_search'],
+        providerToolNames: [],
       });
     });
 

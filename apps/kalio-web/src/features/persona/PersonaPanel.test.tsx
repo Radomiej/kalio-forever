@@ -10,8 +10,18 @@ const apiClientMock = vi.hoisted(() => ({
   put: vi.fn(),
   delete: vi.fn(),
 }));
+const getExecutionProfilesMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const getCredentialsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const getCredentialModelsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const resolveDirectExecutionProfileMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../../services/apiClient', () => ({ apiClient: apiClientMock }));
+vi.mock('../../services/apiClient', () => ({
+  apiClient: apiClientMock,
+  getExecutionProfiles: getExecutionProfilesMock,
+  getCredentials: getCredentialsMock,
+  getCredentialModels: getCredentialModelsMock,
+  resolveDirectExecutionProfile: resolveDirectExecutionProfileMock,
+}));
 
 vi.mock('./PersonaToolPicker', () => ({
   PersonaToolPicker: () => <div data-testid="persona-tool-picker" />,
@@ -68,6 +78,9 @@ function setPersonaGetResponse(personas: Persona[]) {
 describe('PersonaPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getExecutionProfilesMock.mockResolvedValue([]);
+    getCredentialsMock.mockResolvedValue([]);
+    getCredentialModelsMock.mockResolvedValue([]);
   });
 
   it('loads personas and creates a new persona from the main editor', async () => {

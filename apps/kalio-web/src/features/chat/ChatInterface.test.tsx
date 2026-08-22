@@ -390,6 +390,7 @@ vi.mock('../../services/apiClient', () => ({
     patch: vi.fn(() => Promise.resolve({ data: {} })),
   },
   getSessionVfsFiles: vi.fn(() => Promise.resolve({ files: [] })),
+  getExecutionProfiles: vi.fn(() => Promise.resolve([])),
 }));
 
 vi.mock('../architect/architect.api', () => ({
