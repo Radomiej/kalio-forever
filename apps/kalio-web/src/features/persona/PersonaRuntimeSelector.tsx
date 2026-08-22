@@ -119,6 +119,10 @@ export function PersonaRuntimeSelector({
               : 'Uses the active provider from Settings. Choose a saved connection to bind this persona to one provider.'}
           </p>
         </>
+      ) : runtimeKind === 'devin-api' ? (
+        <p className="text-xs text-base-content/55 md:col-span-2" data-testid="persona-devin-runtime-summary">
+          Devin Cloud manages the agent mode remotely. Model and reasoning controls are not exposed by this integration.
+        </p>
       ) : (
         <>
           <label className="label py-0" htmlFor="persona-model-input">

@@ -111,7 +111,7 @@ export class ChildExecutionContinuationService implements OnApplicationBootstrap
         providerToolNames: assembled.personaConfig?.providerToolNames,
         executionProfile,
         externalThreadId: parent.externalThreadId,
-         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk',
+         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api',
          onExternalRuntimeLost: () => controller.abort(),
          onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
           sessions: this.sessions,

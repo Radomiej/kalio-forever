@@ -28,6 +28,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 export function executionProfileProviderLabel(profile: ExecutionProfile): string {
   if (profile.kind === 'codex-app-server') return 'ChatGPT / Codex';
   if (profile.kind === 'claude-agent-sdk') return 'Claude Code';
+  if (profile.kind === 'devin-api') return 'Devin Cloud';
   return PROVIDER_LABELS[profile.provider?.toLowerCase() ?? ''] ?? profile.provider ?? profile.kind;
 }
 
@@ -46,6 +47,8 @@ export function resolveRuntimeProfileLabel(input: RuntimeProfileLabelInput): Run
     providerLabel = 'Codex';
   } else if (kind === 'claude-agent-sdk' || profileId === 'claude-local') {
     providerLabel = 'Claude Code';
+  } else if (kind === 'devin-api' || profileId?.startsWith('devin-')) {
+    providerLabel = 'Devin Cloud';
   } else if (provider) {
     providerLabel = PROVIDER_LABELS[provider] ?? input.profile?.provider ?? input.provider ?? null;
   }

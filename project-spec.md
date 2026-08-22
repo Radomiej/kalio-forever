@@ -192,6 +192,8 @@ classDiagram
 ## Agent Runtime And Codex Boundary
 
 - Persona identity is independent from execution engine. Projects, personas, and sessions select a persisted `ExecutionProfile`; the direct LLM profile remains available and Codex profiles use the ChatGPT/Codex App Server.
+- `devin-api` is a separate cloud task-agent profile. It uses the server-side Devin REST v3 session API with a bounded `DEVIN_MAX_ACU_LIMIT`; it does not receive Kalio `cwd`, local file contents, tool schemas, or native HITL callbacks. Kalio records when its available tool set is omitted at this boundary.
+- Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
 - The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
 - Codex dynamic tools are declared at `thread/start` and are dispatched through Kalio's existing tool broker/policy path. Native Codex tools remain Codex-native; their approval can use Codex auto-review (`codex_guard`) or Kalio HITL (`kalio_strict`).
