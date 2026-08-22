@@ -13,6 +13,7 @@ export const envSchema = Joi.object({
   DEVIN_API_KEY: Joi.string().optional(),
   DEVIN_ORG_ID: Joi.string().optional(),
   DEVIN_MAX_ACU_LIMIT: Joi.number().integer().positive().optional(),
+  DEVIN_CLI_PATH: Joi.string().optional(),
   KALIO_SQLITE_DRIVER: Joi.string().valid('auto', 'node', 'bun').default('auto'),
   KALIO_RUNTIME_VERSION: Joi.string().optional(),
   KALIO_API_PROTOCOL_VERSION: Joi.string().default('1'),

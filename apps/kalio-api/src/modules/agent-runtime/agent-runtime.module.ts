@@ -10,14 +10,17 @@ import { ClaudeAgentSdkLLMSource } from './claude-agent-sdk.llm-source';
 import { DevinApiClient } from './devin-api.client';
 import { DevinApiLLMSource } from './devin-api.llm-source';
 import { DevinIntegrationController } from './devin-integration.controller';
+import { DevinCliIntegrationController } from './devin-cli-integration.controller';
+import { DevinAcpHostRegistry } from './devin-cli-acp.host';
+import { DevinCliAcpLLMSource } from './devin-cli-acp.llm-source';
 import { NativeApprovalService } from './native-approval.service';
 import { NativeCliIntegrationController } from './native-cli-integration.controller';
 import { CodexMcpPolicyService } from './codex-mcp-policy.service';
 
 @Module({
   imports: [DatabaseModule, CLIAgentModule, CredentialsModule],
-  controllers: [ExecutionProfileController, NativeCliIntegrationController, DevinIntegrationController],
-  providers: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, NativeApprovalService, CodexMcpPolicyService],
-  exports: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, NativeApprovalService, CodexMcpPolicyService],
+  controllers: [ExecutionProfileController, NativeCliIntegrationController, DevinIntegrationController, DevinCliIntegrationController],
+  providers: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService],
+  exports: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService],
 })
 export class AgentRuntimeModule {}

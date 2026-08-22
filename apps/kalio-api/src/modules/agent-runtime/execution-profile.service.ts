@@ -123,7 +123,7 @@ export class ExecutionProfileService {
   }
 
   async update(id: string, dto: UpdateExecutionProfileDto): Promise<ExecutionProfile> {
-    await this.get(id);
+    const existing = await this.get(id);
     const set: {
       name?: string;
       model?: string;
@@ -138,7 +138,13 @@ export class ExecutionProfileService {
       if (!name) throw new ConflictException('Execution profile name is required.');
       set.name = name;
     }
-    if (dto.model !== undefined) set.model = dto.model.trim();
+    if (dto.model !== undefined) {
+      const model = dto.model.trim();
+      if (existing.kind === 'devin-cli-acp' && !isDevinCliModel(model)) {
+        throw new ConflictException(`Devin CLI ACP supports only: ${DEVIN_CLI_MODELS.join(', ')}.`);
+      }
+      set.model = model;
+    }
     if (dto.authProfileId !== undefined) set.authProfileId = normalizeOptional(dto.authProfileId);
     if (dto.reasoningEffort !== undefined) set.reasoningEffort = normalizeOptional(dto.reasoningEffort);
     if (dto.approvalMode !== undefined) set.approvalMode = dto.approvalMode;
@@ -184,6 +190,9 @@ function normalizeCreateProfile(dto: CreateExecutionProfileDto): {
   if (dto.kind === 'direct-llm' && !dto.provider) {
     throw new ConflictException('Direct LLM profiles require a provider.');
   }
+  if (dto.kind === 'devin-cli-acp' && !isDevinCliModel(model)) {
+    throw new ConflictException(`Devin CLI ACP supports only: ${DEVIN_CLI_MODELS.join(', ')}.`);
+  }
   return {
     name,
     kind: dto.kind,
@@ -208,4 +217,10 @@ function toMs(value: number | Date): number {
 function directProfileId(credentialId: string, provider: string, model: string): string {
   const identity = `${credentialId}\u0000${provider}\u0000${model}`;
   return `direct-${createHash('sha256').update(identity).digest('hex').slice(0, 32)}`;
+}
+
+const DEVIN_CLI_MODELS = ['glm-5-2', 'swe-1-7'] as const;
+
+function isDevinCliModel(value: string): value is (typeof DEVIN_CLI_MODELS)[number] {
+  return (DEVIN_CLI_MODELS as readonly string[]).includes(value);
 }

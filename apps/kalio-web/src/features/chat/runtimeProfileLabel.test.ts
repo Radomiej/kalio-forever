@@ -45,6 +45,17 @@ describe('resolveRuntimeProfileLabel', () => {
     })).toEqual({ provider: 'Codex', model: 'gpt-5.6-luna' });
   });
 
+  it('labels a host-local Devin profile separately from Devin Cloud', () => {
+    expect(resolveRuntimeProfileLabel({
+      executionProfileId: 'devin-local-glm-5-2',
+      profile: profile({
+        id: 'devin-local-glm-5-2',
+        kind: 'devin-cli-acp',
+        model: 'glm-5-2',
+      }),
+    })).toEqual({ provider: 'Devin CLI', model: 'glm-5-2' });
+  });
+
   it('falls back to the configured provider and model when no profile is loaded', () => {
     expect(resolveRuntimeProfileLabel({
       executionProfileId: undefined,

@@ -12,6 +12,7 @@ export const RUNTIME_KIND_LABELS: Record<PersonaRuntimeKind, string> = {
   'codex-app-server': 'ChatGPT / Codex',
   'claude-agent-sdk': 'Claude Code',
   'devin-api': 'Devin Cloud',
+  'devin-cli-acp': 'Devin CLI (host)',
 };
 
 const PROVIDER_LABELS: Record<string, string> = {

@@ -5,6 +5,7 @@ import { LLMServiceAdapter } from '../chat/llm-service.adapter';
 import { CodexAppServerLLMSource } from './codex-app-server.llm-source';
 import { ClaudeAgentSdkLLMSource } from './claude-agent-sdk.llm-source';
 import { DevinApiLLMSource } from './devin-api.llm-source';
+import { DevinCliAcpLLMSource } from './devin-cli-acp.llm-source';
 
 @Injectable()
 export class ProfiledLLMSource implements ILLMSource {
@@ -13,6 +14,7 @@ export class ProfiledLLMSource implements ILLMSource {
     private readonly codex: CodexAppServerLLMSource,
     private readonly claude: ClaudeAgentSdkLLMSource,
     private readonly devin: DevinApiLLMSource,
+    private readonly devinCli: DevinCliAcpLLMSource,
   ) {}
 
   getConfig(): ReturnType<LLMServiceAdapter['getConfig']> {
@@ -30,6 +32,10 @@ export class ProfiledLLMSource implements ILLMSource {
     }
     if (params.executionProfile?.kind === 'devin-api') {
       yield* this.devin.stream(params);
+      return;
+    }
+    if (params.executionProfile?.kind === 'devin-cli-acp') {
+      yield* this.devinCli.stream(params);
       return;
     }
     yield* this.direct.stream(params);

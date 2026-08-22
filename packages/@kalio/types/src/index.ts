@@ -224,7 +224,8 @@ export type LLMProviderType =
   | 'custom'
   | 'mock';
 
-export type ExecutionProfileKind = 'direct-llm' | 'codex-app-server' | 'claude-agent-sdk' | 'devin-api';
+export type ExecutionProfileKind = 'direct-llm' | 'codex-app-server' | 'claude-agent-sdk' | 'devin-api' | 'devin-cli-acp';
+export type DevinCliModel = 'glm-5-2' | 'swe-1-7';
 export type ExecutionApprovalMode = 'codex_guard' | 'kalio_strict';
 
 export interface ExecutionProfile {

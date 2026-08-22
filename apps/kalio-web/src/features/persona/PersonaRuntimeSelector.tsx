@@ -123,6 +123,29 @@ export function PersonaRuntimeSelector({
         <p className="text-xs text-base-content/55 md:col-span-2" data-testid="persona-devin-runtime-summary">
           Devin Cloud manages the agent mode remotely. Model and reasoning controls are not exposed by this integration.
         </p>
+      ) : runtimeKind === 'devin-cli-acp' ? (
+        <>
+          <label className="label py-0" htmlFor="persona-model-input">
+            <span className="label-text text-xs">Model</span>
+          </label>
+          <select
+            id="persona-model-input"
+            data-testid="persona-model-input"
+            className="select select-bordered select-sm w-full font-mono"
+            value={model}
+            disabled={profilesLoading || nativeOptions.length === 0}
+            onChange={(event) => onNativeModelChange(event.target.value)}
+          >
+            {nativeOptions.length === 0 ? (
+              <option value="">No enabled model profiles</option>
+            ) : nativeOptions.map((option) => (
+              <option key={option.model} value={option.model}>{option.model}</option>
+            ))}
+          </select>
+          <p className="text-xs text-base-content/45" data-testid="persona-devin-cli-runtime-summary">
+            Devin runs on this host through ACP. Kalio tools stay separate; host-native actions remain behind Devin permission requests.
+          </p>
+        </>
       ) : (
         <>
           <label className="label py-0" htmlFor="persona-model-input">
