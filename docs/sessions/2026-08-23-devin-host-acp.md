@@ -35,7 +35,7 @@ Przed zmianą istniały profile direct/Codex/Claude/Devin Cloud oraz osobna ści
 
 1. Odczytano istniejący runtime, kontrakty profili, lifecycle sesji i panel native integrations.
 2. Zweryfikowano lokalny CLI: wersję, login, ACP help i listę modeli.
-3. Sprawdzono oficjalny ACP TypeScript SDK i użyto `@agentclientprotocol/sdk` 1.3.0.
+3. Sprawdzono oficjalny ACP TypeScript SDK i użyto bieżącej stabilnej wersji `@agentclientprotocol/sdk` 1.4.0.
 4. Uruchomiono realny ACP smoke test w pustym katalogu: handshake, nowa sesja i pełny turn.
 5. Dodano focused testy API/web, typecheck/build oraz ręczną weryfikację w Chrome.
 6. Zebrano pełne suite’y osobno, bez maskowania istniejących awarii niezwiązanych z tym slice’em.
@@ -79,12 +79,13 @@ Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików
 - `corepack pnpm --filter kalio-api typecheck` — PASS.
 - `corepack pnpm --filter kalio-api build` — PASS.
 - `corepack pnpm --filter kalio-api test -- src/modules/agent-runtime` — 13 plików, 49 testów PASS.
+- Po aktualizacji SDK do 1.4.0 powtórzono focused backend gate: 13 plików, 49 testów PASS; typecheck i build backendu ponownie PASS.
 - `corepack pnpm --filter kalio-web typecheck` — PASS.
 - `corepack pnpm --filter kalio-web build` — PASS; istnieje tylko ostrzeżenie o dużym chunku Vite.
 - `corepack pnpm --filter kalio-web test -- src/features/persona/persona-runtime-selection.test.ts src/features/chat/runtimeProfileLabel.test.ts src/features/settings/NativeCliIntegrationsPanel.test.tsx` — 3 pliki, 11 testów PASS.
 - API live: `GET http://localhost:3016/api/runtime/devin-cli/status` — `devin.exe`, `3000.2.17`, `authenticated=true`, `acp=true`, `models=[glm-5-2,swe-1-7]`.
 - Chrome live: `http://localhost:5188/` → Settings → Integrations; karta hostowego Devina widoczna jako Online/Logged in/ACP available. Wykonano screenshot viewportu jako dowód wizualny w sesji QA.
-- `git diff --cached --check` — PASS; commit utworzony jako `b95cab4`.
+- `git diff --cached --check` — PASS; implementacja utworzona jako `b95cab4`, dokumentacja sesji jako `475a185`.
 
 ## Caveats and inconclusive checks
 
