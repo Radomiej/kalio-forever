@@ -10,11 +10,13 @@ export function CodeIntelligenceQuickTrust({ projectId }: CodeIntelligenceQuickT
   const [status, setStatus] = useState<ProjectIdeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setConfirming(false);
     setError(null);
     void fetch(`/api/code-intelligence/projects/${encodeURIComponent(projectId)}/integration`)
       .then(async (response) => {
@@ -48,7 +50,6 @@ export function CodeIntelligenceQuickTrust({ projectId }: CodeIntelligenceQuickT
   }
 
   const enable = async () => {
-    if (!window.confirm('Language providers may execute project build scripts and proc macros. Trust this project for VS Code code intelligence?')) return;
     setSaving(true);
     setError(null);
     try {
@@ -72,10 +73,19 @@ export function CodeIntelligenceQuickTrust({ projectId }: CodeIntelligenceQuickT
   return <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/8 px-2.5 py-2 text-xs" role="region" aria-label="VS Code Bridge quick setup">
     <TriangleAlert size={13} className="shrink-0 text-warning" />
     <span className="text-base-content/70">VS Code Bridge is off for this project.</span>
-    <button type="button" className="btn btn-xs btn-warning" onClick={() => void enable()} disabled={saving}>
-      {saving && <Loader2 size={12} className="animate-spin" />}
+    {!confirming && <button type="button" className="btn btn-xs btn-warning" onClick={() => setConfirming(true)} disabled={saving}>
       Enable VS Code Bridge
-    </button>
+    </button>}
+    {confirming && <div className="basis-full rounded-md border border-warning/30 bg-base-100/60 p-2">
+      <p className="text-base-content/75">Language providers may execute project build scripts and proc macros on this host. Trust this project for VS Code code intelligence?</p>
+      <div className="mt-2 flex gap-2">
+        <button type="button" className="btn btn-xs btn-warning" onClick={() => void enable()} disabled={saving}>
+          {saving && <Loader2 size={12} className="animate-spin" />}
+          Confirm and enable
+        </button>
+        <button type="button" className="btn btn-xs btn-ghost" onClick={() => setConfirming(false)} disabled={saving}>Cancel</button>
+      </div>
+    </div>}
     {error && <span className="basis-full text-error" role="alert">{error}</span>}
   </div>;
 }
