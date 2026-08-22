@@ -7,8 +7,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resourcesRoot = join(root, 'src-tauri', 'resources');
 const serverRoot = join(resourcesRoot, 'kalio-server');
 const apiDist = join(root, 'apps', 'kalio-api', 'dist');
-const webDist = join(root, 'apps', 'kalio-web', 'dist');
-const bootstrapSource = join(root, 'scripts', 'desktop-server-bootstrap.mjs');
+const sourceWebDist = join(root, 'apps', 'kalio-web', 'dist');
+const webDist = join(root, 'src-tauri', 'frontend-dist');
+const bootstrapSource = join(root, 'scripts', 'runtime-server-bootstrap.mjs');
 const desktopBackendOrigin = 'http://127.0.0.1:4516';
 
 function run(command, args, cwd = root) {
@@ -70,6 +71,37 @@ async function requirePath(path, label) {
 }
 
 async function installFlatRuntimeDependencies() {
+async function findFile(directory, fileName) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isFile() && entry.name === fileName) {
+      return entryPath;
+    }
+    if (entry.isDirectory()) {
+      const nestedPath = await findFile(entryPath, fileName);
+      if (nestedPath) {
+        return nestedPath;
+      }
+    }
+  }
+  return null;
+}
+
+async function ensureNativeSqliteAddon() {
+  const sourceRoot = join(root, 'apps', 'kalio-api', 'node_modules', 'better-sqlite3');
+  const targetRoot = join(serverRoot, 'node_modules', 'better-sqlite3');
+  const sourcePath = await findFile(sourceRoot, 'better_sqlite3.node');
+  const existingTargetPath = await findFile(targetRoot, 'better_sqlite3.node');
+  if (!sourcePath && !existingTargetPath) {
+    throw new Error('The better-sqlite3 native addon is missing from both the workspace and Tauri staging');
+  }
+  if (sourcePath) {
+    const targetPath = join(targetRoot, 'build', 'Release', 'better_sqlite3.node');
+    await mkdir(dirname(targetPath), { recursive: true });
+    await cp(sourcePath, targetPath, { force: true });
+  }
+}
   const packageJsonPath = join(serverRoot, 'package.json');
   const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   const runtimeDependencies = Object.fromEntries(
@@ -149,7 +181,9 @@ async function removeUnneededOnnxRuntimeArtifacts() {
 }
 
 await rm(resourcesRoot, { recursive: true, force: true });
+await rm(webDist, { recursive: true, force: true });
 await mkdir(resourcesRoot, { recursive: true });
+await cp(sourceWebDist, webDist, { recursive: true });
 
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const deployArgs = [
@@ -166,7 +200,7 @@ if (getPnpmMajorVersion(pnpm) >= 10) {
 run(pnpm, deployArgs);
 
 await requirePath(join(apiDist, 'main.js'), 'API build');
-await requirePath(join(webDist, 'index.html'), 'web build');
+await requirePath(join(sourceWebDist, 'index.html'), 'web build');
 await requirePath(bootstrapSource, 'desktop backend bootstrap');
 await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies');
 
@@ -174,11 +208,12 @@ await installFlatRuntimeDependencies();
 await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
 await removeUnneededOnnxRuntimeArtifacts();
+await ensureNativeSqliteAddon();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
 
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
 await cp(apiDist, join(serverRoot, 'dist'), { recursive: true });
-await cp(bootstrapSource, join(serverRoot, 'desktop-server-bootstrap.mjs'));
+await cp(bootstrapSource, join(serverRoot, 'runtime-server-bootstrap.mjs'));
 
 const nodeResourceName = process.platform === 'win32' ? 'kalio-node.exe' : 'kalio-node';
 const systemNode = process.platform === 'win32' ? 'C:\\Program Files\\nodejs\\node.exe' : process.execPath;
@@ -197,4 +232,5 @@ await writeFile(join(webDist, 'runtime-config.js'), runtimeConfig, 'utf8');
 
 console.log(`[desktop] staged API resources in ${serverRoot}`);
 console.log(`[desktop] bundled Node runtime in ${stagedNodeBinary}`);
-console.log(`[desktop] frontend runtime config points to ${desktopBackendOrigin}`);
+console.log(`[desktop] staged frontend in ${webDist}; runtime config points to ${desktopBackendOrigin}`);
+

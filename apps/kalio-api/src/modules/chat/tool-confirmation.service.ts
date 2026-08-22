@@ -8,18 +8,6 @@ import { HitlRequestService } from '../hitl/hitl-request.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 
 const HITL_TIMEOUT_MS = 0;
-const BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set(['vfs_write']);
-const OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS = new Set([
-  'fs_write',
-  'image_generate',
-  'run_cli_agent',
-  'spawn_cli_agent',
-  'message_cli_agent',
-  'stop_cli_agent',
-  'terminal_spawn',
-]);
-
-type SubagentAgentRunContext = NonNullable<StreamContext['agentRun']> & { autoApproveTools?: string[] };
 export type ConfirmationResolutionStatus = 'resolved' | 'rejected' | 'not_found' | 'session_mismatch';
 type ConfirmationWaitResult = { status: 'approved' | 'rejected' | 'timeout'; requestId: string; message?: string };
 export interface ToolApprovalOutcome {
@@ -124,10 +112,6 @@ export class ToolConfirmationService {
     args: Record<string, unknown>,
     ctx: StreamContext,
   ): Promise<ToolApprovalOutcome> {
-    if (this.canAutoApprove(toolName, ctx)) {
-      return { approved: true };
-    }
-
     if (this.hitlPolicy) {
       try {
         const resolution = await this.hitlPolicy.resolveApproval({
@@ -141,6 +125,7 @@ export class ToolConfirmationService {
         });
 
         if (resolution.status === 'approved') {
+          this.logPolicyLifecycle('hitl_approval_confirmed', resolution.source, callId, toolName, args, ctx, resolution.reason);
           return { approved: true };
         }
 
@@ -148,6 +133,7 @@ export class ToolConfirmationService {
           this.logger.log(
             `Global HITL policy rejected tool [${toolName}] for session ${ctx.sessionId}${resolution.reason ? `: ${resolution.reason}` : ''}`,
           );
+          this.logPolicyLifecycle('hitl_approval_cancelled', resolution.source, callId, toolName, args, ctx, resolution.reason);
           return { approved: false };
         }
       } catch (err) {
@@ -372,23 +358,6 @@ export class ToolConfirmationService {
     });
   }
 
-  private canAutoApprove(toolName: string, ctx: StreamContext): boolean {
-    const agentRun = ctx.agentRun as SubagentAgentRunContext | undefined;
-    if (agentRun?.agentType !== 'subagent') {
-      return false;
-    }
-
-    if (BUILTIN_SUBAGENT_AUTO_APPROVE_TOOLS.has(toolName)) {
-      return (agentRun.vfsMode === 'isolated' && ctx.vfsSessionId === ctx.sessionId)
-        || (agentRun.vfsMode === 'shared' && Array.isArray(agentRun.autoApproveTools) && agentRun.autoApproveTools.includes(toolName));
-    }
-
-    return Array.isArray(agentRun.autoApproveTools)
-      && agentRun.autoApproveTools.some(
-        (candidate) => candidate === toolName && OPT_IN_SUBAGENT_AUTO_APPROVE_TOOLS.has(candidate),
-      );
-  }
-
   private logConfirmationLifecycle(
     pending: PendingConfirmation,
     eventType: Parameters<HitlNotificationService['logApprovalLifecycle']>[0]['eventType'],
@@ -407,6 +376,31 @@ export class ToolConfirmationService {
         args: pending.payload.args,
         agentRun: pending.payload.agentRun,
         toolCallId: pending.payload.toolCallId,
+      },
+    });
+  }
+
+  private logPolicyLifecycle(
+    eventType: Parameters<HitlNotificationService['logApprovalLifecycle']>[0]['eventType'],
+    source: string,
+    callId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    ctx: StreamContext,
+    reason?: string,
+  ): void {
+    void this.hitlNotifications?.logApprovalLifecycle({
+      eventType,
+      requestId: `policy:${callId}`,
+      source,
+      ...(reason ? { reason } : {}),
+      request: {
+        kind: 'tool',
+        sessionId: ctx.sessionId,
+        name: toolName,
+        args,
+        agentRun: ctx.agentRun,
+        toolCallId: callId,
       },
     });
   }

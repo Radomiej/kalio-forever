@@ -180,3 +180,22 @@ classDiagram
 - The primary Kalio SQLite schema changes only through ordered Drizzle migrations.
 - Migration or required-schema validation failure is fatal to API startup; bootstrap must never run compatibility `ALTER TABLE` or silently repair primary database state.
 - A stale, interrupted, or manually altered primary database requires an explicit backup-and-reset operation or a separately invoked one-time upgrade tool. Runtime startup must not decide or perform that recovery.
+
+## Runtime And SQLite Distribution
+
+- The release runtime uses Node.js with the platform-native `better-sqlite3` addon by default; standalone packaging must include the compiled addon and prove startup from the extracted archive.
+- The API owns one SQLite runtime adapter. Node and Bun drivers share the adapter contract, while driver selection is process-wide and cannot change after initialization.
+- `KALIO_SQLITE_DRIVER=auto` is the default. `KALIO_SQLITE_DRIVER=bun` is an opt-in experimental path validated for source/runtime smoke tests; it is not yet the public compiled-executable release lane.
+- Bun is a candidate for a smaller executable and lower runtime overhead, but native `sharp`, `sqlite-vec`, and other platform modules require explicit sidecar/bundle validation before Bun becomes the release default.
+- The backend serves the built web UI and API from one HTTP port in the standalone runtime. Host-binding policy remains a separate verification gate because bootstrap metadata and the actual `listen` call must agree.
+
+## Agent Runtime And Codex Boundary
+
+- Persona identity is independent from execution engine. Projects, personas, and sessions select a persisted `ExecutionProfile`; the direct LLM profile remains available and Codex profiles use the ChatGPT/Codex App Server.
+- Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
+- The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
+- Codex dynamic tools are declared at `thread/start` and are dispatched through Kalio's existing tool broker/policy path. Native Codex tools remain Codex-native; their approval can use Codex auto-review (`codex_guard`) or Kalio HITL (`kalio_strict`).
+- Kalio starts the Codex App Server with inherited `mcp_servers` disabled by default, so MCP entries from the user's global Codex profile are not silently exposed to a Kalio persona. `KALIO_CODEX_INHERIT_MCP=true` is an explicit opt-in for a trusted integration; Kalio's own MCP visibility remains controlled separately by the persona `mcpPolicy` (`allow_all`, `deny_all`, or `allow_list`).
+- Active execution is bounded by the shared runtime scheduler, defaulting to five leases across foreground, control, and child agents. Child agents are not an unbounded second process class.
+- External security/auto-check evaluation is a no-tools model call selected by the configured evaluator persona/profile. Its typed result preserves `allow`, `deny`, and `ask_user`; critical-risk actions always retain the human gate.
+- Codex `thread/resume` currently cannot replace dynamic tool definitions. Until fingerprint mismatch handling is implemented, changing a session's effective toolset requires an explicit fresh thread/rebinding decision.

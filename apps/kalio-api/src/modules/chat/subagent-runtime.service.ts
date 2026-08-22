@@ -2,7 +2,6 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import type { SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
-import type { EmitFn } from './interfaces/stream-context.interface';
 import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from '../tool/subagent-runtime.port';
 import { SessionManagerService } from './session-manager.service';
 import { SessionsService } from './sessions.service';
@@ -20,15 +19,24 @@ import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
 import { createWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import { RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME } from './raw-tool-call.parser';
+import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
+import { NativeApprovalService } from '../agent-runtime/native-approval.service';
+import { RuntimeExecutionScheduler } from '../agent-runtime/runtime-execution.scheduler';
+import { createRuntimeExecutionLeaseController } from '../agent-runtime/runtime-execution-lease.controller';
+import { buildSubagentProviderOptions } from './subagent-provider-options';
+import { ensureSubagentSession } from './subagent-session-bootstrap';
+import { exhaustedLoopResultText, failedRunResultText } from './subagent-result-text';
 import {
   ActiveSubagentRunRegistry,
   type AgentRunWithDepth,
   appendCopiedOutputLinks,
   architectureContextForSubagent,
+  buildSubagentAgentRun,
+  buildSubagentRuntimeContext,
   buildAttachmentHint,
+  createSubagentTrackingEmit,
   displayTextFromStructuredOutput,
   resolveHistorySessionId,
-  runtimeContextsEqual,
   subagentErrorCode,
 } from './subagent-runtime.support';
 
@@ -49,6 +57,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     @Optional() private readonly audit?: AuditService,
     @Optional() private readonly runJournal?: RunJournalService,
     @Optional() private readonly resultReplay?: SubagentResultReplayService,
+    @Optional() private readonly executionProfiles?: ExecutionProfileService,
+    @Optional() private readonly nativeApprovals?: NativeApprovalService,
+    @Optional() private readonly runtimeScheduler?: RuntimeExecutionScheduler,
   ) {}
 
   stopAndDrainSessions(sessionIds: readonly string[]): Promise<void> {
@@ -95,7 +106,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       autoApproveTools: request.autoApproveTools,
     });
 
-    const runtimeContext: SessionRuntimeContext = {
+    const runtimeContext = buildSubagentRuntimeContext({
       runtimeKind,
       parentSessionId: request.parentSessionId,
       parentToolCallId: request.parentToolCallId,
@@ -105,50 +116,34 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       explicitToolNames: policyDecision.allowedToolNames,
       systemPromptProfile: runtimeKind === 'agent-flow-branch' ? 'agent-flow-branch' : 'subagent',
       architectureContext,
-      architectureSlotId: typeof request.auditContext?.roleSlotId === 'string'
-        ? request.auditContext.roleSlotId
-        : undefined,
+      architectureSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
       architectureSlotPolicy: request.slotPolicy,
-    };
+    });
 
-    const agentRun: AgentRunWithDepth = {
-      agentRunId: `subagent-${taskId}`,
-      agentType: 'subagent',
+    const agentRun = buildSubagentAgentRun({
+      taskId,
       parentSessionId: request.parentSessionId,
       parentToolCallId: request.parentToolCallId,
       vfsMode: request.vfsMode,
       vfsSessionId,
-      label: 'Sub-agent',
-      autoApproveTools: request.autoApproveTools,
       subagentDepth,
-    };
+      autoApproveTools: request.autoApproveTools,
+    });
 
-    const childSession = requestedChildSessionId
-      ? await this.sessions.get(requestedChildSessionId)
-      : await this.sessions.createWithId(childSessionId, {
-          personaId,
-          title: `Sub-agent: ${request.objective.slice(0, 54)}`,
-          kind: 'subagent',
-          parentSessionId: request.parentSessionId,
-          parentTurnId: request.parentTurnId,
-          parentToolCallId: request.parentToolCallId,
-          runtimeContext,
-        }, { registerRuntimeProjectPath: true });
-
-    if (childSession.kind !== 'subagent') {
-      throw new Error(`Session ${childSession.id} is not a sub-agent session`);
-    }
-    if (childSession.parentSessionId !== request.parentSessionId) {
-      throw new Error(`Sub-agent session ${childSession.id} does not belong to parent session ${request.parentSessionId}`);
-    }
-    if (
-      requestedChildSessionId
-      && (!childSession.runtimeContext || !runtimeContextsEqual(childSession.runtimeContext, runtimeContext))
-    ) {
-      await this.sessions.updateRuntimeContext(childSession.id, runtimeContext, {
-        registerRuntimeProjectPath: true,
-      });
-    }
+    const childSession = await ensureSubagentSession({
+      sessions: this.sessions,
+      requestedChildSessionId,
+      childSessionId,
+      personaId,
+      objective: request.objective,
+      parentSessionId: request.parentSessionId,
+      parentTurnId: request.parentTurnId,
+      parentToolCallId: request.parentToolCallId,
+      runtimeContext,
+    });
+    const executionProfile = this.executionProfiles
+      ? await this.executionProfiles.assertEnabled(childSession.executionProfileId ?? '')
+      : undefined;
 
     if (request.resumeTurnId && this.resultReplay) {
       const replay = await this.resultReplay.replay(
@@ -156,7 +151,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       );
       if (replay) return replay;
     }
-
     const attachmentPaths = request.attachments ?? [];
     const copiedAttachments = attachmentPaths.length > 0 && request.vfsMode === 'isolated'
       ? this.vfs.copySessionFiles({
@@ -172,33 +166,24 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     const objectiveWithAttachmentHint = `${buildAttachmentHint(effectiveAttachmentPaths)}${request.objective}`;
 
     const emit = request.emit;
+    let promptMessageId: string | undefined;
     let hadContent = false;
     let streamedText = '';
-    const trackingEmit: EmitFn | undefined = emit
-      ? (event, data) => {
-          if (event === 'chat:chunk') {
-            hadContent = true;
-            const payload = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
-            const delta = payload['delta'];
-            if (typeof delta === 'string') streamedText += delta;
-          }
-          const forwarded = runtimeKind === 'agent-flow-branch' && typeof data === 'object' && data !== null
-            ? {
-                ...data as Record<string, unknown>,
-                architectureParentExecution: { childSessionId, childTurnId: turnId, promptMessageId },
-              }
-            : data;
-          emit(event, forwarded as never);
-        }
-      : undefined;
-
+    const trackingEmit = createSubagentTrackingEmit({
+      emit,
+      runtimeKind,
+      childSessionId,
+      turnId,
+      promptMessageId: () => promptMessageId,
+      onChunk: (delta) => { hadContent = true; streamedText += delta; },
+    });
     const promptMessage = await this.sessionManager.persistUserMessage(
       childSessionId,
       objectiveWithAttachmentHint,
       undefined,
       { turnId },
     );
-    const promptMessageId = promptMessage?.id;
+    promptMessageId = promptMessage?.id;
     trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, promptMessageId, agentRun });
     if (!requestedChildSessionId) {
       trackingEmit?.('session:created', childSession);
@@ -215,6 +200,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       agentRun,
       controller,
     });
+    const executionLease = this.runtimeScheduler ? createRuntimeExecutionLeaseController(this.runtimeScheduler, { projectId: childSession.projectId ?? 'system:none', priority: 'child', label: `subagent:${childSessionId}:${turnId}` }) : undefined;
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let journalRunId: string | undefined;
     let rejectExecutionTimeout: ((error: Error) => void) | undefined;
@@ -236,6 +222,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     };
 
     try {
+      await executionLease?.acquire();
       const timeoutPromise = new Promise<never>((_, reject) => {
         rejectExecutionTimeout = reject;
         armExecutionTimeout();
@@ -269,12 +256,15 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       const runtimeConfig = await this.llmSource.getConfig?.();
       const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, assembledContext.model, request.model);
       const requestModel = request.model?.trim();
-      const effectiveModel = requestModel || assembledContext.model || undefined;
+    const effectiveModel = executionProfile?.model || requestModel || assembledContext.model || undefined;
       journalRunId = (await this.runJournal?.startRun({
         sessionId: childSessionId,
         turnId,
-        model: effectiveModel,
-      }))?.id;
+      model: effectiveModel,
+      runtimeKind,
+      executionProfileId: executionProfile?.id,
+      externalThreadId: childSession.externalThreadId,
+    }))?.id;
       const maxIterations = Number.isFinite(request.maxIterations)
         ? Math.max(1, Math.min(100, Math.round(request.maxIterations as number)))
         : Math.max(1, Math.min(100, Math.round(assembledContext.personaConfig?.maxToolAttempts ?? DEFAULT_MAX_ITERATIONS)));
@@ -291,6 +281,20 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           effectiveSystemPrompt: assembledContext.effectiveSystemPrompt,
           toolMetas: assembledContext.toolMetas,
           model: effectiveModel,
+          ...buildSubagentProviderOptions({
+            executionProfile,
+            externalThreadId: childSession.externalThreadId,
+            sessionId: childSessionId,
+             turnId,
+             runId: journalRunId,
+             abortSignal: controller.signal,
+             onExternalRuntimeLost: () => controller.abort(),
+             trackingEmit,
+            sessions: this.sessions,
+            runJournal: this.runJournal,
+            nativeApprovals: this.nativeApprovals,
+            audit: this.audit,
+          }),
           vfsSessionId,
           agentRun,
           abortSignal: controller.signal,
@@ -379,7 +383,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
 
       const structuredDisplayText = displayTextFromStructuredOutput(loopResult.structuredOutput);
       const baseResultText = loopResult.exhausted
-        ? this.exhaustedLoopResultText(maxIterations, loopResult.finalText || streamedText.trim())
+        ? exhaustedLoopResultText(maxIterations, loopResult.finalText || streamedText.trim())
         : loopResult.finalText || streamedText.trim() || structuredDisplayText || 'Sub-agent completed with no output.';
       let completionMessageId = loopResult.lastMessageId;
       if (loopResult.exhausted || baseResultText === 'Sub-agent completed with no output.') {
@@ -431,7 +435,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
         await this.runJournal?.fail(journalRunId, failure.code, failure.message);
       }
       const fallbackState = new TurnState();
-      fallbackState.replaceText(this.failedRunResultText(error.message, streamedText.trim()));
+      fallbackState.replaceText(failedRunResultText(error.message, streamedText.trim()));
       await this.persistTerminalAssistantMessage(
         childSessionId,
         nanoid(),
@@ -471,22 +475,11 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       throw error;
     } finally {
       clearExecutionTimeout();
+      executionLease?.release();
       completeActiveRun();
     }
   }
 
-  private exhaustedLoopResultText(maxIterations: number, lastText: string): string {
-    const suffix = lastText.trim().length > 0
-      ? ` Last assistant text before stopping: ${lastText.trim()}`
-      : '';
-    return `Sub-agent stopped after ${maxIterations} tool iteration${maxIterations === 1 ? '' : 's'} without producing a final answer.${suffix}`;
-  }
-  private failedRunResultText(errorMessage: string, lastText: string): string {
-    const suffix = lastText.trim().length > 0
-      ? ` Last assistant text before failure: ${lastText.trim()}`
-      : '';
-    return `Sub-agent failed: ${errorMessage}.${suffix}`;
-  }
   private async persistTerminalAssistantMessage(
     sessionId: string,
     messageId: string,

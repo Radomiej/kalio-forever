@@ -5,39 +5,63 @@ Install Kalio as a local production stack on your machine. No API key required f
 ## One-line install
 
 ```powershell
-irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
 ```
 
-**Requirements:** Windows 10+, Node.js 22+, Git, PowerShell 5+.
+For the Bun runtime, use:
+
+```powershell
+$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
+```
+
+**Requirements:** Windows 10+, PowerShell 5+. The release archive contains the selected runtime; Git and a separate Node.js installation are not required.
 
 The installer will:
 
-1. Clone Kalio to `%LocalAppData%\kalio-forever\app`
-2. Store your data in `%LocalAppData%\kalio-forever\` (database, workspaces, memory)
-3. Build and start the production stack
-4. Register a **Scheduled Task** so Kalio starts automatically after **user sign-in**
+1. Download the selected runtime archive from the latest published GitHub Release
+2. Install Kalio to `%LocalAppData%\kalio-forever\app`
+3. Store your data in `%LocalAppData%\kalio-forever\data` (database, workspaces, memory)
+4. Start the production stack with the embedded UI
+5. Register a **Scheduled Task** so Kalio starts automatically after **user sign-in**
 
 ## Open Kalio
 
 | | URL |
 |---|---|
-| UI | http://localhost:6188 |
-| API health | http://localhost:4016/api/health |
+| UI | http://127.0.0.1:4016 |
+| API health | http://127.0.0.1:4016/api/health |
 
 ## First steps
 
-1. Open http://localhost:6188
+1. Open http://127.0.0.1:4016
 2. Go to **Settings** and add your LLM provider (or keep `mock` for offline testing)
 3. Create a session in **Talk** and send a message
 4. Approve tool calls when the HITL prompt appears
 
 ## Upgrade
 
-Re-run the installer — it pulls the latest `main` branch, rebuilds, and restarts the stack. Your data in `%LocalAppData%\kalio-forever\` is preserved.
+Re-run the Release installer — it downloads the latest published tag, replaces the runtime, and preserves `%LocalAppData%\kalio-forever\data`. It refuses to replace a runtime that is still running; stop Kalio first if needed.
 
 ```powershell
-irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
 ```
+
+To upgrade the Bun installation:
+
+```powershell
+$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
+```
+
+## Linux install and upgrade
+
+Download the installer from the repository and run it locally:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh
+bash /tmp/kalio-install.sh --runtime node
+```
+
+For Bun, replace `--runtime node` with `--runtime bun`. Re-run the same command to upgrade; the installer preserves the app-local data directory.
 
 ## Uninstall
 
@@ -64,8 +88,8 @@ Or from an existing install directory:
 
 | Problem | What to do |
 |---|---|
-| Node not found | Install Node 22+ from https://nodejs.org (system install, not Cursor bundled Node) |
-| Port 4016/6188 in use | Stop the other process or reinstall with `-BackendPort` / `-FrontendPort` |
+| Runtime not found | Use the Node archive for the default runtime or the Bun archive; no separate runtime installation is needed |
+| Port 4016 in use | Stop the other process or choose another backend port |
 | Stack not running after sign-in | Check `Get-ScheduledTask -TaskName Kalio-Forever`; autostart log is `%LocalAppData%\kalio-forever\app\.kalio-stack\logs\autostart.log`, backend/frontend logs are in `%LocalAppData%\kalio-forever\app\.tmp\qa-stack-logs\` |
 | Provider errors | Open Settings, verify API key and base URL |
 

@@ -34,6 +34,7 @@ export class PersonaService implements OnApplicationBootstrap {
           name: config.name,
           systemPrompt: config.systemPrompt,
           model: config.model ?? '',
+          ...(config.executionProfileId ? { executionProfileId: config.executionProfileId } : {}),
           maxToolAttempts: null,
           allowedTools: config.allowedTools,
           skillIds: config.skillIds ?? [],
@@ -167,7 +168,14 @@ export class PersonaService implements OnApplicationBootstrap {
     return false;
   }
 
-  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model?: string; allowedTools: string[]; skillIds?: string[] }> {
+  private loadPersonasConfig(): Record<string, {
+    name: string;
+    systemPrompt: string;
+    model?: string;
+    executionProfileId?: string;
+    allowedTools: string[];
+    skillIds?: string[];
+  }> {
     try {
       const configPath = join(__dirname, '../../assets/personas.json');
       const configContent = readFileSync(configPath, 'utf-8');
@@ -244,6 +252,7 @@ export class PersonaService implements OnApplicationBootstrap {
     return {
       systemPrompt: persona.systemPrompt,
       model: persona.model,
+      executionProfileId: persona.executionProfileId,
       maxToolAttempts: persona.maxToolAttempts ?? null,
       allowedTools: persona.allowedTools ?? [],
       skillIds: persona.skillIds ?? [],
@@ -276,6 +285,7 @@ export class PersonaService implements OnApplicationBootstrap {
     name: string;
     systemPrompt: string;
     model: string;
+    executionProfileId?: string | null;
     maxToolAttempts?: number | null;
     allowedTools: string[] | null;
     skillIds?: string[] | null;
@@ -294,6 +304,7 @@ export class PersonaService implements OnApplicationBootstrap {
       name: row.name,
       systemPrompt: row.systemPrompt,
       model: row.model,
+      ...(row.executionProfileId ? { executionProfileId: row.executionProfileId } : {}),
       maxToolAttempts: row.maxToolAttempts ?? null,
       allowedTools: row.allowedTools ?? [],
       skillIds: row.skillIds ?? [],
