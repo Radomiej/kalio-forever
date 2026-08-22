@@ -1,22 +1,29 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import { createHash } from 'node:crypto';
 import type {
   CreateExecutionProfileDto,
   ExecutionApprovalMode,
   ExecutionProfile,
   ExecutionProfileKind,
+  LLMProviderType,
+  ResolveDirectExecutionProfileDto,
   UpdateExecutionProfileDto,
 } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { executionProfiles } from '../../database/schema';
+import { CredentialsService } from '../credentials/credentials.service';
 
 const DEFAULT_APPROVAL_MODE: ExecutionApprovalMode = 'codex_guard';
 const CAPABILITIES_VERSION = '1';
 
 @Injectable()
 export class ExecutionProfileService {
-  constructor(private readonly drizzle: DrizzleService) {}
+  constructor(
+    private readonly drizzle: DrizzleService,
+    @Optional() private readonly credentials?: CredentialsService,
+  ) {}
 
   async list(): Promise<ExecutionProfile[]> {
     const rows = await this.drizzle.db.select().from(executionProfiles);
@@ -50,6 +57,64 @@ export class ExecutionProfileService {
     await this.drizzle.db.insert(executionProfiles).values({
       id,
       ...normalized,
+      capabilitiesVersion: CAPABILITIES_VERSION,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return this.get(id);
+  }
+
+  async resolveDirect(dto: ResolveDirectExecutionProfileDto): Promise<ExecutionProfile> {
+    if (!this.credentials) {
+      throw new ConflictException('Direct execution profile resolver is not configured.');
+    }
+    const credentialId = dto.credentialId.trim();
+    const model = dto.model.trim();
+    if (!credentialId || !model) {
+      throw new ConflictException('A credential and model are required for a direct execution profile.');
+    }
+
+    const providerConfig = await this.credentials.getProviderConfigForCredential(credentialId);
+    if (!providerConfig) {
+      throw new NotFoundException(`Credential not found or unavailable: ${credentialId}`);
+    }
+
+    const discoveredModels = await this.credentials.getModelsForCredential(credentialId);
+    const configuredModel = providerConfig.model.trim();
+    if (discoveredModels.length > 0 && model !== configuredModel && !discoveredModels.includes(model)) {
+      throw new ConflictException(`Model is not available for credential ${credentialId}: ${model}`);
+    }
+
+    const id = directProfileId(credentialId, providerConfig.provider, model);
+    const existing = await this.drizzle.db
+      .select()
+      .from(executionProfiles)
+      .where(eq(executionProfiles.id, id))
+      .then((rows) => rows[0]);
+    if (existing) {
+      if (!existing.enabled) throw new ConflictException(`Execution profile is disabled: ${id}`);
+      if (
+        existing.kind !== 'direct-llm'
+        || existing.provider !== providerConfig.provider
+        || existing.authProfileId !== credentialId
+        || existing.model !== model
+      ) {
+        throw new ConflictException(`Direct execution profile identity conflict: ${id}`);
+      }
+      return this.toProfile(existing);
+    }
+
+    const now = new Date();
+    await this.drizzle.db.insert(executionProfiles).values({
+      id,
+      name: `Direct LLM - ${providerConfig.provider} - ${model}`,
+      kind: 'direct-llm',
+      provider: providerConfig.provider as LLMProviderType,
+      model,
+      authProfileId: credentialId,
+      reasoningEffort: null,
+      approvalMode: DEFAULT_APPROVAL_MODE,
+      enabled: true,
       capabilitiesVersion: CAPABILITIES_VERSION,
       createdAt: now,
       updatedAt: now,
@@ -113,8 +178,8 @@ function normalizeCreateProfile(dto: CreateExecutionProfileDto): {
   const name = dto.name.trim();
   if (!name) throw new ConflictException('Execution profile name is required.');
   const model = dto.model.trim();
-  if (!model && dto.kind === 'codex-app-server') {
-    throw new ConflictException('Codex App Server profiles require a model.');
+  if (!model && dto.kind !== 'direct-llm') {
+    throw new ConflictException(`${dto.kind} profiles require a model.`);
   }
   if (dto.kind === 'direct-llm' && !dto.provider) {
     throw new ConflictException('Direct LLM profiles require a provider.');
@@ -138,4 +203,9 @@ function normalizeOptional(value: string | null | undefined): string | null {
 
 function toMs(value: number | Date): number {
   return value instanceof Date ? value.getTime() : value;
+}
+
+function directProfileId(credentialId: string, provider: string, model: string): string {
+  const identity = `${credentialId}\u0000${provider}\u0000${model}`;
+  return `direct-${createHash('sha256').update(identity).digest('hex').slice(0, 32)}`;
 }

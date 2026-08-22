@@ -58,6 +58,28 @@ describe('NativeCliIntegrationController', () => {
     expect(host.reset).toHaveBeenCalledWith('chatgpt-default');
   });
 
+  it('checks a configured Codex process and returns a real status after reset', async () => {
+    const policy = { get: vi.fn(async () => ({ inheritConfiguredMcp: false, source: 'default' as const })) };
+    const host = {
+      getStatus: vi.fn(() => status('chatgpt-default')),
+      getConnection: vi.fn(async () => ({ processEpoch: 'epoch-1' })),
+      reset: vi.fn(async () => undefined),
+    };
+    const profiles = { list: vi.fn(async () => [profile('codex-luna', 'gpt-5.6-luna')]) };
+    const controller = new NativeCliIntegrationController(profiles as never, host as never, policy as never);
+
+    await expect(controller.check('chatgpt-default')).resolves.toMatchObject({
+      authProfileId: 'chatgpt-default',
+      status: 'offline',
+    });
+    await expect(controller.reset('chatgpt-default')).resolves.toMatchObject({
+      authProfileId: 'chatgpt-default',
+      status: 'offline',
+    });
+    expect(host.getConnection).toHaveBeenCalledWith('chatgpt-default', 'settings-check');
+    expect(host.reset).toHaveBeenCalledWith('chatgpt-default');
+  });
+
   it('rejects malformed settings and unknown integrations', async () => {
     const policy = { get: vi.fn(async () => ({ inheritConfiguredMcp: false, source: 'default' as const })) };
     const host = { getStatus: vi.fn(() => status('chatgpt-default')) };

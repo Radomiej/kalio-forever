@@ -77,6 +77,25 @@ export class CredentialsService {
     return this.tryDecryptApiKey(row.apiKey, `Failed to decrypt API key for credential ${credentialId}`);
   }
 
+  async getProviderConfigForCredential(credentialId: string): Promise<ProviderConfig | null> {
+    const row = await this.drizzle.db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, credentialId))
+      .then((r) => r[0]);
+    if (!row) return null;
+
+    const apiKey = this.tryDecryptApiKey(row.apiKey, `Failed to decrypt credential secret for ${credentialId}`);
+    if (apiKey === null) return null;
+
+    return {
+      provider: row.provider as LLMProviderType,
+      apiKey,
+      model: row.model ?? '',
+      baseUrl: row.baseUrl ?? undefined,
+    };
+  }
+
   // ─── Active credential management ────────────────────────────────────────────
 
   async getActiveCredentialId(): Promise<string | null> {

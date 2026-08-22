@@ -132,6 +132,47 @@ a turn.
 - `deny_all` means none are visible.
 - `allow_list` uses concrete prefixed MCP tool names in `persona.allowedTools`.
 
+## Native runtime bridge
+
+Kalio also exposes its own native tool dispatcher as a separate MCP
+Streamable HTTP server. This is an interoperability boundary for native
+external runtimes such as Claude Code, Codex, or another MCP client; it is not
+the client-side `MCPService` and it is not the child `spawn_cli_agent` path.
+
+| Property | Contract |
+| --- | --- |
+| Endpoint | `/api/mcp/bridge` (all Streamable HTTP MCP methods) |
+| Enablement | `KALIO_MCP_BRIDGE_TOKEN` must be configured; otherwise the endpoint returns `503` |
+| Authentication | `Authorization: Bearer <token>` on every request |
+| Origin | Only absent or loopback `http://localhost`, `http://127.0.0.1`, or `http://[::1]` origins are accepted in this first slice |
+| Session | Stateful Streamable HTTP MCP sessions; the server returns and validates `mcp-session-id` |
+| Default tools | Native tools with `requiresConfirmation = false` |
+| Explicit mutation tools | Add `x-kalio-tool-names: name1,name2`; Kalio still applies its normal confirmation/HITL policy |
+| Always excluded | Child/CLI/subagent/AgentFlow launcher tools and tools whose `domain` is `mcp` |
+
+The bridge forwards `tools/list` and `tools/call` through the existing
+`ToolDispatchService`, preserving Kalio tool metadata, session/VFS context, and
+confirmation policy. Optional context headers are `x-kalio-session-id`,
+`x-kalio-vfs-session-id`, `x-kalio-turn-id`, and
+`x-kalio-prompt-message-id`. If no Kalio session header is supplied, the bridge
+uses an isolated `mcp-bridge:<connection-id>` session id; callers should send a
+real session id when a VFS or durable HITL continuation is required.
+
+For a client with native Streamable HTTP MCP support, configure the URL and
+bearer header in that client's MCP settings. For a stdio-only client, the
+existing generic bridge in `E:/Projekty/mcp-dev-servers` can adapt this endpoint:
+
+```powershell
+$env:MCP_HTTP_STDIO_BRIDGE_HEADERS = '{"Authorization":"Bearer <token>","X-Kalio-Session-Id":"<session-id>"}'
+node E:/Projekty/mcp-dev-servers/scripts/mcp-http-stdio-bridge.mjs `
+  http://127.0.0.1:3016/api/mcp/bridge
+```
+
+Do not commit the bearer token or put it in repo-managed TOML. Remote exposure,
+per-persona policy lookup, and re-exporting connected external MCP tools are
+separate follow-up features; this first boundary intentionally stays local and
+native-only.
+
 ## REST surface
 
 Current controller endpoints:

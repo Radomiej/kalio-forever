@@ -8,6 +8,8 @@ export interface LLMSourceParams {
   sessionId: string;
   messageId: string;
   model?: string;
+  /** Provider-owned tools explicitly enabled for this persona/runtime. */
+  providerToolNames?: string[];
   abortSignal?: AbortSignal;
   structuredOutput?: LLMStructuredOutputRequest;
   executionProfile?: ExecutionProfile;

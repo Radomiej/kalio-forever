@@ -28,6 +28,7 @@ export interface LLMAgentLoopRequest {
   effectiveSystemPrompt: string;
   toolMetas: ToolMeta[];
   model?: string;
+  providerToolNames?: string[];
   executionProfile?: ExecutionProfile;
   externalThreadId?: string;
   cwd?: string;

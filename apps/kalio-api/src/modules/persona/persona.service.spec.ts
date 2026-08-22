@@ -105,6 +105,7 @@ describe('PersonaService', () => {
         systemPrompt: 'You are helpful',
         model: 'gpt-4',
         allowedTools: ['vfs_write'],
+        providerToolNames: ['Read', 'WebSearch'],
         skillIds: ['skill-1'],
         updatedAt: Date.now(),
       };
@@ -128,6 +129,7 @@ describe('PersonaService', () => {
       expect(result?.systemPrompt).toBe(personaRow.systemPrompt);
       expect(result?.model).toBe(personaRow.model);
       expect(result?.allowedTools).toEqual(['vfs_write']);
+      expect(result?.providerToolNames).toEqual(['Read', 'WebSearch']);
       expect(result?.skillIds).toEqual(['skill-1']);
       expect(result?.kv).toEqual({
         api_key: 'secret123',
@@ -194,6 +196,7 @@ describe('PersonaService', () => {
           systemPrompt: 'Prompt 1',
           model: 'gpt-4',
           allowedTools: ['tool1'],
+          providerToolNames: ['Read'],
           skillIds: [],
           createdAt: 1234567890,
           updatedAt: 1234567890,
@@ -220,6 +223,7 @@ describe('PersonaService', () => {
       // Assert
       expect(result).toHaveLength(2);
       expect(result[0].allowedTools).toEqual(['tool1']);
+      expect(result[0].providerToolNames).toEqual(['Read']);
       expect(result[0].skillIds).toEqual([]);
       expect(result[1].allowedTools).toEqual([]); // Null becomes empty array
       expect(result[1].skillIds).toEqual([]);      // Null becomes empty array
@@ -243,6 +247,24 @@ describe('PersonaService', () => {
         name: 'Luna',
         model: 'gpt-5.6-luna',
         executionProfileId: 'codex-luna',
+      });
+    });
+
+    it('seeds Claude Sonnet on the native Claude Code execution profile', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            model?: string;
+            executionProfileId?: string;
+          }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['claude']).toMatchObject({
+        name: 'Claude Sonnet',
+        model: 'claude-sonnet-4-6',
+        executionProfileId: 'claude-local',
       });
     });
 

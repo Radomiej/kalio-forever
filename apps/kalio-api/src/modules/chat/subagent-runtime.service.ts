@@ -278,10 +278,11 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           turnId,
           promptMessageId,
           personaId,
-          effectiveSystemPrompt: assembledContext.effectiveSystemPrompt,
-          toolMetas: assembledContext.toolMetas,
-          model: effectiveModel,
-          ...buildSubagentProviderOptions({
+           effectiveSystemPrompt: assembledContext.effectiveSystemPrompt,
+           toolMetas: assembledContext.toolMetas,
+           model: effectiveModel,
+           providerToolNames: assembledContext.personaConfig?.providerToolNames,
+           ...buildSubagentProviderOptions({
             executionProfile,
             externalThreadId: childSession.externalThreadId,
             sessionId: childSessionId,

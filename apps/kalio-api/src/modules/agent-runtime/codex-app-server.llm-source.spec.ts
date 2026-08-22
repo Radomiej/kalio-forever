@@ -148,6 +148,42 @@ describe('CodexAppServerLLMSource', () => {
     expect(chunks).toEqual([{ type: 'text_delta', delta: 'real' }, { type: 'done' }]);
   });
 
+  it('forwards Codex thread token usage as provider-reported usage', async () => {
+    const connection = new FakeConnection();
+    vi.spyOn(connection, 'request').mockImplementation(async (method, requestParams) => {
+      connection.requests.push({ method, params: requestParams });
+      if (method === 'thread/start') return { thread: { id: 'thread-1' } };
+      if (method === 'turn/start') {
+        queueMicrotask(() => connection.emitNotification({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            tokenUsage: {
+              last: { inputTokens: 120, outputTokens: 24, totalTokens: 144 },
+              total: { inputTokens: 120, outputTokens: 24, totalTokens: 144 },
+            },
+          },
+        }));
+        queueMicrotask(() => connection.emitNotification({
+          method: 'turn/completed',
+          params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } },
+        }));
+        return { turn: { id: 'turn-1', status: 'inProgress', error: null } };
+      }
+      throw new Error(`Unexpected request ${method}`);
+    });
+    const source = new CodexAppServerLLMSource({ getConnection: vi.fn().mockResolvedValue(connection) } as never);
+
+    const chunks = [];
+    for await (const chunk of source.stream(params(connection))) chunks.push(chunk);
+
+    expect(chunks).toEqual([
+      { type: 'usage', promptTokens: 120, completionTokens: 24, totalTokens: 144 },
+      { type: 'done' },
+    ]);
+  });
+
   it('starts a fresh thread when a persisted Codex thread cannot be resumed', async () => {
     const connection = new FakeConnection();
     vi.spyOn(connection, 'request').mockImplementation(async (method, requestParams) => {
@@ -204,7 +240,11 @@ describe('CodexAppServerLLMSource', () => {
       return response;
     });
     const source = new CodexAppServerLLMSource({ getConnection: vi.fn().mockResolvedValue(connection) } as never);
-    const iterator = source.stream(params(connection, { tools: [{ name: 'vfs_list', description: 'list', parameters: {}, requiresConfirmation: false }], toolResultChannel: channel }))[Symbol.asyncIterator]();
+    const iterator = source.stream(params(connection, {
+      cwd: 'C:\\Projects\\kalio',
+      tools: [{ name: 'vfs_list', description: 'list', parameters: {}, requiresConfirmation: false }],
+      toolResultChannel: channel,
+    }))[Symbol.asyncIterator]();
 
     await expect(iterator.next()).resolves.toEqual({ done: false, value: { type: 'tool_call', callId: 'call-1', name: 'vfs_list', args: { path: '.' } } });
     expect(channelHandlers).toHaveLength(1);
@@ -218,6 +258,12 @@ describe('CodexAppServerLLMSource', () => {
       params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } },
     });
     await iterator.return?.(undefined);
+    const threadStart = connection.requests.find((request) => request.method === 'thread/start');
+    expect(threadStart?.params).toMatchObject({
+      cwd: 'C:\\Projects\\kalio',
+      runtimeWorkspaceRoots: ['C:\\Projects\\kalio'],
+      dynamicTools: [{ type: 'function', name: 'vfs_list', description: 'list', inputSchema: {} }],
+    });
     expect(connection.responses).toEqual([{
       id: 9,
       result: { contentItems: [{ type: 'inputText', text: JSON.stringify({ entries: [] }) }], success: true },

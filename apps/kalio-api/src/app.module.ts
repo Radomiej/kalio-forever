@@ -27,6 +27,7 @@ import { ArchitectureModule } from './modules/architecture/architecture.module';
 import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
 import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
 import { CodeIntelligenceModule } from './modules/code-intelligence/code-intelligence.module';
+import { KalioMcpBridgeModule } from './modules/mcp-bridge/kalio-mcp-bridge.module';
 
 const shouldServeUi = process.env['KALIO_SERVE_UI'] === 'true';
 const webRoot = resolve(
@@ -78,6 +79,7 @@ const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.htm
     AgentFlowModule,
     AgentRuntimeModule,
     CodeIntelligenceModule,
+    KalioMcpBridgeModule,
     HitlModule,
     RelayModule,
   ],

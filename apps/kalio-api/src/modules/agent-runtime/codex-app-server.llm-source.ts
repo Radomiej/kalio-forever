@@ -366,6 +366,11 @@ export class CodexAppServerLLMSource implements ILLMSource {
       }
       return;
     }
+    if (notification.method === 'thread/tokenUsage/updated' && matchesTurn(params)) {
+      const usage = readCodexUsage(params);
+      if (usage) enqueue(usage);
+      return;
+    }
     if (notification.method === 'error' && matchesTurn(params)) {
       finish(new Error(isRecord(params) ? readText(params['error']) ?? 'Codex App Server error.' : 'Codex App Server error.'));
     }
@@ -428,6 +433,25 @@ function readText(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (isRecord(value) && typeof value['message'] === 'string') return value['message'];
   return undefined;
+}
+
+function readCodexUsage(value: unknown): { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens?: number } | undefined {
+  if (!isRecord(value) || !isRecord(value['tokenUsage']) || !isRecord(value['tokenUsage']['last'])) return undefined;
+  const last = value['tokenUsage']['last'];
+  const promptTokens = readNonNegativeInteger(last['inputTokens']);
+  const completionTokens = readNonNegativeInteger(last['outputTokens']);
+  const totalTokens = readNonNegativeInteger(last['totalTokens']);
+  if (promptTokens === undefined || completionTokens === undefined) return undefined;
+  return {
+    type: 'usage',
+    promptTokens,
+    completionTokens,
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+  };
+}
+
+function readNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 function normalizeCodexReasoningEffort(model: string, configuredEffort?: string): string {

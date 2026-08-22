@@ -17,6 +17,7 @@
     "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.240",
     "@huggingface/transformers": "^4.2.0",
     "@iarna/toml": "^2.2.5",
     "@kalio/types": "workspace:*",
@@ -45,7 +46,8 @@
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "sqlite-vec": "^0.1.9",
-    "yauzl": "2.10.0"
+    "yauzl": "2.10.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@kalio/sdk": "workspace:*",

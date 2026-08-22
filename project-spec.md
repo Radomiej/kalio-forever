@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-08-03
+Last updated: 2026-08-22
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -199,3 +199,24 @@ classDiagram
 - Active execution is bounded by the shared runtime scheduler, defaulting to five leases across foreground, control, and child agents. Child agents are not an unbounded second process class.
 - External security/auto-check evaluation is a no-tools model call selected by the configured evaluator persona/profile. Its typed result preserves `allow`, `deny`, and `ask_user`; critical-risk actions always retain the human gate.
 - Codex `thread/resume` currently cannot replace dynamic tool definitions. Until fingerprint mismatch handling is implemented, changing a session's effective toolset requires an explicit fresh thread/rebinding decision.
+
+## Native MCP Interoperability Boundary
+
+- Kalio exposes a separate authenticated Streamable HTTP MCP server at
+  `/api/mcp/bridge`. It is an external-runtime interoperability adapter over
+  `ToolDispatchService`, not the client-side `MCPService` and not the child
+  `spawn_cli_agent`/subagent execution family.
+- The bridge is disabled unless `KALIO_MCP_BRIDGE_TOKEN` is set. The first
+  implementation accepts only loopback HTTP origins and requires the bearer
+  token on every request; it is not a public or tunnel-facing endpoint.
+- Without an explicit `x-kalio-tool-names` allow-list, only native tools that
+  do not require confirmation are exposed. Explicitly listed confirmation-gated
+  tools still pass through Kalio's normal HITL policy. Child/CLI/subagent tools
+  and connected external MCP tools are never re-exported through this bridge.
+- Streamable HTTP session ids are transport state. Callers should provide the
+  Kalio session/VFS/turn headers when they need durable workspace or HITL
+  context; otherwise the bridge creates an isolated session id.
+- Claude Code, Codex, and other native runtimes may consume this endpoint as an
+  MCP server. Clients that only support stdio may use the existing generic
+  HTTP-to-stdio adapter from `mcp-dev-servers`; the bearer token stays in the
+  client environment, never in repo-managed config.
