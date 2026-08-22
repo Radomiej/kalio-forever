@@ -15,12 +15,23 @@ import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { TurnState } from './turn-state';
 import { SessionsService } from './sessions.service';
 import {
+  RuntimeExecutionScheduler,
+} from '../agent-runtime/runtime-execution.scheduler';
+import {
+  createRuntimeExecutionLeaseController,
+  runtimeExecutionPriority,
+  type RuntimeExecutionLeaseController,
+} from '../agent-runtime/runtime-execution-lease.controller';
+import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
+import { NativeApprovalService } from '../agent-runtime/native-approval.service';
+import { getChatErrorCode } from './chat-error.utils';
+import { createExternalAuditCallback, createNativeApprovalCallback } from './runtime-provider-callbacks';
+import { bindExternalRuntime } from './runtime-external-binding';
+import {
   readPendingRAAppLaunchInputs,
   readPendingRAAppLaunchIntent,
   stripPendingRAAppLaunchRuntimeContext,
 } from './raapp-launch-intent';
-
-type ChatErrorCode = import('@kalio/types').SocketEvents['chat:error']['code'];
 
 function normalizeClientMessageId(clientMessageId: string | undefined): string | undefined {
   if (!clientMessageId) {
@@ -28,25 +39,6 @@ function normalizeClientMessageId(clientMessageId: string | undefined): string |
   }
   const trimmed = clientMessageId.trim();
   return /^[A-Za-z0-9_-]{8,128}$/.test(trimmed) ? trimmed : undefined;
-}
-
-function getChatErrorCode(err: unknown): ChatErrorCode {
-  if (err && typeof err === 'object' && 'code' in err) {
-    const code = (err as { code?: unknown }).code;
-    if (
-      code === 'LLM_RATE_LIMIT' ||
-      code === 'LLM_TIMEOUT' ||
-      code === 'LLM_AUTH' ||
-      code === 'LLM_PROVIDER_DOWN' ||
-      code === 'LLM_QUOTA' ||
-      code === 'LLM_BAD_TOOL_ARGS' ||
-      code === 'LLM_BAD_STRUCTURED_OUTPUT' ||
-      code === 'MAX_ITERATIONS_REACHED'
-    ) {
-      return code;
-    }
-  }
-  return 'LLM_ERROR';
 }
 
 /**
@@ -69,6 +61,9 @@ export class ChatService {
     @Optional() private readonly contextAssembly?: ContextAssemblyService,
     @Optional() private readonly toolDispatch?: ToolDispatchService,
     @Optional() private readonly hitlRequests?: HitlRequestService,
+    @Optional() private readonly runtimeScheduler?: RuntimeExecutionScheduler,
+    @Optional() private readonly executionProfiles?: ExecutionProfileService,
+    @Optional() private readonly nativeApprovals?: NativeApprovalService,
   ) {}
 
   async approveAndResumeTool(
@@ -77,6 +72,9 @@ export class ChatService {
     message: string | undefined,
     emit: EmitFn,
   ): Promise<boolean> {
+    if (this.nativeApprovals && await this.nativeApprovals.resolve(requestId, sessionId, 'accept', message)) {
+      return true;
+    }
     if (!this.hitlRequests) return false;
     const pending = await this.hitlRequests.getById(requestId);
     if (!pending || pending.sessionId !== sessionId || pending.status !== 'pending') return false;
@@ -90,6 +88,9 @@ export class ChatService {
   }
 
   async cancelPendingTool(requestId: string, sessionId: string, message?: string): Promise<boolean> {
+    if (this.nativeApprovals && await this.nativeApprovals.resolve(requestId, sessionId, 'cancel', message)) {
+      return true;
+    }
     if (!this.hitlRequests) return false;
     const pending = await this.hitlRequests.getById(requestId);
     if (!pending || pending.sessionId !== sessionId || pending.status !== 'pending') return false;
@@ -124,13 +125,22 @@ export class ChatService {
     const claimed = await this.hitlRequests.claimApprovedContinuation(approved.id, approved.revision);
     if (!claimed) return false;
     const session = await this.sessions.get(claimed.sessionId);
+    const executionProfile = this.executionProfiles
+      ? await this.executionProfiles.assertEnabled(session.executionProfileId ?? '')
+      : undefined;
     const runtimeContext = session.runtimeContext ?? { runtimeKind: 'chat' as const, systemPromptProfile: 'default-chat' as const };
     const assembled = await this.contextAssembly.assembleForSessionRuntime(session.personaId, runtimeContext);
     const controller = new AbortController();
     this.abortControllers.set(claimed.sessionId, controller);
+    const resumeLease = createRuntimeExecutionLeaseController(this.runtimeScheduler, {
+      projectId: session.projectId ?? 'system:none',
+      priority: 'control',
+      label: `resume:${claimed.sessionId}:${claimed.turnId ?? requestId}`,
+    });
     const toolName = payload['toolName'];
     const args = payload['args'] as Record<string, unknown>;
     try {
+      await resumeLease.acquire();
       const runId = claimed.runId ?? undefined;
       const turnId = claimed.turnId;
       const toolCallId = claimed.toolCallId;
@@ -164,6 +174,17 @@ export class ChatService {
         vfsSessionId: typeof cursor['vfsSessionId'] === 'string' ? cursor['vfsSessionId'] : undefined,
         promptMessageId: cursor['promptMessageId'], personaId: session.personaId,
         effectiveSystemPrompt: assembled.effectiveSystemPrompt, toolMetas: assembled.toolMetas, model: assembled.model,
+        executionProfile, externalThreadId: session.externalThreadId,
+         providerCompletesTurn: executionProfile?.kind === 'codex-app-server',
+         onExternalRuntimeLost: () => controller.abort(),
+         cwd: readExecutionCwd(session.runtimeContext),
+         onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
+           sessions: this.sessions, runJournal: this.runJournal, sessionId: claimed.sessionId, runId, externalThreadId, binding,
+         }),
+          onNativeApprovalRequested: createNativeApprovalCallback(this.nativeApprovals, {
+            sessionId: claimed.sessionId, turnId, runId, emit, abortSignal: controller.signal, hitlRequests: this.hitlRequests,
+          }),
+         onExternalAudit: createExternalAuditCallback(this.audit, claimed.sessionId),
         abortSignal: controller.signal, emit, maxIterations: cursor['currentLimit'],
         resumeState: { iteration: cursor['iteration'], currentLimit: cursor['currentLimit'] },
         maxEmptyNoToolRetries: Math.max(5, cursor['currentLimit'] * 2), auditDomain: 'chat',
@@ -174,7 +195,15 @@ export class ChatService {
           onToolRunning: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_running' }); },
         },
       });
-      if (runId && loopResult.maxIterationsReached) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${loopResult.finalLimit} iterations`);
+       if (loopResult.aborted) {
+         if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted because the external Codex runtime was lost.');
+         emit('chat:error', {
+           sessionId: claimed.sessionId,
+           code: 'INTERRUPTED',
+           message: 'Turn interrupted because the external Codex runtime was lost.',
+           hadContent: false,
+         });
+       } else if (runId && loopResult.maxIterationsReached) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${loopResult.finalLimit} iterations`);
       else if (runId && loopResult.emptyNoToolRetriesExhausted) await this.runJournal?.fail(runId, 'LLM_ERROR', 'Agent produced empty output after resume');
       else if (runId) await this.runJournal?.complete(runId, {
         finalText: loopResult.finalText,
@@ -185,11 +214,22 @@ export class ChatService {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (claimed.runId) await this.runJournal?.fail(claimed.runId, 'TOOL_EXECUTION_FAILED', message);
-      emit('chat:error', { sessionId: claimed.sessionId, code: 'LLM_ERROR', message, hadContent: false });
+       if (controller.signal.aborted) {
+         if (claimed.runId) await this.runJournal?.interrupt(claimed.runId, 'Turn interrupted because the external Codex runtime was lost.');
+         emit('chat:error', {
+           sessionId: claimed.sessionId,
+           code: 'INTERRUPTED',
+           message: 'Turn interrupted because the external Codex runtime was lost.',
+           hadContent: false,
+         });
+       } else {
+         if (claimed.runId) await this.runJournal?.fail(claimed.runId, 'TOOL_EXECUTION_FAILED', message);
+         emit('chat:error', { sessionId: claimed.sessionId, code: 'LLM_ERROR', message, hadContent: false });
+       }
       if (claimed.turnId) emit('agent:done', { sessionId: claimed.sessionId, turnId: claimed.turnId });
       return false;
     } finally {
+      resumeLease.release();
       if (this.abortControllers.get(claimed.sessionId) === controller) this.abortControllers.delete(claimed.sessionId);
     }
   }
@@ -206,6 +246,7 @@ export class ChatService {
   ): Promise<void> {
     const controller = new AbortController();
     this.abortControllers.set(sessionId, controller);
+    let executionLeaseController: RuntimeExecutionLeaseController | undefined;
 
     const firstMessageId = nanoid();
     const turnId = suppliedTurnId ?? nanoid();
@@ -225,11 +266,19 @@ export class ChatService {
     try {
       await this.sessionManager.ensureSession(sessionId, personaId);
       const session = await this.sessions.get(sessionId);
+      const executionProfile = this.executionProfiles
+        ? await this.executionProfiles.assertEnabled(session.executionProfileId ?? '')
+        : undefined;
       await this.sessions.registerRuntimeProjectPathForSession(sessionId);
       const runtimeContext = session.runtimeContext ?? {
         runtimeKind: 'chat' as const,
         systemPromptProfile: 'default-chat' as const,
       };
+      executionLeaseController = createRuntimeExecutionLeaseController(this.runtimeScheduler, {
+        projectId: session.projectId ?? 'system:none',
+        priority: runtimeExecutionPriority(runtimeContext.runtimeKind),
+        label: `chat:${sessionId}:${turnId}`,
+      });
       const pendingRAAppLaunchIntent = readPendingRAAppLaunchIntent(sessionId, personaId, runtimeContext);
       const pendingRAAppInputs = readPendingRAAppLaunchInputs(runtimeContext);
       let consumedPendingRAAppLaunchIntent = false;
@@ -242,9 +291,18 @@ export class ChatService {
         turnId,
         messageId: normalizeClientMessageId(clientMessageId),
       });
+      await executionLeaseController.acquire();
       const promptMessageId = promptMessage?.id;
       trackingEmit('agent:start', { sessionId, turnId, promptMessageId });
-      await checkpointRun('started');
+      await checkpointRun('started', {
+        runtimeKind: runtimeContext.runtimeKind,
+        ...(executionProfile ? {
+          provider: executionProfile.kind,
+          model: executionProfile.model || undefined,
+          executionProfileId: executionProfile.id,
+        } : {}),
+        ...(session.externalThreadId ? { externalThreadId: session.externalThreadId } : {}),
+      });
 
       const assembledContext = await this.contextAssembly.assembleForSessionRuntime(personaId, runtimeContext);
 
@@ -266,8 +324,20 @@ export class ChatService {
         promptMessageId,
         personaId,
         effectiveSystemPrompt: assembledContext.effectiveSystemPrompt,
-        toolMetas: assembledContext.toolMetas,
-        model: assembledContext.model,
+         toolMetas: assembledContext.toolMetas,
+         model: assembledContext.model,
+         executionProfile,
+         externalThreadId: session.externalThreadId,
+         providerCompletesTurn: executionProfile?.kind === 'codex-app-server',
+          onExternalRuntimeLost: () => controller.abort(),
+          cwd: readExecutionCwd(runtimeContext),
+          onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
+            sessions: this.sessions, runJournal: this.runJournal, sessionId, runId, externalThreadId, binding,
+          }),
+          onNativeApprovalRequested: createNativeApprovalCallback(this.nativeApprovals, {
+            sessionId, turnId, runId, emit: trackingEmit, abortSignal: controller.signal, hitlRequests: this.hitlRequests,
+          }),
+          onExternalAudit: createExternalAuditCallback(this.audit, sessionId),
         abortSignal: controller.signal,
         emit: trackingEmit,
         maxIterations: maxToolAttempts,
@@ -299,6 +369,7 @@ export class ChatService {
           : undefined,
         callbacks: {
           onBeforeIteration: async (iteration, messageId, currentLimit) => {
+            await executionLeaseController?.acquire();
             trackingEmit('agent:budget_progress', {
               sessionId,
               turnId,
@@ -317,8 +388,10 @@ export class ChatService {
           },
           onWaitingForHuman: async () => {
             await checkpointRun('tool_pending', { status: 'waiting_for_human' });
+            executionLeaseController?.release();
           },
           onToolRunning: async () => {
+            await executionLeaseController?.acquire();
             await checkpointRun('tool_running');
           },
           onEscalation: (message) => {
@@ -330,6 +403,7 @@ export class ChatService {
             });
           },
           onIterationLimitReached: async ({ iterationCount, currentLimit }) => {
+            executionLeaseController?.release();
             trackingEmit('agent:budget_progress', {
               sessionId,
               turnId,
@@ -411,10 +485,20 @@ export class ChatService {
         `Turn failed session=${sessionId}: ${message}`,
         err instanceof Error ? err.stack : undefined,
       );
-      if (!(err instanceof TurnErrorAlreadyEmitted)) {
+      if (controller.signal.aborted) {
+        if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted because the external Codex runtime was lost.');
+        if (!(err instanceof TurnErrorAlreadyEmitted)) {
+          emit('chat:error', {
+            sessionId,
+            code: 'INTERRUPTED',
+            message: 'Turn interrupted because the external Codex runtime was lost.',
+            hadContent,
+          });
+        }
+      } else if (!(err instanceof TurnErrorAlreadyEmitted)) {
         emit('chat:error', { sessionId, code: errorCode, message, hadContent });
       }
-      if (runId) await this.runJournal?.fail(runId, errorCode, message);
+      if (!controller.signal.aborted && runId) await this.runJournal?.fail(runId, errorCode, message);
       emit('agent:done', { sessionId, turnId });
       void this.audit.log({
         sessionId,
@@ -423,6 +507,7 @@ export class ChatService {
         data: { message },
       });
     } finally {
+      executionLeaseController?.release();
       if (this.abortControllers.get(sessionId) === controller) {
         this.abortControllers.delete(sessionId);
       }
@@ -436,4 +521,10 @@ export class ChatService {
       this.abortControllers.delete(sessionId);
     }
   }
+}
+
+function readExecutionCwd(runtimeContext: import('@kalio/types').SessionRuntimeContext | undefined): string | undefined {
+  const value = runtimeContext?.architectureContext?.['executionCwd']
+    ?? runtimeContext?.architectureContext?.['projectPath'];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }

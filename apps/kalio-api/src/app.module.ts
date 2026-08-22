@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
 import { envSchema } from './config/env.schema';
+import { EmbeddedUiModule } from './runtime/embedded-ui.module';
 import { KalioConfigModule } from './config/kalio-config.module';
 import { DatabaseModule } from './database/database.module';
 import { LLMModule } from './modules/llm/llm.module';
@@ -21,9 +25,32 @@ import { RelayModule } from './modules/relay/relay.module';
 import { HitlModule } from './modules/hitl/hitl.module';
 import { ArchitectureModule } from './modules/architecture/architecture.module';
 import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
+import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
+
+const shouldServeUi = process.env['KALIO_SERVE_UI'] === 'true';
+const webRoot = resolve(
+  process.env['KALIO_WEB_ROOT'] ?? resolve(__dirname, '../../../apps/kalio-web/dist'),
+);
+const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.html'))
+  ? [
+      ServeStaticModule.forRoot({
+        rootPath: webRoot,
+        renderPath: /^\/(?!api(?:\/|$)|health(?:\/|$)|socket\.io(?:\/|$))(?!.*\.[^/]+$).*/,
+        exclude: ['/api', '/api/*path', '/health', '/health/*path', '/socket.io', '/socket.io/*path'],
+        serveStaticOptions: {
+          index: false,
+          fallthrough: true,
+          immutable: true,
+          maxAge: '1y',
+        },
+      }),
+    ]
+  : [];
 
 @Module({
   imports: [
+    EmbeddedUiModule,
+    ...embeddedUiModule,
     ConfigModule.forRoot({
       isGlobal: true,
       ignoreEnvFile: true,
@@ -48,6 +75,7 @@ import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
     ImageModule,
     ArchitectureModule,
     AgentFlowModule,
+    AgentRuntimeModule,
     HitlModule,
     RelayModule,
   ],

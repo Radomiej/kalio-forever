@@ -1,0 +1,63 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NativeCliIntegrationsPanel } from './NativeCliIntegrationsPanel';
+
+const STATUS = {
+  id: 'codex:chatgpt-default',
+  provider: 'codex',
+  displayName: 'Codex App Server (chatgpt-default)',
+  kind: 'codex-app-server',
+  authProfileId: 'chatgpt-default',
+  status: 'online',
+  connected: true,
+  openSessionCount: 2,
+  processEpoch: 'epoch-1',
+  profileIds: ['codex-guard', 'codex-luna'],
+  models: ['gpt-5.4', 'gpt-5.6-luna'],
+};
+
+describe('NativeCliIntegrationsPanel', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/runtime/native-cli-integrations' && !init?.method) {
+        return new Response(JSON.stringify([STATUS]), { status: 200 });
+      }
+      if (url.endsWith('/check') || url.endsWith('/reset')) {
+        return new Response(JSON.stringify({ ...STATUS, ...(url.endsWith('/reset') ? { status: 'offline', connected: false, openSessionCount: 0 } : {}) }), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    vi.stubGlobal('confirm', vi.fn(() => true));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows connection state and open native sessions', async () => {
+    render(<NativeCliIntegrationsPanel />);
+
+    expect(await screen.findByText('Codex App Server (chatgpt-default)')).toBeInTheDocument();
+    expect(screen.getByText('Online')).toBeInTheDocument();
+    expect(screen.getByText('2 open sessions')).toBeInTheDocument();
+    expect(screen.getByText(/gpt-5\.6-luna/)).toBeInTheDocument();
+  });
+
+  it('checks and resets an integration from the panel', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex App Server (chatgpt-default)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check' }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/native-cli-integrations/chatgpt-default/check',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/native-cli-integrations/chatgpt-default/reset',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+  });
+});

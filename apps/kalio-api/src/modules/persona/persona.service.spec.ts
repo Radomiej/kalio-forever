@@ -228,6 +228,24 @@ describe('PersonaService', () => {
   });
 
   describe('seeded personas config', () => {
+    it('seeds Luna on the ChatGPT/Codex gpt-5.6-luna execution profile', () => {
+      const config = (
+        service as unknown as {
+          loadPersonasConfig(): Record<string, {
+            name: string;
+            model?: string;
+            executionProfileId?: string;
+          }>;
+        }
+      ).loadPersonasConfig();
+
+      expect(config['luna']).toMatchObject({
+        name: 'Luna',
+        model: 'gpt-5.6-luna',
+        executionProfileId: 'codex-luna',
+      });
+    });
+
     it('keeps vfs_write visible to the orchestrator persona for file-producing delegations', () => {
       const config = (
         service as unknown as { loadPersonasConfig(): Record<string, { allowedTools: string[] }> }

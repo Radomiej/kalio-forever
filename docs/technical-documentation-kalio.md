@@ -158,12 +158,13 @@ flowchart LR
 |---|---|---|
 | Prezentacja | `kalio-web` / React 19 | Interfejs rozmów, sesji, ustawień, narzędzi, pamięci, observability, RA-App i wyników narzędzi. |
 | Komunikacja | `@kalio/sdk`, Socket.IO | Warstwa klienta zdarzeń: `chat:send`, `chat:chunk`, `tool:*`, `agent:*`, `cli_agent:progress`. |
-| Aplikacja | `kalio-api` / NestJS 11 | Backend runtime: kolejki sesji, streaming, LLM loop, narzędzia, VFS, pamięć, MCP, RA-App, CLI agent, audyt. |
+| Aplikacja | `kalio-api` / NestJS 11 | Backend runtime: kolejki sesji, streaming, LLM loop, bezpośrednie LLM, Codex App Server, narzędzia, VFS, pamięć, MCP, RA-App, CLI agent, audyt. |
 | Kontrakty | `@kalio/types` | Wspólne typy DTO, Socket events, wyniki narzędzi, konfiguracje providerów, modele RA-App i CLI. |
 | Narzędzia | `ToolRegistryService` | Odczyt dekoratorów `@Tool()` / `@ConfirmedTool()`, rejestr natywnych tooli, override polityk confirmation. |
 | Dispatch | `ToolDispatchService` | Łączenie narzędzi natywnych i MCP, HITL, wykonanie, obsługa błędów, `ToolResult`. |
 | Integracja | `MCPService` | Dynamiczne wykrywanie narzędzi z serwerów MCP stdio/HTTP, lifecycle i filtrowanie per persona. |
 | Agenci | `SubagentRuntimeService`, `CLIAgentService` | Delegacja do child sessions oraz do procesów CLI: Copilot, Gemini, Claude Code i inne adaptery. |
+| Runtime agentów | `ExecutionProfileService`, `CodexAppServerHost`, `CodexAppServerLLMSource` | Wybór silnika per projekt/persona/sesja, jeden długowieczny App Server per profil auth, dynamiczne tool calls, native approvals i korelacja z run journal. |
 | Pamięć | `MemoryService`, `EmbeddingService` | Ingest/search pamięci per persona, `sqlite-vec`, konfiguracja providerów embeddingów. |
 | Pliki | `VFSService`, allowed paths | Izolowany VFS sesji, KV store, bezpieczna praca na host FS według allowlist. |
 | Mini-aplikacje | `RAAppService`, `RAAppVersioningService` | Tworzenie/renderowanie inline RA-App, katalog ZIP, draft/current/history, rollback. |
@@ -201,6 +202,8 @@ Moduł czatu obsługuje rozmowę użytkownika z agentem. Odpowiada za:
 
 Backend pozostaje właścicielem procesu agentowego. Frontend nie wykonuje narzędzi i nie decyduje o historii przekazywanej do LLM.
 
+Execution profile może skierować turn do bezpośredniego providera LLM albo do Codex App Server. W wariancie Codex `ChatSession` pozostaje źródłem prawdy, a zapisany `externalThreadId` jest wyłącznie bindingiem do zewnętrznego threadu. Codex wysyła dynamiczne narzędzia przez JSON-RPC do backendu; backend wykonuje je przez istniejący dispatch/policy/HITL i zwraca wynik do turnu.
+
 ### 3.2. Sesje
 
 Sesja jest izolowanym kontekstem pracy. Zawiera:
@@ -231,6 +234,7 @@ Persony definiują sposób działania agenta:
 - podpięte skills jako prompt injections,
 - trwały token avatara (`avatarSeed`, `avatarVariant`, `avatarPaletteKey`, `avatarIndex`),
 - osobną pamięć semantyczną.
+- opcjonalny `executionProfileId`, który wybiera runtime/model/auth profile bez zmiany tożsamości persony.
 
 Skills są wielokrotnego użytku i mogą wzbogacać prompt persony o konkretne reguły, style pracy albo ograniczenia.
 
@@ -263,6 +267,16 @@ Zasady:
 - Widoczność MCP powinna być kontrolowana przez personę.
 - Narzędzia MCP z efektami ubocznymi powinny mieć politykę confirmation zgodną z ryzykiem.
 - Discovery MCP powinno obsługiwać paginację i restart serwera.
+
+### 3.5a. Codex App Server i profile wykonawcze
+
+`execution_profiles` przechowuje typ runtime (`direct-llm` albo `codex-app-server`), model, opcjonalny provider/auth profile, reasoning effort i tryb approval (`codex_guard` albo `kalio_strict`). Projekt wskazuje domyślny profil, persona może go nadpisać, a sesja zapisuje profil rozstrzygnięty przy utworzeniu. Child session dziedziczy profil rodzica.
+
+`CodexAppServerHost` utrzymuje jeden proces `codex app-server --stdio` na profil zaufania/auth. `thread/start` otrzymuje model, cwd, sandbox, system instructions i dynamic tools. `item/tool/call` jest mapowany na `ToolDispatchService`; native command/file/permission approval w `codex_guard` pozostaje po stronie Codex auto-review, a w `kalio_strict` trafia do istniejącego kanału `tool:confirmation_required`.
+
+Domyślnie proces jest uruchamiany z nadpisaniem `mcp_servers={}`, więc wpisy MCP z globalnego `~/.codex/config.toml` nie przechodzą do sesji Kalio. Świadome odziedziczenie tych serwerów wymaga `KALIO_CODEX_INHERIT_MCP=true`; nie zmienia to osobnej polityki MCP persony dla serwerów zarejestrowanych w Kalio.
+
+Aktywne wykonania korzystają ze wspólnego limitu pięciu lease'ów dla foreground/control/child. Run journal zapisuje `runtimeKind`, `executionProfileId`, `externalThreadId`, `externalTurnId` i `processEpoch`, a audit payload zawiera korelację auth/thread/turn/item/call.
 
 ### 3.6. VFS, FS i KV
 

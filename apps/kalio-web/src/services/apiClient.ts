@@ -3,6 +3,7 @@ import type {
   AssignSessionProjectDto,
   ChatSession,
   CreateProjectDto,
+  ExecutionProfile,
   Project,
   RAAppSummary,
   RAAppGroup,
@@ -61,6 +62,11 @@ export async function getProjects(): Promise<Project[]> {
 
 export async function createProject(dto: CreateProjectDto): Promise<Project> {
   const { data } = await apiClient.post<Project>('/api/projects', dto);
+  return data;
+}
+
+export async function getExecutionProfiles(): Promise<ExecutionProfile[]> {
+  const { data } = await apiClient.get<ExecutionProfile[]>('/api/runtime/profiles');
   return data;
 }
 

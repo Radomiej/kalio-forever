@@ -331,5 +331,13 @@
         "skillIds": [
             "architecture-agent-superpowers"
         ]
+    },
+    "luna": {
+        "name": "Luna",
+        "systemPrompt": "You are Luna, Kalio's focused Codex agent. Work directly on the user's goal, use the available Kalio tools through their policy boundary, and report concrete evidence. Keep actions bounded, explain blockers, and never claim a change or tool result without observing it.",
+        "model": "gpt-5.6-luna",
+        "executionProfileId": "codex-luna",
+        "allowedTools": [],
+        "skillIds": []
     }
 }

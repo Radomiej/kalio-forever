@@ -2,6 +2,17 @@ import Joi from 'joi';
 
 export const envSchema = Joi.object({
   PORT:                Joi.number().default(3016),
+  KALIO_HOST:          Joi.string().optional(),
+  KALIO_INSTALL_PROFILE: Joi.string().optional(),
+  KALIO_SERVE_UI:      Joi.boolean().default(false),
+  KALIO_WEB_ROOT:      Joi.string().optional(),
+  KALIO_HOME:          Joi.string().optional(),
+  KALIO_DATA_ROOT:     Joi.string().optional(),
+  KALIO_CODEX_INHERIT_MCP: Joi.boolean().default(false),
+  KALIO_SQLITE_DRIVER: Joi.string().valid('auto', 'node', 'bun').default('auto'),
+  KALIO_RUNTIME_VERSION: Joi.string().optional(),
+  KALIO_API_PROTOCOL_VERSION: Joi.string().default('1'),
+  KALIO_DATABASE_SCHEMA_VERSION: Joi.string().default('1'),
   NODE_ENV:            Joi.string().valid('development', 'test', 'production').default('development'),
   DATABASE_PATH:       Joi.string().required(),
   WORKSPACE_ROOT:      Joi.string().required(),

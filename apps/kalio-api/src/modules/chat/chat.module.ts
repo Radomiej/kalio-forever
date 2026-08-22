@@ -54,6 +54,9 @@ import { AllowedPathsModule } from '../allowed-paths/allowed-paths.module';
 import { RelayModule } from '../relay/relay.module';
 import { HitlModule } from '../hitl/hitl.module';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
+import { RuntimeExecutionScheduler } from '../agent-runtime/runtime-execution.scheduler';
+import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
+import { ProfiledLLMSource } from '../agent-runtime/profiled-llm-source';
 import { TelegramRelayService } from '../relay/telegram/telegram-relay.service';
 import { TOOL_DISPATCH_REGISTRY, type ToolDispatchRegistryPort } from '../tool/tool-dispatch-registry.port';
 import { SUBAGENT_RUNTIME } from '../tool/subagent-runtime.port';
@@ -77,7 +80,7 @@ import {
  *   TOOL_REGISTRY     → Tool dispatch registry port exported by ToolModule
  */
 @Module({
-  imports: [AuditModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, AllowedPathsModule, HitlModule, RelayModule],
+  imports: [AuditModule, AgentRuntimeModule, LLMModule, PersonaModule, ToolModule, VFSModule, RAAppModule, MCPModule, SkillsModule, CredentialsModule, AllowedPathsModule, HitlModule, RelayModule],
   controllers: [
     SessionsController,
     ProjectsController,
@@ -109,6 +112,8 @@ import {
     SessionRuntimeWatchlistService,
     SessionRuntimeStopService,
     ActiveSessionRegistry,
+    RuntimeExecutionScheduler,
+    ProfiledLLMSource,
     SessionsService,
     ProjectsService,
     ChatTestSupportService,
@@ -153,7 +158,7 @@ import {
     // LLM_SOURCE: async iterable adapter over LLMService callback API
     {
       provide: LLM_SOURCE,
-      useExisting: LLMServiceAdapter,
+      useExisting: ProfiledLLMSource,
     },
 
     {

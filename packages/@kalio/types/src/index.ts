@@ -224,6 +224,44 @@ export type LLMProviderType =
   | 'custom'
   | 'mock';
 
+export type ExecutionProfileKind = 'direct-llm' | 'codex-app-server';
+export type ExecutionApprovalMode = 'codex_guard' | 'kalio_strict';
+
+export interface ExecutionProfile {
+  id: ID;
+  name: string;
+  kind: ExecutionProfileKind;
+  provider?: LLMProviderType;
+  model: string;
+  authProfileId?: string;
+  reasoningEffort?: string;
+  approvalMode: ExecutionApprovalMode;
+  enabled: boolean;
+  capabilitiesVersion: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CreateExecutionProfileDto {
+  name: string;
+  kind: ExecutionProfileKind;
+  provider?: LLMProviderType;
+  model: string;
+  authProfileId?: string;
+  reasoningEffort?: string;
+  approvalMode?: ExecutionApprovalMode;
+  enabled?: boolean;
+}
+
+export interface UpdateExecutionProfileDto {
+  name?: string;
+  model?: string;
+  authProfileId?: string | null;
+  reasoningEffort?: string | null;
+  approvalMode?: ExecutionApprovalMode;
+  enabled?: boolean;
+}
+
 // ─── Persona ──────────────────────────────────────────────────────────────────
 /** Controls which MCP tools a persona can access. */
 export type MCPPolicy = 'allow_all' | 'deny_all' | 'allow_list';
@@ -247,6 +285,7 @@ export interface Persona {
   name: string;
   systemPrompt: string;
   model: string;           // e.g. "claude-sonnet-4-6", "gpt-4o", "qwen3:8b"
+  executionProfileId?: ID;
   maxToolAttempts?: number | null;
   allowedTools: string[];  // native tool names available to this persona (tool allowlist)
   skillIds: string[];      // IDs of Skill entities whose prompts are injected into system prompt
@@ -270,6 +309,7 @@ export interface PersonaKV {
 export interface PersonaSessionConfig {
   systemPrompt: string;
   model: string;
+  executionProfileId?: ID;
   maxToolAttempts?: number | null;
   allowedTools: string[];  // filtered tool list for this session
   skillIds: string[];      // Skill entity IDs whose prompts get injected
@@ -281,6 +321,7 @@ export interface CreatePersonaDto {
   name: string;
   systemPrompt: string;
   model: string;
+  executionProfileId?: ID;
   maxToolAttempts?: number;
   allowedTools: string[];
   skillIds?: string[];
@@ -295,6 +336,7 @@ export interface UpdatePersonaDto {
   name?: string;
   systemPrompt?: string;
   model?: string;
+  executionProfileId?: ID;
   maxToolAttempts?: number | null;
   allowedTools?: string[];
   skillIds?: string[];
@@ -383,6 +425,7 @@ export interface Project {
   name: string;
   path: string | null;
   kind: ProjectKind;
+  defaultExecutionProfileId?: ID;
   isSystem: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -391,10 +434,12 @@ export interface Project {
 export interface CreateProjectDto {
   name: string;
   path: string;
+  defaultExecutionProfileId?: ID;
 }
 
 export interface UpdateProjectDto {
   name: string;
+  defaultExecutionProfileId?: ID;
 }
 
 export interface AssignSessionProjectDto {
@@ -411,6 +456,8 @@ export interface ChatSession {
   parentTurnId?: ID;
   parentToolCallId?: ID;
   projectId?: ID;
+  executionProfileId?: ID;
+  externalThreadId?: ID;
   runtimeContext?: SessionRuntimeContext;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -424,6 +471,7 @@ export interface CreateSessionDto {
   parentTurnId?: ID;
   parentToolCallId?: ID;
   projectId?: ID;
+  executionProfileId?: ID;
   projectPathOverride?: string;
   runtimeContext?: SessionRuntimeContext;
 }
@@ -449,8 +497,158 @@ export type ToolDomain =
   | 'image'
   | 'skill'
   | 'persona'
+  | 'code_intelligence'
   | 'mcp'
   | 'generic';
+
+export type IdeRuntimeLifecycle =
+  | 'disabled'
+  | 'idle_stopped'
+  | 'starting'
+  | 'indexing'
+  | 'ready'
+  | 'degraded'
+  | 'error';
+
+export type IdeOwnership = 'managed' | 'none' | 'unverified';
+
+export type IdeErrorCode =
+  | 'IDE_PROJECT_REQUIRED'
+  | 'IDE_PROJECT_DISABLED'
+  | 'IDE_PROJECT_TRUST_REQUIRED'
+  | 'IDE_SANDBOX_UNSUPPORTED'
+  | 'IDE_BRIDGE_MISSING'
+  | 'IDE_BRIDGE_INCOMPATIBLE'
+  | 'IDE_LANGUAGE_PROVIDER_MISSING'
+  | 'IDE_INDEXING'
+  | 'IDE_START_TIMEOUT'
+  | 'IDE_RUNTIME_CAPACITY'
+  | 'IDE_PROCESS_OWNERSHIP_UNVERIFIED'
+  | 'IDE_QUERY_INVALID';
+
+export type IdeLanguageLifecycle = 'detected' | 'missing' | 'indexing' | 'ready' | 'degraded';
+
+export interface IdeLanguageStatus {
+  id: string;
+  displayName: string;
+  lifecycle: IdeLanguageLifecycle;
+  provider?: string;
+  providerVersion?: string;
+  message?: string;
+}
+
+export interface ProjectIdeStatus {
+  projectId: ID;
+  projectName?: string;
+  canonicalRoot?: string;
+  lifecycle: IdeRuntimeLifecycle;
+  enabled: boolean;
+  trustAcknowledged: boolean;
+  workspaceTrusted: boolean;
+  bridgeCompatible: boolean;
+  bridgeVersion?: string;
+  ownership: IdeOwnership;
+  runtimeId?: string;
+  languages: IdeLanguageStatus[];
+  capabilities: string[];
+  errorCode?: IdeErrorCode;
+  message?: string;
+}
+
+export interface CodeIntelligenceIntegrationStatus {
+  backend: 'vscode_bridge';
+  platformSupported: boolean;
+  enabled: boolean;
+  autoStart: boolean;
+  codeExecutable?: string;
+  vscodeVersion?: string;
+  bridgeInstalled: boolean;
+  bridgeVersion?: string;
+  bridgeCompatible: boolean;
+  writeToolsEnabled: false;
+  sandboxSupported: false;
+  maxManagedRuntimes: 2;
+  idleTimeoutMinutes: 10;
+  projects: ProjectIdeStatus[];
+}
+
+export interface CodeIntelligenceIntegrationPatch {
+  enabled?: boolean;
+  autoStart?: boolean;
+}
+
+export interface ProjectIdeIntegrationPatch {
+  enabled: boolean;
+  acknowledgedRisk?: boolean;
+}
+
+export interface IdeQueryTarget {
+  symbol?: string;
+  path?: string;
+  line?: number;
+  column?: number;
+  kind?: string;
+  container?: string;
+}
+
+export type IdeQueryOperation =
+  | 'workspace_symbols'
+  | 'document_symbols'
+  | 'definition'
+  | 'declaration'
+  | 'type_definition'
+  | 'implementation'
+  | 'references'
+  | 'incoming_calls'
+  | 'outgoing_calls'
+  | 'hover';
+
+export interface IdeQueryRequest {
+  operation: IdeQueryOperation;
+  target?: IdeQueryTarget;
+  query?: string;
+  maxResults?: number;
+}
+
+export interface IdeLocation {
+  path?: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+}
+
+export interface IdeQueryResult {
+  operation: IdeQueryOperation;
+  items: unknown[];
+  locations: IdeLocation[];
+  truncated: boolean;
+  backend: 'vscode_bridge';
+}
+
+export interface IdeDiagnosticsRequest {
+  scope: 'file' | 'project';
+  path?: string;
+  severities?: Array<'error' | 'warning' | 'information'>;
+  maxResults?: number;
+}
+
+export interface IdeDiagnostic {
+  path?: string;
+  line?: number;
+  column?: number;
+  severity?: string;
+  source?: string;
+  code?: string | number;
+  message: string;
+}
+
+export interface IdeDiagnosticsResult {
+  scope: IdeDiagnosticsRequest['scope'];
+  diagnostics: IdeDiagnostic[];
+  truncated: boolean;
+  backend: 'vscode_bridge';
+}
 
 export interface ToolMeta {
   name: string;
@@ -1124,6 +1322,11 @@ export interface ChatRunSnapshot {
   status: ChatRunStatus;
   provider?: string;
   model?: string;
+  runtimeKind?: SessionRuntimeKind;
+  executionProfileId?: ID;
+  externalThreadId?: string;
+  externalTurnId?: string;
+  processEpoch?: string;
   /** Backend-owned monotonic order for projections of this run. Required after the revision migration. */
   revision?: number;
   retryCount: number;

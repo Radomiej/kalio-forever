@@ -1,15 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { LLMService } from '../llm/llm.service';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
+import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
+import { CodexAppServerLLMSource } from '../agent-runtime/codex-app-server.llm-source';
 import type { HitlDecisionInput, HitlDecisionResult } from './hitl.types';
 
 const AUTO_HITL_SYSTEM_APPENDIX = [
   'You are the approval authority for human-in-the-loop gating.',
   'Decide whether the described operation should be approved.',
-  'Return only valid JSON with this exact shape: {"agree": true|false, "reason": "short explanation"}.',
+  'Return only valid JSON with this exact shape: {"decision":"allow|deny|ask_user", "risk":"low|medium|high|critical", "reason":"short explanation"}.',
   'Do not wrap the JSON in markdown fences.',
   'Never call tools.',
 ].join(' ');
@@ -50,9 +52,18 @@ function parseDecision(raw: string): HitlDecisionResult {
   const candidate = extractJsonObject(raw);
   const parsed = JSON.parse(candidate) as Record<string, unknown>;
   const agree = parsed['agree'];
+  const decision = parsed['decision'];
+  const risk = parsed['risk'];
   const reason = parsed['reason'];
 
-  if (typeof agree !== 'boolean') {
+  const normalizedAgree = typeof agree === 'boolean'
+    ? agree
+    : decision === 'allow'
+      ? true
+      : decision === 'deny' || decision === 'ask_user'
+        ? false
+        : undefined;
+  if (normalizedAgree === undefined) {
     throw new Error('Auto HITL response is missing a boolean agree field.');
   }
 
@@ -60,8 +71,16 @@ function parseDecision(raw: string): HitlDecisionResult {
     throw new Error('Auto HITL response is missing a non-empty reason field.');
   }
 
+  if (risk !== undefined && risk !== 'low' && risk !== 'medium' && risk !== 'high' && risk !== 'critical') {
+    throw new Error('Auto HITL response contains an invalid risk field.');
+  }
+
   return {
-    agree,
+    agree: normalizedAgree,
+    ...(risk ? { risk } : {}),
+    decision: decision === 'allow' || decision === 'deny' || decision === 'ask_user'
+      ? decision
+      : normalizedAgree ? 'allow' : 'deny',
     reason: reason.trim(),
   };
 }
@@ -74,6 +93,8 @@ export class HitlDecisionService {
     private readonly personaService: PersonaService,
     private readonly skillsService: SkillsService,
     private readonly llmService: LLMService,
+    @Optional() private readonly executionProfiles?: ExecutionProfileService,
+    @Optional() private readonly codexSource?: CodexAppServerLLMSource,
   ) {}
 
   async evaluateApproval(input: HitlDecisionInput): Promise<HitlDecisionResult> {
@@ -104,24 +125,15 @@ export class HitlDecisionService {
             agentRun: input.request.agentRun,
           },
           requiredResponse: {
-            agree: 'boolean',
+            decision: 'allow|deny|ask_user',
+            risk: 'low|medium|high|critical',
             reason: 'string',
           },
         }, null, 2),
       },
     ];
 
-    let rawResponse = '';
-    await this.llmService.streamChat(messages, [], {
-      sessionId: `hitl:${input.request.sessionId}`,
-      messageId: nanoid(),
-      abortSignal: input.request.abortSignal,
-      onChunk: (chunk) => {
-        if (!chunk.thinking) {
-          rawResponse += chunk.delta;
-        }
-      },
-    });
+    const rawResponse = await this.evaluateWithConfiguredProfile(personaConfig.executionProfileId, messages, input);
 
     try {
       return parseDecision(rawResponse);
@@ -130,5 +142,42 @@ export class HitlDecisionService {
       this.logger.error('Failed to parse auto HITL evaluator response', error);
       throw error;
     }
+  }
+
+  private async evaluateWithConfiguredProfile(
+    profileId: string | undefined,
+    messages: ContextManagedLLMMessage[],
+    input: HitlDecisionInput,
+  ): Promise<string> {
+    const profile = profileId && this.executionProfiles
+      ? await this.executionProfiles.assertEnabled(profileId)
+      : undefined;
+    if (profile?.kind === 'codex-app-server') {
+      if (!this.codexSource) throw new Error('Codex App Server evaluator is not configured.');
+      let response = '';
+      for await (const chunk of this.codexSource.stream({
+        messages,
+        tools: [],
+        sessionId: `hitl:${input.request.sessionId}:${nanoid()}`,
+        messageId: nanoid(),
+        executionProfile: profile,
+        abortSignal: input.request.abortSignal,
+      })) {
+        if (chunk.type === 'text_delta') response += chunk.delta;
+      }
+      return response;
+    }
+
+    let response = '';
+    await this.llmService.streamChat(messages, [], {
+      sessionId: `hitl:${input.request.sessionId}`,
+      messageId: nanoid(),
+      abortSignal: input.request.abortSignal,
+      ...(profile?.kind === 'direct-llm' && profile.model ? { modelOverride: profile.model } : {}),
+      onChunk: (chunk) => {
+        if (!chunk.thinking) response += chunk.delta;
+      },
+    });
+    return response;
   }
 }
