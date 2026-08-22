@@ -274,7 +274,7 @@ Zasady:
 
 `CodexAppServerHost` utrzymuje jeden proces `codex app-server --stdio` na profil zaufania/auth. `thread/start` otrzymuje model, cwd, sandbox, system instructions i dynamic tools. `item/tool/call` jest mapowany na `ToolDispatchService`; native command/file/permission approval w `codex_guard` pozostaje po stronie Codex auto-review, a w `kalio_strict` trafia do istniejącego kanału `tool:confirmation_required`.
 
-Domyślnie proces jest uruchamiany z nadpisaniem `mcp_servers={}`, więc wpisy MCP z globalnego `~/.codex/config.toml` nie przechodzą do sesji Kalio. Świadome odziedziczenie tych serwerów wymaga `KALIO_CODEX_INHERIT_MCP=true`; nie zmienia to osobnej polityki MCP persony dla serwerów zarejestrowanych w Kalio.
+Domyślnie Kalio wylicza aktywne serwery MCP z profilu Codexa przez `codex mcp list` i przekazuje dla każdego `mcp_servers.<id>.enabled=false`; pusty override `mcp_servers={}` nie wystarcza, bo Codex scala puste tabele z konfiguracją globalną. Settings > Integrations udostępnia przełącznik per auth profile przez `PATCH /api/runtime/native-cli-integrations/:authProfileId/settings`. Wartość jest trwale zapisywana w `app_settings` jako `codex.mcp.inherit.<authProfileId>`, a zmiana resetuje proces App Server, żeby następny start zastosował nową politykę. `KALIO_CODEX_INHERIT_MCP=true|false` działa tylko jako fallback, gdy nie ma ustawienia profilu; nie zmienia to osobnej polityki MCP persony dla serwerów zarejestrowanych w Kalio.
 
 Aktywne wykonania korzystają ze wspólnego limitu pięciu lease'ów dla foreground/control/child. Run journal zapisuje `runtimeKind`, `executionProfileId`, `externalThreadId`, `externalTurnId` i `processEpoch`, a audit payload zawiera korelację auth/thread/turn/item/call.
 

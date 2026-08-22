@@ -3,15 +3,17 @@ import { CodexAppServerHost, CodexAppServerProtocolRouter, buildCodexAppServerAr
 
 describe('CodexAppServerProtocolRouter', () => {
   it('blocks inherited Codex MCP servers unless explicitly opted in', () => {
-    expect(buildCodexAppServerArgs(['multi_agent'], false)).toEqual([
+    expect(buildCodexAppServerArgs(['multi_agent'], false, ['vscode_lsp', 'mcp-playwright-orchestrator'])).toEqual([
       'app-server',
       '--stdio',
       '-c',
-      'mcp_servers={}',
+      'mcp_servers."vscode_lsp".enabled=false',
+      '-c',
+      'mcp_servers."mcp-playwright-orchestrator".enabled=false',
       '--disable',
       'multi_agent',
     ]);
-    expect(buildCodexAppServerArgs(['multi_agent'], true)).toEqual([
+    expect(buildCodexAppServerArgs(['multi_agent'], true, ['vscode_lsp'])).toEqual([
       'app-server',
       '--stdio',
       '--disable',
@@ -23,6 +25,7 @@ describe('CodexAppServerProtocolRouter', () => {
     expect(buildCodexSpawnSpec('codex.cmd', ['app-server', '--stdio'], 'win32', 'C:\\Windows\\System32\\cmd.exe')).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
       args: ['/d', '/s', '/c', 'codex.cmd', 'app-server', '--stdio'],
+      windowsVerbatimArguments: true,
     });
   });
 

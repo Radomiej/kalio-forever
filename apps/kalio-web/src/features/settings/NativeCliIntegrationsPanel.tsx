@@ -14,9 +14,13 @@ type NativeCliIntegrationStatus = {
   lastError?: string;
   profileIds: string[];
   models: string[];
+  mcp: {
+    inheritConfiguredMcp: boolean;
+    source: 'settings' | 'environment' | 'default';
+  };
 };
 
-type IntegrationAction = `${string}:check` | `${string}:reset`;
+type IntegrationAction = `${string}:check` | `${string}:reset` | `${string}:mcp`;
 
 export function NativeCliIntegrationsPanel() {
   const [integrations, setIntegrations] = useState<NativeCliIntegrationStatus[]>([]);
@@ -70,6 +74,31 @@ export function NativeCliIntegrationsPanel() {
     }
   };
 
+  const updateMcpPolicy = async (integration: NativeCliIntegrationStatus, inheritConfiguredMcp: boolean) => {
+    const actionId = `${integration.authProfileId}:mcp` as IntegrationAction;
+    setAction(actionId);
+    setError(null);
+    try {
+      const response = await fetch(`/api/runtime/native-cli-integrations/${encodeURIComponent(integration.authProfileId)}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inheritConfiguredMcp }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch((err: unknown) => {
+          console.debug('[NativeCliIntegrationsPanel] MCP policy error response was not JSON', err);
+          return null;
+        }) as { message?: string } | null;
+        throw new Error(body?.message ?? `${response.status}: ${response.statusText}`);
+      }
+      await loadIntegrations();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update Codex MCP policy.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
@@ -97,8 +126,7 @@ export function NativeCliIntegrationsPanel() {
           Check starts the app server when needed. Reset closes its process and clears the tracked native sessions.
         </p>
         <p className="mt-2 text-xs text-base-content/60">
-          Inherited MCP servers from the Codex profile are blocked by default; Kalio passes only its policy-filtered tools.
-          Set <span className="font-mono">KALIO_CODEX_INHERIT_MCP=true</span> only when external Codex MCP access is intentional.
+          Codex profile MCP servers are blocked by default; Kalio passes only its policy-filtered tools. Use the per-integration switch below only when external Codex MCP access is intentional.
         </p>
       </div>
 
@@ -135,6 +163,27 @@ export function NativeCliIntegrationsPanel() {
                     <div><span className="text-base-content/45">Connection:</span> {integration.connected ? 'connected' : 'not connected'}</div>
                     <div><span className="text-base-content/45">Models:</span> {integration.models.join(', ') || 'none'}</div>
                     <div><span className="text-base-content/45">Profiles:</span> {integration.profileIds.join(', ') || 'none'}</div>
+                  </div>
+                  <div className="rounded-lg border border-base-300 bg-base-200/20 px-3 py-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-sm mt-0.5"
+                        checked={integration.mcp.inheritConfiguredMcp}
+                        disabled={action !== null}
+                        onChange={(event) => void updateMcpPolicy(integration, event.target.checked)}
+                        aria-label="Allow Codex profile MCP servers"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium">Allow Codex profile MCP servers</span>
+                        <span className="mt-1 block text-xs text-base-content/55">
+                          {integration.mcp.inheritConfiguredMcp
+                            ? 'Enabled: external MCP servers configured in Codex can start with this integration.'
+                            : 'Disabled: external Codex MCP servers are explicitly disabled at process start.'}
+                        </span>
+                        <span className="mt-1 block text-[11px] text-base-content/40">Source: {integration.mcp.source}</span>
+                      </span>
+                    </label>
                   </div>
                   {integration.processEpoch && (
                     <div className="font-mono text-[11px] text-base-content/40 break-all">process {integration.processEpoch}</div>

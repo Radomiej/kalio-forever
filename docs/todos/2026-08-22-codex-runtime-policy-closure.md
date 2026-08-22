@@ -7,7 +7,8 @@
 - [x] Route Codex dynamic tools through Kalio dispatch, policy, HITL, and audit correlation.
 - [x] Bound foreground, control, and child execution to the default five-slot scheduler.
 - [x] Route the configured auto-check evaluator through a no-tools Codex profile and preserve `ask_user`.
-- [x] Verify API/web typechecks, API build, shared types build, and 119 focused backend tests.
+- [x] Add a per-auth-profile Codex MCP inheritance toggle in Settings, persist it in `app_settings`, and reset the affected App Server process after changes.
+- [x] Verify focused Codex host/source, policy, controller, and integration-settings tests plus frontend typecheck; the final backend build remains blocked by an unrelated dirty Code Intelligence test constructor mismatch.
 
 ## Closure gates
 
@@ -17,7 +18,7 @@
 - [ ] [P2] Add project/persona profile selector and browser proof.
 - [ ] [P2] Add trusted-loopback/auth boundary for external security policy endpoint.
 - [ ] [P3] Measure RSS/concurrency against the five-lease design.
-- [x] [P2] Block inherited Codex `mcp_servers` by default; require an explicit `KALIO_CODEX_INHERIT_MCP=true` opt-in.
+- [x] [P2] Block inherited Codex `mcp_servers` by default; expose an explicit Settings toggle per auth profile, with `KALIO_CODEX_INHERIT_MCP` retained only as the environment fallback.
 - [ ] [P4] Implement optional Claude Code runtime adapter.
 
 ## Boundary
