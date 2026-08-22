@@ -14,6 +14,7 @@ const STATUS = {
   processEpoch: 'epoch-1',
   profileIds: ['codex-guard', 'codex-luna'],
   models: ['gpt-5.4', 'gpt-5.6-luna'],
+  mcp: { inheritConfiguredMcp: false, source: 'default' },
 };
 
 describe('NativeCliIntegrationsPanel', () => {
@@ -25,6 +26,10 @@ describe('NativeCliIntegrationsPanel', () => {
       }
       if (url.endsWith('/check') || url.endsWith('/reset')) {
         return new Response(JSON.stringify({ ...STATUS, ...(url.endsWith('/reset') ? { status: 'offline', connected: false, openSessionCount: 0 } : {}) }), { status: 200 });
+      }
+      if (url.endsWith('/settings') && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as { inheritConfiguredMcp: boolean };
+        return new Response(JSON.stringify({ inheritConfiguredMcp: body.inheritConfiguredMcp, source: 'settings' }), { status: 200 });
       }
       return new Response(null, { status: 404 });
     }));
@@ -58,6 +63,21 @@ describe('NativeCliIntegrationsPanel', () => {
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/reset',
       expect.objectContaining({ method: 'POST' }),
+    ));
+  });
+
+  it('toggles inherited Codex MCP access from the integration settings', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex App Server (chatgpt-default)');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Codex profile MCP servers' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/native-cli-integrations/chatgpt-default/settings',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ inheritConfiguredMcp: true }),
+      }),
     ));
   });
 });
