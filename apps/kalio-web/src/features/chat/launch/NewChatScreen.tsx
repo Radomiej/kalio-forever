@@ -4,6 +4,7 @@ import type { Persona, Project } from '@kalio/types';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import { PersonaCombobox } from './PersonaCombobox';
 import { ProjectPicker } from '../../projects/ProjectPicker';
+import { CodeIntelligenceQuickTrust } from './CodeIntelligenceQuickTrust';
 
 const WELCOME_PROMPTS = [
   'What can you do?',
@@ -225,15 +226,18 @@ export function NewChatScreen({
 
           <div>
             {onProjectChange ? (
-              <ProjectPicker
-                value={projectId}
-                onChange={(project) => {
-                  onProjectChange(project);
-                  onProjectPathChange(project.path ?? '');
-                }}
-                disabled={isBusy}
-                testId={`${testIdPrefix}-project-picker`}
-              />
+              <>
+                <ProjectPicker
+                  value={projectId}
+                  onChange={(project) => {
+                    onProjectChange(project);
+                    onProjectPathChange(project.path ?? '');
+                  }}
+                  disabled={isBusy}
+                  testId={`${testIdPrefix}-project-picker`}
+                />
+                {projectId !== 'system:none' && <CodeIntelligenceQuickTrust projectId={projectId} />}
+              </>
             ) : (
               <>
                 <label htmlFor={`${testIdPrefix}-project-path-input`} className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
@@ -278,12 +282,7 @@ export function NewChatScreen({
             disabled={isBusy}
             data-testid={`${testIdPrefix}-prompt-input`}
           />
-          <div className="flex items-center justify-between gap-3 border-t border-base-300/70 px-1 pt-2">
-            <span className="truncate text-[11px] text-base-content/65" data-testid={`${testIdPrefix}-routing-summary`}>
-              {launchMode === 'workflow' && activeArchitecture
-                ? `Workflow runtime: ${activeArchitecture.label}`
-                : `Chat runtime: ${activePersona?.label ?? 'Default'}`}
-            </span>
+          <div className="flex items-center justify-end gap-3 border-t border-base-300/70 px-1 pt-2">
             <button
               type="button"
               className="btn btn-primary btn-sm gap-2"

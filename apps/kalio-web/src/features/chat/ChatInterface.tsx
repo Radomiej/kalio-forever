@@ -45,6 +45,31 @@ export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/
 
 const DEFAULT_SESSION_TITLE = 'New Chat';
 
+function resolveRuntimeProvider(executionProfileId: string | undefined, provider: string | undefined): string | null {
+  const profileId = executionProfileId?.trim().toLowerCase();
+  if (profileId?.startsWith('codex-')) {
+    return 'Codex';
+  }
+
+  const providerLabels: Record<string, string> = {
+    openai: 'ChatGPT',
+    openrouter: 'OpenRouter',
+    cometapi: 'CometAPI',
+    xiaomimimo: 'MiMo',
+    ollama: 'Ollama',
+    deepseek: 'DeepSeek',
+    bitnet: 'BitNet',
+    custom: 'Custom LLM',
+    mock: 'Local LLM',
+  };
+  return provider ? providerLabels[provider.toLowerCase()] ?? provider : null;
+}
+
+function resolveRuntimeModel(model: string | undefined): string | null {
+  const normalized = model?.trim();
+  return normalized && normalized.toLowerCase() !== 'mock' ? normalized : null;
+}
+
 function buildOptimisticSessionTitle(content: string): string {
   const preview = content.slice(0, 50).trim();
   return preview + (content.length > 50 ? '...' : '');
@@ -98,7 +123,8 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     chunkSessionIds,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const activeModel = useSettingsStore((s) => s.getEffectiveModel());
+  const backendProvider = useSettingsStore((s) => s.backendConfig?.provider);
+  const backendModel = useSettingsStore((s) => s.backendConfig?.model);
   const conversationTitleSettings = useSettingsStore((state) => state.conversationTitleSettings);
   const setConversationTitleSettings = useSettingsStore((state) => state.setConversationTitleSettings);
   const {
@@ -187,6 +213,12 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     selectedPersonaId,
     setSelectedPersonaId,
   } = useLaunchPersonas(activeSession?.personaId);
+  const activePersona = personas.find((persona) => persona.id === activeSession?.personaId);
+  const activeModel = resolveRuntimeModel(activePersona?.model || backendModel);
+  const activeProvider = resolveRuntimeProvider(
+    activeSession?.executionProfileId ?? activePersona?.executionProfileId,
+    backendProvider,
+  );
 
   const renderableConversationProjection = resolveRenderableConversationProjection({
     session: activeSession,
@@ -482,6 +514,7 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
         <ChatSessionHeader
           activeContext={activeContext}
           activeModel={activeModel}
+          activeProvider={activeProvider}
           activeSession={activeSession}
           activeSessionId={activeSessionId}
           copied={copied}
