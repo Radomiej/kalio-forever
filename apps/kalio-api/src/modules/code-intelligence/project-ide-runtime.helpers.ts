@@ -1,20 +1,18 @@
-import { execFile } from 'node:child_process';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { promisify } from 'node:util';
 import {
   existsSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  statSync,
 } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Dirent } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import type { IdeLanguageStatus } from '@kalio/types';
 import { CodeIntelligenceError } from './code-intelligence.errors';
 
-const execFileAsync = promisify(execFile);
 const START_TIMEOUT_MS = 120 * 1000;
 const SUPPORTED_BRIDGE_MIN = [0, 4, 7];
 const SUPPORTED_BRIDGE_MAX = [0, 5, 0];
@@ -138,12 +136,29 @@ function compareVersionParts(a: number[], b: number[]): number {
   for (let i = 0; i < 3; i += 1) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) - (b[i] ?? 0);
   return 0;
 }
-export async function readVsCodeVersion(codeExecutable: string): Promise<string | undefined> {
+export function readVsCodeVersion(codeExecutable: string): string | undefined {
+  const installRoot = dirname(codeExecutable);
+  const appRoots = [join(installRoot, 'resources', 'app')];
   try {
-    const result = await execFileAsync(codeExecutable, ['--version'], { timeout: 3_000, windowsHide: true });
-    const firstLine = typeof result.stdout === 'string' ? result.stdout.split(/\r?\n/)[0]?.trim() : undefined;
-    return firstLine && /^\d+\.\d+/.test(firstLine) ? firstLine : undefined;
-  } catch { return undefined; }
+    const versionedRoots = readdirSync(installRoot, { withFileTypes: true, encoding: 'utf8' })
+      .filter((entry) => entry.isDirectory() && /^[0-9a-f]{10}$/iu.test(entry.name))
+      .map((entry) => {
+        const root = join(installRoot, entry.name);
+        return { root, modifiedAt: statSync(root).mtimeMs };
+      })
+      .sort((left, right) => right.modifiedAt - left.modifiedAt)
+      .map(({ root }) => join(root, 'resources', 'app'));
+    appRoots.push(...versionedRoots);
+  } catch { /* an installation may not expose versioned app directories */ }
+  for (const appRoot of appRoots) {
+    for (const fileName of ['product.json', 'package.json']) {
+      try {
+        const parsed = JSON.parse(readFileSync(join(appRoot, fileName), 'utf8')) as { version?: unknown };
+        if (typeof parsed.version === 'string' && /^\d+\.\d+/.test(parsed.version)) return parsed.version;
+      } catch { /* an installation may not contain every metadata file */ }
+    }
+  }
+  return undefined;
 }
 export async function allocatePort(): Promise<number> {
   const server = createServer();

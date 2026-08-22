@@ -16,7 +16,6 @@ describe('CodeIntelligenceQuickTrust', () => {
       }
       return new Response(JSON.stringify(DISABLED), { status: 200 });
     }));
-    vi.stubGlobal('confirm', vi.fn(() => true));
   });
 
   afterEach(() => vi.unstubAllGlobals());
@@ -26,6 +25,8 @@ describe('CodeIntelligenceQuickTrust', () => {
     expect(await screen.findByRole('button', { name: 'Enable VS Code Bridge' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable VS Code Bridge' }));
+    expect(screen.getByText(/build scripts and proc macros/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and enable' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/code-intelligence/projects/project-1/integration',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ enabled: true, acknowledgedRisk: true }) }),

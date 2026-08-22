@@ -272,8 +272,16 @@ function Stop-ProcessTreePreservingManagedVscode {
     $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $tree -contains $_.ProcessId } |
         Sort-Object CreationDate -Descending)
+    $protectedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($process in $processes) {
         if (Test-ManagedVscodeProcess -ProcessId $process.ProcessId) {
+            foreach ($managedProcessId in @(Get-ProcessTree -ParentId $process.ProcessId)) {
+                [void]$protectedProcessIds.Add([int]$managedProcessId)
+            }
+        }
+    }
+    foreach ($process in $processes) {
+        if ($protectedProcessIds.Contains([int]$process.ProcessId)) {
             Write-Host "  [keep] managed VS Code PID $($process.ProcessId)" -ForegroundColor DarkGray
             continue
         }
