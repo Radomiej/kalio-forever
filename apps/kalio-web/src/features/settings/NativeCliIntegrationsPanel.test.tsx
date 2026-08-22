@@ -17,12 +17,25 @@ const STATUS = {
   mcp: { inheritConfiguredMcp: false, source: 'default' },
 };
 
+const DEVIN_STATUS = {
+  executable: 'devin.exe',
+  version: '3000.2.17',
+  authenticated: true,
+  acp: true,
+  models: ['glm-5-2', 'swe-1-7'],
+  hostCount: 0,
+  hosts: [],
+};
+
 describe('NativeCliIntegrationsPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/runtime/native-cli-integrations' && !init?.method) {
         return new Response(JSON.stringify([STATUS]), { status: 200 });
+      }
+      if (url === '/api/runtime/devin-cli/status' && !init?.method) {
+        return new Response(JSON.stringify(DEVIN_STATUS), { status: 200 });
       }
       if (url.endsWith('/check') || url.endsWith('/reset')) {
         return new Response(JSON.stringify({ ...STATUS, ...(url.endsWith('/reset') ? { status: 'offline', connected: false, openSessionCount: 0 } : {}) }), { status: 200 });
@@ -44,7 +57,8 @@ describe('NativeCliIntegrationsPanel', () => {
     render(<NativeCliIntegrationsPanel />);
 
     expect(await screen.findByText('Codex')).toBeInTheDocument();
-    expect(screen.getByText('Online')).toBeInTheDocument();
+    expect(screen.getByTestId('devin-cli-integration-card')).toHaveTextContent('glm-5-2');
+    expect(screen.getAllByText('Online')).toHaveLength(2);
     expect(screen.getByText('2 open sessions')).toBeInTheDocument();
     expect(screen.getByText(/gpt-5\.6-luna/)).toBeInTheDocument();
   });
@@ -63,7 +77,7 @@ describe('NativeCliIntegrationsPanel', () => {
     render(<NativeCliIntegrationsPanel />);
     await screen.findByText('Codex');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Recheck' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Recheck' })[1]!);
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/check',
       expect.objectContaining({ method: 'POST' }),

@@ -39,4 +39,14 @@ describe('persona runtime selection', () => {
     expect(nativeReasoningOptions(profiles, 'codex-app-server', 'gpt-5.4')).toEqual(['', 'max']);
     expect(nativeReasoningOptions(profiles, 'codex-app-server', 'gpt-5.6-luna')).toEqual(['max']);
   });
+
+  it('exposes the two free Devin host lanes without reasoning controls', () => {
+    const profiles = [
+      profile({ id: 'devin-glm', kind: 'devin-cli-acp', name: 'Devin · GLM-5.2', model: 'glm-5-2', reasoningEffort: undefined }),
+      profile({ id: 'devin-swe', kind: 'devin-cli-acp', name: 'Devin · SWE-1.7', model: 'swe-1-7', reasoningEffort: undefined }),
+    ];
+
+    expect(nativeModelOptions(profiles, 'devin-cli-acp').map((option) => option.model)).toEqual(['glm-5-2', 'swe-1-7']);
+    expect(nativeReasoningOptions(profiles, 'devin-cli-acp', 'glm-5-2')).toEqual(['']);
+  });
 });

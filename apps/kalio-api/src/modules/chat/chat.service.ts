@@ -176,7 +176,7 @@ export class ChatService {
         effectiveSystemPrompt: assembled.effectiveSystemPrompt, toolMetas: assembled.toolMetas, model: assembled.model,
         providerToolNames: assembled.personaConfig?.providerToolNames,
         executionProfile, externalThreadId: session.externalThreadId,
-         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api',
+         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api' || executionProfile?.kind === 'devin-cli-acp',
          onExternalRuntimeLost: () => controller.abort(),
          cwd: readExecutionCwd(session.runtimeContext),
          onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
@@ -330,7 +330,7 @@ export class ChatService {
           providerToolNames: assembledContext.personaConfig?.providerToolNames,
           executionProfile,
          externalThreadId: session.externalThreadId,
-          providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api',
+          providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api' || executionProfile?.kind === 'devin-cli-acp',
           onExternalRuntimeLost: () => controller.abort(),
           cwd: readExecutionCwd(runtimeContext),
           onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({

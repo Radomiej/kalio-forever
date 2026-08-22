@@ -29,6 +29,7 @@ export function executionProfileProviderLabel(profile: ExecutionProfile): string
   if (profile.kind === 'codex-app-server') return 'ChatGPT / Codex';
   if (profile.kind === 'claude-agent-sdk') return 'Claude Code';
   if (profile.kind === 'devin-api') return 'Devin Cloud';
+  if (profile.kind === 'devin-cli-acp') return 'Devin CLI';
   return PROVIDER_LABELS[profile.provider?.toLowerCase() ?? ''] ?? profile.provider ?? profile.kind;
 }
 
@@ -47,6 +48,8 @@ export function resolveRuntimeProfileLabel(input: RuntimeProfileLabelInput): Run
     providerLabel = 'Codex';
   } else if (kind === 'claude-agent-sdk' || profileId === 'claude-local') {
     providerLabel = 'Claude Code';
+  } else if (kind === 'devin-cli-acp' || profileId?.startsWith('devin-local-')) {
+    providerLabel = 'Devin CLI';
   } else if (kind === 'devin-api' || profileId?.startsWith('devin-')) {
     providerLabel = 'Devin Cloud';
   } else if (provider) {

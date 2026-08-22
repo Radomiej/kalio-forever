@@ -31,7 +31,7 @@ export function buildSubagentProviderOptions(input: {
   return {
     executionProfile: input.executionProfile,
     externalThreadId: input.externalThreadId,
-    providerCompletesTurn: input.executionProfile?.kind === 'codex-app-server' || input.executionProfile?.kind === 'claude-agent-sdk' || input.executionProfile?.kind === 'devin-api',
+    providerCompletesTurn: input.executionProfile?.kind === 'codex-app-server' || input.executionProfile?.kind === 'claude-agent-sdk' || input.executionProfile?.kind === 'devin-api' || input.executionProfile?.kind === 'devin-cli-acp',
     onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
       sessions: input.sessions,
       runJournal: input.runJournal,
