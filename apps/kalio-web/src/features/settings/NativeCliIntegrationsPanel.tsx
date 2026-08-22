@@ -129,7 +129,7 @@ export function NativeCliIntegrationsPanel() {
   return (
     <section className="flex flex-col gap-4" aria-labelledby="native-app-servers-title">
       <div className="flex items-center justify-between gap-4">
-        <h3 id="native-app-servers-title" className="text-base font-semibold">Native app servers</h3>
+        <h3 id="native-app-servers-title" className="text-base font-semibold">Native runtimes</h3>
         <button
           type="button"
           className="btn btn-xs btn-ghost gap-1"
@@ -147,11 +147,11 @@ export function NativeCliIntegrationsPanel() {
       {loading && integrations.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-base-content/50">
           <Loader2 size={14} className="animate-spin" />
-          Checking native app servers...
+          Checking native runtimes...
         </div>
       ) : integrations.length === 0 ? (
         <div className="rounded-lg border border-base-300 px-4 py-5 text-sm text-base-content/60">
-          No native CLI integrations are configured yet.
+          No native runtimes are configured yet.
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -195,22 +195,24 @@ export function NativeCliIntegrationsPanel() {
                     </details>
                   </div>
 
-                  <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-200/20 px-3 py-2.5" title="Allow external MCP servers configured in Codex for this integration.">
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium">External MCP servers</span>
-                      <span className="mt-0.5 block text-xs text-base-content/50">
-                        {integration.mcp.inheritConfiguredMcp ? 'Allowed' : 'Blocked'}
+                  {integration.provider === 'codex' && (
+                    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-200/20 px-3 py-2.5" title="Allow external MCP servers configured in Codex for this integration.">
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium">External MCP servers</span>
+                        <span className="mt-0.5 block text-xs text-base-content/50">
+                          {integration.mcp.inheritConfiguredMcp ? 'Allowed' : 'Blocked'}
+                        </span>
                       </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm"
-                      checked={integration.mcp.inheritConfiguredMcp}
-                      disabled={action !== null}
-                      onChange={(event) => void updateMcpPolicy(integration, event.target.checked)}
-                      aria-label="Allow Codex profile MCP servers"
-                    />
-                  </label>
+                      <input
+                        type="checkbox"
+                        className="toggle toggle-sm"
+                        checked={integration.mcp.inheritConfiguredMcp}
+                        disabled={action !== null}
+                        onChange={(event) => void updateMcpPolicy(integration, event.target.checked)}
+                        aria-label="Allow Codex profile MCP servers"
+                      />
+                    </label>
+                  )}
                   {integration.lastError && <div className="text-xs text-error">{integration.lastError}</div>}
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -222,15 +224,17 @@ export function NativeCliIntegrationsPanel() {
                       {action === checkAction ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
                       Recheck
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-xs btn-ghost gap-1 text-warning"
-                      disabled={action !== null}
-                      onClick={() => void runAction(integration, 'reset')}
-                    >
-                      {action === resetAction ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                      Reset
-                    </button>
+                    {integration.provider === 'codex' && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-ghost gap-1 text-warning"
+                        disabled={action !== null}
+                        onClick={() => void runAction(integration, 'reset')}
+                      >
+                        {action === resetAction ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                        Reset
+                      </button>
+                    )}
                   </div>
                 </div>
               </article>
@@ -245,6 +249,9 @@ export function NativeCliIntegrationsPanel() {
 function friendlyIntegrationName(integration: NativeCliIntegrationStatus): string {
   if (integration.provider.toLowerCase() === 'codex') {
     return 'Codex';
+  }
+  if (integration.provider.toLowerCase() === 'claude') {
+    return 'Claude';
   }
   return integration.displayName.replace(/\s*\([^)]*\)\s*$/, '') || integration.provider;
 }

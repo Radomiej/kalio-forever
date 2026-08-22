@@ -2,8 +2,11 @@ import axios from 'axios';
 import type {
   AssignSessionProjectDto,
   ChatSession,
+  Credential,
   CreateProjectDto,
+  CreateExecutionProfileDto,
   ExecutionProfile,
+  ResolveDirectExecutionProfileDto,
   Project,
   RAAppSummary,
   RAAppGroup,
@@ -67,6 +70,30 @@ export async function createProject(dto: CreateProjectDto): Promise<Project> {
 
 export async function getExecutionProfiles(): Promise<ExecutionProfile[]> {
   const { data } = await apiClient.get<ExecutionProfile[]>('/api/runtime/profiles');
+  return data;
+}
+
+export async function getCredentials(): Promise<Credential[]> {
+  const { data } = await apiClient.get<Credential[]>('/api/credentials');
+  return data;
+}
+
+export async function getCredentialModels(credentialId: string): Promise<string[]> {
+  const { data } = await apiClient.get<{ models: string[] }>(
+    `/api/credentials/${encodeURIComponent(credentialId)}/models`,
+  );
+  return data.models;
+}
+
+export async function createExecutionProfile(dto: CreateExecutionProfileDto): Promise<ExecutionProfile> {
+  const { data } = await apiClient.post<ExecutionProfile>('/api/runtime/profiles', dto);
+  return data;
+}
+
+export async function resolveDirectExecutionProfile(
+  dto: ResolveDirectExecutionProfileDto,
+): Promise<ExecutionProfile> {
+  const { data } = await apiClient.post<ExecutionProfile>('/api/runtime/profiles/direct/resolve', dto);
   return data;
 }
 
