@@ -150,12 +150,13 @@ describe('@kalio/types contract shape', () => {
       | 'memory'
       | 'search'
       | 'web'
-      | 'tool_registry'
-      | 'image'
-      | 'skill'
-      | 'persona'
-      | 'mcp'
-      | 'generic'
+       | 'tool_registry'
+       | 'image'
+       | 'skill'
+       | 'persona'
+       | 'mcp'
+       | 'code_intelligence'
+       | 'generic'
     >();
     expectTypeOf<Pick<ToolCallRequest, 'sessionId' | 'toolName' | 'args' | 'callId'>>().toEqualTypeOf<{
       sessionId: ID;
