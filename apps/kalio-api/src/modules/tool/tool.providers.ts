@@ -29,6 +29,7 @@ import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
 import { EscalateTool } from './tools/escalate.tool';
+import { IdeDiagnosticsTool, IdeQueryTool, IdeStatusTool } from '../code-intelligence/code-intelligence.tools';
 import { KVStoreService } from './kv-store.service';
 import { TerminalService } from './terminal.service';
 import { ToolRegistryService } from './tool-registry.service';
@@ -56,6 +57,7 @@ export const TOOL_PROVIDER_CLASSES = [
   SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool,
   PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool,
   EscalateTool,
+  IdeQueryTool, IdeDiagnosticsTool, IdeStatusTool,
 ] as const;
 
 export const TOOL_CONFIGURATION_PROVIDERS: Provider[] = [
