@@ -43,17 +43,27 @@ describe('NativeCliIntegrationsPanel', () => {
   it('shows connection state and open native sessions', async () => {
     render(<NativeCliIntegrationsPanel />);
 
-    expect(await screen.findByText('Codex App Server (chatgpt-default)')).toBeInTheDocument();
+    expect(await screen.findByText('Codex')).toBeInTheDocument();
     expect(screen.getByText('Online')).toBeInTheDocument();
     expect(screen.getByText('2 open sessions')).toBeInTheDocument();
     expect(screen.getByText(/gpt-5\.6-luna/)).toBeInTheDocument();
   });
 
+  it('checks the integration automatically when the page opens', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/native-cli-integrations/chatgpt-default/check',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+  });
+
   it('checks and resets an integration from the panel', async () => {
     render(<NativeCliIntegrationsPanel />);
-    await screen.findByText('Codex App Server (chatgpt-default)');
+    await screen.findByText('Codex');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Check' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/check',
       expect.objectContaining({ method: 'POST' }),
@@ -68,7 +78,7 @@ describe('NativeCliIntegrationsPanel', () => {
 
   it('toggles inherited Codex MCP access from the integration settings', async () => {
     render(<NativeCliIntegrationsPanel />);
-    await screen.findByText('Codex App Server (chatgpt-default)');
+    await screen.findByText('Codex');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Codex profile MCP servers' }));
 

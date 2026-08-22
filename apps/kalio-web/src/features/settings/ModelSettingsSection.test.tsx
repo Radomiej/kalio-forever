@@ -91,7 +91,7 @@ describe('ModelSettingsSection', () => {
 
     render(<ModelSettingsSection activeRuntimeConfig={activeRuntimeConfig} onRuntimeConfigChange={vi.fn()} />);
 
-    expect(await screen.findByRole('heading', { name: 'Active Provider' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Runtime provider' })).toBeInTheDocument();
     expect(screen.getByText('openai')).toBeInTheDocument();
     expect(screen.getByText('My OpenAI')).toBeInTheDocument();
     expect(screen.getByText('saved provider')).toBeInTheDocument();
