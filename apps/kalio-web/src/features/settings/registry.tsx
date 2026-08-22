@@ -11,7 +11,7 @@ import { TelegramSettings } from './TelegramSettings';
 import { HITLSettingsPanel } from './HITLSettingsPanel';
 import { AuditRetentionSettingsPanel } from './AuditRetentionSettingsPanel';
 import { ConversationSettingsPanel } from './ConversationSettingsPanel';
-import { NativeCliIntegrationsPanel } from './NativeCliIntegrationsPanel';
+import { IntegrationsPanel } from './IntegrationsPanel';
 
 export interface SettingsBlock {
   id: string;
@@ -30,7 +30,7 @@ export const SETTINGS_BLOCKS: SettingsBlock[] = [
   { id: 'web-search',   label: 'Web Search',        icon: <Search size={16} />,   component: WebSearchPanel },
   { id: 'image',        label: 'Image Generation',  icon: <Image size={16} />,    component: ImageSettingsPanel },
   { id: 'tools',        label: 'CLI Agents',        icon: <Wrench size={16} />,   component: CLIAgentPanel },
-  { id: 'native-cli',   label: 'Native CLI integrations', icon: <ServerCog size={16} />, component: NativeCliIntegrationsPanel },
+  { id: 'integrations', label: 'Integrations',          icon: <ServerCog size={16} />, component: IntegrationsPanel },
   { id: 'mcp',          label: 'MCP Servers',       icon: <Plug size={16} />,     component: MCPSettingsPanel },
   { id: 'allowed-paths', label: 'Allowed Paths',    icon: <Folder size={16} />,   component: AllowedPathsPanel },
   { id: 'telegram',     label: 'Telegram',          icon: <Send size={16} />,     component: TelegramSettings },

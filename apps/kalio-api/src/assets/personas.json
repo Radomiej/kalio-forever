@@ -97,7 +97,10 @@
             "persona_list",
             "fs_read",
             "fs_list",
-            "fs_write"
+            "fs_write",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -123,7 +126,10 @@
             "terminal_kill",
             "fs_read",
             "fs_list",
-            "fs_write"
+            "fs_write",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -175,7 +181,10 @@
             "kv_list",
             "fs_read",
             "fs_list",
-            "fs_write"
+            "fs_write",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -255,7 +264,10 @@
             "fs_read",
             "fs_list",
             "fs_write",
-            "design_preview"
+            "design_preview",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"

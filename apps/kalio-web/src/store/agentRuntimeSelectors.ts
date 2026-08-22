@@ -371,7 +371,6 @@ export function selectRuntimeAttentionItems(params: {
         || runtimeState === 'error'
         || architectureState === 'waiting'
         || architectureState === 'error'
-        || Boolean(snapshot)
         || persistedRuntimeEvidence
       )
     ) {

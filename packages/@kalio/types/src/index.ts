@@ -568,6 +568,7 @@ export interface CodeIntelligenceIntegrationStatus {
   writeToolsEnabled: false;
   sandboxSupported: false;
   maxManagedRuntimes: 2;
+  activeRuntimeCount: number;
   idleTimeoutMinutes: 10;
   projects: ProjectIdeStatus[];
 }
@@ -1765,6 +1766,7 @@ export type AuditType =
 export type AuditDomain =
   | 'llm'
   | 'tool'
+  | 'code_intelligence'
   | 'subagent'
   | 'architecture'
   | 'hitl'

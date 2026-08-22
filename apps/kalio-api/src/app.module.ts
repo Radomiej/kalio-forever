@@ -26,6 +26,7 @@ import { HitlModule } from './modules/hitl/hitl.module';
 import { ArchitectureModule } from './modules/architecture/architecture.module';
 import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
 import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
+import { CodeIntelligenceModule } from './modules/code-intelligence/code-intelligence.module';
 
 const shouldServeUi = process.env['KALIO_SERVE_UI'] === 'true';
 const webRoot = resolve(
@@ -76,6 +77,7 @@ const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.htm
     ArchitectureModule,
     AgentFlowModule,
     AgentRuntimeModule,
+    CodeIntelligenceModule,
     HitlModule,
     RelayModule,
   ],
