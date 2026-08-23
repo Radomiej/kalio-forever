@@ -4,14 +4,13 @@ Use this skill for version bumps, desktop/runtime release preparation, GitHub Ac
 
 ## Version source of truth
 
-Kalio keeps the application version synchronized in:
+Kalio keeps the release version synchronized in every application/workspace package.json manifest plus:
 
-- package.json
 - src-tauri/Cargo.toml
 - src-tauri/Cargo.lock
 - src-tauri/tauri.conf.json
 
-Do not edit only one of these files. Run:
+The exact manifest list is owned by scripts/bump-version.mjs. Do not edit only one version file. Run:
 
 ~~~text
 node scripts/bump-version.mjs 1.0.1
