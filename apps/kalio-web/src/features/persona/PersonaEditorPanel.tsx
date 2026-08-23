@@ -3,7 +3,7 @@ import { Check, Trash2, Wrench } from 'lucide-react';
 import type { CreatePersonaDto, Credential, ExecutionProfile, MCPPolicy, Persona, PersonaAvatarToken, UpdatePersonaDto } from '@kalio/types';
 import { getCredentialModels, getCredentials, getExecutionProfiles, resolveDirectExecutionProfile } from '../../services/apiClient';
 import { PersonaAvatar } from './PersonaAvatar';
-import { defaultAvatarFromName } from './persona-avatar.utils';
+import { defaultAvatarFromName, personaToAvatarToken } from './persona-avatar.utils';
 import { PersonaAvatarModal } from './PersonaAvatarModal';
 import { PersonaToolPicker } from './PersonaToolPicker';
 import { ClaudeNativeToolPicker } from './ClaudeNativeToolPicker';
@@ -119,12 +119,7 @@ export function PersonaEditorPanel(props: Props) {
     setAllowedTools(persona.allowedTools ?? []);
     setProviderToolNames(persona.providerToolNames ?? []);
     setMcpPolicy(persona.mcpPolicy ?? 'allow_all');
-    setAvatar({
-      avatarSeed: persona.avatarSeed,
-      avatarVariant: persona.avatarVariant,
-      avatarPaletteKey: persona.avatarPaletteKey,
-      avatarIndex: persona.avatarIndex,
-    });
+    setAvatar(personaToAvatarToken(persona));
     setAvatarManuallySelected(true);
   }, [mode, persona, executionProfiles]);
 

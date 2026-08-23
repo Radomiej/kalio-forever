@@ -100,8 +100,8 @@ describe('PersonaEditorPanel', () => {
         providerToolNames: [],
         mcpPolicy: 'allow_all',
         avatarSeed: 'locked-seed',
-        avatarVariant: 'ring',
-        avatarPaletteKey: 'violet',
+        avatarVariant: 'sunset',
+        avatarPaletteKey: 'ocean',
         avatarIndex: 4,
       });
     });
@@ -124,7 +124,7 @@ describe('PersonaEditorPanel', () => {
     await waitFor(() => {
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
         name: 'Beta Name',
-        avatarSeed: 'alpha#2',
+        avatarSeed: 'avatar-qiabj7-2',
         avatarVariant: 'pixel',
         avatarPaletteKey: 'ocean',
         avatarIndex: 2,

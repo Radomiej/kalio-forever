@@ -113,9 +113,10 @@ describe('PersonaPanel', () => {
         systemPrompt: 'Plan the next step before acting.',
         maxToolAttempts: 60,
         allowedTools: [],
+        providerToolNames: [],
         mcpPolicy: 'allow_all',
         avatarSeed: 'new planner',
-        avatarVariant: 'marble',
+        avatarVariant: 'bauhaus',
         avatarPaletteKey: 'ocean',
         avatarIndex: 0,
       });
@@ -148,9 +149,10 @@ describe('PersonaPanel', () => {
         systemPrompt: 'Trimmed prompt.',
         maxToolAttempts: 75,
         allowedTools: ['vfs_read_file'],
+        providerToolNames: [],
         mcpPolicy: 'allow_all',
         avatarSeed: 'existing persona',
-        avatarVariant: 'marble',
+        avatarVariant: 'pixel',
         avatarPaletteKey: 'ocean',
         avatarIndex: 0,
       });
