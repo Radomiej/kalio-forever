@@ -78,12 +78,12 @@ Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików
 
 - `corepack pnpm --filter kalio-api typecheck` — PASS.
 - `corepack pnpm --filter kalio-api build` — PASS.
-- `corepack pnpm --filter kalio-api test -- src/modules/agent-runtime` — 13 plików, 49 testów PASS.
-- Po aktualizacji SDK do 1.4.0 powtórzono focused backend gate: 13 plików, 49 testów PASS; typecheck i build backendu ponownie PASS.
+- `corepack pnpm --filter kalio-api test -- src/modules/agent-runtime` — 13 plików, 50 testów PASS po regresji kodów wyjścia probe’a.
+- Po aktualizacji SDK do 1.4.0 powtórzono focused backend gate: 13 plików, 50 testów PASS; typecheck i build backendu ponownie PASS.
 - `corepack pnpm --filter kalio-web typecheck` — PASS.
 - `corepack pnpm --filter kalio-web build` — PASS; istnieje tylko ostrzeżenie o dużym chunku Vite.
 - `corepack pnpm --filter kalio-web test -- src/features/persona/persona-runtime-selection.test.ts src/features/chat/runtimeProfileLabel.test.ts src/features/settings/NativeCliIntegrationsPanel.test.tsx` — 3 pliki, 11 testów PASS.
-- API live: `GET http://localhost:3016/api/runtime/devin-cli/status` — `devin.exe`, `3000.2.17`, `authenticated=true`, `acp=true`, `models=[glm-5-2,swe-1-7]`.
+- API live: `GET http://localhost:3016/api/runtime/devin-cli/status` — `devin.exe`, `3000.2.17`, `authenticated=true`, `acp=true`, `models=[glm-5-2,swe-1-7]` in the host stack context.
 - Chrome live: `http://localhost:5188/` → Settings → Integrations; karta hostowego Devina widoczna jako Online/Logged in/ACP available. Wykonano screenshot viewportu jako dowód wizualny w sesji QA.
 - `git diff --cached --check` — PASS; implementacja utworzona jako `b95cab4`, dokumentacja sesji jako `475a185`.
 
@@ -93,6 +93,13 @@ Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików
 - Pełny web suite zakończył się `196 passed`, `5 failed` w `198` plikach; awarie dotyczą testów Execution Graph i nie dotknęły focused testów panelu/persona.
 - Nie wykonano prywatnego repo canary ani deployu zewnętrznego. Dev hot-reload na localhost był już uruchomiony; dowód obejmuje lokalny runtime, nie produkcję.
 - Live ACP odpowiedział `stopReason=end_turn` i streamował komunikację, ale smoke prompt zawierał żądanie literalnej odpowiedzi, którego agent nie zachował dokładnie. Potwierdza to transport/lifecycle, nie jakość instruction-following.
+
+## Post-reset verification
+
+- Po resecie hosta ograniczony probe uruchomiony w sandboxie kończył `devin auth status` kodem `101` z `PermissionDenied` przy tworzeniu rolling loga; nie był to dowód wylogowania.
+- To samo polecenie uruchomione w kontekście hostowego stacka kończy się kodem `0` i zwraca `Logged in (via Devin)` z credential file `%APPDATA%\\devin\\credentials.toml`; ponowne logowanie nie jest wymagane.
+- Parser statusu został utwardzony: tekst probe’a bez kodu `0` nie może oznaczyć Devina jako zalogowanego ani udostępnić modeli/ACP. Dodano regresję dla częściowego outputu po crashu.
+- Weryfikacja API po hot-reloadzie nadal zwraca `authenticated=true`, co jest zgodne z działającym hostowym kontekstem; ograniczony probe pozostaje lokalnym problemem uprawnień procesu, nie stanem sesji Devin.
 
 ## Remaining boundary and production closure
 

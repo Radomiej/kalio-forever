@@ -26,11 +26,16 @@ export interface DevinCliLaunchSpec {
   args: string[];
 }
 
+export interface DevinCliProbeCommand {
+  text: string;
+  exitCode: number;
+}
+
 export interface DevinCliProbeOutput {
-  version: string;
-  authStatus: string;
-  acpHelp: string;
-  models: string;
+  version: DevinCliProbeCommand;
+  authStatus: DevinCliProbeCommand;
+  acpHelp: DevinCliProbeCommand;
+  models: DevinCliProbeCommand;
 }
 
 export interface DevinCliProbe {
@@ -90,11 +95,17 @@ export function resolveDevinCliPath(): string {
 }
 
 export function parseDevinCliProbe(executable: string, output: DevinCliProbeOutput): DevinCliProbe {
-  const versionMatch = output.version.match(/devin\s+([^\s]+)/i);
-  const authenticated = /logged\s+in|authenticated/i.test(output.authStatus)
-    && !/not\s+logged\s+in|unauthenticated|login required/i.test(output.authStatus);
-  const acp = /\bacp\b/i.test(output.acpHelp) && /usage|run|mode|agent/i.test(output.acpHelp);
-  const models = DEVIN_CLI_MODELS.filter((model) => output.models.toLowerCase().includes(model));
+  // Text alone is not trustworthy when the CLI has crashed after writing partial output.
+  const versionMatch = output.version.exitCode === 0 ? output.version.text.match(/devin\s+([^\s]+)/i) : null;
+  const authenticated = output.authStatus.exitCode === 0
+    && /logged\s+in|authenticated/i.test(output.authStatus.text)
+    && !/not\s+logged\s+in|unauthenticated|login required/i.test(output.authStatus.text);
+  const acp = output.acpHelp.exitCode === 0
+    && /\bacp\b/i.test(output.acpHelp.text)
+    && /usage|run|mode|agent/i.test(output.acpHelp.text);
+  const models = output.models.exitCode === 0
+    ? DEVIN_CLI_MODELS.filter((model) => output.models.text.toLowerCase().includes(model))
+    : [];
   return {
     executable,
     version: versionMatch?.[1] ?? null,
@@ -354,14 +365,18 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
     await Promise.all([...this.hosts.values()].map((host) => host.close()));
   }
 
-  private async probeCommand(executable: string, args: string[]): Promise<string> {
+  private async probeCommand(executable: string, args: string[]): Promise<DevinCliProbeCommand> {
     const run = promisify(execFile);
     try {
       const result = await run(executable, args, { timeout: PROBE_TIMEOUT_MS, windowsHide: true, maxBuffer: 256 * 1024 });
-      return `${result.stdout}\n${result.stderr}`;
+      return { text: `${result.stdout}\n${result.stderr}`, exitCode: 0 };
     } catch (error) {
-      const result = error as { stdout?: unknown; stderr?: unknown };
-      return `${typeof result.stdout === 'string' ? result.stdout : ''}\n${typeof result.stderr === 'string' ? result.stderr : ''}`;
+      const result = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+      const exitCode = typeof result.code === 'number' ? result.code : 1;
+      return {
+        text: `${typeof result.stdout === 'string' ? result.stdout : ''}\n${typeof result.stderr === 'string' ? result.stderr : ''}`,
+        exitCode,
+      };
     }
   }
 }
