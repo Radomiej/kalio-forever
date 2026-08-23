@@ -37,8 +37,9 @@ async function bootstrap(): Promise<void> {
   httpAdapter.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
 
   const port = parseInt(process.env['PORT'] ?? '3016', 10);
-  await app.listen(port);
-  logger.log(`kalio-api running on http://localhost:${port}`);
+  const host = process.env['KALIO_HOST']?.trim() || '127.0.0.1';
+  await app.listen(port, host);
+  logger.log(`kalio-api running on http://${host}:${port}`);
 }
 
 bootstrap().catch((err: unknown) => {
