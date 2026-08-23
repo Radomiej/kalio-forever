@@ -102,6 +102,9 @@ function Register-AutostartTask {
 @echo off
 setlocal
 cd /d "$WorkingDirectory"
+call "$Launcher" update --auto --no-launch >> "$LogPath" 2>&1
+set "UPDATE_EXIT=%ERRORLEVEL%"
+if not "%UPDATE_EXIT%"=="0" echo [kalio] updater warning: exit code %UPDATE_EXIT% >> "$LogPath"
 call "$Launcher" serve >> "$LogPath" 2>&1
 "@
     Set-Content -LiteralPath $wrapperPath -Value $wrapperContent -Encoding ASCII
@@ -191,15 +194,28 @@ try {
         if (-not (Test-Path -LiteralPath $launcher)) {
             throw "Runtime launcher is missing: $launcher"
         }
+        $packagedLauncherScript = Join-Path $versionRoot 'bin\kalio-launcher.ps1'
+        if (-not (Test-Path -LiteralPath $packagedLauncherScript -PathType Leaf)) {
+            throw "Stable launcher is missing from the runtime archive: $packagedLauncherScript"
+        }
+        $stableLauncherScript = Join-Path $InstallRoot 'bin\kalio-launcher.ps1'
+        Copy-Item -LiteralPath $packagedLauncherScript -Destination $stableLauncherScript -Force
+        $stableLauncher = Join-Path $InstallRoot 'bin\kalio.cmd'
+        $stableLauncherContent = @'
+@echo off
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0kalio-launcher.ps1" %*
+exit /b %ERRORLEVEL%
+'@
+        Set-Content -LiteralPath $stableLauncher -Value $stableLauncherContent -Encoding ASCII
         if (-not $NoAutostart) {
-            Register-AutostartTask -InstallRoot $InstallRoot -Launcher $launcher -WorkingDirectory (Join-Path $versionRoot 'server') -LogPath (Join-Path $InstallRoot 'logs\autostart.log')
+            Register-AutostartTask -InstallRoot $InstallRoot -Launcher $stableLauncher -WorkingDirectory (Join-Path $InstallRoot 'bin') -LogPath (Join-Path $InstallRoot 'logs\autostart.log')
         }
         Write-Ok "Kalio runtime installed at $InstallRoot"
         Write-Host "  data -> $dataRoot" -ForegroundColor Green
-        Write-Host "  run  -> $launcher" -ForegroundColor Green
+        Write-Host "  run  -> $stableLauncher" -ForegroundColor Green
         if (-not $NoLaunch) {
             Write-Step 'Starting Kalio on localhost'
-            Start-Process -FilePath $launcher -ArgumentList 'start'
+            Start-Process -FilePath $stableLauncher -ArgumentList 'start'
         }
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -42,9 +42,11 @@
     "desktop:build": "node scripts/desktop-build.mjs",
     "desktop:updater-config": "node scripts/tauri-updater-config.mjs",
     "release:tauri-manifest": "node scripts/generate-tauri-latest-json.mjs",
+    "release:runtime-manifest": "node scripts/generate-runtime-release-manifest.mjs",
     "release:third-party-notices": "node scripts/generate-third-party-notices.mjs",
     "runtime:package": "node scripts/build-runtime-package.mjs",
     "runtime:package:bun": "node scripts/build-runtime-package.mjs --runtime bun",
+    "runtime:update": "node scripts/kalio-updater.mjs",
     "runtime:install:release:windows": "powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1"
   },
   "devDependencies": {

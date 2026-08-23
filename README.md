@@ -113,8 +113,20 @@ For the Bun runtime:
 curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh && bash /tmp/kalio-install.sh --runtime bun
 ~~~
 
-Run the same command again to upgrade to the latest published version. The installer
-refuses to replace a runtime while it is running and preserves the data directory.
+On Windows, an installed runtime can update itself through a separate helper process:
+
+~~~powershell
+& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
+~~~
+
+The safe command defers while Kalio is running. An explicit `--force` request stops
+only this installation's recorded process tree, downloads the matching Node or Bun
+archive, verifies the runtime manifest and SHA-256, switches versions atomically,
+health-checks the new process, and rolls back on failure. The Scheduled Task performs
+the same check without force at user sign-in. User data is preserved.
+
+For an older installation or a repair, run the release installer again. It refuses
+to replace a runtime while it is running and preserves the data directory.
 
 The Windows desktop build packages the web client, the production API, and a
 Node.js runtime into a per-user Tauri installer. The backend starts on loopback

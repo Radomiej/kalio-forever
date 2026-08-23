@@ -60,6 +60,8 @@ jobs:
 
       - name: Build Windows runtime archive
         shell: pwsh
+        env:
+          KALIO_RUNTIME_UPDATE_PUBLIC_KEY: ${{ vars.KALIO_RUNTIME_UPDATE_PUBLIC_KEY }}
         run: |
           $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source
           $bunPath = (Get-Command bun -CommandType Application | Select-Object -First 1).Source
@@ -181,6 +183,8 @@ jobs:
 
       - name: Build Linux runtime archive
         shell: bash
+        env:
+          KALIO_RUNTIME_UPDATE_PUBLIC_KEY: ${{ vars.KALIO_RUNTIME_UPDATE_PUBLIC_KEY }}
         run: |
           export KALIO_NODE_BINARY="$(command -v node)"
           export KALIO_BUN_BINARY="$(command -v bun)"
@@ -290,6 +294,14 @@ jobs:
           node scripts/generate-tauri-latest-json.mjs release-assets release-assets/latest.json
           if ($LASTEXITCODE -ne 0) { throw 'Tauri updater manifest generation failed' }
 
+      - name: Generate standalone runtime update manifest
+        shell: pwsh
+        env:
+          KALIO_RUNTIME_SIGNING_PRIVATE_KEY: ${{ secrets.KALIO_RUNTIME_SIGNING_PRIVATE_KEY }}
+        run: |
+          node scripts/generate-runtime-release-manifest.mjs release-assets release-assets/kalio-runtime-manifest.json
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone runtime manifest generation failed' }
+
       - name: Create or update draft GitHub release
         shell: pwsh
         env:
@@ -307,4 +319,3 @@ jobs:
           } else {
             gh release create $tag --draft --generate-notes --title "Kalio $tag" @assets
           }
-

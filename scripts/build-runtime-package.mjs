@@ -29,6 +29,9 @@ const apiDist = join(root, 'apps', 'kalio-api', 'dist');
 const webDist = join(root, 'apps', 'kalio-web', 'dist');
 const bootstrapSource = join(root, 'scripts', 'runtime-server-bootstrap.mjs');
 const cliSource = join(root, 'scripts', 'kalio-cli.mjs');
+const updaterSource = join(root, 'scripts', 'kalio-updater.mjs');
+const updaterHelpersSource = join(root, 'scripts', 'kalio-updater-helpers.mjs');
+const launcherSource = join(root, 'scripts', 'kalio-launcher.ps1');
 
 function run(command, commandArgs, cwd = root) {
   const currentPath = process.env.PATH ?? process.env.Path ?? '';
@@ -293,6 +296,18 @@ await writeFile(
   'utf8',
 );
 await cp(cliSource, join(stageRoot, 'bin', 'kalio-cli.mjs'));
+await cp(updaterSource, join(stageRoot, 'bin', 'kalio-updater.mjs'));
+await cp(updaterHelpersSource, join(stageRoot, 'bin', 'kalio-updater-helpers.mjs'));
+if (platform === 'windows') {
+  await cp(launcherSource, join(stageRoot, 'bin', 'kalio-launcher.ps1'));
+}
+if (process.env.KALIO_RUNTIME_UPDATE_PUBLIC_KEY?.trim()) {
+  await writeFile(
+    join(stageRoot, 'bin', 'runtime-update-public-key.pem'),
+    process.env.KALIO_RUNTIME_UPDATE_PUBLIC_KEY.trim() + '\n',
+    'utf8',
+  );
+}
 
 const runtimeName = runtime === 'bun'
   ? platform === 'windows' ? 'kalio-bun.exe' : 'kalio-bun'
@@ -364,4 +379,3 @@ const archiveArgs = platform === 'windows'
 run('tar', archiveArgs);
 await rm(stagingParent, { recursive: true, force: true });
 console.log('[kalio] runtime package created: ' + archive);
-

@@ -150,6 +150,49 @@ async function doctor() {
   }, null, 2));
 }
 
+async function update(args) {
+  const home = getHome();
+  const { current, versionRoot } = await readCurrent(home);
+  const updaterPath = join(versionRoot, 'bin', 'kalio-updater.mjs');
+  const runtimeName = current.runtime === 'bun'
+    ? process.platform === 'win32' ? 'kalio-bun.exe' : 'kalio-bun'
+    : process.platform === 'win32' ? 'kalio-node.exe' : 'kalio-node';
+  const runtimePath = join(versionRoot, 'bin', runtimeName);
+  await stat(updaterPath);
+  await stat(runtimePath);
+
+  const auto = args.includes('--auto');
+  const child = spawn(runtimePath, [updaterPath, ...args], {
+    cwd: versionRoot,
+    detached: !auto,
+    env: {
+      ...process.env,
+      KALIO_HOME: home,
+      KALIO_DATA_ROOT: join(home, 'data'),
+    },
+    stdio: auto ? 'inherit' : 'ignore',
+    windowsHide: !auto,
+  });
+  if (!auto) {
+    child.unref();
+    console.log('[kalio] update started in a separate process; see logs/updater.log');
+    return;
+  }
+  const exitCode = await new Promise((resolveExit) => {
+    child.once('error', (error) => {
+      console.error('[kalio] updater spawn failed:', error);
+      resolveExit(1);
+    });
+    child.once('exit', (code, signal) => {
+      if (signal) {
+        console.error('[kalio] updater exited with signal ' + signal);
+      }
+      resolveExit(code ?? 1);
+    });
+  });
+  process.exitCode = exitCode;
+}
+
 async function uninstall(args) {
   const home = getHome();
   const purgeData = args.includes('--purge-data');
@@ -176,6 +219,8 @@ const [command = 'start', ...args] = process.argv.slice(2);
 try {
   if (command === 'doctor') {
     await doctor();
+  } else if (command === 'update') {
+    await update(args);
   } else if (command === 'uninstall') {
     await uninstall(args);
   } else if (command === 'serve') {
@@ -183,10 +228,9 @@ try {
   } else if (command === 'start' || command === 'run') {
     await runServer(!args.includes('--no-open'));
   } else {
-    throw new Error('Unknown command: ' + command + '. Use start, serve, doctor, or uninstall.');
+    throw new Error('Unknown command: ' + command + '. Use start, serve, update, doctor, or uninstall.');
   }
 } catch (error) {
   console.error('[kalio] ' + (error instanceof Error ? error.message : String(error)));
   process.exitCode = 1;
 }
-

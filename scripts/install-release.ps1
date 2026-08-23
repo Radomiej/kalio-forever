@@ -48,9 +48,42 @@ try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
         $archivePath = Join-Path $tempRoot $assetName
+        $manifestPath = Join-Path $tempRoot 'kalio-runtime-manifest.json'
         $installerPath = Join-Path $tempRoot 'install.ps1'
         Write-Host "[kalio] downloading $assetName from $tag" -ForegroundColor Cyan
         Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$assetName" -OutFile $archivePath
+        $manifestDownloaded = $false
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/kalio-runtime-manifest.json" -OutFile $manifestPath
+            $manifestDownloaded = $true
+        } catch {
+            Write-Warning "Runtime manifest is unavailable for $tag; continuing without an archive hash check"
+        }
+        if ($manifestDownloaded) {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            if ($manifest.schema -ne 1 -or [string]::IsNullOrWhiteSpace([string]$manifest.payload)) {
+                throw 'Runtime update manifest is invalid'
+            }
+            $payloadBytes = [Convert]::FromBase64String([string]$manifest.payload)
+            $payload = [Text.Encoding]::UTF8.GetString($payloadBytes) | ConvertFrom-Json
+            if ([string]$payload.tag -ne $tag -or [string]$payload.version -ne $releaseVersion) {
+                throw 'Runtime update manifest does not match the selected GitHub Release'
+            }
+            $hashEntry = @($payload.assets | Where-Object { $_.name -eq $assetName }) | Select-Object -First 1
+            if ($null -eq $hashEntry -or ([string]$hashEntry.sha256) -notmatch '^[A-Fa-f0-9]{64}$') {
+                throw "Runtime update manifest has no valid SHA-256 entry for $assetName"
+            }
+            $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne ([string]$hashEntry.sha256).ToLowerInvariant()) {
+                throw "Runtime archive SHA-256 mismatch: expected $($hashEntry.sha256), got $actualHash"
+            }
+            Write-Host '[kalio] runtime archive SHA-256 verified' -ForegroundColor Green
+            if ($manifest.signature) {
+                Write-Warning 'Runtime manifest signature is present; full Ed25519 trust verification is enabled after the signed public key is installed'
+            } else {
+                Write-Warning 'Runtime manifest is unsigned; archive integrity is protected by HTTPS and SHA-256 only'
+            }
+        }
         Invoke-WebRequest -UseBasicParsing -Uri "$rawBaseUrl/scripts/install.ps1" -OutFile $installerPath
 
         $installerArgs = @(
