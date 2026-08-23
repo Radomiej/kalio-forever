@@ -169,6 +169,7 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 - Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`
 - Prod (built dist): `pnpm prod` / `pnpm prod:rebuild` (API :4016, web :6188)
 - Windows user install: `scripts/install.ps1` → Scheduled Task autostart after reboot
+- Release version sync: `node scripts/bump-version.mjs <MAJOR.MINOR.PATCH>` or `node scripts/bump-version.mjs --check`
 
 Full local workflow: `docs/local-dev-guide.md`. User install: `docs/quickstart-user.md`.
 
@@ -193,6 +194,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - Treat CLI agents, subagents, and AgentFlow children as one child-execution model whenever the UI/runtime needs shared lifecycle handling.
 - For chat/appflow changes, verify FE-first parity across Talk, Session Panel, Canvas, and Execution Graph instead of proving behavior only through API polling.
 - For architecture/runtime work, load `kalio-architecture-runtime-guard`; keep the repo copy aligned at `docs/agent-skills/kalio-architecture-runtime-guard.md`.
+- For release/versioning work, load `kalio-release`; keep the repo copy aligned at `docs/agent-skills/kalio-release.md` and use the version sync script instead of editing version files individually.
 - For critical architecture/runtime work, keep bug-hunter agents running by default: two backend-focused hunters, one frontend-focused hunter, plus one coverage guardian tracking meaningful 80%+ FE/BE coverage. Scope them to disjoint files, require real regression evidence, and do not accept coverage-only or mock-only tests that miss user-visible behavior.
 - **File size hard limit: 500 LOC.** Any file approaching this must be split before adding more code.
   - React components: extract sub-components to co-located files (`ComponentName.SubPart.tsx` or `components/` subfolder)
@@ -232,6 +234,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.
 - Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/sub-agentflow-target-architecture.md before implementing it.
 - Repo copy of the manual QA skill lives at `docs/agent-skills/kalio-manual-qa.md`; keep it aligned with the installed `kalio-manual-qa` skill.
+- Release version is a four-file contract (`package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`); run `node scripts/bump-version.mjs --check` in release workflow gates.
 - When testing generated demo output, route QA defects back through Kalio/AgentFlow resume context; do not patch the target repo manually.
 - Before any live LLM/CLI/real-project AgentFlow run, pass the local gate first: focused regression tests, affected app typecheck, and affected app build where a build script exists.
 - Before any paid/live AgentFlow run, complete `docs/agentflow-paid-run-readiness-checklist.md`; mock E2E and local gates are mandatory, not optional.
