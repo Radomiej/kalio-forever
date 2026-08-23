@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { ToolMeta } from '@kalio/types';
 import type { ToolDispatchService } from '../chat/tool-dispatch.service';
+import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 import { KalioMcpBridgeHttpError, KalioMcpBridgeService } from './kalio-mcp-bridge.service';
 
 const tools: ToolMeta[] = [
@@ -31,18 +32,22 @@ describe('KalioMcpBridgeService', () => {
   let bridge: KalioMcpBridgeService;
   let httpServer: ReturnType<typeof createServer>;
   let baseUrl: string;
+  let contextRegistry: KalioMcpBridgeContextRegistry;
 
   beforeEach(async () => {
     process.env['KALIO_MCP_BRIDGE_TOKEN'] = 'test-bridge-token';
     const dispatch = {
       getToolMetas: vi.fn(() => tools),
-      dispatch: vi.fn(async (callId: string, _name: string, args: Record<string, unknown>, ctx: { sessionId: string }) => ({
+      dispatch: vi.fn(async (callId: string, _name: string, args: Record<string, unknown>, ctx: { sessionId: string; turnId?: string; promptMessageId?: string }) => ({
         callId,
         status: 'success' as const,
-        data: { args, sessionId: ctx.sessionId },
+        data: { args, sessionId: ctx.sessionId, turnId: ctx.turnId, promptMessageId: ctx.promptMessageId },
       })),
     } as unknown as ToolDispatchService;
-    bridge = new KalioMcpBridgeService(dispatch);
+    contextRegistry = new KalioMcpBridgeContextRegistry();
+    bridge = new KalioMcpBridgeService(dispatch, {
+      getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null),
+    } as never, contextRegistry);
     httpServer = createServer((request, response) => {
       void bridge.handleRequest(request, response).catch((error) => {
         const status = error instanceof KalioMcpBridgeHttpError ? error.statusCode : 500;
@@ -134,11 +139,60 @@ describe('KalioMcpBridgeService', () => {
     await client.close();
   });
 
-  it('fails closed when no bridge token is configured', () => {
+  it('uses the current Kalio turn context while reusing an ACP MCP session', async () => {
+    contextRegistry.activate({
+      sessionId: 'session-dynamic',
+      turnId: 'turn-2',
+      promptMessageId: 'prompt-2',
+    });
+    const client = new Client({ name: 'kalio-bridge-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: {
+        headers: {
+          Authorization: 'Bearer test-bridge-token',
+          'x-kalio-session-id': 'session-dynamic',
+          'x-kalio-tool-names': 'vfs_read',
+          'x-kalio-bridge-client': 'devin-acp',
+        },
+      },
+    });
+    await client.connect(transport);
+    const result = await client.callTool({ name: 'vfs_read', arguments: { filePath: 'notes.txt' } });
+    const textContent = findTextContent(result.content);
+    expect(JSON.parse(textContent?.text ?? '')).toMatchObject({
+      sessionId: 'session-dynamic',
+      turnId: 'turn-2',
+      promptMessageId: 'prompt-2',
+    });
+    await client.close();
+  });
+
+  it('fails closed for managed runtimes without an active Kalio turn', async () => {
+    const client = new Client({ name: 'kalio-bridge-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: {
+        headers: {
+          Authorization: 'Bearer test-bridge-token',
+          'x-kalio-session-id': 'session-no-active-turn',
+          'x-kalio-tool-names': 'vfs_read',
+          'x-kalio-bridge-client': 'devin-acp',
+        },
+      },
+    });
+    await client.connect(transport);
+    const result = await client.callTool({ name: 'vfs_read', arguments: { filePath: 'notes.txt' } });
+    expect(result).toMatchObject({ isError: true, content: [{ type: 'text' }] });
+    expect(findTextContent(result.content)?.text).toContain('No active Kalio turn context');
+    await client.close();
+  });
+
+  it('fails closed when no bridge token is configured', async () => {
     delete process.env['KALIO_MCP_BRIDGE_TOKEN'];
     const dispatch = { getToolMetas: vi.fn() } as unknown as ToolDispatchService;
-    const unconfigured = new KalioMcpBridgeService(dispatch);
-    expect(() => unconfigured.authorize({})).toThrowError(
+    const unconfigured = new KalioMcpBridgeService(dispatch, {
+      getToken: vi.fn(async () => null),
+    } as never, new KalioMcpBridgeContextRegistry());
+    await expect(unconfigured.authorize({})).rejects.toThrowError(
       expect.objectContaining({ statusCode: 503 }),
     );
   });

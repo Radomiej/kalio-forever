@@ -7,6 +7,8 @@ import { buildKalioMcpBridgeHttpConfig } from '../../common/kalio-mcp-bridge-con
 import { DevinAcpHostRegistry, isDevinCliModel, type DevinAcpHost, type DevinAcpSession, type DevinAcpPromptInput } from './devin-cli-acp.host';
 import { classifyDevinNativeTool, type DevinNativeToolsPolicy } from './devin-native-tools';
 import { DevinNativeToolsPolicyService } from './devin-native-tools-policy.service';
+import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-token.service';
+import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
@@ -15,6 +17,8 @@ export class DevinCliAcpLLMSource implements ILLMSource {
   constructor(
     private readonly registry: DevinAcpHostRegistry,
     private readonly nativeToolsPolicy: DevinNativeToolsPolicyService,
+    private readonly mcpBridgeToken: KalioMcpBridgeTokenService,
+    private readonly mcpBridgeContext: KalioMcpBridgeContextRegistry,
   ) {}
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
@@ -26,20 +30,14 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model || '(empty)'}.`);
     const cwd = params.cwd?.trim() || process.env['WORKSPACE_ROOT']?.trim() || process.cwd();
     const nativeToolsPolicy = await this.nativeToolsPolicy.get();
-    const bridgeConfig = buildKalioMcpBridgeHttpConfig({
+    const bridgeToken = await this.mcpBridgeToken.getToken();
+    const bridgeContext = {
       sessionId: params.sessionId,
       vfsSessionId: params.sessionId,
-      turnId: params.runId,
-      promptMessageId: params.messageId,
       allowedToolNames: params.tools.map((tool) => tool.name),
-    });
-    const mcpServers = bridgeConfig ? [bridgeConfig] : [];
-    await this.audit(params, {
-      eventName: 'devin-cli-acp.mcp_bridge',
-      status: 'completed',
-      data: { enabled: Boolean(bridgeConfig), toolCount: params.tools.length, nativeToolsPolicy },
-    });
-
+      bridgeClient: 'devin-acp' as const,
+    };
+    const bridgeConfig = buildKalioMcpBridgeHttpConfig(bridgeContext, bridgeToken);
     if (params.tools.length > 0 || (params.providerToolNames?.length ?? 0) > 0 || params.toolResultChannel) {
       await this.audit(params, {
         eventName: 'devin-cli-acp.tools.omitted',
@@ -56,6 +54,19 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     let session: DevinAcpSession | undefined;
     try {
       host = await this.registry.get(model);
+      const httpMcpSupported = bridgeConfig ? await host.supportsHttpMcp() : false;
+      const mcpServers = bridgeConfig && httpMcpSupported ? [bridgeConfig] : [];
+      await this.audit(params, {
+        eventName: 'devin-cli-acp.mcp_bridge',
+        status: 'completed',
+        data: {
+          enabled: Boolean(mcpServers.length),
+          requested: Boolean(bridgeConfig),
+          httpMcpSupported,
+          toolCount: params.tools.length,
+          nativeToolsPolicy,
+        },
+      });
       session = await host.ensureSession(cwd, params.externalThreadId, mcpServers);
       if (!params.externalThreadId) {
         await params.onExternalThreadBound?.(session.sessionId, { processEpoch: session.processEpoch });
@@ -81,6 +92,12 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       };
       const promptInput: DevinAcpPromptInput = {
         signal: params.abortSignal,
+        onTurnStart: () => this.mcpBridgeContext.activate({
+          sessionId: params.sessionId,
+          vfsSessionId: params.sessionId,
+          turnId: params.runId,
+          promptMessageId: params.messageId,
+        }),
         onText: (text) => enqueue({ type: 'text_delta', delta: text }),
         onThought: (text) => enqueue({ type: 'thinking_delta', delta: text }),
         onToolActivity: (activity) => {

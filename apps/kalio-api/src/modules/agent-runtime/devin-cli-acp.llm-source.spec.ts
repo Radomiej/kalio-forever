@@ -25,12 +25,19 @@ describe('DevinCliAcpLLMSource', () => {
     });
     const host = {
       ensureSession: vi.fn(async () => ({ sessionId: 'acp-session-1', cwd: 'C:\\fixture', processEpoch: 'epoch-1', resumed: false })),
+      supportsHttpMcp: vi.fn(async () => true),
       prompt,
     };
     const registry = { get: vi.fn(async () => host) };
+    const bridgeContext = { set: vi.fn(), clear: vi.fn() };
     const audits: Array<{ eventName?: string }> = [];
     const bound = vi.fn(async () => undefined);
-    const source = new DevinCliAcpLLMSource(registry as never, { get: vi.fn(async () => nativeToolsPolicy) } as never);
+    const source = new DevinCliAcpLLMSource(
+      registry as never,
+      { get: vi.fn(async () => nativeToolsPolicy) } as never,
+      { getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null) } as never,
+      bridgeContext as never,
+    );
     const profile: ExecutionProfile = {
       id: 'devin-local-glm-5-2',
       name: 'Devin · GLM-5.2',
@@ -72,12 +79,18 @@ describe('DevinCliAcpLLMSource', () => {
     let receivedPrompt = '';
     const host = {
       ensureSession: vi.fn(async () => ({ sessionId: 'acp-session-2', cwd: 'C:\\fixture', processEpoch: 'epoch-2', resumed: true })),
+      supportsHttpMcp: vi.fn(async () => true),
       prompt: vi.fn(async (_id: string, text: string) => {
         receivedPrompt = text;
         return 'cancelled' as const;
       }),
     };
-    const source = new DevinCliAcpLLMSource({ get: vi.fn(async () => host) } as never, { get: vi.fn(async () => nativeToolsPolicy) } as never);
+    const source = new DevinCliAcpLLMSource(
+      { get: vi.fn(async () => host) } as never,
+      { get: vi.fn(async () => nativeToolsPolicy) } as never,
+      { getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null) } as never,
+      { set: vi.fn(), clear: vi.fn() } as never,
+    );
     const profile: ExecutionProfile = {
       id: 'devin-local-swe-1-7', name: 'Devin · SWE-1.7', kind: 'devin-cli-acp', model: 'swe-1-7',
       approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
@@ -95,9 +108,15 @@ describe('DevinCliAcpLLMSource', () => {
     const ensureSession = vi.fn(async () => ({ sessionId: 'acp-session-3', cwd: 'C:\\fixture', processEpoch: 'epoch-3', resumed: false }));
     const host = {
       ensureSession,
+      supportsHttpMcp: vi.fn(async () => true),
       prompt: vi.fn(async () => 'cancelled' as const),
     };
-    const source = new DevinCliAcpLLMSource({ get: vi.fn(async () => host) } as never, { get: vi.fn(async () => nativeToolsPolicy) } as never);
+    const source = new DevinCliAcpLLMSource(
+      { get: vi.fn(async () => host) } as never,
+      { get: vi.fn(async () => nativeToolsPolicy) } as never,
+      { getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null) } as never,
+      { set: vi.fn(), clear: vi.fn() } as never,
+    );
     await collect(source.stream({
       messages: [{ role: 'user', content: 'bridge test' }],
       tools: [{ name: 'vfs_read', description: 'read', parameters: { type: 'object' }, requiresConfirmation: false }],
@@ -118,6 +137,9 @@ describe('DevinCliAcpLLMSource', () => {
         { name: 'x-kalio-tool-names', value: 'vfs_read' },
       ]),
     }]);
+    const calls = ensureSession.mock.calls as unknown as Array<[string, string | undefined, Array<{ headers: Array<{ name: string }> }>]>;
+    const config = calls[0]?.[2]?.[0];
+    expect(config.headers.map((header) => header.name)).not.toEqual(expect.arrayContaining(['x-kalio-turn-id', 'x-kalio-prompt-message-id']));
     delete process.env['KALIO_MCP_BRIDGE_TOKEN'];
     delete process.env['PORT'];
   });

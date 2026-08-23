@@ -28,7 +28,7 @@ const DEVIN_STATUS = {
 };
 
 const DEVIN_SETTINGS = {
-  mcpBridge: { enabled: true, transport: 'streamable-http' },
+  mcpBridge: { enabled: true, configuredBy: 'settings', transport: 'streamable-http' },
   nativeTools: { filesystem: false, web: false, terminal: false, source: 'default' },
 };
 
@@ -46,7 +46,7 @@ describe('NativeCliIntegrationsPanel', () => {
         return new Response(JSON.stringify(DEVIN_SETTINGS), { status: 200 });
       }
       if (url === '/api/runtime/devin-cli/settings' && init?.method === 'PATCH') {
-        const body = JSON.parse(String(init.body)) as Record<string, boolean>;
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         return new Response(JSON.stringify({
           ...DEVIN_SETTINGS,
           nativeTools: {
@@ -135,6 +135,39 @@ describe('NativeCliIntegrationsPanel', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ filesystem: true }),
+      }),
+    ));
+  });
+
+  it('generates a local Devin bridge token from Settings', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate local token' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/devin-cli/settings',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ generateMcpBridgeToken: true }),
+      }),
+    ));
+  });
+
+  it('saves a manual Devin bridge token override from Settings', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+
+    fireEvent.change(screen.getByLabelText('Kalio MCP bridge token override'), {
+      target: { value: 'manual-bridge-token-123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save override' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/devin-cli/settings',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ mcpBridgeToken: 'manual-bridge-token-123' }),
       }),
     ));
   });

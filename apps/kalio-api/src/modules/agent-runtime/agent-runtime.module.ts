@@ -17,9 +17,10 @@ import { NativeApprovalService } from './native-approval.service';
 import { NativeCliIntegrationController } from './native-cli-integration.controller';
 import { CodexMcpPolicyService } from './codex-mcp-policy.service';
 import { DevinNativeToolsPolicyService } from './devin-native-tools-policy.service';
+import { KalioMcpBridgeContextModule } from '../../common/kalio-mcp-bridge-context.module';
 
 @Module({
-  imports: [DatabaseModule, CLIAgentModule, CredentialsModule],
+  imports: [DatabaseModule, CLIAgentModule, CredentialsModule, KalioMcpBridgeContextModule],
   controllers: [ExecutionProfileController, NativeCliIntegrationController, DevinIntegrationController, DevinCliIntegrationController],
   providers: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
   exports: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],

@@ -20,7 +20,7 @@ type NativeCliIntegrationStatus = {
   };
 };
 
-type IntegrationAction = `${string}:check` | `${string}:reset` | `${string}:mcp` | `${string}:devin-tools`;
+type IntegrationAction = `${string}:check` | `${string}:reset` | `${string}:mcp` | `${string}:devin-tools` | `${string}:mcp-bridge`;
 
 type DevinCliStatus = {
   executable: string;
@@ -40,7 +40,7 @@ type DevinNativeToolsPolicy = {
 };
 
 type DevinCliSettings = {
-  mcpBridge: { enabled: boolean; transport: 'streamable-http'; url: string };
+  mcpBridge: { enabled: boolean; configuredBy: 'settings' | 'environment' | 'none'; transport: 'streamable-http'; url: string };
   nativeTools: DevinNativeToolsPolicy;
 };
 
@@ -51,6 +51,7 @@ export function NativeCliIntegrationsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [devinCli, setDevinCli] = useState<DevinCliStatus | null>(null);
   const [devinSettings, setDevinSettings] = useState<DevinCliSettings | null>(null);
+  const [devinTokenOverride, setDevinTokenOverride] = useState('');
 
   const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
     setLoading(true);
@@ -201,6 +202,32 @@ export function NativeCliIntegrationsPanel() {
     }
   };
 
+  const updateDevinBridgeToken = async (payload: { mcpBridgeToken?: string; generateMcpBridgeToken?: boolean; clearMcpBridgeToken?: boolean }) => {
+    const actionId = 'devin:mcp-bridge' as IntegrationAction;
+    setAction(actionId);
+    setError(null);
+    try {
+      const response = await fetch('/api/runtime/devin-cli/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch((err: unknown) => {
+          console.debug('[NativeCliIntegrationsPanel] Devin bridge token response was not JSON', err);
+          return null;
+        }) as { message?: string } | null;
+        throw new Error(body?.message ?? `${response.status}: ${response.statusText}`);
+      }
+      setDevinSettings(await response.json() as DevinCliSettings);
+      setDevinTokenOverride('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update the Devin MCP bridge token.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   return (
     <section className="flex flex-col gap-4" aria-labelledby="native-app-servers-title">
       <div className="flex items-center justify-between gap-4">
@@ -225,7 +252,11 @@ export function NativeCliIntegrationsPanel() {
         loading={loading && devinCli === null}
         onRefresh={() => { void loadDevinCliStatus(); void loadDevinCliSettings(); }}
         onUpdateNativeTool={(category, enabled) => void updateDevinNativeTool(category, enabled)}
+        tokenOverride={devinTokenOverride}
+        onTokenOverrideChange={setDevinTokenOverride}
+        onUpdateBridgeToken={(payload) => void updateDevinBridgeToken(payload)}
         updating={action?.endsWith(':devin-tools') ?? false}
+        bridgeUpdating={action === 'devin:mcp-bridge'}
       />
 
       {loading && integrations.length === 0 ? (
@@ -336,14 +367,22 @@ function DevinCliCard({
   loading,
   onRefresh,
   onUpdateNativeTool,
+  tokenOverride,
+  onTokenOverrideChange,
+  onUpdateBridgeToken,
   updating,
+  bridgeUpdating,
 }: {
   status: DevinCliStatus | null;
   settings: DevinCliSettings | null;
   loading: boolean;
   onRefresh: () => void;
   onUpdateNativeTool: (category: keyof DevinNativeToolsPolicy, enabled: boolean) => void;
+  tokenOverride: string;
+  onTokenOverrideChange: (value: string) => void;
+  onUpdateBridgeToken: (payload: { mcpBridgeToken?: string; generateMcpBridgeToken?: boolean; clearMcpBridgeToken?: boolean }) => void;
   updating: boolean;
+  bridgeUpdating: boolean;
 }) {
   const online = status?.authenticated === true && status.acp === true;
   return (
@@ -375,10 +414,56 @@ function DevinCliCard({
           <span className={`rounded-md px-2 py-1 ${settings?.mcpBridge.enabled ? 'bg-success/10 text-success' : 'bg-base-200/70'}`}>
             {settings?.mcpBridge.enabled ? 'Kalio MCP bridge enabled' : 'Kalio MCP bridge disabled'}
           </span>
+          <span className="rounded-md bg-base-200/70 px-2 py-1">
+            Token: {settings?.mcpBridge.configuredBy === 'settings' ? 'Settings' : settings?.mcpBridge.configuredBy === 'environment' ? 'environment fallback' : 'not configured'}
+          </span>
         </div>
         <p className="text-xs text-base-content/50">
-          Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Changing a switch resets active Devin hosts.
+          Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Token actions and switches reset active Devin hosts.
         </p>
+        <div className="rounded-lg border border-base-300 bg-base-200/20 p-3">
+          <div className="mb-2 text-sm font-medium">Kalio MCP bridge token</div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              className="input input-bordered input-sm min-w-0 flex-1 font-mono"
+              value={tokenOverride}
+              onChange={(event) => onTokenOverrideChange(event.target.value)}
+              placeholder="Override token (16+ characters)"
+              aria-label="Kalio MCP bridge token override"
+              disabled={bridgeUpdating}
+            />
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              disabled={bridgeUpdating || tokenOverride.trim().length < 16}
+              onClick={() => onUpdateBridgeToken({ mcpBridgeToken: tokenOverride })}
+            >
+              Save override
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn btn-xs btn-primary"
+              disabled={bridgeUpdating}
+              onClick={() => onUpdateBridgeToken({ generateMcpBridgeToken: true })}
+            >
+              Generate local token
+            </button>
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              disabled={bridgeUpdating || settings?.mcpBridge.configuredBy !== 'settings'}
+              onClick={() => onUpdateBridgeToken({ clearMcpBridgeToken: true })}
+            >
+              Use environment fallback
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-base-content/45">
+            The token is stored locally and never returned by the status endpoint. Clearing the override reveals the environment value, if configured.
+          </p>
+        </div>
         {settings && (
           <div className="grid gap-2 sm:grid-cols-3" aria-label="Devin native tools">
             {(['filesystem', 'web', 'terminal'] as const).map((category) => (

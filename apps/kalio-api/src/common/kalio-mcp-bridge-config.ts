@@ -11,6 +11,7 @@ export interface KalioMcpBridgeContext {
   turnId?: string;
   promptMessageId?: string;
   allowedToolNames?: readonly string[];
+  bridgeClient?: 'devin-acp';
 }
 
 export function kalioMcpBridgeUrl(): string {
@@ -18,18 +19,20 @@ export function kalioMcpBridgeUrl(): string {
   return `http://127.0.0.1:${port}/api/mcp/bridge`;
 }
 
-export function isKalioMcpBridgeEnabled(): boolean {
-  return Boolean(process.env['KALIO_MCP_BRIDGE_TOKEN']?.trim());
+export function isKalioMcpBridgeEnabled(token?: string | null): boolean {
+  const resolved = token === undefined ? process.env['KALIO_MCP_BRIDGE_TOKEN'] : token;
+  return Boolean(resolved?.trim());
 }
 
 export function buildKalioMcpBridgeHttpConfig(
   context: KalioMcpBridgeContext,
+  token?: string | null,
 ): KalioMcpBridgeHttpConfig | null {
-  const token = process.env['KALIO_MCP_BRIDGE_TOKEN']?.trim();
-  if (!token) return null;
+  const resolvedToken = (token === undefined ? process.env['KALIO_MCP_BRIDGE_TOKEN'] : token)?.trim();
+  if (!resolvedToken) return null;
 
   const headers: Array<{ name: string; value: string }> = [
-    { name: 'Authorization', value: `Bearer ${token}` },
+    { name: 'Authorization', value: `Bearer ${resolvedToken}` },
     { name: 'x-kalio-session-id', value: context.sessionId },
   ];
   addHeader(headers, 'x-kalio-vfs-session-id', context.vfsSessionId);
@@ -37,6 +40,9 @@ export function buildKalioMcpBridgeHttpConfig(
   addHeader(headers, 'x-kalio-prompt-message-id', context.promptMessageId);
   if (context.allowedToolNames) {
     headers.push({ name: 'x-kalio-tool-names', value: context.allowedToolNames.join(',') });
+  }
+  if (context.bridgeClient) {
+    headers.push({ name: 'x-kalio-bridge-client', value: context.bridgeClient });
   }
 
   return { type: 'http', name: 'kalio', url: kalioMcpBridgeUrl(), headers };
