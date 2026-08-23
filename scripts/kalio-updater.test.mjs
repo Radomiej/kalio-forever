@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import {
   isVersionNewer,
+  isRuntimeProcessOwned,
   verifyUpdateSignature,
 } from './kalio-updater.mjs';
 import { createRuntimeManifest } from './generate-runtime-release-manifest.mjs';
@@ -15,6 +16,24 @@ test('updater compares release versions without treating an equal version as new
   assert.equal(isVersionNewer('1.1.0', '1.0.0'), true);
   assert.equal(isVersionNewer('1.0.0', '1.0.0'), false);
   assert.equal(isVersionNewer('0.9.0', '1.0.0'), false);
+});
+
+test('force-stop ownership rejects a stale PID reused by another application', () => {
+  const home = String.raw`E:\Kalio`;
+  assert.equal(
+    isRuntimeProcessOwned(home, {
+      ExecutablePath: String.raw`E:\Kalio\app\versions\1.0.0\bin\kalio-node.exe`,
+      CommandLine: String.raw`"E:\Kalio\app\versions\1.0.0\bin\kalio-node.exe" E:\Kalio\app\versions\1.0.0\bin\kalio-cli.mjs serve`,
+    }),
+    true,
+  );
+  assert.equal(
+    isRuntimeProcessOwned(home, {
+      ExecutablePath: String.raw`C:\Program Files\nodejs\node.exe`,
+      CommandLine: String.raw`"C:\Program Files\nodejs\node.exe" E:\Projekty\portal-muza\apps\web\.next\dev\server.js`,
+    }),
+    false,
+  );
 });
 
 test('runtime manifest signs and verifies its exact payload with Ed25519', async () => {

@@ -159,6 +159,46 @@ function runCommand(command, args) {
   });
 }
 
+function readWindowsProcess(pid) {
+  const query = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" | Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress)`;
+  return new Promise((resolveProcess, reject) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', query],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Unable to inspect Kalio process ${pid}`));
+        return;
+      }
+      const trimmed = output.trim();
+      try {
+        resolveProcess(trimmed ? JSON.parse(trimmed) : null);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+export function isRuntimeProcessOwned(home, processInfo) {
+  const homeText = String(home);
+  const absoluteHome = /^[A-Za-z]:[\\/]/.test(homeText) || homeText.startsWith('\\\\')
+    ? homeText
+    : resolve(homeText);
+  const versionsRoot = join(absoluteHome, 'app', 'versions').replaceAll('/', '\\').toLowerCase() + '\\';
+  const executablePath = String(processInfo?.ExecutablePath ?? '').replaceAll('/', '\\').toLowerCase();
+  const commandLine = String(processInfo?.CommandLine ?? '').replaceAll('/', '\\').toLowerCase();
+  return executablePath.startsWith(versionsRoot)
+    && commandLine.includes(versionsRoot)
+    && commandLine.includes('kalio-cli.mjs');
+}
+
 async function waitForLockRelease(home) {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -183,6 +223,15 @@ async function stopRuntime(home, force) {
     throw new Error('Kalio is running; use `kalio update --force` after saving active work');
   }
   if (process.platform === 'win32') {
+    const processInfo = await readWindowsProcess(pid);
+    if (!processInfo) {
+      await logMessage(home, `WARNING: runtime PID ${pid} is gone; removing its stale runtime lock`);
+      await rm(join(home, '.runtime.lock'), { force: true });
+      return;
+    }
+    if (!isRuntimeProcessOwned(home, processInfo)) {
+      throw new Error(`Runtime lock PID ${pid} does not belong to this Kalio installation; refusing --force`);
+    }
     const exitCode = await runCommand('taskkill.exe', ['/PID', String(pid), '/T', '/F']);
     if (exitCode !== 0) {
       await logMessage(home, `WARNING: taskkill returned ${exitCode}; waiting for the runtime lock`);

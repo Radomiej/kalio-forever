@@ -27,6 +27,7 @@ flowchart TD
 - `pnpm build` passed with the system Node runtime.
 - `node --test scripts/kalio-updater.test.mjs` passed: version comparison and Ed25519 manifest verification.
 - `bun test scripts/kalio-updater.test.mjs` passed with Bun 1.2.18.
+- Force-stop ownership now verifies the recorded PID executable and command line before `taskkill`; a stale PID reused by another application is refused and is never terminated.
 - `node --test scripts/runtime-scripts.test.mjs` passed: 24 tests.
 - Final Windows Node archive was built and installed in an isolated directory. `doctor` selected `runtime=node`, and `/api/runtime/info` returned `sqliteDriver=node` and `embeddedUi=true`.
 - Final Windows Bun archive was built and installed in an isolated directory. `doctor` selected `runtime=bun`, and `/api/runtime/info` returned `sqliteDriver=bun` and `embeddedUi=true`.
