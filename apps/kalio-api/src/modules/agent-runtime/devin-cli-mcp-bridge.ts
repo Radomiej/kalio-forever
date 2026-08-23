@@ -6,9 +6,11 @@ export interface DevinCliMcpBridgeContext {
   sessionId: string;
   vfsSessionId?: string;
   allowedToolNames?: readonly string[];
+  serverName?: string;
 }
 
 const STDIO_PROXY_FILE = join(__dirname, '..', 'mcp-bridge', 'kalio-mcp-bridge-stdio.js');
+export const DEVIN_KALIO_MCP_SERVER_NAME = 'kalio-runtime';
 
 /**
  * Builds the ACP stdio config used when a Devin host cannot connect to HTTP MCP.
@@ -31,7 +33,7 @@ export function buildDevinStdioMcpBridgeConfig(
   }
 
   return {
-    name: 'kalio',
+    name: context.serverName ?? DEVIN_KALIO_MCP_SERVER_NAME,
     command: process.execPath,
     args: [STDIO_PROXY_FILE],
     env,

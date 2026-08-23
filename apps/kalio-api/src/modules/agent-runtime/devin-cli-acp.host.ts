@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { Readable, Transform, Writable } from 'node:stream';
 import { isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
+import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-config';
 import {
   client,
   methods,
@@ -92,9 +93,9 @@ export function isDevinCliModel(value: string): value is DevinCliModel {
   return (DEVIN_CLI_MODELS as readonly string[]).includes(value);
 }
 
-export function buildDevinCliLaunchSpec(model: DevinCliModel, executable = resolveDevinCliPath()): DevinCliLaunchSpec {
+export function buildDevinCliLaunchSpec(model: DevinCliModel, executable = resolveDevinCliPath(), configPath?: string): DevinCliLaunchSpec {
   if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model}`);
-  return { command: executable, args: ['--model', model, 'acp'] };
+  return { command: executable, args: [...(configPath ? ['--config', configPath] : []), '--model', model, 'acp'] };
 }
 
 export function resolveDevinCliPath(): string {
@@ -131,6 +132,7 @@ export class DevinAcpHost {
   private capabilities: AgentCapabilities = {};
   private status: 'starting' | 'online' | 'error' | 'offline' = 'offline';
   private starting?: Promise<void>;
+  private config?: DevinCliConfigHandle;
   private closing = false;
 
   constructor(readonly model: DevinCliModel) {}
@@ -146,7 +148,7 @@ export class DevinAcpHost {
   async ensureSession(cwd: string, externalThreadId?: string, mcpServers: McpServer[] = []): Promise<DevinAcpSession> {
     const normalizedCwd = normalizeCwd(cwd);
     const normalizedMcpServers = [...mcpServers];
-    const connection = await this.ensureConnection();
+    const connection = await this.ensureConnection(normalizedMcpServers);
     if (externalThreadId) {
       const existing = this.sessions.get(externalThreadId);
       if (existing) {
@@ -195,9 +197,12 @@ export class DevinAcpHost {
     this.child = undefined;
     this.starting = undefined;
     this.sessions.clear();
+    const config = this.config;
+    this.config = undefined;
+    await config?.cleanup();
   }
 
-  private async ensureConnection(): Promise<ClientConnection> {
+  private async ensureConnection(mcpServers: readonly McpServer[] = []): Promise<ClientConnection> {
     if (this.connection && !this.connection.signal.aborted) return this.connection;
     if (this.starting) {
       await this.starting;
@@ -205,7 +210,7 @@ export class DevinAcpHost {
     }
     this.closing = false;
     this.status = 'starting';
-    this.starting = this.startConnection();
+    this.starting = this.startConnection(mcpServers);
     try {
       await this.starting;
       return this.requireConnection();
@@ -214,10 +219,13 @@ export class DevinAcpHost {
     }
   }
 
-  private async startConnection(): Promise<void> {
-    const spec = buildDevinCliLaunchSpec(this.model);
+  private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
+    const config = mcpServers.length > 0 ? await createDevinCliConfig(this.model, mcpServers) : undefined;
+    this.config = config;
+    const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath(), config?.path);
     const child = spawn(spec.command, spec.args, {
       env: { ...process.env },
+      ...(config ? { cwd: config.cwd } : {}),
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -362,14 +370,15 @@ export class DevinAcpHost {
 
 @Injectable()
 export class DevinAcpHostRegistry implements OnModuleDestroy {
-  private readonly hosts = new Map<DevinCliModel, DevinAcpHost>();
+  private readonly hosts = new Map<string, DevinAcpHost>();
 
-  async get(model: string): Promise<DevinAcpHost> {
+  async get(model: string, scopeKey?: string): Promise<DevinAcpHost> {
     if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model}.`);
-    const existing = this.hosts.get(model);
+    const key = scopeKey?.trim() ? `${model}\u0000${scopeKey.trim()}` : model;
+    const existing = this.hosts.get(key);
     if (existing) return existing;
     const host = new DevinAcpHost(model);
-    this.hosts.set(model, host);
+    this.hosts.set(key, host);
     return host;
   }
 
