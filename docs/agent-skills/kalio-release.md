@@ -17,12 +17,12 @@ node scripts/bump-version.mjs 1.0.1
 node scripts/bump-version.mjs --check
 ~~~
 
-The script refuses to continue when the four files already contain different versions. It accepts stable MAJOR.MINOR.PATCH versions only.
+The script refuses to continue when any tracked version file already contains a different version. It accepts stable MAJOR.MINOR.PATCH versions only.
 
 ## Release procedure
 
 1. Start from a clean branch and inspect git status.
-2. Run the version bump script and review the four-file diff.
+2. Run the version bump script and review the complete manifest diff.
 3. Run node scripts/bump-version.mjs --check.
 4. Run the focused release/runtime tests, then the affected API build/typecheck and the desktop preparation/build.
 5. Push the branch and wait for the pull-request workflow.
