@@ -8,6 +8,7 @@ import { ToolDispatchService } from '../chat/tool-dispatch.service';
 import { TurnState } from '../chat/turn-state';
 import type { StreamContext } from '../chat/interfaces/stream-context.interface';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isKalioMcpBridgeEnabled } from '../../common/kalio-mcp-bridge-config';
 
 const BLOCKED_CHILD_TOOL_NAMES = new Set([
   'run_cli_agent',
@@ -91,7 +92,7 @@ export class KalioMcpBridgeService {
   }
 
   authorize(headers: IncomingHttpHeaders): void {
-    if (!this.token) {
+    if (!this.token || !isKalioMcpBridgeEnabled()) {
       throw new KalioMcpBridgeHttpError(
         503,
         'Kalio MCP bridge is disabled. Configure KALIO_MCP_BRIDGE_TOKEN.',
@@ -120,12 +121,15 @@ export class KalioMcpBridgeService {
 
   private createConnection(headers: IncomingHttpHeaders): BridgeConnection {
     const id = randomUUID();
+    const toolNamesHeader = headerValue(headers, 'x-kalio-tool-names');
     const context: BridgeContext = {
       sessionId: headerValue(headers, 'x-kalio-session-id') ?? `mcp-bridge:${id}`,
       vfsSessionId: headerValue(headers, 'x-kalio-vfs-session-id'),
       turnId: headerValue(headers, 'x-kalio-turn-id'),
       promptMessageId: headerValue(headers, 'x-kalio-prompt-message-id'),
-      allowedToolNames: parseToolAllowList(headerValue(headers, 'x-kalio-tool-names')),
+      allowedToolNames: hasHeader(headers, 'x-kalio-tool-names')
+        ? parseToolAllowList(toolNamesHeader)
+        : undefined,
     };
 
     const connection = {} as BridgeConnection;
@@ -234,9 +238,12 @@ function headerValue(headers: IncomingHttpHeaders, name: string): string | undef
 }
 
 function parseToolAllowList(value: string | undefined): ReadonlySet<string> | undefined {
-  if (!value) return undefined;
-  const names = value.split(',').map((name) => name.trim()).filter(Boolean);
-  return names.length > 0 ? new Set(names) : undefined;
+  if (!value) return new Set();
+  return new Set(value.split(',').map((name) => name.trim()).filter(Boolean));
+}
+
+function hasHeader(headers: IncomingHttpHeaders, name: string): boolean {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
 }
 
 function isLoopbackOrigin(value: string): boolean {

@@ -1,15 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { DevinCliModel, ExecutionProfile } from '@kalio/types';
+import type { ExecutionProfile } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { buildKalioMcpBridgeHttpConfig } from '../../common/kalio-mcp-bridge-config';
 import { DevinAcpHostRegistry, isDevinCliModel, type DevinAcpHost, type DevinAcpSession, type DevinAcpPromptInput } from './devin-cli-acp.host';
+import { classifyDevinNativeTool, type DevinNativeToolsPolicy } from './devin-native-tools';
+import { DevinNativeToolsPolicyService } from './devin-native-tools-policy.service';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
   private readonly logger = new Logger(DevinCliAcpLLMSource.name);
 
-  constructor(private readonly registry: DevinAcpHostRegistry) {}
+  constructor(
+    private readonly registry: DevinAcpHostRegistry,
+    private readonly nativeToolsPolicy: DevinNativeToolsPolicyService,
+  ) {}
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
     const profile = params.executionProfile;
@@ -19,6 +25,20 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     const model = profile.model.trim() || params.model?.trim() || '';
     if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model || '(empty)'}.`);
     const cwd = params.cwd?.trim() || process.env['WORKSPACE_ROOT']?.trim() || process.cwd();
+    const nativeToolsPolicy = await this.nativeToolsPolicy.get();
+    const bridgeConfig = buildKalioMcpBridgeHttpConfig({
+      sessionId: params.sessionId,
+      vfsSessionId: params.sessionId,
+      turnId: params.runId,
+      promptMessageId: params.messageId,
+      allowedToolNames: params.tools.map((tool) => tool.name),
+    });
+    const mcpServers = bridgeConfig ? [bridgeConfig] : [];
+    await this.audit(params, {
+      eventName: 'devin-cli-acp.mcp_bridge',
+      status: 'completed',
+      data: { enabled: Boolean(bridgeConfig), toolCount: params.tools.length, nativeToolsPolicy },
+    });
 
     if (params.tools.length > 0 || (params.providerToolNames?.length ?? 0) > 0 || params.toolResultChannel) {
       await this.audit(params, {
@@ -36,7 +56,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     let session: DevinAcpSession | undefined;
     try {
       host = await this.registry.get(model);
-      session = await host.ensureSession(cwd, params.externalThreadId);
+      session = await host.ensureSession(cwd, params.externalThreadId, mcpServers);
       if (!params.externalThreadId) {
         await params.onExternalThreadBound?.(session.sessionId, { processEpoch: session.processEpoch });
       }
@@ -63,7 +83,22 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         signal: params.abortSignal,
         onText: (text) => enqueue({ type: 'text_delta', delta: text }),
         onThought: (text) => enqueue({ type: 'thinking_delta', delta: text }),
-        onPermission: (request) => this.handlePermission(params, profile, session!, request),
+        onToolActivity: (activity) => {
+          void this.audit(params, {
+            eventName: 'devin-cli-acp.tool',
+            status: activity.status === 'completed' ? 'completed' : activity.status === 'failed' ? 'failed' : 'running',
+            data: {
+              sessionId: session!.sessionId,
+              processEpoch: session!.processEpoch,
+              toolCallId: activity.toolCallId,
+              kind: activity.kind,
+              name: activity.name,
+              title: activity.title,
+              toolStatus: activity.status,
+            },
+          });
+        },
+        onPermission: (request) => this.handlePermission(params, profile, nativeToolsPolicy, session!, request),
       };
       await this.audit(params, {
         eventName: 'devin-cli-acp.turn.started',
@@ -131,10 +166,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
   private async handlePermission(
     params: LLMSourceParams,
     profile: ExecutionProfile,
+    nativeToolsPolicy: DevinNativeToolsPolicy,
     session: DevinAcpSession,
     request: Parameters<DevinAcpPromptInput['onPermission']>[0],
   ): Promise<'accept' | 'decline' | 'cancel'> {
-    const decision = profile.approvalMode === 'kalio_strict' && params.onNativeApprovalRequested
+    const category = classifyDevinNativeTool(request.toolCall);
+    const categoryEnabled = category ? nativeToolsPolicy[category] : false;
+    const decision = categoryEnabled && profile.approvalMode === 'kalio_strict' && params.onNativeApprovalRequested
       ? await params.onNativeApprovalRequested({
         method: 'devin.session.request_permission',
         params: {

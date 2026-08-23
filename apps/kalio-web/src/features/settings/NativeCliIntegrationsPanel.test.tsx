@@ -27,6 +27,11 @@ const DEVIN_STATUS = {
   hosts: [],
 };
 
+const DEVIN_SETTINGS = {
+  mcpBridge: { enabled: true, transport: 'streamable-http' },
+  nativeTools: { filesystem: false, web: false, terminal: false, source: 'default' },
+};
+
 describe('NativeCliIntegrationsPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -36,6 +41,20 @@ describe('NativeCliIntegrationsPanel', () => {
       }
       if (url === '/api/runtime/devin-cli/status' && !init?.method) {
         return new Response(JSON.stringify(DEVIN_STATUS), { status: 200 });
+      }
+      if (url === '/api/runtime/devin-cli/settings' && !init?.method) {
+        return new Response(JSON.stringify(DEVIN_SETTINGS), { status: 200 });
+      }
+      if (url === '/api/runtime/devin-cli/settings' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, boolean>;
+        return new Response(JSON.stringify({
+          ...DEVIN_SETTINGS,
+          nativeTools: {
+            ...DEVIN_SETTINGS.nativeTools,
+            ...body,
+            source: 'settings',
+          },
+        }), { status: 200 });
       }
       if (url.endsWith('/check') || url.endsWith('/reset')) {
         return new Response(JSON.stringify({ ...STATUS, ...(url.endsWith('/reset') ? { status: 'offline', connected: false, openSessionCount: 0 } : {}) }), { status: 200 });
@@ -101,6 +120,21 @@ describe('NativeCliIntegrationsPanel', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ inheritConfiguredMcp: true }),
+      }),
+    ));
+  });
+
+  it('toggles Devin native filesystem access through the integration settings', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Devin filesystem tools' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/devin-cli/settings',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ filesystem: true }),
       }),
     ));
   });

@@ -194,7 +194,8 @@ classDiagram
 - Persona identity is independent from execution engine. Projects, personas, and sessions select a persisted `ExecutionProfile`; the direct LLM profile remains available and Codex profiles use the ChatGPT/Codex App Server.
 - `devin-api` is a separate cloud task-agent profile. It uses the server-side Devin REST v3 session API with a bounded `DEVIN_MAX_ACU_LIMIT`; it does not receive Kalio `cwd`, local file contents, tool schemas, or native HITL callbacks. Kalio records when its available tool set is omitted at this boundary.
 - `devin-cli-acp` is a separate host-local profile family. It launches the authenticated Devin CLI directly as `devin --model <glm-5-2|swe-1-7> acp`, keeps one ACP process per model lane, and persists the opaque ACP `sessionId` through the existing `externalThreadId` binding. It is not `CLIAgentService`, `spawn_cli_agent`, or a Claude runtime.
-- The first Devin ACP slice sends no Kalio tool schemas and advertises no filesystem/terminal client capabilities. Native Devin permission requests are denied by default or routed through the existing Kalio HITL callback in `kalio_strict`; enabling a native host-tool bridge remains a separate, explicit capability decision.
+- Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server in `session/new`, `session/load`, and `session/resume`, scoped with the current Kalio session/VFS/turn/message headers and persona-filtered tool names. The adapter keeps the bridge absent when `KALIO_MCP_BRIDGE_TOKEN` is unset, so local dev remains fail-closed.
+- Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
 - Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
 - The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
@@ -217,6 +218,9 @@ classDiagram
   do not require confirmation are exposed. Explicitly listed confirmation-gated
   tools still pass through Kalio's normal HITL policy. Child/CLI/subagent tools
   and connected external MCP tools are never re-exported through this bridge.
+- An explicit empty `x-kalio-tool-names` value exposes no tools; Devin always
+  sends this header so a persona with no allowed Kalio tools cannot fall back to
+  the bridge's read-only defaults.
 - Streamable HTTP session ids are transport state. Callers should provide the
   Kalio session/VFS/turn headers when they need durable workspace or HITL
   context; otherwise the bridge creates an isolated session id.
