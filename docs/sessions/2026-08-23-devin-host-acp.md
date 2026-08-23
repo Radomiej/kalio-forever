@@ -72,7 +72,7 @@ flowchart TD
 
 ## Files and boundaries changed
 
-Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików: adapter ACP i testy, status controller, typy/profile/migrację, routing czatu, selector persona, panel Settings, lockfile i dokumentację. Nie zmieniano `CLIAgentService`, ścieżki `spawn_cli_agent` ani istniejących adapterów Claude.
+Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików: adapter ACP i testy, status controller, typy/profile/migrację, routing czatu, selector persona, panel Settings, lockfile i dokumentację. Następnie `b4388c9` podniósł ACP SDK do 1.4.0, a `f6ec1c3` utwardził status probe’a kodami wyjścia po resecie hosta. Nie zmieniano `CLIAgentService`, ścieżki `spawn_cli_agent` ani istniejących adapterów Claude.
 
 ## Verification evidence
 
@@ -85,7 +85,7 @@ Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików
 - `corepack pnpm --filter kalio-web test -- src/features/persona/persona-runtime-selection.test.ts src/features/chat/runtimeProfileLabel.test.ts src/features/settings/NativeCliIntegrationsPanel.test.tsx` — 3 pliki, 11 testów PASS.
 - API live: `GET http://localhost:3016/api/runtime/devin-cli/status` — `devin.exe`, `3000.2.17`, `authenticated=true`, `acp=true`, `models=[glm-5-2,swe-1-7]` in the host stack context.
 - Chrome live: `http://localhost:5188/` → Settings → Integrations; karta hostowego Devina widoczna jako Online/Logged in/ACP available. Wykonano screenshot viewportu jako dowód wizualny w sesji QA.
-- `git diff --cached --check` — PASS; implementacja utworzona jako `b95cab4`, dokumentacja sesji jako `475a185`.
+- `git diff --cached --check` — PASS; implementacja utworzona jako `b95cab4`, dokumentacja sesji jako `475a185`, a poprawka probe’a jako `f6ec1c3`.
 
 ## Caveats and inconclusive checks
 
