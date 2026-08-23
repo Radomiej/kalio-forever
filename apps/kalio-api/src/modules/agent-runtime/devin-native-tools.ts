@@ -34,11 +34,22 @@ export function isKalioMcpToolCall(toolCall: DevinNativeToolCall, serverName = '
   const name = toolCall.name?.trim().toLowerCase() ?? '';
   const toolCallId = toolCall.toolCallId?.trim().toLowerCase() ?? '';
   const wrapperName = name === 'mcp_call_tool' || toolCallId.includes('mcp_call_tool');
+  const normalizedServerName = serverName.trim().toLowerCase();
   const input = isRecord(toolCall.rawInput) ? toolCall.rawInput : undefined;
   const server = readString(input?.server) ?? readString(input?.serverName);
-  if (server) return wrapperName && server.toLowerCase() === serverName.trim().toLowerCase();
-  const normalizedServerName = serverName.trim().toLowerCase();
-  return wrapperName && new RegExp(`\\bfrom\\s+${escapeRegExp(normalizedServerName)}\\b`).test(toolCall.title?.toLowerCase() ?? '');
+  if (server && server.toLowerCase() === normalizedServerName) return true;
+  if (server) return false;
+
+  const titleMatch = toolCall.title?.trim().match(/^(?:calling|called)\s+(.+?)\s+from\s+(.+?)\s*$/i);
+  const titleServer = titleMatch?.[2]?.trim().toLowerCase();
+  if (titleServer !== normalizedServerName) return false;
+  if (wrapperName || toolCallId.includes('mcp')) return true;
+
+  // Devin 3000.5 reports a permission request for an MCP tool by its real
+  // name, while the title carries the server identity (for example,
+  // "Calling vfs_list from kalio-runtime").
+  const titleTool = titleMatch?.[1]?.trim().toLowerCase();
+  return Boolean(titleTool && (!name || name === titleTool));
 }
 
 export function classifyDevinNativeTool(toolCall: DevinNativeToolCall): DevinNativeToolCategory | undefined {
