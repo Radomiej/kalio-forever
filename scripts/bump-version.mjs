@@ -80,7 +80,11 @@ const targets = [
 ];
 
 function replaceOnce(content, pattern, replacement, label) {
-  const matches = content.match(pattern);
+  const globalPattern = new RegExp(
+    pattern.source,
+    pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g',
+  );
+  const matches = content.match(globalPattern);
   if (!matches || matches.length !== 1) {
     throw new Error('Expected exactly one ' + label + ' match');
   }
