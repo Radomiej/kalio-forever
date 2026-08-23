@@ -262,6 +262,10 @@ async function removeLinuxOptionalArtifacts() {
       throw error;
     }
   }
+  await rm(
+    join(nodeModulesRoot, '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
+    { recursive: true, force: true },
+  );
 }
 
 await rm(stagingParent, { recursive: true, force: true });
