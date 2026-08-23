@@ -168,6 +168,17 @@ async function removeMuslSharpPrebuilds() {
   );
 }
 
+async function removeMuslClaudeAgentSdk() {
+  if (process.platform !== 'linux') {
+    return;
+  }
+
+  await rm(
+    join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
+    { recursive: true, force: true },
+  );
+}
+
 async function removeUnneededOnnxRuntimeArtifacts() {
   if (process.platform !== 'linux') {
     return;
@@ -208,6 +219,7 @@ await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies')
 await installFlatRuntimeDependencies();
 await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
+await removeMuslClaudeAgentSdk();
 await removeUnneededOnnxRuntimeArtifacts();
 await ensureNativeSqliteAddon();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
