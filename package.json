@@ -1,7 +1,7 @@
 {
   "name": "kalio-forever",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
     "qa": "powershell -ExecutionPolicy Bypass -File start-qa.ps1",
