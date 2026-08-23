@@ -93,9 +93,9 @@ export function isDevinCliModel(value: string): value is DevinCliModel {
   return (DEVIN_CLI_MODELS as readonly string[]).includes(value);
 }
 
-export function buildDevinCliLaunchSpec(model: DevinCliModel, executable = resolveDevinCliPath(), configPath?: string): DevinCliLaunchSpec {
+export function buildDevinCliLaunchSpec(model: DevinCliModel, executable = resolveDevinCliPath()): DevinCliLaunchSpec {
   if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model}`);
-  return { command: executable, args: [...(configPath ? ['--config', configPath] : []), '--model', model, 'acp'] };
+  return { command: executable, args: ['--model', model, 'acp'] };
 }
 
 export function resolveDevinCliPath(): string {
@@ -222,7 +222,11 @@ export class DevinAcpHost {
   private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
     const config = mcpServers.length > 0 ? await createDevinCliConfig(this.model, mcpServers) : undefined;
     this.config = config;
-    const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath(), config?.path);
+    // Devin 3000.3+ loads project MCP servers from the dedicated
+    // `.devin/mcp_config.local.json`; passing the legacy `--config` file
+    // bypasses that loader, so keep the ephemeral project overlay discoverable
+    // from the child cwd and select only the model on the command line.
+    const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
     const child = spawn(spec.command, spec.args, {
       env: { ...process.env },
       ...(config ? { cwd: config.cwd } : {}),
