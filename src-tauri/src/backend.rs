@@ -177,7 +177,7 @@ pub fn stop(app: &AppHandle) {
             drop(lock_file);
             let _ = remove_file(lock_path);
         }
-    }
+    };
 }
 
 fn resolve_kalio_home(app: &App) -> Result<PathBuf, Box<dyn Error>> {
