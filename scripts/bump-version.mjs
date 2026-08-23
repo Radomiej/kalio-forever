@@ -5,12 +5,21 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const targets = [
-  {
-    path: 'package.json',
+  ...[
+    'package.json',
+    'apps/kalio-api/package.json',
+    'apps/kalio-web/package.json',
+    'apps/e2e/package.json',
+    'apps/kalio-demo/package.json',
+    'apps/kalio-video/package.json',
+    'packages/@kalio/sdk/package.json',
+    'packages/@kalio/types/package.json',
+  ].map(path => ({
+    path,
     readVersion(content) {
       const value = JSON.parse(content).version;
       if (typeof value !== 'string') {
-        throw new Error('package.json does not contain a string version');
+        throw new Error(path + ' does not contain a string version');
       }
       return value;
     },
@@ -19,10 +28,10 @@ const targets = [
         content,
         /("version"\s*:\s*)"[^"]+"/,
         '$1"' + version + '"',
-        'package.json version',
+        path + ' version',
       );
     },
-  },
+  })),
   {
     path: 'src-tauri/Cargo.toml',
     readVersion(content) {
