@@ -378,13 +378,20 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $assets = @(Get-ChildItem -LiteralPath release-assets -File -Recurse | Where-Object {
-            $_.Name -match '\.(exe|zip|tar\.gz|AppImage|deb|md|txt|json|sig)$'
+            $_.Name -match '\.(exe|zip|tar\.gz|AppImage|deb|md|txt|json|sig)
+
           } | Select-Object -ExpandProperty FullName)
           if ($assets.Count -eq 0) { throw 'No release assets were downloaded' }
+
           gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag @assets --clobber
-            gh release edit $tag --draft=true --title "Kalio $tag"
-          } else {
-            gh release create $tag --draft --generate-notes --title "Kalio $tag" @assets
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --draft --generate-notes --title "Kalio $tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Draft GitHub release creation failed' }
           }
+
+          foreach ($asset in $assets) {
+            gh release upload $tag $asset --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Release asset upload failed: $asset" }
+          }
+          gh release edit $tag --draft=true --title "Kalio $tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Draft GitHub release update failed' }
