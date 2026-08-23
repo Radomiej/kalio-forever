@@ -209,6 +209,43 @@ jobs:
           if-no-files-found: error
           path: release/kalio-runtime-*-linux-x64.tar.gz
 
+      - name: Split Linux Bun runtime archive for manual verification
+        shell: bash
+        run: |
+          mkdir -p release-bun-parts
+          bun_archive="$(find release -maxdepth 1 -type f -name '*-bun-linux-x64.tar.gz' -print -quit)"
+          test -n "$bun_archive"
+          split -b 300m -d -a 2 "$bun_archive" release-bun-parts/kalio-bun-runtime.part.
+          ls -lh release-bun-parts
+
+      - name: Upload Linux Bun runtime part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-bun-part-00
+          if-no-files-found: ignore
+          path: release-bun-parts/kalio-bun-runtime.part.00
+
+      - name: Upload Linux Bun runtime part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-bun-part-01
+          if-no-files-found: ignore
+          path: release-bun-parts/kalio-bun-runtime.part.01
+
+      - name: Upload Linux Bun runtime part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-bun-part-02
+          if-no-files-found: ignore
+          path: release-bun-parts/kalio-bun-runtime.part.02
+
+      - name: Upload Linux Bun runtime part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-bun-part-03
+          if-no-files-found: ignore
+          path: release-bun-parts/kalio-bun-runtime.part.03
+
       - name: Configure optional updater signing
         id: updater
         if: startsWith(github.ref, 'refs/tags/')
