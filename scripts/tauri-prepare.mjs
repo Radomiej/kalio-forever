@@ -70,7 +70,6 @@ async function requirePath(path, label) {
   }
 }
 
-async function installFlatRuntimeDependencies() {
 async function findFile(directory, fileName) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
@@ -102,6 +101,8 @@ async function ensureNativeSqliteAddon() {
     await cp(sourcePath, targetPath, { force: true });
   }
 }
+
+async function installFlatRuntimeDependencies() {
   const packageJsonPath = join(serverRoot, 'package.json');
   const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   const runtimeDependencies = Object.fromEntries(
