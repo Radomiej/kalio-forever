@@ -194,7 +194,7 @@ classDiagram
 - Persona identity is independent from execution engine. Projects, personas, and sessions select a persisted `ExecutionProfile`; the direct LLM profile remains available and Codex profiles use the ChatGPT/Codex App Server.
 - `devin-api` is a separate cloud task-agent profile. It uses the server-side Devin REST v3 session API with a bounded `DEVIN_MAX_ACU_LIMIT`; it does not receive Kalio `cwd`, local file contents, tool schemas, or native HITL callbacks. Kalio records when its available tool set is omitted at this boundary.
 - `devin-cli-acp` is a separate host-local profile family. It launches the authenticated Devin CLI directly as `devin --model <glm-5-2|swe-1-7> acp`, keeps one ACP process per model lane, and persists the opaque ACP `sessionId` through the existing `externalThreadId` binding. It is not `CLIAgentService`, `spawn_cli_agent`, or a Claude runtime.
-- Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server in `session/new`, `session/load`, and `session/resume`, scoped with the current Kalio session/VFS/turn/message headers and persona-filtered tool names. The adapter keeps the bridge absent when `KALIO_MCP_BRIDGE_TOKEN` is unset, so local dev remains fail-closed.
+- Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server only when the provider handshake advertises HTTP MCP support. The stable session config carries the Kalio session/VFS scope and persona-filtered tool names; a serialized per-turn context registry supplies turn/message IDs to bridge calls without changing the ACP session policy. The installed Devin CLI `3000.2.17` reports `mcpCapabilities.http=false`, so Kalio keeps the bridge requested but omits an ineffective MCP server and records that boundary in audit data. The bridge token is resolved from the desktop Settings override first and `KALIO_MCP_BRIDGE_TOKEN` second, so local dev remains fail-closed when neither source is configured.
 - Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
 - Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
@@ -211,9 +211,11 @@ classDiagram
   `/api/mcp/bridge`. It is an external-runtime interoperability adapter over
   `ToolDispatchService`, not the client-side `MCPService` and not the child
   `spawn_cli_agent`/subagent execution family.
-- The bridge is disabled unless `KALIO_MCP_BRIDGE_TOKEN` is set. The first
-  implementation accepts only loopback HTTP origins and requires the bearer
-  token on every request; it is not a public or tunnel-facing endpoint.
+- The bridge is disabled unless a Settings token or `KALIO_MCP_BRIDGE_TOKEN` is
+  set. The first implementation accepts only loopback HTTP origins and
+  requires the bearer token on every request; it is not a public or
+  tunnel-facing endpoint. Settings can generate, override, or clear the local
+  token; status responses expose only the configured source, never the secret.
 - Without an explicit `x-kalio-tool-names` allow-list, only native tools that
   do not require confirmation are exposed. Explicitly listed confirmation-gated
   tools still pass through Kalio's normal HITL policy. Child/CLI/subagent tools
@@ -224,6 +226,9 @@ classDiagram
 - Streamable HTTP session ids are transport state. Callers should provide the
   Kalio session/VFS/turn headers when they need durable workspace or HITL
   context; otherwise the bridge creates an isolated session id.
+- Managed Devin bridge connections fail closed on `tools/call` when no active
+  serialized Kalio turn context exists; direct MCP clients retain their static
+  header context and cannot inherit a Devin turn.
 - Claude Code, Codex, and other native runtimes may consume this endpoint as an
   MCP server. Clients that only support stdio may use the existing generic
   HTTP-to-stdio adapter from `mcp-dev-servers`; the bearer token stays in the

@@ -9,6 +9,8 @@ import { TurnState } from '../chat/turn-state';
 import type { StreamContext } from '../chat/interfaces/stream-context.interface';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isKalioMcpBridgeEnabled } from '../../common/kalio-mcp-bridge-config';
+import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-token.service';
+import { KalioMcpBridgeContextRegistry, type KalioMcpBridgeTurnContext } from '../../common/kalio-mcp-bridge-context';
 
 const BLOCKED_CHILD_TOOL_NAMES = new Set([
   'run_cli_agent',
@@ -28,6 +30,7 @@ interface BridgeContext {
   turnId?: string;
   promptMessageId?: string;
   allowedToolNames?: ReadonlySet<string>;
+  dynamicContextRequired: boolean;
 }
 
 interface BridgeConnection {
@@ -57,16 +60,19 @@ export class KalioMcpBridgeHttpError extends Error {
 @Injectable()
 export class KalioMcpBridgeService {
   private readonly connections = new Map<string, BridgeConnection>();
-  private readonly token = process.env['KALIO_MCP_BRIDGE_TOKEN']?.trim();
 
-  constructor(private readonly toolDispatch: ToolDispatchService) {}
+  constructor(
+    private readonly toolDispatch: ToolDispatchService,
+    private readonly tokenService: KalioMcpBridgeTokenService,
+    private readonly contextRegistry: KalioMcpBridgeContextRegistry,
+  ) {}
 
   async handleRequest(
     request: IncomingMessage,
     response: ServerResponse,
     parsedBody?: unknown,
   ): Promise<void> {
-    this.authorize(request.headers);
+    await this.authorize(request.headers);
 
     const requestedSessionId = headerValue(request.headers, 'mcp-session-id');
     let connection = requestedSessionId ? this.connections.get(requestedSessionId) : undefined;
@@ -91,16 +97,17 @@ export class KalioMcpBridgeService {
     await connection.transport.handleRequest(request, response, parsedBody);
   }
 
-  authorize(headers: IncomingHttpHeaders): void {
-    if (!this.token || !isKalioMcpBridgeEnabled()) {
+  async authorize(headers: IncomingHttpHeaders): Promise<void> {
+    const token = await this.tokenService.getToken();
+    if (!token || !isKalioMcpBridgeEnabled(token)) {
       throw new KalioMcpBridgeHttpError(
         503,
-        'Kalio MCP bridge is disabled. Configure KALIO_MCP_BRIDGE_TOKEN.',
+        'Kalio MCP bridge is disabled. Configure a token in Settings or KALIO_MCP_BRIDGE_TOKEN.',
       );
     }
 
     const authorization = headerValue(headers, 'authorization');
-    if (authorization !== `Bearer ${this.token}`) {
+    if (authorization !== `Bearer ${token}`) {
       throw new KalioMcpBridgeHttpError(401, 'Unauthorized.');
     }
 
@@ -130,6 +137,7 @@ export class KalioMcpBridgeService {
       allowedToolNames: hasHeader(headers, 'x-kalio-tool-names')
         ? parseToolAllowList(toolNamesHeader)
         : undefined,
+      dynamicContextRequired: headerValue(headers, 'x-kalio-bridge-client') === 'devin-acp',
     };
 
     const connection = {} as BridgeConnection;
@@ -171,13 +179,18 @@ export class KalioMcpBridgeService {
         return toolError(`Tool ${toolName} is not available in this Kalio bridge scope.`);
       }
 
+      const dynamicContext = this.contextRegistry.get(connection.context.sessionId);
+      if (connection.context.dynamicContextRequired && !dynamicContext) {
+        return toolError('No active Kalio turn context is available for this native runtime.');
+      }
       const callId = `mcp-${connection.sessionId ?? connection.id}-${String(extra.requestId)}`;
       const args = isRecord(request.params.arguments) ? request.params.arguments : {};
+      const context = this.activeContext(connection);
       const streamContext: StreamContext = {
-        sessionId: connection.context.sessionId,
-        turnId: connection.context.turnId,
-        promptMessageId: connection.context.promptMessageId,
-        vfsSessionId: connection.context.vfsSessionId,
+        sessionId: context.sessionId,
+        turnId: context.turnId,
+        promptMessageId: context.promptMessageId,
+        vfsSessionId: context.vfsSessionId,
         messageId: callId,
         abortSignal: extra.signal,
         state: new TurnState(),
@@ -193,7 +206,7 @@ export class KalioMcpBridgeService {
   }
 
   private visibleTools(connection: BridgeConnection): ToolMeta[] {
-    const allowList = connection.context.allowedToolNames;
+    const allowList = this.activeContext(connection).allowedToolNames;
     return this.toolDispatch
       .getToolMetas()
       .filter((tool) => tool.domain !== 'mcp')
@@ -203,6 +216,18 @@ export class KalioMcpBridgeService {
       .filter((tool) => Boolean(allowList) || !tool.requiresConfirmation)
       .filter((tool) => !allowList || allowList.has(tool.name));
   }
+
+  private activeContext(connection: BridgeConnection): BridgeContext {
+    const dynamic = this.contextRegistry.get(connection.context.sessionId);
+    return dynamic ? mergeContext(connection.context, dynamic) : connection.context;
+  }
+}
+
+function mergeContext(base: BridgeContext, dynamic: KalioMcpBridgeTurnContext): BridgeContext {
+  return {
+    ...base,
+    ...dynamic,
+  };
 }
 
 function toMcpTool(meta: ToolMeta): McpTool {

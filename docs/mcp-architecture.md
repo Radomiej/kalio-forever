@@ -142,7 +142,7 @@ the client-side `MCPService` and it is not the child `spawn_cli_agent` path.
 | Property | Contract |
 | --- | --- |
 | Endpoint | `/api/mcp/bridge` (all Streamable HTTP MCP methods) |
-| Enablement | `KALIO_MCP_BRIDGE_TOKEN` must be configured; otherwise the endpoint returns `503` |
+| Enablement | A token generated/overridden in Settings is preferred; `KALIO_MCP_BRIDGE_TOKEN` remains the environment fallback. With neither configured the endpoint returns `503` |
 | Authentication | `Authorization: Bearer <token>` on every request |
 | Origin | Only absent or loopback `http://localhost`, `http://127.0.0.1`, or `http://[::1]` origins are accepted in this first slice |
 | Session | Stateful Streamable HTTP MCP sessions; the server returns and validates `mcp-session-id` |
@@ -160,16 +160,20 @@ uses an isolated `mcp-bridge:<connection-id>` session id; callers should send a
 real session id when a VFS or durable HITL continuation is required.
 
 For a client with native Streamable HTTP MCP support, configure the URL and
-bearer header in that client's MCP settings. Host-local Devin ACP receives the
-same HTTP server config on `session/new`, `session/load`, and `session/resume`;
-the adapter adds the current Kalio session, VFS/turn/message context, and the
-persona-filtered tool names. Devin's current ACP handshake advertises
-`mcpCapabilities.http = false`, but the CLI still accepts the per-session
-`mcpServers` entry; if a future CLI rejects it, the turn fails explicitly
-instead of widening the tool boundary. Devin's own filesystem, web, and
-terminal tools are separate category switches at
-`/api/runtime/devin-cli/settings`, defaulting to blocked and still requiring
-Kalio strict approval when enabled.
+bearer header in that client's MCP settings. The Devin Settings panel can
+generate a local token, save a manual override, or clear the override to return
+to the environment fallback; the token value is never returned by the status
+endpoint. Host-local Devin ACP receives the same stable HTTP server config on
+`session/new`, `session/load`, and `session/resume`; per-turn VFS/turn/message
+context is activated only while a serialized ACP prompt is running. The
+adapter checks the provider handshake before sending the MCP config. The
+installed Devin CLI `3000.2.17` advertises `mcpCapabilities.http = false`, so
+Kalio records the bridge as requested but does not pass an ineffective MCP
+server to that process; the chat still works, but Kalio tools are not
+available through this ACP lane until Devin advertises HTTP MCP support.
+Devin's own filesystem, web, and terminal tools are separate category
+switches at `/api/runtime/devin-cli/settings`, defaulting to blocked and still
+requiring Kalio strict approval when enabled.
 
 For a stdio-only client, the existing generic bridge in
 `E:/Projekty/mcp-dev-servers` can adapt this endpoint:

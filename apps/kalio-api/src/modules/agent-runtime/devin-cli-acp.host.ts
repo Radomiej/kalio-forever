@@ -61,6 +61,7 @@ export interface DevinAcpSession {
 
 export interface DevinAcpPromptInput {
   signal?: AbortSignal;
+  onTurnStart?: () => (() => void) | void;
   onText: (text: string) => void;
   onThought: (text: string) => void;
   onToolActivity?: (activity: DevinAcpToolActivity) => void;
@@ -172,6 +173,11 @@ export class DevinAcpHost {
     return { sessionId, cwd: normalizedCwd, processEpoch, resumed: false };
   }
 
+  async supportsHttpMcp(): Promise<boolean> {
+    await this.ensureConnection();
+    return this.capabilities.mcpCapabilities?.http === true;
+  }
+
   async prompt(sessionId: string, prompt: string, input: DevinAcpPromptInput): Promise<StopReason> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Devin ACP session is not registered: ${sessionId}`);
@@ -279,6 +285,7 @@ export class DevinAcpHost {
     const connectionFailure = new Promise<never>((_, reject) => { rejectConnection = reject; });
     const active: ActiveTurn = { ...input, rejectConnection };
     session.active = active;
+    const releaseTurn = input.onTurnStart?.() ?? (() => undefined);
     const abortHandler = (): void => {
       void connection.agent.notify(methods.agent.session.cancel, { sessionId }).catch(() => undefined);
     };
@@ -294,6 +301,7 @@ export class DevinAcpHost {
       if (input.signal?.aborted) return 'cancelled';
       throw asError(error, 'Devin ACP prompt failed.');
     } finally {
+      releaseTurn();
       input.signal?.removeEventListener('abort', abortHandler);
       if (session.active === active) session.active = undefined;
     }

@@ -359,5 +359,13 @@
         "executionProfileId": "claude-local",
         "allowedTools": [],
         "skillIds": []
+    },
+    "devin": {
+        "name": "Devin GLM-5.2",
+        "systemPrompt": "You are Devin, Kalio's host-local ACP agent. Work directly on the user's goal through the Kalio MCP bridge and policy boundary, keep actions bounded, and report concrete evidence without claiming unobserved results.",
+        "model": "glm-5-2",
+        "executionProfileId": "devin-local-glm-5-2",
+        "allowedTools": [],
+        "skillIds": []
     }
 }

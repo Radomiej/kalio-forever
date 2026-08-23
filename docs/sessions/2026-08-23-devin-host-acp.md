@@ -10,7 +10,7 @@ Dodać natywną integrację z lokalnym, zalogowanym Devin CLI na hoście przez A
 - darmowe lane’y zweryfikowane lokalnie: `glm-5-2` i `swe-1-7`;
 - proces uruchamiany dokładnie jako `devin --model <lane> acp`;
 - Kalio zachowuje własną sesję, audyt, scheduler i approval boundary;
-- Kalio tools are now passed as a scoped Streamable HTTP MCP server when the bridge token is configured; provider-native filesystem/web/terminal tools remain category-gated;
+- Kalio tools use a scoped Streamable HTTP MCP bridge when the provider advertises HTTP MCP; the bridge token is owned by desktop Settings with an environment fallback; provider-native filesystem/web/terminal tools remain category-gated;
 - smoke run odbywał się w pustym katalogu, ponieważ prompt/kontekst prywatnego repo byłby wysłany do zewnętrznej usługi;
 - istniejącej integracji Claude nie usuwano ani nie używano jako podstawy tej ścieżki.
 
@@ -24,7 +24,8 @@ Dodać natywną integrację z lokalnym, zalogowanym Devin CLI na hoście przez A
 | Routing profilu Kalio | PASS | profile `devin-local-glm-5-2` i `devin-local-swe-1-7`, typ `devin-cli-acp` |
 | Status API | PASS | `GET http://localhost:3016/api/runtime/devin-cli/status` zwrócił `authenticated=true`, `acp=true`, oba modele |
 | Settings/Chrome | PASS | `http://localhost:5188/`, Settings → Integrations, karta `Devin CLI (host)` z `Online`, `Logged in`, `ACP available` |
-| Kalio tool bridge | PASS (code) / BLOCKED (live token) | ACP receives the scoped HTTP MCP config; current dev env intentionally has no `KALIO_MCP_BRIDGE_TOKEN`, so `/api/mcp/bridge` returns 503 |
+| Kalio tool bridge | PASS (code + direct SDK) / BLOCKED (Devin ACP capability) | Settings token generation/override and direct Streamable HTTP `tools/list` smoke passed with a scoped `vfs_list`; installed Devin `3000.2.17` handshake reports `mcpCapabilities.http=false`, so the adapter omits MCP for that ACP process and records `requested=true, enabled=false` |
+| Devin persona and repeat turn | PASS | Chrome Talk selected `Devin GLM-5.2`; `DEVIN_PERSONA_OK`, `DEVIN_SECOND_OK`, and `DEVIN_CAPABILITY_GATE_OK` were returned in one persisted conversation after host reset |
 | Native Devin tools policy | PASS | persisted filesystem/web/terminal switches default to false and enabled requests stay behind `kalio_strict` HITL |
 | Prywatny workspace canary | BLOCKED | wymaga osobnej, jawnej zgody na wysłanie kontekstu repo do Devina |
 
@@ -40,13 +41,14 @@ Przed zmianą istniały profile direct/Codex/Claude/Devin Cloud oraz osobna ści
 4. Uruchomiono realny ACP smoke test w pustym katalogu: handshake, nowa sesja i pełny turn.
 5. Dodano focused testy API/web, typecheck/build oraz ręczną weryfikację w Chrome.
 6. Zebrano pełne suite’y osobno, bez maskowania istniejących awarii niezwiązanych z tym slice’em.
-7. Dodano scoped Devin MCP config, ACP tool-activity audit events, native-tool policy/settings API, UI toggles, and focused regression tests.
+7. Dodano scoped Devin MCP config, ACP tool-activity audit events, native-tool policy/settings API, UI toggles, desktop Settings token generation/override/clear, serialized turn-context binding, Devin persona seed, and focused regression tests.
 
 ## Root causes and decisions
 
 - **Zaobserwowano:** hostowy Devin udostępnia ACP i `session/load`; **ograniczenie:** Kalio musi utrzymać własny binding sesji i nie może tracić `cwd`; **decyzja:** jeden długo żyjący host na lane, `externalThreadId` przechowuje opaque ACP `sessionId`, a restart używa `session/load`.
 - **Zaobserwowano:** agent może żądać natywnych uprawnień; **decyzja:** mapować ACP `read/edit/delete/move/search`, `fetch`, and `execute` into filesystem/web/terminal policy categories. All categories default to deny; only `kalio_strict` requests reach the existing HITL callback.
-- **Zaobserwowano:** current Devin ACP handshake reports `mcpCapabilities.http=false`, but `session/new` accepts an HTTP `mcpServers` entry; **decyzja:** pass the config explicitly and treat a future rejection as a surfaced turn error rather than silently falling back to a wider tool surface.
+- **Zaobserwowano:** current Devin ACP handshake reports `mcpCapabilities.http=false`; **decyzja:** keep the bridge boundary implemented, but only send the MCP server when HTTP MCP is advertised. The installed CLI can still chat and request native tools, but it cannot consume Kalio MCP until a compatible version is installed.
+- **Zaobserwowano:** changing per-turn headers in a reused ACP session caused `session tool policy changed`; **decyzja:** keep ACP MCP config stable, activate only turn/message context during the serialized `promptNow` window, and fail managed bridge calls closed outside an active turn.
 - **Zaobserwowano:** prywatne repo wymagałoby transmisji lokalnego kontekstu do usługi zewnętrznej; **ograniczenie:** brak jawnej zgody na taki transfer; **decyzja:** live smoke tylko w pustym katalogu.
 
 ## Implementation sequence
@@ -56,6 +58,7 @@ Przed zmianą istniały profile direct/Codex/Claude/Devin Cloud oraz osobna ści
 3. Dodano `DevinCliAcpLLMSource`, routing w `ProfiledLLMSource`, profil seedujący migrację `0034` oraz korelację `externalThreadId`.
 4. Dodano status `GET /api/runtime/devin-cli/status`, wybór modelu w persona selectorze i kartę hostowego Devina w Settings.
 5. Dodano testy kontraktu oraz dokumentację `project-spec.md` i `docs/technical-documentation-kalio.md`.
+6. Dodano wspólny kontekst mostu, token w `app_settings` z env fallbackiem oraz personę `devin` (`glm-5-2`, `devin-local-glm-5-2`).
 
 ## Flow diagram
 
@@ -68,6 +71,9 @@ flowchart TD
     E --> F[session/prompt]
     F --> G[session/update: text/thought/tool activity]
     G --> H[Kalio ChatSession, audit i UI]
+    H --> L{ACP mcpCapabilities.http?}
+    L -->|yes| M[Scoped Kalio Streamable HTTP bridge]
+    L -->|no| N[Chat continues; bridge omitted and audited]
     D --> I{native permission request}
     I -->|policy off| K[ACP permission denied]
     I -->|policy on + strict| J
@@ -76,6 +82,8 @@ flowchart TD
 ## Files and boundaries changed
 
 Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików: adapter ACP i testy, status controller, typy/profile/migrację, routing czatu, selector persona, panel Settings, lockfile i dokumentację. Następnie `b4388c9` podniósł ACP SDK do 1.4.0, a `f6ec1c3` utwardził status probe’a kodami wyjścia po resecie hosta. Nie zmieniano `CLIAgentService`, ścieżki `spawn_cli_agent` ani istniejących adapterów Claude.
+
+Current slice commit: `64fc542` (`feat(runtime): persist Devin bridge token in Settings`) — Settings-owned bridge token, capability-gated ACP MCP config, serialized turn context, Devin persona, native-tool policy UI, and verification docs.
 
 ## Verification evidence
 
@@ -86,38 +94,41 @@ Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików
 - `corepack pnpm --filter kalio-web typecheck` — PASS.
 - `corepack pnpm --filter kalio-web build` — PASS; istnieje tylko ostrzeżenie o dużym chunku Vite.
 - `corepack pnpm --filter kalio-web test -- src/features/persona/persona-runtime-selection.test.ts src/features/chat/runtimeProfileLabel.test.ts src/features/settings/NativeCliIntegrationsPanel.test.tsx` — 3 pliki, 11 testów PASS.
+- Focused Devin/token/bridge backend gate — 5 plików, 22 testy PASS; focused web Settings/persona gate — 2 pliki, 10 testów PASS.
+- `pnpm.cmd --filter kalio-api typecheck` and `pnpm.cmd --filter kalio-web typecheck` — PASS after the token/context changes; API and web builds — PASS on the dev worktree.
 - API live: `GET http://localhost:3016/api/runtime/devin-cli/status` — `devin.exe`, `3000.2.17`, `authenticated=true`, `acp=true`, `models=[glm-5-2,swe-1-7]` in the host stack context.
 - Chrome live: `http://localhost:5188/` → Settings → Integrations; karta hostowego Devina widoczna jako Online/Logged in/ACP available. Wykonano screenshot viewportu jako dowód wizualny w sesji QA.
-- `git diff --cached --check` — PASS; implementacja utworzona jako `b95cab4`, dokumentacja sesji jako `475a185`, a poprawka probe’a jako `f6ec1c3`.
+- Chrome live: Talk → persona `Devin GLM-5.2`; one normal reply and a repeat reply in the same ACP conversation passed after host reset. The requested `vfs_list` prompt produced no Kalio tool call because the provider capability probe is false; a native `functions.exec` request was observed and declined while native tools were disabled.
+- Read-only ACP capability probe: `devin.exe 3000.2.17` returned `mcpCapabilities: { http: false, sse: false }`.
+- Direct Streamable HTTP SDK smoke with a disposable Settings override listed only scoped `vfs_list`; the final Settings token was rotated to a random value and is not recorded here.
 
 ## P2 closure update
 
-- Added `kalio-mcp-bridge-config.ts`: the Devin adapter passes an authenticated,
-  loopback Streamable HTTP MCP server to ACP session creation/restoration with
-  explicit Kalio session/VFS/turn/message headers and an explicit tool allow-list.
+- Added `kalio-mcp-bridge-config.ts`: the Devin adapter prepares an authenticated,
+  loopback Streamable HTTP MCP server with a stable session/VFS scope and
+  explicit tool allow-list; the provider capability gate omits it when HTTP MCP
+  is not advertised.
+- Added a serialized bridge turn-context registry so reused ACP sessions do not
+  compare volatile turn/message headers as a changed tool policy.
 - Added ACP `tool_call`/`tool_call_update` forwarding to `devin-cli-acp.tool`
   audit events, so live tool progress is observable alongside text and thoughts.
 - Added persisted Devin native-tool settings (`filesystem`, `web`, `terminal`),
   default-deny classification, `/api/runtime/devin-cli/settings`, and Settings
   toggles. Enabled categories remain behind the existing strict HITL callback.
-- Focused verification: backend bridge/ACP/policy tests `18/18 PASS`; web panel
-  tests `5/5 PASS`; typechecks were green before the unrelated persona-avatar
-  edits appeared in the shared worktree.
-- Live dev verification: `GET /api/runtime/devin-cli/settings` returns all three
-  switches false and the loopback bridge URL; `GET /api/mcp/bridge` returns the
-  expected `503` while the dev environment has no token. A bearer token was not
-  created or persisted by this change.
-- Final full typecheck/build attempts are `BLOCKED` by unrelated unowned
-  persona-avatar edits: the API test references missing `avatarVariant`, and
-  the web build cannot resolve `boring-avatars`. Those files are intentionally
-  excluded from this commit; the focused Devin/MCP gates remain green.
+- Focused verification: backend bridge/ACP/token/context tests `22/22 PASS`; web
+  Settings/persona tests `10/10 PASS`; API/web typechecks and builds PASS.
+- Live dev verification: Settings token source reports `settings`, native
+  filesystem/web/terminal switches remain false, and direct bridge SDK listing
+  is scoped. The status endpoint never returns the token.
+- The existing avatar worktree changes were preserved and not staged by this
+  slice; their current compile/build state was checked separately.
 
 ## Caveats and inconclusive checks
 
 - Pełny API suite zakończył się `235 passed`, `17 failed` w `239` plikach. Najważniejsze obserwacje: test migracji ma hard-coded oczekiwanie 28 wpisów przy aktualnym journalu 35, a część testów KV/CLI widzi brakujące kolumny w bazie testowej. To pozostały baseline/release gate, nie dowód działania hostowego adaptera.
 - Pełny web suite zakończył się `196 passed`, `5 failed` w `198` plikach; awarie dotyczą testów Execution Graph i nie dotknęły focused testów panelu/persona.
 - Nie wykonano prywatnego repo canary ani deployu zewnętrznego. Dev hot-reload na localhost był już uruchomiony; dowód obejmuje lokalny runtime, nie produkcję.
-- Live ACP odpowiedział `stopReason=end_turn` i streamował komunikację, ale smoke prompt zawierał żądanie literalnej odpowiedzi, którego agent nie zachował dokładnie. Potwierdza to transport/lifecycle, nie jakość instruction-following.
+- Live ACP returned `stopReason=end_turn` and streamed thoughts/text. Repeat-turn routing now works; tool execution through Kalio remains unverified for this installed Devin build because HTTP MCP is explicitly unsupported by its handshake.
 
 ## Post-reset verification
 
@@ -128,7 +139,7 @@ Commit `b95cab4` (`feat(runtime): add host-local Devin ACP`) obejmuje 26 plików
 
 ## Remaining boundary and production closure
 
-- **[P2] Required before broader release:** set `KALIO_MCP_BRIDGE_TOKEN` in the intended host environment and run an authorized Devin MCP canary against a disposable workspace; the code path is implemented but the current dev stack is intentionally token-disabled.
+- **[P2] Required before broader release:** install/use a Devin CLI build that advertises HTTP MCP (or explicitly approve a stdio adapter path), then run an authorized disposable-workspace Kalio tool canary. Current host chat/persona communication is proven; current CLI MCP tool use is blocked by the provider capability boundary.
 - **[P2] Required before production:** naprawić lub formalnie sklasyfikować pełne API/web suite’y, a następnie powtórzyć pełny gate.
 - **[P3] Recommended:** dodać osobny, autoryzowany workspace canary z kontrolowanym testowym katalogiem, gdy będzie zgoda na transmisję kontekstu do Devina.
 - Produkcja nie jest potwierdzona: brak deployu, publicznego health checku i produkcyjnego testu tego runtime’u.
