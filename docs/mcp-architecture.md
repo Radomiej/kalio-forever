@@ -148,6 +148,7 @@ the client-side `MCPService` and it is not the child `spawn_cli_agent` path.
 | Session | Stateful Streamable HTTP MCP sessions; the server returns and validates `mcp-session-id` |
 | Default tools | Native tools with `requiresConfirmation = false` |
 | Explicit mutation tools | Add `x-kalio-tool-names: name1,name2`; Kalio still applies its normal confirmation/HITL policy |
+| Empty explicit allow-list | No native tools are exposed (different from an omitted header) |
 | Always excluded | Child/CLI/subagent/AgentFlow launcher tools and tools whose `domain` is `mcp` |
 
 The bridge forwards `tools/list` and `tools/call` through the existing
@@ -159,8 +160,19 @@ uses an isolated `mcp-bridge:<connection-id>` session id; callers should send a
 real session id when a VFS or durable HITL continuation is required.
 
 For a client with native Streamable HTTP MCP support, configure the URL and
-bearer header in that client's MCP settings. For a stdio-only client, the
-existing generic bridge in `E:/Projekty/mcp-dev-servers` can adapt this endpoint:
+bearer header in that client's MCP settings. Host-local Devin ACP receives the
+same HTTP server config on `session/new`, `session/load`, and `session/resume`;
+the adapter adds the current Kalio session, VFS/turn/message context, and the
+persona-filtered tool names. Devin's current ACP handshake advertises
+`mcpCapabilities.http = false`, but the CLI still accepts the per-session
+`mcpServers` entry; if a future CLI rejects it, the turn fails explicitly
+instead of widening the tool boundary. Devin's own filesystem, web, and
+terminal tools are separate category switches at
+`/api/runtime/devin-cli/settings`, defaulting to blocked and still requiring
+Kalio strict approval when enabled.
+
+For a stdio-only client, the existing generic bridge in
+`E:/Projekty/mcp-dev-servers` can adapt this endpoint:
 
 ```powershell
 $env:MCP_HTTP_STDIO_BRIDGE_HEADERS = '{"Authorization":"Bearer <token>","X-Kalio-Session-Id":"<session-id>"}'
@@ -168,10 +180,9 @@ node E:/Projekty/mcp-dev-servers/scripts/mcp-http-stdio-bridge.mjs `
   http://127.0.0.1:3016/api/mcp/bridge
 ```
 
-Do not commit the bearer token or put it in repo-managed TOML. Remote exposure,
-per-persona policy lookup, and re-exporting connected external MCP tools are
-separate follow-up features; this first boundary intentionally stays local and
-native-only.
+Do not commit the bearer token or put it in repo-managed TOML. Remote exposure
+and re-exporting connected external MCP tools remain separate follow-up
+features; this boundary intentionally stays local and native-only.
 
 ## REST surface
 

@@ -117,6 +117,23 @@ describe('KalioMcpBridgeService', () => {
     await client.close();
   });
 
+  it('keeps an explicit empty allow-list closed instead of falling back to defaults', async () => {
+    const client = new Client({ name: 'kalio-bridge-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: {
+        headers: {
+          Authorization: 'Bearer test-bridge-token',
+          'x-kalio-session-id': 'session-4',
+          'x-kalio-tool-names': '',
+        },
+      },
+    });
+    await client.connect(transport);
+    const listed = await client.listTools();
+    expect(listed.tools).toEqual([]);
+    await client.close();
+  });
+
   it('fails closed when no bridge token is configured', () => {
     delete process.env['KALIO_MCP_BRIDGE_TOKEN'];
     const dispatch = { getToolMetas: vi.fn() } as unknown as ToolDispatchService;

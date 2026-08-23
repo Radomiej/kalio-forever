@@ -20,7 +20,7 @@ type NativeCliIntegrationStatus = {
   };
 };
 
-type IntegrationAction = `${string}:check` | `${string}:reset` | `${string}:mcp`;
+type IntegrationAction = `${string}:check` | `${string}:reset` | `${string}:mcp` | `${string}:devin-tools`;
 
 type DevinCliStatus = {
   executable: string;
@@ -32,12 +32,25 @@ type DevinCliStatus = {
   hosts: Array<{ model: string; status: 'starting' | 'online' | 'error' | 'offline'; processEpoch?: string }>;
 };
 
+type DevinNativeToolsPolicy = {
+  filesystem: boolean;
+  web: boolean;
+  terminal: boolean;
+  source: 'settings' | 'default';
+};
+
+type DevinCliSettings = {
+  mcpBridge: { enabled: boolean; transport: 'streamable-http'; url: string };
+  nativeTools: DevinNativeToolsPolicy;
+};
+
 export function NativeCliIntegrationsPanel() {
   const [integrations, setIntegrations] = useState<NativeCliIntegrationStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<IntegrationAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [devinCli, setDevinCli] = useState<DevinCliStatus | null>(null);
+  const [devinSettings, setDevinSettings] = useState<DevinCliSettings | null>(null);
 
   const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
     setLoading(true);
@@ -65,6 +78,19 @@ export function NativeCliIntegrationsPanel() {
       return loaded;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load Devin CLI status.');
+      return null;
+    }
+  }, []);
+
+  const loadDevinCliSettings = useCallback(async (): Promise<DevinCliSettings | null> => {
+    try {
+      const response = await fetch('/api/runtime/devin-cli/settings');
+      if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
+      const loaded = await response.json() as DevinCliSettings;
+      setDevinSettings(loaded);
+      return loaded;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load Devin CLI settings.');
       return null;
     }
   }, []);
@@ -113,11 +139,11 @@ export function NativeCliIntegrationsPanel() {
   }, []);
 
   const refreshStatus = useCallback(async () => {
-    const [loaded] = await Promise.all([loadIntegrations(), loadDevinCliStatus()]);
+    const [loaded] = await Promise.all([loadIntegrations(), loadDevinCliStatus(), loadDevinCliSettings()]);
     for (const integration of loaded) {
       await runAction(integration, 'check');
     }
-  }, [loadDevinCliStatus, loadIntegrations, runAction]);
+  }, [loadDevinCliSettings, loadDevinCliStatus, loadIntegrations, runAction]);
 
   useEffect(() => {
     void refreshStatus();
@@ -150,6 +176,31 @@ export function NativeCliIntegrationsPanel() {
     }
   };
 
+  const updateDevinNativeTool = async (category: keyof DevinNativeToolsPolicy, enabled: boolean) => {
+    const actionId = `devin:${category}:devin-tools` as IntegrationAction;
+    setAction(actionId);
+    setError(null);
+    try {
+      const response = await fetch('/api/runtime/devin-cli/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [category]: enabled }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch((err: unknown) => {
+          console.debug('[NativeCliIntegrationsPanel] Devin settings error response was not JSON', err);
+          return null;
+        }) as { message?: string } | null;
+        throw new Error(body?.message ?? `${response.status}: ${response.statusText}`);
+      }
+      setDevinSettings(await response.json() as DevinCliSettings);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update Devin native tool policy.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   return (
     <section className="flex flex-col gap-4" aria-labelledby="native-app-servers-title">
       <div className="flex items-center justify-between gap-4">
@@ -168,7 +219,14 @@ export function NativeCliIntegrationsPanel() {
 
       {error && <div className="alert alert-error text-sm" role="alert">{error}</div>}
 
-      <DevinCliCard status={devinCli} loading={loading && devinCli === null} onRefresh={() => void loadDevinCliStatus()} />
+      <DevinCliCard
+        status={devinCli}
+        settings={devinSettings}
+        loading={loading && devinCli === null}
+        onRefresh={() => { void loadDevinCliStatus(); void loadDevinCliSettings(); }}
+        onUpdateNativeTool={(category, enabled) => void updateDevinNativeTool(category, enabled)}
+        updating={action?.endsWith(':devin-tools') ?? false}
+      />
 
       {loading && integrations.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-base-content/50">
@@ -272,7 +330,21 @@ export function NativeCliIntegrationsPanel() {
   );
 }
 
-function DevinCliCard({ status, loading, onRefresh }: { status: DevinCliStatus | null; loading: boolean; onRefresh: () => void }) {
+function DevinCliCard({
+  status,
+  settings,
+  loading,
+  onRefresh,
+  onUpdateNativeTool,
+  updating,
+}: {
+  status: DevinCliStatus | null;
+  settings: DevinCliSettings | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onUpdateNativeTool: (category: keyof DevinNativeToolsPolicy, enabled: boolean) => void;
+  updating: boolean;
+}) {
   const online = status?.authenticated === true && status.acp === true;
   return (
     <article className="overflow-hidden rounded-xl border border-base-300" data-testid="devin-cli-integration-card">
@@ -300,10 +372,30 @@ function DevinCliCard({ status, loading, onRefresh }: { status: DevinCliStatus |
           <span className="rounded-md bg-base-200/70 px-2 py-1">
             {status?.models.join(', ') || 'No configured free model lanes'}
           </span>
+          <span className={`rounded-md px-2 py-1 ${settings?.mcpBridge.enabled ? 'bg-success/10 text-success' : 'bg-base-200/70'}`}>
+            {settings?.mcpBridge.enabled ? 'Kalio MCP bridge enabled' : 'Kalio MCP bridge disabled'}
+          </span>
         </div>
         <p className="text-xs text-base-content/50">
-          Host-local Devin uses ACP. Kalio tool schemas are not forwarded in this slice; native permission requests remain under the Kalio approval boundary.
+          Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Changing a switch resets active Devin hosts.
         </p>
+        {settings && (
+          <div className="grid gap-2 sm:grid-cols-3" aria-label="Devin native tools">
+            {(['filesystem', 'web', 'terminal'] as const).map((category) => (
+              <label key={category} className="flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-base-300 bg-base-200/20 px-3 py-2" title={`Allow Devin ${category} tools.`}>
+                <span className="text-sm font-medium capitalize">{category}</span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-sm"
+                  checked={settings.nativeTools[category]}
+                  disabled={updating}
+                  onChange={(event) => onUpdateNativeTool(category, event.target.checked)}
+                  aria-label={`Allow Devin ${category} tools`}
+                />
+              </label>
+            ))}
+          </div>
+        )}
         <details>
           <summary className="flex cursor-pointer list-none items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-base-content/50 hover:bg-base-200/70 hover:text-base-content/80">
             Details <ChevronDown size={12} />

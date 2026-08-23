@@ -12,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   type AgentCapabilities,
   type ClientConnection,
+  type McpServer,
   type RequestPermissionRequest,
   type SessionNotification,
   type StopReason,
@@ -62,23 +63,28 @@ export interface DevinAcpPromptInput {
   signal?: AbortSignal;
   onText: (text: string) => void;
   onThought: (text: string) => void;
+  onToolActivity?: (activity: DevinAcpToolActivity) => void;
   onPermission: (request: RequestPermissionRequest) => Promise<'accept' | 'decline' | 'cancel'>;
+}
+
+export interface DevinAcpToolActivity {
+  toolCallId: string;
+  kind?: string | null;
+  name?: string | null;
+  title?: string | null;
+  status?: string | null;
 }
 
 interface SessionState {
   cwd: string;
   processEpoch: string;
+  mcpServers: McpServer[];
   tail: Promise<void>;
   active?: ActiveTurn;
 }
 
 interface ActiveTurn extends DevinAcpPromptInput {
   rejectConnection: (error: Error) => void;
-}
-
-interface ChildProcessWithConnection {
-  child: ChildProcessWithoutNullStreams;
-  connection: ClientConnection;
 }
 
 export function isDevinCliModel(value: string): value is DevinCliModel {
@@ -136,29 +142,33 @@ export class DevinAcpHost {
     };
   }
 
-  async ensureSession(cwd: string, externalThreadId?: string): Promise<DevinAcpSession> {
+  async ensureSession(cwd: string, externalThreadId?: string, mcpServers: McpServer[] = []): Promise<DevinAcpSession> {
     const normalizedCwd = normalizeCwd(cwd);
+    const normalizedMcpServers = [...mcpServers];
     const connection = await this.ensureConnection();
     if (externalThreadId) {
       const existing = this.sessions.get(externalThreadId);
       if (existing) {
         if (existing.cwd !== normalizedCwd) throw new Error('Devin ACP session cannot change its working directory.');
+        if (JSON.stringify(existing.mcpServers) !== JSON.stringify(normalizedMcpServers)) {
+          throw new Error('Devin ACP session tool policy changed; reset the Devin host before continuing.');
+        }
         if (existing.processEpoch === this.processEpoch) {
           return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: existing.processEpoch, resumed: false };
         }
       }
-      await this.restoreSession(connection, externalThreadId, normalizedCwd);
+      await this.restoreSession(connection, externalThreadId, normalizedCwd, normalizedMcpServers);
       const restoredEpoch = this.requireProcessEpoch();
-      const state: SessionState = { cwd: normalizedCwd, processEpoch: restoredEpoch, tail: Promise.resolve() };
+      const state: SessionState = { cwd: normalizedCwd, processEpoch: restoredEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() };
       this.sessions.set(externalThreadId, state);
       return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: restoredEpoch, resumed: true };
     }
 
-    const response = await connection.agent.request(methods.agent.session.new, { cwd: normalizedCwd, mcpServers: [] });
+    const response = await connection.agent.request(methods.agent.session.new, { cwd: normalizedCwd, mcpServers: normalizedMcpServers });
     const sessionId = response.sessionId?.trim();
     if (!sessionId) throw new Error('Devin ACP did not return a session id.');
     const processEpoch = this.requireProcessEpoch();
-    this.sessions.set(sessionId, { cwd: normalizedCwd, processEpoch, tail: Promise.resolve() });
+    this.sessions.set(sessionId, { cwd: normalizedCwd, processEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() });
     return { sessionId, cwd: normalizedCwd, processEpoch, resumed: false };
   }
 
@@ -238,10 +248,10 @@ export class DevinAcpHost {
     }
   }
 
-  private async restoreSession(connection: ClientConnection, sessionId: string, cwd: string): Promise<void> {
+  private async restoreSession(connection: ClientConnection, sessionId: string, cwd: string, mcpServers: McpServer[]): Promise<void> {
     if (this.capabilities.loadSession === true) {
       try {
-        await connection.agent.request(methods.agent.session.load, { sessionId, cwd, mcpServers: [] });
+        await connection.agent.request(methods.agent.session.load, { sessionId, cwd, mcpServers });
         return;
       } catch (error) {
         if (!this.capabilities.sessionCapabilities?.resume) {
@@ -251,7 +261,7 @@ export class DevinAcpHost {
     }
     if (this.capabilities.sessionCapabilities?.resume) {
       try {
-        await connection.agent.request(methods.agent.session.resume, { sessionId, cwd, mcpServers: [] });
+        await connection.agent.request(methods.agent.session.resume, { sessionId, cwd, mcpServers });
         return;
       } catch (error) {
         throw asError(error, `Devin ACP could not resume persisted session ${sessionId}.`);
@@ -309,6 +319,16 @@ export class DevinAcpHost {
     if ((update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk') && update.content.type === 'text') {
       if (update.sessionUpdate === 'agent_message_chunk') active.onText(update.content.text);
       else active.onThought(update.content.text);
+      return;
+    }
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      active.onToolActivity?.({
+        toolCallId: update.toolCallId,
+        kind: update.kind,
+        name: update.name,
+        title: update.title,
+        status: update.status,
+      });
     }
   }
 
@@ -343,6 +363,12 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
     const host = new DevinAcpHost(model);
     this.hosts.set(model, host);
     return host;
+  }
+
+  async reset(): Promise<void> {
+    const hosts = [...this.hosts.values()];
+    this.hosts.clear();
+    await Promise.all(hosts.map((host) => host.close()));
   }
 
   async getStatus(): Promise<DevinCliIntegrationStatus> {
