@@ -437,3 +437,22 @@ describe('CredentialsService', () => {
     });
 
     it('uses local timeout for custom credential pointing to localhost', async () => {
+      await drizzleSvc.db.insert(schema.credentials).values({
+        id: 'custom-local',
+        name: 'Custom Local',
+        provider: 'custom',
+        apiKey: 'key',
+        baseUrl: 'http://localhost:1234',
+        model: null,
+        createdAt: new Date(),
+      });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await svc.getModelsForCredential('custom-local');
+
+      expect(timeoutSettings.getProviderTimeoutMs).toHaveBeenCalledWith(true);
+      vi.unstubAllGlobals();
+    });
+  });
+});
