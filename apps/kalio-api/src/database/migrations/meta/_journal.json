@@ -190,6 +190,62 @@
       "when": 1783949100000,
       "tag": "0026_restore_messages_tool_result_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1787397801684,
+      "tag": "0027_execution_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1787404500000,
+      "tag": "0028_codex_luna_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1787405000000,
+      "tag": "0029_codex_model_lanes",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1787405100000,
+      "tag": "0030_codex_luna_strict",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787405200000,
+      "tag": "0031_claude_local_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1787405300000,
+      "tag": "0032_claude_current_model_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1787405400000,
+      "tag": "0033_persona_provider_tools",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1787405500000,
+      "tag": "0034_devin_local_cli_profiles",
+      "breakpoints": true
     }
   ]
 }

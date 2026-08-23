@@ -16,6 +16,7 @@ import { SkillsModule } from '../modules/skills/skills.module';
 import { PersonaModule } from '../modules/persona/persona.module';
 import { CredentialsModule } from '../modules/credentials/credentials.module';
 import { RelayModule } from '../modules/relay/relay.module';
+import { CodeIntelligenceModule } from '../modules/code-intelligence/code-intelligence.module';
 import { TOOL_CATALOG, type ToolCatalogPort } from '../modules/tool/tool-catalog.port';
 import { TOOL_DISPATCH_REGISTRY } from '../modules/tool/tool-dispatch-registry.port';
 import { TOOL_CONFIGURATION_PROVIDERS, TOOL_PROVIDER_CLASSES } from '../modules/tool/tool.providers';
@@ -34,6 +35,7 @@ function toMeta(reflector: Reflector, ToolClass: ToolClass): ToolMeta {
     description: options.description,
     parameters: options.parameters,
     requiresConfirmation: options.requiresConfirmation ?? false,
+    ...(options.domain ? { domain: options.domain } : {}),
   };
 }
 
@@ -50,7 +52,7 @@ function buildToolCatalog(reflector: Reflector): ToolCatalogPort {
 }
 
 @Module({
-  imports: [DatabaseModule, VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule, RelayModule],
+  imports: [DatabaseModule, VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule, RelayModule, CodeIntelligenceModule],
   providers: [
     ...TOOL_CONFIGURATION_PROVIDERS,
     {

@@ -1,14 +1,21 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import Database from 'better-sqlite3';
+import { createDrizzleDatabase, createSqliteDatabase, migrateDrizzleDatabase, type KalioDrizzleDatabase, type SqliteClient } from './sqlite-runtime';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { readMigrationFiles, type MigrationMeta } from 'drizzle-orm/migrator';
 import * as schema from './schema';
 
 const REQUIRED_MIGRATED_COLUMNS = [
+  ['execution_profiles', [
+    'id',
+    'name',
+    'kind',
+    'model',
+    'approval_mode',
+    'enabled',
+    'capabilities_version',
+  ]],
   ['agent_flow_runs', [
     'open_chat_session_id',
     'parent_tool_call_id',
@@ -37,6 +44,11 @@ const REQUIRED_MIGRATED_COLUMNS = [
     'queued_at',
     'queue_claimed_at',
     'queue_cancelled_at',
+    'runtime_kind',
+    'execution_profile_id',
+    'external_thread_id',
+    'external_turn_id',
+    'process_epoch',
   ]],
   ['hitl_requests', [
     'id',
@@ -52,9 +64,19 @@ const REQUIRED_MIGRATED_COLUMNS = [
     'avatar_index',
     'skill_ids',
     'max_tool_attempts',
+    'execution_profile_id',
+    'provider_tool_names',
   ]],
+  ['projects', ['default_execution_profile_id']],
   ['mcp_servers', ['origin_source']],
-  ['sessions', ['runtime_context']],
+  ['sessions', [
+    'runtime_context',
+    'execution_profile_id',
+    'external_thread_id',
+    'toolset_fingerprint',
+    'policy_fingerprint',
+    'runtime_binding_version',
+  ]],
   ['messages', ['turn_id', 'prompt_message_id']],
 ] as const;
 
@@ -124,7 +146,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readJournalRows(sqlite: Database.Database): MigrationJournalRow[] {
+function readJournalRows(sqlite: SqliteClient): MigrationJournalRow[] {
   const table = sqlite.prepare(
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations' LIMIT 1",
   ).get();
@@ -163,7 +185,7 @@ function assertOfficialBaselineJournal(
   });
 }
 
-function inspectBackfillColumns(sqlite: Database.Database): {
+function inspectBackfillColumns(sqlite: SqliteClient): {
   present: number;
   valid: number;
   invalid: string[];
@@ -190,7 +212,7 @@ function inspectBackfillColumns(sqlite: Database.Database): {
 }
 
 export function reconcileLegacyPrimarySchema(
-  sqlite: Database.Database,
+  sqlite: SqliteClient,
   migrationsFolder: string,
 ): void {
   const journal = readMigrationJournal(migrationsFolder);
@@ -262,23 +284,24 @@ export function reconcileLegacyPrimarySchema(
 @Injectable()
 export class DrizzleService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DrizzleService.name);
-  private sqlite!: Database.Database;
-  public db!: BetterSQLite3Database<typeof schema>;
+  private sqlite!: SqliteClient;
+  public db!: KalioDrizzleDatabase;
 
   constructor(private readonly config: ConfigService) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     const dbPath = this.config.get<string>('DATABASE_PATH', './data/kalio.db');
+    const requestedDriver = this.config.get<string>('KALIO_SQLITE_DRIVER');
     mkdirSync(dirname(dbPath), { recursive: true });
-    this.sqlite = new Database(dbPath);
-    this.sqlite.pragma('journal_mode = WAL');
-    this.sqlite.pragma('foreign_keys = ON');
-    this.db = drizzle(this.sqlite, { schema });
+    const database = createSqliteDatabase(dbPath, requestedDriver);
+    this.sqlite = database.client;
+    this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    this.db = createDrizzleDatabase(this.sqlite, database.driver, schema);
 
     const migrationsFolder = resolve(__dirname, 'migrations');
     try {
       reconcileLegacyPrimarySchema(this.sqlite, migrationsFolder);
-      migrate(this.db, { migrationsFolder });
+      migrateDrizzleDatabase(this.db, database.driver, migrationsFolder);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Database migration failed for ${dbPath}: ${message}`);
@@ -287,7 +310,7 @@ export class DrizzleService implements OnModuleInit, OnModuleDestroy {
 
     this.assertMigratedSchema();
     this.logger.log(`Migrations applied from ${migrationsFolder}`);
-    this.logger.log(`Database connected: ${dbPath}`);
+    this.logger.log(`Database connected: ${dbPath} (${database.driver})`);
   }
 
   onModuleDestroy(): void {

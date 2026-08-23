@@ -1,4 +1,4 @@
-import type { AgentRunContext, LLMContent, LLMStructuredOutputRequest, SessionRuntimeKind, ToolMeta } from '@kalio/types';
+import type { AgentRunContext, ExecutionProfile, LLMContent, LLMStructuredOutputRequest, SessionRuntimeKind, ToolMeta } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
 
 export type LLMRuntimeKind = Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
@@ -28,6 +28,27 @@ export interface LLMAgentLoopRequest {
   effectiveSystemPrompt: string;
   toolMetas: ToolMeta[];
   model?: string;
+  providerToolNames?: string[];
+  executionProfile?: ExecutionProfile;
+  externalThreadId?: string;
+  cwd?: string;
+  providerCompletesTurn?: boolean;
+  onExternalThreadBound?: (threadId: string, binding?: { turnId?: string; processEpoch?: string }) => Promise<void>;
+  onExternalRuntimeLost?: (event: {
+    authProfileId: string;
+    processEpoch: string;
+    reason: 'reset' | 'exit' | 'error' | 'closed';
+  }) => void;
+  onNativeApprovalRequested?: (request: {
+    method: string;
+    params: Record<string, unknown>;
+  }) => Promise<'accept' | 'decline' | 'cancel'>;
+  onExternalAudit?: (event: {
+    eventName: string;
+    status?: 'started' | 'running' | 'completed' | 'waiting_for_human' | 'failed' | 'cancelled';
+    data?: Record<string, unknown>;
+  }) => Promise<void> | void;
+  onToolResult?: (callId: string, result: import('@kalio/types').ToolResult) => Promise<void>;
   vfsSessionId?: string;
   agentRun?: AgentRunContext;
   abortSignal: AbortSignal;

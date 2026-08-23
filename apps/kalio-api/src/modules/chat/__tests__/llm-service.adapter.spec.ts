@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { LLMServiceAdapter } from '../llm-service.adapter';
 import type { LLMService } from '../../llm/llm.service';
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
-import type { LLMToolCall, LLMStreamChunk } from '@kalio/types';
+import type { ExecutionProfile, LLMToolCall, LLMStreamChunk } from '@kalio/types';
 
 interface FakeStream {
   chunks: LLMStreamChunk[];
@@ -79,6 +79,36 @@ describe('LLMServiceAdapter', () => {
       expect.any(Array),
       expect.any(Array),
       expect.objectContaining({ modelOverride: 'mimo-v2.5' }),
+    );
+  });
+
+  it('dispatches a bound direct profile through its credential-aware stream', async () => {
+    const directProfile: ExecutionProfile = {
+      id: 'direct-profile',
+      name: 'OpenRouter fast',
+      kind: 'direct-llm',
+      provider: 'openrouter',
+      model: 'openrouter/fast',
+      authProfileId: 'credential-1',
+      approvalMode: 'codex_guard',
+      enabled: true,
+      capabilitiesVersion: '1',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const streamChat = vi.fn();
+    const streamChatWithExecutionProfile = vi.fn().mockResolvedValue([]);
+    const llm = { streamChat, streamChatWithExecutionProfile } as unknown as LLMService;
+    const adapter = new LLMServiceAdapter(llm);
+
+    await collect(adapter.stream({ ...baseParams, model: 'ignored', executionProfile: directProfile }));
+
+    expect(streamChat).not.toHaveBeenCalled();
+    expect(streamChatWithExecutionProfile).toHaveBeenCalledWith(
+      directProfile,
+      expect.any(Array),
+      expect.any(Array),
+      expect.objectContaining({ modelOverride: undefined }),
     );
   });
 

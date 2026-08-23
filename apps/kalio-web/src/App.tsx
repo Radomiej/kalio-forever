@@ -47,6 +47,11 @@ import { useSettingsStore } from './features/settings/settingsStore';
 import { activateConversationSession } from './features/chat/activeConversationSession';
 import { preloadRuntimeWatchSessionHistory } from './features/chat/runtimeWatchHistoryBootstrap';
 import { selectRuntimeAttentionItems } from './store/agentRuntimeSelectors';
+import {
+  RUNTIME_ATTENTION_REVIEWED_EVENT,
+  readReviewedRuntimeAttentionKeys,
+  selectRuntimeAttentionNotice,
+} from './store/agentRuntimeAttentionNotice';
 import { mergeSessionsPreservingLocal } from './features/sessions/mergeSessionsPreservingLocal';
 
 export function App() {
@@ -61,6 +66,8 @@ export function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
   const [lastTalkActiveAt, setLastTalkActiveAt] = useState<number | null>(() => loadLastTalkActiveAt());
   const [talkSidebarCollapsed, setTalkSidebarCollapsed] = useState(false);
+  const [runtimeAttentionNowMs, setRuntimeAttentionNowMs] = useState(() => Date.now());
+  const [reviewedRuntimeAttentionKeys, setReviewedRuntimeAttentionKeys] = useState(readReviewedRuntimeAttentionKeys);
 
   const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
@@ -76,9 +83,16 @@ export function App() {
     sessions,
     sessionMessages,
   });
-  const talkAttentionCount = talkAttentionItems.length;
-  const approvalAttentionCount = talkAttentionItems.filter((item) => item.kind === 'hitl' || item.kind === 'budget').length;
-  const runtimeAttentionCount = talkAttentionCount - approvalAttentionCount;
+  const approvalAttentionCount = talkAttentionItems.filter((item) => item.actionable).length;
+  const runtimeAttentionNotice = selectRuntimeAttentionNotice({
+    items: talkAttentionItems,
+    nowMs: runtimeAttentionNowMs,
+    reviewedItemKeys: reviewedRuntimeAttentionKeys,
+  });
+  const runtimeAttentionNoticeMaxUpdatedAt = runtimeAttentionNotice?.maxUpdatedAt;
+  const runtimeAttentionNoticeNextExpiresInMs = runtimeAttentionNotice?.nextExpiresInMs;
+  const runtimeAttentionCount = runtimeAttentionNotice?.totalRecentCount ?? 0;
+  const talkAttentionCount = approvalAttentionCount + runtimeAttentionCount;
   const talkAttentionTitle = approvalAttentionCount > 0 && runtimeAttentionCount === 0
     ? `${approvalAttentionCount} approval${approvalAttentionCount === 1 ? '' : 's'} waiting`
     : approvalAttentionCount === 0 && runtimeAttentionCount > 0
@@ -87,6 +101,26 @@ export function App() {
   const hasTalkAttention = talkAttentionCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
   const bootstrapFetchSeqRef = useRef(0);
+
+  useEffect(() => {
+    const handleReviewedRuntimeAttention = () => {
+      setReviewedRuntimeAttentionKeys(readReviewedRuntimeAttentionKeys());
+    };
+    window.addEventListener(RUNTIME_ATTENTION_REVIEWED_EVENT, handleReviewedRuntimeAttention);
+    return () => window.removeEventListener(RUNTIME_ATTENTION_REVIEWED_EVENT, handleReviewedRuntimeAttention);
+  }, []);
+
+  useEffect(() => {
+    if (runtimeAttentionNoticeNextExpiresInMs === undefined) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRuntimeAttentionNowMs(Date.now());
+    }, runtimeAttentionNoticeNextExpiresInMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [runtimeAttentionNoticeMaxUpdatedAt, runtimeAttentionNoticeNextExpiresInMs]);
 
   // Initialize on app mount
   useEffect(() => {

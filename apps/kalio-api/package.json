@@ -1,6 +1,6 @@
 {
   "name": "kalio-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "build": "nest build",
@@ -17,6 +17,8 @@
     "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.240",
     "@huggingface/transformers": "^4.2.0",
     "@iarna/toml": "^2.2.5",
     "@kalio/types": "workspace:*",
@@ -27,6 +29,7 @@
     "@nestjs/core": "^11.1.19",
     "@nestjs/platform-express": "^11.1.19",
     "@nestjs/platform-socket.io": "^11.1.19",
+    "@nestjs/serve-static": "^5.0.5",
     "@nestjs/websockets": "^11.1.19",
     "@types/archiver": "^7.0.0",
     "ajv": "8.20.0",
@@ -44,7 +47,8 @@
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "sqlite-vec": "^0.1.9",
-    "yauzl": "2.10.0"
+    "yauzl": "2.10.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@kalio/sdk": "workspace:*",

@@ -24,13 +24,14 @@ function getOptionalStringArg(args: ToolCallRequest['args'], key: 'name' | 'syst
   return rawValue.trim();
 }
 
-function getOptionalStringArrayArg(args: ToolCallRequest['args'], key: 'allowedTools' | 'skillIds'): string[] | undefined {
+function getOptionalStringArrayArg(args: ToolCallRequest['args'], key: 'allowedTools' | 'providerToolNames' | 'skillIds'): string[] | undefined {
   const rawValue = args[key];
   if (rawValue === undefined) {
     return undefined;
   }
   if (!Array.isArray(rawValue) || rawValue.some((item) => typeof item !== 'string' || item.trim().length === 0)) {
-    throw new Error(`INVALID_${key === 'allowedTools' ? 'ALLOWED_TOOLS' : 'SKILL_IDS'}: ${key} must be an array of non-empty strings`);
+    const errorKey = key === 'allowedTools' ? 'ALLOWED_TOOLS' : key === 'providerToolNames' ? 'PROVIDER_TOOL_NAMES' : 'SKILL_IDS';
+    throw new Error(`INVALID_${errorKey}: ${key} must be an array of non-empty strings`);
   }
   return rawValue.map((item) => item.trim());
 }
@@ -50,7 +51,7 @@ function getOptionalMcpPolicyArg(args: ToolCallRequest['args']): MCPPolicy | und
 @Tool({
   name: 'persona_list',
   domain: 'persona',
-  description: 'List all personas. Returns id, name, model, allowedTools (native tool names), skillIds, and mcpPolicy for each.',
+   description: 'List all personas. Returns id, name, model, Kalio allowedTools, providerToolNames, skillIds, and mcpPolicy for each.',
   parameters: {
     type: 'object',
     properties: {},
@@ -60,11 +61,11 @@ function getOptionalMcpPolicyArg(args: ToolCallRequest['args']): MCPPolicy | und
 export class PersonaListTool {
   constructor(private readonly personaService: PersonaService) {}
 
-  async execute(request: ToolCallRequest): Promise<{ personas: { id: string; name: string; model: string; allowedTools: string[]; skillIds: string[]; mcpPolicy: MCPPolicy }[] }> {
+  async execute(request: ToolCallRequest): Promise<{ personas: { id: string; name: string; model: string; allowedTools: string[]; providerToolNames: string[]; skillIds: string[]; mcpPolicy: MCPPolicy }[] }> {
     void request;
     const all = await this.personaService.findAll();
     return {
-      personas: all.map((p) => ({ id: p.id, name: p.name, model: p.model, allowedTools: p.allowedTools, skillIds: p.skillIds, mcpPolicy: p.mcpPolicy })),
+      personas: all.map((p) => ({ id: p.id, name: p.name, model: p.model, allowedTools: p.allowedTools, providerToolNames: p.providerToolNames ?? [], skillIds: p.skillIds, mcpPolicy: p.mcpPolicy })),
     };
   }
 }
@@ -84,7 +85,12 @@ export class PersonaListTool {
       allowedTools: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Optional list of native tool names this persona is allowed to use. Empty = all tools. Use list_tools to discover tool names.',
+        description: 'Optional list of provider-native tool names this persona may use. Empty = all provider-native tools disabled. Use provider documentation to discover names.',
+      },
+      providerToolNames: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional Claude Code built-in tool names enabled for this persona (for example Read or WebSearch). Empty = disabled. Kalio child and external MCP tools are not accepted here.',
       },
       skillIds: {
         type: 'array',
@@ -108,9 +114,10 @@ export class PersonaCreateTool {
     const systemPrompt = getRequiredStringArg(request.args, 'systemPrompt');
     const model = getRequiredStringArg(request.args, 'model');
     const allowedTools = getOptionalStringArrayArg(request.args, 'allowedTools') ?? [];
+    const providerToolNames = getOptionalStringArrayArg(request.args, 'providerToolNames') ?? [];
     const skillIds = getOptionalStringArrayArg(request.args, 'skillIds') ?? [];
     const mcpPolicy = getOptionalMcpPolicyArg(request.args) ?? 'allow_all';
-    const persona = await this.personaService.create({ name, systemPrompt, model, allowedTools, skillIds, mcpPolicy });
+    const persona = await this.personaService.create({ name, systemPrompt, model, allowedTools, providerToolNames, skillIds, mcpPolicy });
     return { id: persona.id, name: persona.name, model: persona.model };
   }
 }
@@ -131,7 +138,12 @@ export class PersonaCreateTool {
       allowedTools: {
         type: 'array',
         items: { type: 'string' },
-        description: 'New list of native tool names (replaces existing list entirely). Empty array = all tools allowed.',
+        description: 'New provider-native tool list (replaces existing list entirely). Empty array disables all provider-native tools.',
+      },
+      providerToolNames: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'New Claude Code built-in tool names (replaces the existing list). Empty array = disabled.',
       },
       skillIds: {
         type: 'array',
@@ -156,9 +168,10 @@ export class PersonaUpdateTool {
     const systemPrompt = getOptionalStringArg(request.args, 'systemPrompt');
     const model = getOptionalStringArg(request.args, 'model');
     const allowedTools = getOptionalStringArrayArg(request.args, 'allowedTools');
+    const providerToolNames = getOptionalStringArrayArg(request.args, 'providerToolNames');
     const skillIds = getOptionalStringArrayArg(request.args, 'skillIds');
     const mcpPolicy = getOptionalMcpPolicyArg(request.args);
-    const updated = await this.personaService.update(id, { name, systemPrompt, model, allowedTools, skillIds, mcpPolicy });
+    const updated = await this.personaService.update(id, { name, systemPrompt, model, allowedTools, providerToolNames, skillIds, mcpPolicy });
     return { id: updated.id, name: updated.name, model: updated.model };
   }
 }

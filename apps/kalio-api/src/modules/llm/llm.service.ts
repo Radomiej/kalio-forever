@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
+import type { ExecutionProfile, LLMToolCall, LLMConfig, LLMProviderType } from '@kalio/types';
 import type { ILLMProvider, ProviderConfig, LLMToolDef, StreamChatOptions } from './llm.types';
 import { createRuntimeLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
@@ -114,6 +114,25 @@ export class LLMService {
     );
   }
 
+  async streamChatWithExecutionProfile(
+    profile: ExecutionProfile,
+    messages: ContextManagedLLMMessage[],
+    tools: LLMToolDef[],
+    options: StreamChatOptions,
+  ): Promise<LLMToolCall[]> {
+    if (profile.kind !== 'direct-llm') {
+      throw new BadRequestException('Direct LLM execution requires a direct-llm execution profile.');
+    }
+
+    const config = await this.getExecutionProfileConfig(profile);
+    return this.runStreamChatWithConfig(
+      config,
+      messages,
+      tools,
+      await this.withGenerationDefaults({ ...options, modelOverride: undefined }),
+    );
+  }
+
   private async withGenerationDefaults(options: StreamChatOptions): Promise<StreamChatOptions> {
     if (options.maxOutputTokens !== undefined) {
       return options;
@@ -145,6 +164,25 @@ export class LLMService {
       model: envConfig.model,
       source: 'env',
     };
+  }
+
+  private async getExecutionProfileConfig(profile: ExecutionProfile): Promise<ProviderConfig> {
+    if (profile.authProfileId) {
+      const credentialConfig = await this.credentialsService.getProviderConfigForCredential(profile.authProfileId);
+      if (!credentialConfig) {
+        throw new BadRequestException(`Credential for execution profile is unavailable: ${profile.authProfileId}`);
+      }
+      if (profile.provider && credentialConfig.provider !== profile.provider) {
+        throw new BadRequestException(`Credential provider does not match execution profile ${profile.id}.`);
+      }
+      return { ...credentialConfig, model: profile.model || credentialConfig.model };
+    }
+
+    const active = await this.getActiveProvider();
+    if (profile.provider && active.config.provider !== profile.provider) {
+      throw new BadRequestException(`Execution profile ${profile.id} is not bound to the active provider.`);
+    }
+    return { ...active.config, model: profile.model || active.config.model };
   }
 
   async getActiveModels(): Promise<string[]> {

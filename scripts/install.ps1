@@ -1,34 +1,17 @@
-# Kalio Windows production installer
+# Kalio Windows runtime installer
 # Usage:
-#   irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
-#   .\scripts\install.ps1 -RepoUrl https://github.com/Radomiej/kalio-forever.git
+#   .\scripts\install.ps1 -ArchivePath .\kalio-runtime-1.0.0-windows-x64.zip
+#   .\scripts\install.ps1 -ArchivePath .\kalio-runtime-1.0.0-windows-x64.zip -NoLaunch
 
 param(
-    [string]$RepoUrl = 'https://github.com/Radomiej/kalio-forever.git',
-    [string]$Branch = 'main',
-    [string]$InstallDir = '',
-    [string]$DataRoot = '',
-    [int]$BackendPort = 4016,
-    [int]$FrontendPort = 6188,
-    [switch]$NoOpen,
-    [switch]$NoTask,
-    [switch]$SkipBuild
+    [Parameter(Mandatory = $true)]
+    [string]$ArchivePath,
+    [string]$InstallRoot = '',
+    [switch]$NoLaunch,
+    [switch]$NoAutostart
 )
 
 $ErrorActionPreference = 'Stop'
-$TaskName = 'Kalio-Forever'
-
-$localAppData = [Environment]::GetFolderPath('LocalApplicationData')
-if (-not $localAppData) {
-    $localAppData = Join-Path $env:USERPROFILE 'AppData\Local'
-}
-
-if (-not $InstallDir) {
-    $InstallDir = Join-Path $localAppData 'kalio-forever\app'
-}
-if (-not $DataRoot) {
-    $DataRoot = Join-Path $localAppData 'kalio-forever'
-}
 
 function Write-Step {
     param([string]$Message)
@@ -40,282 +23,204 @@ function Write-Ok {
     Write-Host "[kalio] $Message" -ForegroundColor Green
 }
 
-function Write-Fail {
-    param([string]$Message)
-    Write-Host "[kalio] FAIL $Message" -ForegroundColor Red
-}
-
-function Ensure-SystemNodeOnPath {
-    $programFilesNode = 'C:\Program Files\nodejs'
-    if (Test-Path $programFilesNode) {
-        $env:PATH = "$programFilesNode;$env:PATH"
+function Assert-Version {
+    param([string]$Version)
+    if ($Version -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+        throw "Invalid runtime version: $Version"
     }
 }
 
-function Get-NodeCommand {
-    Ensure-SystemNodeOnPath
-    $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
-    if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue }
-    if (-not $nodeCmd) {
-        throw 'Node.js not found. Install Node 22+ from https://nodejs.org and rerun the installer.'
-    }
-    return $nodeCmd
-}
-
-function Test-NodeVersion {
-    param($NodeCmd)
-    $versionText = & $NodeCmd.Source -p "process.versions.node"
-    $major = [int]($versionText.Split('.')[0])
-    if ($major -lt 22) {
-        throw "Node.js 22+ required. Found $versionText at $($NodeCmd.Source)"
+function Assert-UnderRoot {
+    param([string]$Path, [string]$Root)
+    $resolvedPath = [IO.Path]::GetFullPath($Path)
+    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    if (-not $resolvedPath.StartsWith($resolvedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to operate outside install root: $resolvedPath"
     }
 }
 
-function Test-GitAvailable {
-    $gitCmd = Get-Command git.exe -ErrorAction SilentlyContinue
-    if (-not $gitCmd) { $gitCmd = Get-Command git -ErrorAction SilentlyContinue }
-    if (-not $gitCmd) {
-        throw 'Git not found. Install Git for Windows and rerun the installer.'
-    }
-    return $gitCmd
-}
+function New-DataEnv {
+    param([string]$DataRoot, [ValidateSet('node', 'bun')][string]$Runtime = 'node')
 
-function Test-PortFree {
-    param([int]$Port)
-
-    $owners = @(Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -eq 'Listen' -and $_.OwningProcess -gt 0 } |
-        Select-Object -ExpandProperty OwningProcess -Unique)
-
-    if ($owners.Count -gt 0) {
-        throw "Port $Port is already in use (PID $($owners -join ', ')). Stop the conflicting process or pass different ports."
-    }
-}
-
-function Stop-ManagedStackIfPresent {
-    param($NodeCmd, [string]$TargetDir)
-
-    $stackManager = Join-Path $TargetDir 'scripts\stack-manager.mjs'
-    if (-not (Test-Path $stackManager)) {
+    $envPath = Join-Path $DataRoot '.env'
+    if (Test-Path -LiteralPath $envPath) {
+        Write-Step "Keeping existing data environment: $envPath"
         return
     }
 
-    Write-Step 'Stopping any existing managed stack'
-    & $NodeCmd.Source $stackManager stop
-    if ($LASTEXITCODE -ne 0) {
-        Write-Step 'No managed stack to stop (continuing)'
-    }
-}
-
-function Ensure-Pnpm {
-    param($NodeCmd)
-
-    Write-Step 'Enabling pnpm via corepack'
-    $corepackJs = Join-Path ${env:ProgramFiles} 'nodejs\node_modules\corepack\dist\corepack.js'
-    if (-not (Test-Path $corepackJs)) {
-        $corepackJs = Join-Path (Split-Path $NodeCmd.Source -Parent) 'node_modules\corepack\dist\corepack.js'
-    }
-    if (-not (Test-Path $corepackJs)) {
-        throw 'corepack.js not found. Reinstall Node.js 22+ with corepack support.'
-    }
-
-    & $NodeCmd.Source $corepackJs enable
-    if ($LASTEXITCODE -ne 0) { throw "corepack enable failed with exit code $LASTEXITCODE" }
-
-    & $NodeCmd.Source $corepackJs prepare pnpm@9.15.0 --activate
-    if ($LASTEXITCODE -ne 0) { throw "corepack prepare pnpm failed with exit code $LASTEXITCODE" }
-
-    $pnpmCmd = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
-    if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue }
-    if (-not $pnpmCmd) {
-        throw 'pnpm not available after corepack prepare.'
-    }
-    return $pnpmCmd
-}
-
-function Ensure-Repo {
-    param($GitCmd, [string]$TargetDir, [string]$RemoteUrl, [string]$RemoteBranch)
-
-    New-Item -ItemType Directory -Force -Path (Split-Path $TargetDir -Parent) | Out-Null
-
-    if (Test-Path (Join-Path $TargetDir '.git')) {
-        Write-Step "Updating existing install at $TargetDir"
-        Push-Location $TargetDir
-        try {
-            & $GitCmd.Source fetch origin $RemoteBranch
-            if ($LASTEXITCODE -ne 0) { throw "git fetch failed with exit code $LASTEXITCODE" }
-            & $GitCmd.Source checkout $RemoteBranch
-            if ($LASTEXITCODE -ne 0) { throw "git checkout failed with exit code $LASTEXITCODE" }
-            & $GitCmd.Source pull --ff-only origin $RemoteBranch
-            if ($LASTEXITCODE -ne 0) { throw "git pull failed with exit code $LASTEXITCODE" }
-        } finally {
-            Pop-Location
-        }
-        return
-    }
-
-    if (Test-Path $TargetDir) {
-        throw "Install path exists but is not a git repo: $TargetDir"
-    }
-
-    Write-Step "Cloning $RemoteUrl -> $TargetDir"
-    & $GitCmd.Source clone --branch $RemoteBranch --depth 1 $RemoteUrl $TargetDir
-    if ($LASTEXITCODE -ne 0) { throw "git clone failed with exit code $LASTEXITCODE" }
-}
-
-function New-ProdEnvFile {
-    param([string]$Path, [string]$Root, [int]$ApiPort, [int]$WebPort)
-
-    if (Test-Path $Path) {
-        Write-Step "Keeping existing env file: $Path"
-        return
-    }
-
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $bytes = New-Object byte[] 32
-    $rng.GetBytes($bytes)
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
     $masterKey = [Convert]::ToBase64String($bytes)
-
-    $dbPath = Join-Path $Root 'kalio.db'
-    $workspacePath = Join-Path $Root 'workspaces'
-    $memoryPath = Join-Path $Root 'memory'
-    $embeddingPath = Join-Path $Root 'embeddings-cache'
-
+    $dbPath = Join-Path $DataRoot 'kalio.db'
+    $workspacePath = Join-Path $DataRoot 'workspaces'
+    $memoryPath = Join-Path $DataRoot 'memory'
+    $embeddingPath = Join-Path $DataRoot 'embeddings-cache'
     $content = @"
-# Kalio production profile (generated by install.ps1)
-LLM_PROVIDER=mock
-LLM_API_KEY=mock
-LLM_BASE_URL=mock
-LLM_MODEL=mock
-
+# Generated by Kalio runtime installer. Keep this file private.
 NODE_ENV=production
-PORT=$ApiPort
-VITE_PORT=$WebPort
+PORT=4016
+KALIO_HOST=127.0.0.1
+KALIO_INSTALL_PROFILE=runtime
+KALIO_SERVE_UI=true
+KALIO_SQLITE_DRIVER=$Runtime
 DATABASE_PATH=$dbPath
 WORKSPACE_ROOT=$workspacePath
 MEMORY_DB_PATH=$memoryPath
 EMBEDDING_CACHE_DIR=$embeddingPath
 CREDENTIALS_MASTER_KEY=$masterKey
-CORS_ORIGIN=http://localhost:$WebPort,http://127.0.0.1:$WebPort
-KALIO_INSTALL_PROFILE=prod
+CORS_ORIGIN=http://127.0.0.1:4016
+LLM_PROVIDER=mock
+LLM_API_KEY=mock
+LLM_BASE_URL=mock
+LLM_MODEL=mock
 "@
-
-    New-Item -ItemType Directory -Force -Path $Root | Out-Null
-    Set-Content -Path $Path -Value $content -Encoding UTF8
-    Write-Ok "Created prod env file: $Path"
+    New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
+    [IO.File]::WriteAllText($envPath, $content, (New-Object Text.UTF8Encoding($false)))
+    Write-Ok "Created data environment: $envPath"
 }
 
-function Register-KalioTask {
-    param([string]$AutostartScript)
+function Register-AutostartTask {
+    param(
+        [string]$InstallRoot,
+        [string]$Launcher,
+        [string]$WorkingDirectory,
+        [string]$LogPath
+    )
 
-    if (-not (Test-Path $AutostartScript)) {
-        throw "Autostart script missing: $AutostartScript"
+    if (-not (Get-Command -Name Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-Warning 'Scheduled Task cmdlets are unavailable; Kalio will not start automatically'
+        return
     }
 
-    Write-Step "Registering Scheduled Task '$TaskName'"
-    $action = New-ScheduledTaskAction `
-        -Execute 'powershell.exe' `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$AutostartScript`""
-
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $wrapperPath = Join-Path $InstallRoot 'bin\kalio-autostart.cmd'
+    $wrapperContent = @"
+@echo off
+setlocal
+cd /d "$WorkingDirectory"
+call "$Launcher" update --auto --no-launch >> "$LogPath" 2>&1
+set "UPDATE_EXIT=%ERRORLEVEL%"
+if not "%UPDATE_EXIT%"=="0" echo [kalio] updater warning: exit code %UPDATE_EXIT% >> "$LogPath"
+call "$Launcher" serve >> "$LogPath" 2>&1
+"@
+    Set-Content -LiteralPath $wrapperPath -Value $wrapperContent -Encoding ASCII
+    $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $action = New-ScheduledTaskAction -Execute $wrapperPath -WorkingDirectory $WorkingDirectory
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+    $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType InteractiveToken -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Principal $principal `
-        -Description 'Start Kalio prod stack when the user signs in' `
-        -Force | Out-Null
-
-    Write-Ok "Scheduled Task '$TaskName' registered"
+    Register-ScheduledTask -TaskName 'Kalio Forever' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Write-Ok 'Registered per-user startup task: Kalio Forever'
 }
 
 try {
-    Write-Host ''
-    Write-Host 'Kalio Production Installer' -ForegroundColor Cyan
-    Write-Host "  install dir -> $InstallDir" -ForegroundColor Green
-    Write-Host "  data root   -> $DataRoot" -ForegroundColor Green
-    Write-Host "  ports       -> API $BackendPort / UI $FrontendPort" -ForegroundColor Green
-    Write-Host ''
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    if (-not $localAppData) {
+        $localAppData = Join-Path $env:USERPROFILE 'AppData\Local'
+    }
+    if (-not $InstallRoot) {
+        $InstallRoot = Join-Path $localAppData 'Kalio'
+    }
+    $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+    $ArchivePath = [IO.Path]::GetFullPath($ArchivePath)
+    if (-not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
+        throw "Runtime archive not found: $ArchivePath"
+    }
 
-    $nodeCmd = Get-NodeCommand
-    Test-NodeVersion -NodeCmd $nodeCmd
-    $gitCmd = Test-GitAvailable
-
-    Ensure-Repo -GitCmd $gitCmd -TargetDir $InstallDir -RemoteUrl $RepoUrl -RemoteBranch $Branch
-    Stop-ManagedStackIfPresent -NodeCmd $nodeCmd -TargetDir $InstallDir
-    Test-PortFree -Port $BackendPort
-    Test-PortFree -Port $FrontendPort
-
-    $envFile = Join-Path $DataRoot '.env'
-    New-ProdEnvFile -Path $envFile -Root $DataRoot -ApiPort $BackendPort -WebPort $FrontendPort
-
-    $pnpmCmd = Ensure-Pnpm -NodeCmd $nodeCmd
-
-    Push-Location $InstallDir
+    $lockPath = Join-Path $InstallRoot '.runtime.lock'
+    if (Test-Path -LiteralPath $lockPath) {
+        throw "Kalio appears to be running; stop it before updating: $lockPath"
+    }
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('kalio-runtime-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
-        Write-Step 'Installing dependencies'
-        & $pnpmCmd.Source install
-        if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE" }
-
-        Write-Step 'Running workspace preflight repair if needed'
-        & $nodeCmd.Source (Join-Path $InstallDir 'scripts\repo-preflight.mjs') --repair
-        if ($LASTEXITCODE -ne 0) {
-            Write-Step 'Preflight repair reported issues; continuing with install'
+        Write-Step "Extracting runtime archive: $ArchivePath"
+        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $tempRoot -Force
+        $metadataFile = Get-ChildItem -LiteralPath $tempRoot -Filter 'runtime.json' -File -Recurse | Select-Object -First 1
+        if ($null -eq $metadataFile) {
+            throw 'runtime.json is missing from the archive'
         }
-
-        if (-not $SkipBuild) {
-            Write-Step 'Building Kalio (api + web)'
-            & $pnpmCmd.Source run build
-            if ($LASTEXITCODE -ne 0) { throw "pnpm build failed with exit code $LASTEXITCODE" }
+        $metadata = Get-Content -LiteralPath $metadataFile.FullName -Raw | ConvertFrom-Json
+        $runtime = if ($null -eq $metadata.runtime -or [string]::IsNullOrWhiteSpace([string]$metadata.runtime)) { 'node' } else { [string]$metadata.runtime }
+        if ($runtime -notin @('node', 'bun')) {
+            throw "Unsupported Kalio runtime: $runtime"
         }
+        if ($metadata.platform -ne 'windows' -or $metadata.architecture -ne 'x64') {
+            throw "This archive is not a Windows x64 Kalio runtime: $($metadata.platform)/$($metadata.architecture)"
+        }
+        Assert-Version -Version $metadata.version
+        $sourceRoot = $metadataFile.Directory.FullName
+        $versionsRoot = Join-Path $InstallRoot 'app\versions'
+        $versionRoot = Join-Path $versionsRoot $metadata.version
+        Assert-UnderRoot -Path $versionRoot -Root $versionsRoot
+        New-Item -ItemType Directory -Path $versionsRoot -Force | Out-Null
+        if (Test-Path -LiteralPath $versionRoot) {
+            Write-Step "Replacing existing runtime version $($metadata.version)"
+            Remove-Item -LiteralPath $versionRoot -Recurse -Force
+        }
+        Write-Step "Installing runtime version $($metadata.version)"
+        Copy-Item -LiteralPath $sourceRoot -Destination $versionRoot -Recurse -Force
 
-        Write-Step 'Starting prod stack'
-        $stackArgs = @(
-            (Join-Path $InstallDir 'scripts\stack-manager.mjs'),
-            'start',
-            '--profile', 'prod',
-            '--runtime', 'direct',
-            '--backend-port', "$BackendPort",
-            '--frontend-port', "$FrontendPort",
-            '--data-root', $DataRoot,
-            '--env-file', $envFile,
-            '--use-env-llm'
+        $dataRoot = Join-Path $InstallRoot 'data'
+        $requiredDirectories = @(
+            (Join-Path $InstallRoot 'bin'),
+            (Join-Path $InstallRoot 'logs'),
+            (Join-Path $InstallRoot 'cache'),
+            $dataRoot
         )
-        if ($SkipBuild) {
-            $stackArgs += '--skip-build'
+        foreach ($directory in $requiredDirectories) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
         }
+        New-DataEnv -DataRoot $dataRoot -Runtime $runtime
 
-        & $nodeCmd.Source @stackArgs
-        if ($LASTEXITCODE -ne 0) { throw "stack-manager start failed with exit code $LASTEXITCODE" }
+        $currentPath = Join-Path $InstallRoot 'current.json'
+        $currentTemp = Join-Path $InstallRoot 'current.json.tmp'
+        $current = @{
+            version = $metadata.version
+            runtime = $runtime
+            platform = $metadata.platform
+            architecture = $metadata.architecture
+            apiProtocolVersion = $metadata.apiProtocolVersion
+            databaseSchemaVersion = $metadata.databaseSchemaVersion
+        } | ConvertTo-Json
+        [IO.File]::WriteAllText($currentTemp, $current, (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $currentTemp -Destination $currentPath -Force
+
+        $launcher = Join-Path $versionRoot 'bin\kalio.cmd'
+        if (-not (Test-Path -LiteralPath $launcher)) {
+            throw "Runtime launcher is missing: $launcher"
+        }
+        $packagedLauncherScript = Join-Path $versionRoot 'bin\kalio-launcher.ps1'
+        if (-not (Test-Path -LiteralPath $packagedLauncherScript -PathType Leaf)) {
+            throw "Stable launcher is missing from the runtime archive: $packagedLauncherScript"
+        }
+        $stableLauncherScript = Join-Path $InstallRoot 'bin\kalio-launcher.ps1'
+        Copy-Item -LiteralPath $packagedLauncherScript -Destination $stableLauncherScript -Force
+        $stableLauncher = Join-Path $InstallRoot 'bin\kalio.cmd'
+        $stableLauncherContent = @'
+@echo off
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0kalio-launcher.ps1" %*
+exit /b %ERRORLEVEL%
+'@
+        Set-Content -LiteralPath $stableLauncher -Value $stableLauncherContent -Encoding ASCII
+        if (-not $NoAutostart) {
+            Register-AutostartTask -InstallRoot $InstallRoot -Launcher $stableLauncher -WorkingDirectory (Join-Path $InstallRoot 'bin') -LogPath (Join-Path $InstallRoot 'logs\autostart.log')
+        }
+        Write-Ok "Kalio runtime installed at $InstallRoot"
+        Write-Host "  data -> $dataRoot" -ForegroundColor Green
+        Write-Host "  run  -> $stableLauncher" -ForegroundColor Green
+        if (-not $NoLaunch) {
+            Write-Step 'Starting Kalio on localhost'
+            Start-Process -FilePath $stableLauncher -ArgumentList 'start'
+        }
     } finally {
-        Pop-Location
-    }
-
-    if (-not $NoTask) {
-        Register-KalioTask -AutostartScript (Join-Path $InstallDir 'scripts\kalio-autostart.ps1')
-    }
-
-    $uiUrl = "http://localhost:$FrontendPort"
-    $apiUrl = "http://localhost:$BackendPort/api/health"
-
-    Write-Host ''
-    Write-Ok 'Kalio production install complete'
-    Write-Host "  UI     -> $uiUrl" -ForegroundColor Green
-    Write-Host "  Health -> $apiUrl" -ForegroundColor Green
-    Write-Host "  Data   -> $DataRoot" -ForegroundColor Green
-    if (-not $NoTask) {
-        Write-Host "  Task   -> $TaskName (At logon for this user)" -ForegroundColor Green
-    }
-    Write-Host ''
-
-    if (-not $NoOpen) {
-        Start-Process $uiUrl
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 } catch {
-    Write-Fail $_.Exception.Message
+    Write-Host "[kalio] FAIL $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }

@@ -57,6 +57,8 @@ export interface HitlDecisionInput {
 export interface HitlDecisionResult {
   agree: boolean;
   reason: string;
+  risk?: 'low' | 'medium' | 'high' | 'critical';
+  decision?: 'allow' | 'deny' | 'ask_user';
 }
 
 export function isHitlMode(value: string | null | undefined): value is HitlMode {

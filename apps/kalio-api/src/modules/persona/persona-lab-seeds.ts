@@ -57,7 +57,7 @@ const toolsets: Record<LabPersona['kind'], string[]> = {
   orchestrator: ['run_sub_agentflow', 'run_subagent', 'spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'wait_for', 'web_search', 'fs_read', 'fs_list', 'vfs_read', 'vfs_list', 'list_tools', 'get_tool_details'],
   research: ['web_search', 'run_subagent', 'fs_read', 'fs_list', 'vfs_read', 'vfs_list'],
   analysis: ['run_subagent', 'web_search', 'fs_read', 'fs_list', 'vfs_read', 'vfs_list'],
-  build: ['spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'wait_for', 'run_subagent', 'fs_read', 'fs_list', 'fs_write', 'vfs_read', 'vfs_write', 'vfs_list'],
+  build: ['spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'wait_for', 'run_subagent', 'fs_read', 'fs_list', 'fs_write', 'ide_query', 'ide_diagnostics', 'ide_status', 'vfs_read', 'vfs_write', 'vfs_list'],
   design: ['run_subagent', 'fs_read', 'fs_list', 'fs_write', 'vfs_read', 'vfs_write', 'vfs_list', 'design_preview', 'image_generate', 'image_view'],
   qa: ['spawn_cli_agent', 'message_cli_agent', 'get_cli_agent_status', 'wait_for', 'run_subagent', 'fs_read', 'fs_list', 'vfs_read', 'vfs_list'],
   review: ['run_subagent', 'web_search', 'fs_read', 'fs_list', 'vfs_read', 'vfs_list'],

@@ -158,12 +158,13 @@ flowchart LR
 |---|---|---|
 | Prezentacja | `kalio-web` / React 19 | Interfejs rozmów, sesji, ustawień, narzędzi, pamięci, observability, RA-App i wyników narzędzi. |
 | Komunikacja | `@kalio/sdk`, Socket.IO | Warstwa klienta zdarzeń: `chat:send`, `chat:chunk`, `tool:*`, `agent:*`, `cli_agent:progress`. |
-| Aplikacja | `kalio-api` / NestJS 11 | Backend runtime: kolejki sesji, streaming, LLM loop, narzędzia, VFS, pamięć, MCP, RA-App, CLI agent, audyt. |
+| Aplikacja | `kalio-api` / NestJS 11 | Backend runtime: kolejki sesji, streaming, LLM loop, bezpośrednie LLM, Codex App Server, narzędzia, VFS, pamięć, MCP, RA-App, CLI agent, audyt. |
 | Kontrakty | `@kalio/types` | Wspólne typy DTO, Socket events, wyniki narzędzi, konfiguracje providerów, modele RA-App i CLI. |
 | Narzędzia | `ToolRegistryService` | Odczyt dekoratorów `@Tool()` / `@ConfirmedTool()`, rejestr natywnych tooli, override polityk confirmation. |
 | Dispatch | `ToolDispatchService` | Łączenie narzędzi natywnych i MCP, HITL, wykonanie, obsługa błędów, `ToolResult`. |
 | Integracja | `MCPService` | Dynamiczne wykrywanie narzędzi z serwerów MCP stdio/HTTP, lifecycle i filtrowanie per persona. |
 | Agenci | `SubagentRuntimeService`, `CLIAgentService` | Delegacja do child sessions oraz do procesów CLI: Copilot, Gemini, Claude Code i inne adaptery. |
+| Runtime agentów | `ExecutionProfileService`, `CodexAppServerHost`, `CodexAppServerLLMSource`, `DevinApiClient`, `DevinApiLLMSource`, `DevinAcpHostRegistry`, `DevinCliAcpLLMSource` | Wybór silnika per projekt/persona/sesja, natywne runtime Codex/Devin, korelacja z run journal i audyt; Devin Cloud jest sterowany REST v3, a hostowy Devin CLI przez ACP. |
 | Pamięć | `MemoryService`, `EmbeddingService` | Ingest/search pamięci per persona, `sqlite-vec`, konfiguracja providerów embeddingów. |
 | Pliki | `VFSService`, allowed paths | Izolowany VFS sesji, KV store, bezpieczna praca na host FS według allowlist. |
 | Mini-aplikacje | `RAAppService`, `RAAppVersioningService` | Tworzenie/renderowanie inline RA-App, katalog ZIP, draft/current/history, rollback. |
@@ -201,6 +202,8 @@ Moduł czatu obsługuje rozmowę użytkownika z agentem. Odpowiada za:
 
 Backend pozostaje właścicielem procesu agentowego. Frontend nie wykonuje narzędzi i nie decyduje o historii przekazywanej do LLM.
 
+Execution profile może skierować turn do bezpośredniego providera LLM, Codex App Server, hostowego Devin CLI ACP albo Devin Cloud API. W wariancie Codex `ChatSession` pozostaje źródłem prawdy, a zapisany `externalThreadId` jest wyłącznie bindingiem do zewnętrznego threadu. Codex wysyła dynamiczne narzędzia przez JSON-RPC do backendu; backend wykonuje je przez istniejący dispatch/policy/HITL i zwraca wynik do turnu. Devin Cloud ma odmienny kontrakt: tworzy lub wznawia zdalną sesję, wysyła prompt bez lokalnego kontekstu i odpytuje status oraz paginowane wiadomości. Hostowy Devin CLI działa przez ACP: `DevinAcpHostRegistry` utrzymuje proces `devin --model <lane> acp`, `session/new`/`session/load` wiąże sesję z dokładnym absolutnym `cwd`, a `session/update` streamuje tekst i myśli do standardowego runtime. Kalio przekazuje persona-scoped MCP przez HTTP, gdy provider to deklaruje, albo przez skompilowany proxy stdio `kalio-mcp-bridge-stdio.js`, który nadal wywołuje wyłącznie lokalny, bearer-protected bridge. ACP filesystem/web/terminal capabilities pozostają osobną polityką kategorii; permission requests są domyślnie odrzucane lub przechodzą przez Kalio HITL.
+
 ### 3.2. Sesje
 
 Sesja jest izolowanym kontekstem pracy. Zawiera:
@@ -231,6 +234,7 @@ Persony definiują sposób działania agenta:
 - podpięte skills jako prompt injections,
 - trwały token avatara (`avatarSeed`, `avatarVariant`, `avatarPaletteKey`, `avatarIndex`),
 - osobną pamięć semantyczną.
+- opcjonalny `executionProfileId`, który wybiera runtime/model/auth profile bez zmiany tożsamości persony.
 
 Skills są wielokrotnego użytku i mogą wzbogacać prompt persony o konkretne reguły, style pracy albo ograniczenia.
 
@@ -263,6 +267,20 @@ Zasady:
 - Widoczność MCP powinna być kontrolowana przez personę.
 - Narzędzia MCP z efektami ubocznymi powinny mieć politykę confirmation zgodną z ryzykiem.
 - Discovery MCP powinno obsługiwać paginację i restart serwera.
+
+### 3.5a. Codex App Server i profile wykonawcze
+
+`execution_profiles` przechowuje typ runtime (`direct-llm`, `codex-app-server`, `claude-agent-sdk`, `devin-api` albo `devin-cli-acp`), model, opcjonalny provider/auth profile, reasoning effort i tryb approval (`codex_guard` albo `kalio_strict`). Projekt wskazuje domyślny profil, persona może go nadpisać, a sesja zapisuje profil rozstrzygnięty przy utworzeniu. Child session dziedziczy profil rodzica. Migracja `0034_devin_local_cli_profiles.sql` seedsuje hostowe profile `devin-local-glm-5-2` i `devin-local-swe-1-7`.
+
+`CodexAppServerHost` utrzymuje jeden proces `codex app-server --stdio` na profil zaufania/auth. `thread/start` otrzymuje model, cwd, sandbox, system instructions i dynamic tools. `item/tool/call` jest mapowany na `ToolDispatchService`; native command/file/permission approval w `codex_guard` pozostaje po stronie Codex auto-review, a w `kalio_strict` trafia do istniejącego kanału `tool:confirmation_required`.
+
+Domyślnie Kalio wylicza aktywne serwery MCP z profilu Codexa przez `codex mcp list` i przekazuje dla każdego `mcp_servers.<id>.enabled=false`; pusty override `mcp_servers={}` nie wystarcza, bo Codex scala puste tabele z konfiguracją globalną. Settings > Integrations udostępnia przełącznik per auth profile przez `PATCH /api/runtime/native-cli-integrations/:authProfileId/settings`. Wartość jest trwale zapisywana w `app_settings` jako `codex.mcp.inherit.<authProfileId>`, a zmiana resetuje proces App Server, żeby następny start zastosował nową politykę. `KALIO_CODEX_INHERIT_MCP=true|false` działa tylko jako fallback, gdy nie ma ustawienia profilu; nie zmienia to osobnej polityki MCP persony dla serwerów zarejestrowanych w Kalio.
+
+Aktywne wykonania korzystają ze wspólnego limitu pięciu lease'ów dla foreground/control/child. Run journal zapisuje `runtimeKind`, `executionProfileId`, `externalThreadId`, `externalTurnId` i `processEpoch`, a audit payload zawiera korelację auth/thread/turn/item/call.
+
+`DevinApiClient` wymaga po stronie serwera `DEVIN_API_KEY`, `DEVIN_ORG_ID` i dodatniego `DEVIN_MAX_ACU_LIMIT`; endpoint `GET /api/runtime/devin/status` zwraca wyłącznie bezpieczny stan konfiguracji. Pierwszy adapter nie forwarduje lokalnego `cwd` ani narzędzi Kalio; gdy persona ma dostępne narzędzia, ich pominięcie jest zapisane w audycie. Trwały checkpoint zdalnego `event_id` po restarcie backendu pozostaje osobnym domknięciem przed pełnym reconnect release gate.
+
+`DevinCliIntegrationController` udostępnia `GET /api/runtime/devin-cli/status`, który bez ujawniania promptów lub tokenów sprawdza lokalny executable, wersję, login, tryb ACP i obecność dwóch darmowych lane'ów. Hostowy smoke test powinien odbywać się w pustym katalogu; uruchomienie w prywatnym repo wymaga osobnej, jawnej zgody użytkownika.
 
 ### 3.6. VFS, FS i KV
 

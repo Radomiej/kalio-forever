@@ -47,6 +47,7 @@ if (repoPreflight.code !== 0) {
 const scriptTests = await run(process.execPath, [
   '--test',
   './scripts/stack-state.test.mjs',
+  './scripts/kalio-updater.test.mjs',
   './scripts/runtime-scripts.test.mjs',
   './scripts/code-audit/audit-scripts.test.mjs',
   './scripts/agentflow-paid-readiness.test.mjs',
