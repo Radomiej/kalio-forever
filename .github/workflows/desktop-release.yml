@@ -167,6 +167,16 @@ jobs:
         with:
           bun-version: 1.2.18
 
+      - name: Install baseline Bun runtime for Linux archive
+        shell: bash
+        run: |
+          baseline_root="$RUNNER_TEMP/kalio-bun-baseline"
+          npm install --prefix "$baseline_root" --no-save --no-audit --no-fund "@oven/bun-linux-x64-baseline@1.2.18"
+          baseline_binary="$baseline_root/node_modules/@oven/bun-linux-x64-baseline/bin/bun"
+          test -x "$baseline_binary"
+          "$baseline_binary" --version
+          echo "KALIO_BUN_BINARY=$baseline_binary" >> "$GITHUB_ENV"
+
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
@@ -187,7 +197,7 @@ jobs:
           KALIO_RUNTIME_UPDATE_PUBLIC_KEY: ${{ vars.KALIO_RUNTIME_UPDATE_PUBLIC_KEY }}
         run: |
           export KALIO_NODE_BINARY="$(command -v node)"
-          export KALIO_BUN_BINARY="$(command -v bun)"
+          export KALIO_BUN_BINARY="${KALIO_BUN_BINARY:-$(command -v bun)}"
           mkdir -p release
           node scripts/build-runtime-package.mjs --platform linux --output release --runtime node
           node scripts/build-runtime-package.mjs --platform linux --output release --runtime bun
