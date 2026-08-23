@@ -1,6 +1,6 @@
 export interface KalioMcpBridgeHttpConfig {
   type: 'http';
-  name: 'kalio';
+  name: string;
   url: string;
   headers: Array<{ name: string; value: string }>;
 }
@@ -12,6 +12,7 @@ export interface KalioMcpBridgeContext {
   promptMessageId?: string;
   allowedToolNames?: readonly string[];
   bridgeClient?: 'devin-acp';
+  serverName?: string;
 }
 
 export function kalioMcpBridgeUrl(): string {
@@ -45,7 +46,7 @@ export function buildKalioMcpBridgeHttpConfig(
     headers.push({ name: 'x-kalio-bridge-client', value: context.bridgeClient });
   }
 
-  return { type: 'http', name: 'kalio', url: kalioMcpBridgeUrl(), headers };
+  return { type: 'http', name: context.serverName ?? 'kalio', url: kalioMcpBridgeUrl(), headers };
 }
 
 function addHeader(headers: Array<{ name: string; value: string }>, name: string, value: string | undefined): void {
