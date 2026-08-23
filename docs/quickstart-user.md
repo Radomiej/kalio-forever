@@ -19,8 +19,8 @@ $script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scri
 The installer will:
 
 1. Download the selected runtime archive from the latest published GitHub Release
-2. Install Kalio to `%LocalAppData%\kalio-forever\app`
-3. Store your data in `%LocalAppData%\kalio-forever\data` (database, workspaces, memory)
+2. Install Kalio to `%LocalAppData%\Kalio\app`
+3. Store your data in `%LocalAppData%\Kalio\data` (database, workspaces, memory)
 4. Start the production stack with the embedded UI
 5. Register a **Scheduled Task** so Kalio starts automatically after **user sign-in**
 
@@ -40,13 +40,36 @@ The installer will:
 
 ## Upgrade
 
-Re-run the Release installer — it downloads the latest published tag, replaces the runtime, and preserves `%LocalAppData%\kalio-forever\data`. It refuses to replace a runtime that is still running; stop Kalio first if needed.
+The Windows install also has a built-in updater. It is a separate process, so it
+never tries to overwrite the executable that is currently serving the UI:
+
+```powershell
+& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
+```
+
+If Kalio is running, the safe command reports that active work must be saved first.
+For an explicit user-requested restart, use `--force`; it targets only the process
+tree recorded by this Kalio installation, downloads the published runtime, verifies
+the release manifest and SHA-256, switches the version pointer atomically, checks
+`/api/runtime/info`, and rolls back the pointer if the new runtime is unhealthy:
+
+```powershell
+& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update --force
+```
+
+At Windows sign-in the Scheduled Task runs a non-forcing update check before
+starting Kalio. A network or signature warning does not prevent the currently
+installed version from starting. User data under `%LocalAppData%\Kalio\data` is
+preserved.
+
+For an older installation without the built-in updater, re-run the release installer:
 
 ```powershell
 irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
 ```
 
-To upgrade the Bun installation:
+The same built-in `kalio.cmd update` command upgrades a Bun installation; the
+release installer remains available as a repair/reinstall path:
 
 ```powershell
 $script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
