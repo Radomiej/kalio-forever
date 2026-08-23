@@ -163,20 +163,29 @@ For a client with native Streamable HTTP MCP support, configure the URL and
 bearer header in that client's MCP settings. The Devin Settings panel can
 generate a local token, save a manual override, or clear the override to return
 to the environment fallback; the token value is never returned by the status
-endpoint. Host-local Devin ACP receives the same stable HTTP server config on
-`session/new`, `session/load`, and `session/resume`; per-turn VFS/turn/message
-context is activated only while a serialized ACP prompt is running. The
+endpoint. Host-local Devin ACP receives the same stable bridge policy on
+`session/new`, `session/load`, and `session/resume`; it uses HTTP when the
+provider advertises it and the compiled stdio proxy otherwise. Per-turn
+VFS/turn/message context is activated only while a serialized ACP prompt is running. The
 adapter checks the provider handshake before sending the MCP config. The
 installed Devin CLI `3000.2.17` advertises `mcpCapabilities.http = false`, so
-Kalio records the bridge as requested but does not pass an ineffective MCP
-server to that process; the chat still works, but Kalio tools are not
-available through this ACP lane until Devin advertises HTTP MCP support.
+Kalio passes a stdio MCP proxy instead of an ineffective HTTP server. The
+compiled `kalio-mcp-bridge-stdio.js` process forwards `tools/list` and
+`tools/call` to the same bearer-protected bridge; the persona allow-list and
+turn context therefore remain enforced by Kalio. A real Devin tool call still
+needs a provider/runtime canary because ACP capability discovery does not
+prove that a particular CLI build actually invokes a supplied stdio server.
 Devin's own filesystem, web, and terminal tools are separate category
 switches at `/api/runtime/devin-cli/settings`, defaulting to blocked and still
 requiring Kalio strict approval when enabled.
 
-For a stdio-only client, the existing generic bridge in
-`E:/Projekty/mcp-dev-servers` can adapt this endpoint:
+For a generic stdio-only client, the existing bridge in
+`E:/Projekty/mcp-dev-servers` can adapt this endpoint. Managed Devin ACP uses
+the repository-owned compiled proxy instead:
+
+```text
+apps/kalio-api/dist/modules/mcp-bridge/kalio-mcp-bridge-stdio.js
+```
 
 ```powershell
 $env:MCP_HTTP_STDIO_BRIDGE_HEADERS = '{"Authorization":"Bearer <token>","X-Kalio-Session-Id":"<session-id>"}'

@@ -14,7 +14,7 @@ async function collect(stream: AsyncIterable<InternalLLMChunk>): Promise<Interna
 describe('DevinCliAcpLLMSource', () => {
   const nativeToolsPolicy: DevinNativeToolsPolicy = { filesystem: false, web: false, terminal: false, source: 'default' };
 
-  it('binds a new ACP session, streams text/thoughts, and omits Kalio tool forwarding', async () => {
+  it('binds a new ACP session, streams text/thoughts, and scopes Kalio tools through MCP', async () => {
     const prompt = vi.fn(async (_sessionId: string, text: string, input: { onText: (text: string) => void; onThought: (text: string) => void; onToolActivity?: (activity: { toolCallId: string; kind: string; title: string; status: string }) => void }) => {
       expect(text).toContain('SYSTEM:');
       expect(text).toContain('USER:\nInspect the empty fixture.');
@@ -140,6 +140,46 @@ describe('DevinCliAcpLLMSource', () => {
     const calls = ensureSession.mock.calls as unknown as Array<[string, string | undefined, Array<{ headers: Array<{ name: string }> }>]>;
     const config = calls[0]?.[2]?.[0];
     expect(config.headers.map((header) => header.name)).not.toEqual(expect.arrayContaining(['x-kalio-turn-id', 'x-kalio-prompt-message-id']));
+    delete process.env['KALIO_MCP_BRIDGE_TOKEN'];
+    delete process.env['PORT'];
+  });
+
+  it('falls back to a stdio bridge proxy when the Devin host lacks HTTP MCP', async () => {
+    process.env['KALIO_MCP_BRIDGE_TOKEN'] = 'test-token';
+    process.env['PORT'] = '3316';
+    const ensureSession = vi.fn(async () => ({ sessionId: 'acp-session-4', cwd: 'C:\\fixture', processEpoch: 'epoch-4', resumed: false }));
+    const host = {
+      ensureSession,
+      supportsHttpMcp: vi.fn(async () => false),
+      prompt: vi.fn(async () => 'cancelled' as const),
+    };
+    const source = new DevinCliAcpLLMSource(
+      { get: vi.fn(async () => host) } as never,
+      { get: vi.fn(async () => nativeToolsPolicy) } as never,
+      { getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null) } as never,
+      { activate: vi.fn(() => () => undefined) } as never,
+    );
+    await collect(source.stream({
+      messages: [{ role: 'user', content: 'stdio bridge test' }],
+      tools: [{ name: 'vfs_read', description: 'read', parameters: { type: 'object' }, requiresConfirmation: false }],
+      sessionId: 'kalio-session-4',
+      messageId: 'message-4',
+      executionProfile: {
+        id: 'devin-local-glm-5-2', name: 'Devin · GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
+        approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
+      },
+      cwd: 'C:\\fixture',
+    } as unknown as LLMSourceParams));
+    const servers = (ensureSession.mock.calls[0] as unknown as [string, string | undefined, Array<{ command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>] | undefined)?.[2] ?? [];
+    expect(servers).toHaveLength(1);
+    expect(servers[0]).toMatchObject({ name: 'kalio', command: process.execPath });
+    expect(servers[0]?.args?.[0]).toContain('kalio-mcp-bridge-stdio.js');
+    expect(servers[0]?.env).toEqual(expect.arrayContaining([
+      { name: 'KALIO_MCP_BRIDGE_URL', value: 'http://127.0.0.1:3316/api/mcp/bridge' },
+      { name: 'KALIO_MCP_BRIDGE_TOKEN', value: 'test-token' },
+      { name: 'KALIO_MCP_BRIDGE_SESSION_ID', value: 'kalio-session-4' },
+      { name: 'KALIO_MCP_BRIDGE_TOOL_NAMES', value: 'vfs_read' },
+    ]));
     delete process.env['KALIO_MCP_BRIDGE_TOKEN'];
     delete process.env['PORT'];
   });

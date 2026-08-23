@@ -9,6 +9,7 @@ import { classifyDevinNativeTool, type DevinNativeToolsPolicy } from './devin-na
 import { DevinNativeToolsPolicyService } from './devin-native-tools-policy.service';
 import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-token.service';
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
+import { buildDevinStdioMcpBridgeConfig } from './devin-cli-mcp-bridge';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
@@ -38,12 +39,12 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       bridgeClient: 'devin-acp' as const,
     };
     const bridgeConfig = buildKalioMcpBridgeHttpConfig(bridgeContext, bridgeToken);
-    if (params.tools.length > 0 || (params.providerToolNames?.length ?? 0) > 0 || params.toolResultChannel) {
+    if ((params.providerToolNames?.length ?? 0) > 0 || params.toolResultChannel) {
       await this.audit(params, {
         eventName: 'devin-cli-acp.tools.omitted',
         status: 'started',
         data: {
-          toolCount: params.tools.length,
+          kalioToolCount: params.tools.length,
           providerToolCount: params.providerToolNames?.length ?? 0,
           toolResultChannel: Boolean(params.toolResultChannel),
         },
@@ -55,7 +56,11 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     try {
       host = await this.registry.get(model);
       const httpMcpSupported = bridgeConfig ? await host.supportsHttpMcp() : false;
-      const mcpServers = bridgeConfig && httpMcpSupported ? [bridgeConfig] : [];
+      const mcpServers = bridgeConfig
+        ? httpMcpSupported
+          ? [bridgeConfig]
+          : [buildDevinStdioMcpBridgeConfig({ ...bridgeContext, url: bridgeConfig.url }, bridgeToken!.trim())]
+        : [];
       await this.audit(params, {
         eventName: 'devin-cli-acp.mcp_bridge',
         status: 'completed',
@@ -63,6 +68,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           enabled: Boolean(mcpServers.length),
           requested: Boolean(bridgeConfig),
           httpMcpSupported,
+          transport: mcpServers[0] ? ('type' in mcpServers[0] ? mcpServers[0].type : 'stdio') : null,
           toolCount: params.tools.length,
           nativeToolsPolicy,
         },
