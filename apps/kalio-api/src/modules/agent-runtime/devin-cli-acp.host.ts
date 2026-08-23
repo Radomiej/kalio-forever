@@ -85,6 +85,11 @@ interface SessionState {
   active?: ActiveTurn;
 }
 
+interface DevinSessionWorkspace {
+  cwd: string;
+  additionalDirectories?: string[];
+}
+
 interface ActiveTurn extends DevinAcpPromptInput {
   rejectConnection: (error: Error) => void;
 }
@@ -149,6 +154,7 @@ export class DevinAcpHost {
     const normalizedCwd = normalizeCwd(cwd);
     const normalizedMcpServers = [...mcpServers];
     const connection = await this.ensureConnection(normalizedMcpServers);
+    const sessionWorkspace = this.buildSessionWorkspace(normalizedCwd);
     if (externalThreadId) {
       const existing = this.sessions.get(externalThreadId);
       if (existing) {
@@ -160,14 +166,17 @@ export class DevinAcpHost {
           return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: existing.processEpoch, resumed: false };
         }
       }
-      await this.restoreSession(connection, externalThreadId, normalizedCwd, normalizedMcpServers);
+      await this.restoreSession(connection, externalThreadId, sessionWorkspace, normalizedMcpServers);
       const restoredEpoch = this.requireProcessEpoch();
       const state: SessionState = { cwd: normalizedCwd, processEpoch: restoredEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() };
       this.sessions.set(externalThreadId, state);
       return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: restoredEpoch, resumed: true };
     }
 
-    const response = await connection.agent.request(methods.agent.session.new, { cwd: normalizedCwd, mcpServers: normalizedMcpServers });
+    const response = await connection.agent.request(methods.agent.session.new, {
+      ...sessionWorkspace,
+      mcpServers: normalizedMcpServers,
+    });
     const sessionId = response.sessionId?.trim();
     if (!sessionId) throw new Error('Devin ACP did not return a session id.');
     const processEpoch = this.requireProcessEpoch();
@@ -266,10 +275,18 @@ export class DevinAcpHost {
     }
   }
 
-  private async restoreSession(connection: ClientConnection, sessionId: string, cwd: string, mcpServers: McpServer[]): Promise<void> {
+  private buildSessionWorkspace(cwd: string): DevinSessionWorkspace {
+    const configCwd = this.config?.cwd;
+    if (!configCwd) return { cwd };
+    return this.capabilities.sessionCapabilities?.additionalDirectories !== undefined
+      ? { cwd: configCwd, additionalDirectories: [cwd] }
+      : { cwd: configCwd };
+  }
+
+  private async restoreSession(connection: ClientConnection, sessionId: string, workspace: DevinSessionWorkspace, mcpServers: McpServer[]): Promise<void> {
     if (this.capabilities.loadSession === true) {
       try {
-        await connection.agent.request(methods.agent.session.load, { sessionId, cwd, mcpServers });
+        await connection.agent.request(methods.agent.session.load, { sessionId, ...workspace, mcpServers });
         return;
       } catch (error) {
         if (!this.capabilities.sessionCapabilities?.resume) {
@@ -279,7 +296,7 @@ export class DevinAcpHost {
     }
     if (this.capabilities.sessionCapabilities?.resume) {
       try {
-        await connection.agent.request(methods.agent.session.resume, { sessionId, cwd, mcpServers });
+        await connection.agent.request(methods.agent.session.resume, { sessionId, ...workspace, mcpServers });
         return;
       } catch (error) {
         throw asError(error, `Devin ACP could not resume persisted session ${sessionId}.`);

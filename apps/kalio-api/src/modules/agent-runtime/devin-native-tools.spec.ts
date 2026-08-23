@@ -39,5 +39,13 @@ describe('Devin native tool classification', () => {
       title: 'Calling fs_list from kalio-runtime',
       rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
     }, 'kalio-runtime')).toBe(true);
+    expect(isKalioMcpToolCall({
+      name: 'vfs_list',
+      title: 'Calling vfs_list from kalio-runtime',
+    }, 'kalio-runtime')).toBe(true);
+    expect(isKalioMcpToolCall({
+      name: 'vfs_list',
+      title: 'Calling vfs_list from github',
+    }, 'kalio-runtime')).toBe(false);
   });
 });
