@@ -1,8 +1,12 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import type { McpServer } from '@agentclientprotocol/sdk';
 import type { DevinCliModel } from '@kalio/types';
+
+const execFileAsync = promisify(execFile);
 
 export interface DevinCliConfigHandle {
   path: string;
@@ -24,6 +28,10 @@ export async function createDevinCliConfig(
   const cwd = join(directory, 'workspace');
   const configDirectory = join(cwd, '.devin');
   await mkdir(configDirectory, { recursive: true });
+  // Devin discovers project-scoped config by walking up to a valid .git/.jj
+  // root. Keep that discovery inside the ephemeral host directory rather than
+  // the user's project or global Devin configuration.
+  await execFileAsync('git', ['init', '--quiet', cwd], { windowsHide: true });
   const mcpConfig = Object.fromEntries(mcpServers.map((server) => [server.name, serializeMcpServer(server)]));
   const path = join(configDirectory, 'config.local.json');
   const dedicatedMcpPath = join(configDirectory, 'mcp_config.local.json');
@@ -41,7 +49,6 @@ export async function createDevinCliConfig(
 function serializeMcpServer(server: McpServer): Record<string, unknown> {
   if ('command' in server) {
     return {
-      transport: 'stdio',
       command: server.command,
       args: server.args,
       env: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),

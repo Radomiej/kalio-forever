@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createDevinCliConfig } from './devin-cli-config';
@@ -21,7 +21,6 @@ describe('Devin CLI ephemeral config', () => {
       };
       expect(parsed.agent?.model).toBe('glm-5-2');
       expect(parsed.mcpServers?.['kalio-runtime']).toEqual({
-        transport: 'stdio',
         command: process.execPath,
         args: ['kalio-mcp-bridge-stdio.js'],
         env: {
@@ -31,6 +30,8 @@ describe('Devin CLI ephemeral config', () => {
       });
       expect(config.cwd).toContain('kalio-devin-acp-');
       expect(config.path).toBe(join(config.cwd, '.devin', 'config.local.json'));
+      expect((await stat(join(config.cwd, '.git'))).isDirectory()).toBe(true);
+      expect((await stat(join(config.cwd, '.git', 'HEAD'))).isFile()).toBe(true);
       expect(await readFile(join(config.cwd, '.devin', 'mcp_config.local.json'), 'utf8')).toContain('kalio-runtime');
     } finally {
       await config.cleanup();

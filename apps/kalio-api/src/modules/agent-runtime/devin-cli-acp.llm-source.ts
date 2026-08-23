@@ -58,7 +58,8 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       host = await this.registry.get(model, bridgeConfig ? params.sessionId : undefined);
       // Devin CLI 3000.x advertises ACP but ignores session/new MCP entries in
       // practice. The host therefore loads the same scoped bridge through its
-      // ephemeral --config file and keeps stdio as the portable transport.
+      // ephemeral project-local `.devin/mcp_config.local.json` and keeps stdio
+      // as the portable transport.
       const httpMcpSupported = false;
       const mcpServers = bridgeConfig
         ? [buildDevinStdioMcpBridgeConfig({ ...bridgeContext, url: bridgeConfig.url }, bridgeToken!.trim())]
