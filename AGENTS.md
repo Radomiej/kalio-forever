@@ -234,7 +234,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.
 - Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/sub-agentflow-target-architecture.md before implementing it.
 - Repo copy of the manual QA skill lives at `docs/agent-skills/kalio-manual-qa.md`; keep it aligned with the installed `kalio-manual-qa` skill.
-- Release version is a four-file contract (`package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`); run `node scripts/bump-version.mjs --check` in release workflow gates.
+- Release version is synchronized across all application/workspace `package.json` manifests plus `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; use `node scripts/bump-version.mjs` and run `--check` in release workflow gates.
 - When testing generated demo output, route QA defects back through Kalio/AgentFlow resume context; do not patch the target repo manually.
 - Before any live LLM/CLI/real-project AgentFlow run, pass the local gate first: focused regression tests, affected app typecheck, and affected app build where a build script exists.
 - Before any paid/live AgentFlow run, complete `docs/agentflow-paid-run-readiness-checklist.md`; mock E2E and local gates are mandatory, not optional.
