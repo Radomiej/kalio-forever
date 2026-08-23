@@ -378,8 +378,7 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $assets = @(Get-ChildItem -LiteralPath release-assets -File -Recurse | Where-Object {
-            $_.Name -match '\.(exe|zip|tar\.gz|AppImage|deb|md|txt|json|sig)
-
+            $_.Name -match '\.(exe|zip|tar\.gz|AppImage|deb|md|txt|json|sig)$'
           } | Select-Object -ExpandProperty FullName)
           if ($assets.Count -eq 0) { throw 'No release assets were downloaded' }
 
