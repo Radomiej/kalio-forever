@@ -132,8 +132,8 @@ Current slice commit: `812d7b7` (`feat(runtime): persist Devin bridge token in S
 
 ## Caveats and inconclusive checks
 
-- Pełny API suite zakończył się `235 passed`, `17 failed` w `239` plikach. Najważniejsze obserwacje: test migracji ma hard-coded oczekiwanie 28 wpisów przy aktualnym journalu 35, a część testów KV/CLI widzi brakujące kolumny w bazie testowej. To pozostały baseline/release gate, nie dowód działania hostowego adaptera.
-- Pełny web suite zakończył się `196 passed`, `5 failed` w `198` plikach; awarie dotyczą testów Execution Graph i nie dotknęły focused testów panelu/persona.
+- Pełny API suite zakończył się `2685 passed`, `17 failed` w `245` plikach. Najważniejsze obserwacje: test migracji ma hard-coded oczekiwanie 28 wpisów przy aktualnym journalu 35, a część testów KV/CLI/HITL widzi brakujące kolumny `execution_profile_id` lub `provider_tool_names` w bazie testowej. To pozostały baseline/release gate, nie dowód działania hostowego adaptera.
+- Pełny web suite zakończył się `1740 passed`, `3 failed` w `198` plikach; wszystkie awarie dotyczą `ExecutionGraphView.test.tsx` i brakującego `graph-empty-routing-summary`, bez wpływu na focused testy Settings/persona/runtime.
 - Nie wykonano prywatnego repo canary ani deployu zewnętrznego. Dev hot-reload na localhost był już uruchomiony; dowód obejmuje lokalny runtime, nie produkcję.
 - Live ACP returned `stopReason=end_turn` and streamed thoughts/text. Repeat-turn routing now works; ACP tool execution through Kalio remains blocked for this installed Devin build because HTTP MCP is explicitly unsupported by its handshake. Regular interactive CLI registration and tool execution are proven separately above.
 
