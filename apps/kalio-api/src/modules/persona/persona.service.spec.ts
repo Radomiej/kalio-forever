@@ -424,7 +424,7 @@ describe('PersonaService', () => {
       expect(valuesMock).toHaveBeenCalledWith(
         expect.objectContaining({
           avatarSeed: 'research bot',
-          avatarVariant: 'marble',
+          avatarVariant: 'sunset',
           avatarPaletteKey: 'ocean',
           avatarIndex: 0,
         }),
@@ -453,7 +453,7 @@ describe('PersonaService', () => {
       const result = await service.findAll();
 
       expect(result[0]?.avatarSeed).toBe('legacy persona');
-      expect(result[0]?.avatarVariant).toBe('marble');
+      expect(result[0]?.avatarVariant).toBe('ring');
       expect(result[0]?.avatarPaletteKey).toBe('ocean');
       expect(result[0]?.avatarIndex).toBe(0);
     });

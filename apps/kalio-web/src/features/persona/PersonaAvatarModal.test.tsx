@@ -47,7 +47,7 @@ describe('PersonaAvatarModal', () => {
 
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({
       avatarIndex: 3,
-      avatarVariant: 'sunset',
+      avatarVariant: 'beam',
     }));
   });
 });

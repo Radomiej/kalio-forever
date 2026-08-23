@@ -3,7 +3,10 @@ import {
   buildAvatarCandidate,
   buildAvatarCandidates,
   defaultAvatarFromName,
+  deriveAvatarSeed,
+  avatarVariantFromSeed,
   formatPersonaListMeta,
+  fnv1aHash,
   normalizeAvatarSeed,
   personaToAvatarToken,
 } from './persona-avatar.utils';
@@ -16,10 +19,18 @@ describe('persona-avatar.utils', () => {
 
   it('builds deterministic candidates', () => {
     expect(buildAvatarCandidate('planner', 1)).toMatchObject({
-      avatarSeed: 'planner#1',
-      avatarVariant: 'beam',
+      avatarSeed: 'avatar-h256hq-1',
+      avatarVariant: 'marble',
+      avatarPaletteKey: 'ocean',
       avatarIndex: 1,
     });
+  });
+
+  it('matches Nekko stable seed hashing and variant selection', () => {
+    expect(fnv1aHash('same')).toBe(3440134715);
+    expect(avatarVariantFromSeed('same')).toBe('bauhaus');
+    expect(deriveAvatarSeed('planner', 3)).toBe('avatar-gi5z3s-3');
+    expect(avatarVariantFromSeed(deriveAvatarSeed('planner', 3))).toBe('beam');
   });
 
   it('loads candidate batches for modal picker', () => {
@@ -42,6 +53,10 @@ describe('persona-avatar.utils', () => {
       avatarIndex: 0,
     } as Persona;
 
-    expect(personaToAvatarToken(legacy)).toEqual(defaultAvatarFromName('Legacy Persona'));
+    expect(personaToAvatarToken(legacy)).toEqual({
+      ...defaultAvatarFromName('Legacy Persona'),
+      avatarVariant: 'ring',
+      avatarPaletteKey: 'ocean',
+    });
   });
 });

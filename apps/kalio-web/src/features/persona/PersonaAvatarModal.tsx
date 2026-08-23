@@ -13,10 +13,7 @@ interface Props {
 }
 
 function tokensEqual(a: PersonaAvatarToken, b: PersonaAvatarToken): boolean {
-  return a.avatarSeed === b.avatarSeed
-    && a.avatarVariant === b.avatarVariant
-    && a.avatarPaletteKey === b.avatarPaletteKey
-    && a.avatarIndex === b.avatarIndex;
+  return a.avatarSeed === b.avatarSeed;
 }
 
 export function PersonaAvatarModal({ baseSeed, selected, onClose, onSelect }: Props) {

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAvatarCandidate,
+  deriveAvatarSeed,
   defaultAvatarFromName,
+  avatarVariantFromSeed,
+  fnv1aHash,
   normalizeAvatarSeed,
   resolveCreateAvatar,
   resolvePersonaAvatar,
@@ -24,9 +27,16 @@ describe('persona-avatar.utils', () => {
       avatarPaletteKey: 'ocean',
       avatarIndex: 0,
     });
-    expect(second.avatarSeed).toBe('planner#1');
-    expect(second.avatarVariant).toBe('beam');
+    expect(second.avatarSeed).toBe('avatar-h256hq-1');
+    expect(second.avatarVariant).toBe('marble');
     expect(second.avatarIndex).toBe(1);
+  });
+
+  it('matches Nekko stable seed hashing and variant selection', () => {
+    expect(fnv1aHash('same')).toBe(3440134715);
+    expect(avatarVariantFromSeed('same')).toBe('bauhaus');
+    expect(deriveAvatarSeed('planner', 3)).toBe('avatar-gi5z3s-3');
+    expect(avatarVariantFromSeed(deriveAvatarSeed('planner', 3))).toBe('beam');
   });
 
   it('defaults avatar from name when create dto omits avatar fields', () => {
@@ -43,13 +53,17 @@ describe('persona-avatar.utils', () => {
     })).toEqual({
       avatarSeed: 'custom-seed',
       avatarVariant: 'ring',
-      avatarPaletteKey: 'violet',
+      avatarPaletteKey: 'ocean',
       avatarIndex: 12,
     });
   });
 
   it('falls back to name-based avatar for legacy rows without stored token', () => {
-    expect(resolvePersonaAvatar({ name: 'Legacy Persona' })).toEqual(defaultAvatarFromName('Legacy Persona'));
+    expect(resolvePersonaAvatar({ name: 'Legacy Persona' })).toEqual({
+      ...defaultAvatarFromName('Legacy Persona'),
+      avatarVariant: 'ring',
+      avatarPaletteKey: 'ocean',
+    });
   });
 
   it('returns stored avatar token when all fields exist', () => {
@@ -61,8 +75,8 @@ describe('persona-avatar.utils', () => {
       avatarIndex: 3,
     })).toEqual({
       avatarSeed: 'locked-seed',
-      avatarVariant: 'pixel',
-      avatarPaletteKey: 'ember',
+      avatarVariant: 'sunset',
+      avatarPaletteKey: 'ocean',
       avatarIndex: 3,
     });
   });
