@@ -21,6 +21,9 @@ import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
 import { ActiveSessionRegistry } from './active-session-registry.service';
+import { PersonaService } from '../persona/persona.service';
+import { resolveExecutionProfileId } from '../agent-runtime/execution-profile.utils';
+import { resolvePersonaExecutionProfileChange } from './session-profile-binding.utils';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
 import {
   buildTitlePrompt as buildSessionTitlePrompt,
@@ -55,6 +58,7 @@ export class SessionsService {
     private readonly projects: ProjectsService,
     @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
     @Optional() private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly personas?: PersonaService,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -90,6 +94,7 @@ export class SessionsService {
       parentTurnId: dto.parentTurnId ?? null,
       parentToolCallId: dto.parentToolCallId ?? null,
       projectId: scope.projectId,
+      executionProfileId: scope.executionProfileId,
       runtimeContext: scope.runtimeContext ?? null,
       createdAt: now,
       updatedAt: now,
@@ -172,6 +177,15 @@ export class SessionsService {
       throw new BadRequestException('The no-project session cannot have a path override.');
     }
     const current = await this.get(id);
+    const targetExecutionProfileId = project?.defaultExecutionProfileId ?? 'local-direct-default';
+    const affectedSessionsForProfile = await Promise.all((await this.collectDescendantIds(id)).map((sessionId) => this.get(sessionId)));
+    const profileMismatch = affectedSessionsForProfile.find((session) => (
+      session.executionProfileId !== undefined
+      && session.executionProfileId !== targetExecutionProfileId
+    ));
+    if (profileMismatch) {
+      throw new ConflictException('A session is bound to another execution profile; create a new chat to change it.');
+    }
     const hasPathChange = dto.pathOverride !== undefined;
     const path = hasPathChange
       ? (dto.pathOverride?.trim() || project?.path) ?? null
@@ -222,12 +236,25 @@ export class SessionsService {
     options: SessionRuntimeScopeOptions = {},
   ): Promise<void> {
     await this.assertExists(id);
+    const current = await this.get(id);
+    let nextExecutionProfileId: string | undefined;
+    if (patch.personaId !== undefined && patch.personaId !== current.personaId) {
+      const personaConfig = await this.personas?.getSessionConfig(patch.personaId);
+      const nextProfileId = personaConfig?.executionProfileId;
+      nextExecutionProfileId = await resolvePersonaExecutionProfileChange(
+        this.repo,
+        id,
+        current.executionProfileId,
+        nextProfileId,
+      );
+    }
     const hasPatch = patch.title !== undefined || patch.personaId !== undefined || patch.runtimeContext !== undefined;
     if (hasPatch) {
       await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.title !== undefined) set.title = patch.title;
       if (patch.personaId !== undefined) set.personaId = patch.personaId;
+      if (nextExecutionProfileId !== undefined) set.executionProfileId = nextExecutionProfileId;
       if (patch.runtimeContext !== undefined) set.runtimeContext = patch.runtimeContext;
       await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
       this.sessionEvents.emitSessionUpdated(await this.get(id));
@@ -244,6 +271,25 @@ export class SessionsService {
     await this.drizzle.db
       .update(sessions)
       .set({ runtimeContext, updatedAt: new Date() })
+      .where(eq(sessions.id, id));
+    this.sessionEvents.emitSessionUpdated(await this.get(id));
+  }
+
+  async bindExternalThread(
+    id: string,
+    externalThreadId: string,
+    binding: { toolsetFingerprint?: string; policyFingerprint?: string } = {},
+  ): Promise<void> {
+    await this.assertExists(id);
+    await this.drizzle.db
+      .update(sessions)
+      .set({
+        externalThreadId,
+        ...(binding.toolsetFingerprint ? { toolsetFingerprint: binding.toolsetFingerprint } : {}),
+        ...(binding.policyFingerprint ? { policyFingerprint: binding.policyFingerprint } : {}),
+        runtimeBindingVersion: 1,
+        updatedAt: new Date(),
+      })
       .where(eq(sessions.id, id));
     this.sessionEvents.emitSessionUpdated(await this.get(id));
   }
@@ -307,6 +353,7 @@ export class SessionsService {
 
   private async resolveProjectScope(dto: CreateSessionDto): Promise<{
     projectId: string;
+    executionProfileId: string;
     runtimeContext: SessionRuntimeContext | null | undefined;
   }> {
     const requestedProjectId = dto.projectId?.trim() || undefined;
@@ -321,12 +368,25 @@ export class SessionsService {
     const projectId = inheritedProjectId !== SYSTEM_PROJECT_IDS.none && parent
       ? inheritedProjectId
       : requestedProjectId ?? inheritedProjectId;
+    const explicitProfileId = dto.executionProfileId?.trim() || undefined;
+    const parentProfileId = parent?.executionProfileId?.trim() || undefined;
+    if (parent && explicitProfileId && parentProfileId && explicitProfileId !== parentProfileId) {
+      throw new BadRequestException('A child session must use its host execution profile.');
+    }
+    const personaProfileId = parent
+      ? undefined
+      : (await this.personas?.getSessionConfig(dto.personaId))?.executionProfileId;
     if (projectId === SYSTEM_PROJECT_IDS.none) {
       if (requestedProjectId === SYSTEM_PROJECT_IDS.none && dto.projectPathOverride?.trim()) {
         throw new BadRequestException('The no-project session cannot have a path override.');
       }
       return {
         projectId,
+        executionProfileId: resolveExecutionProfileId({
+          explicitProfileId: parentProfileId ?? explicitProfileId,
+          personaProfileId,
+          projectProfileId: 'local-direct-default',
+        }),
         runtimeContext: requestedProjectId === SYSTEM_PROJECT_IDS.none
           ? this.clearProjectPath(dto.runtimeContext)
           : dto.runtimeContext,
@@ -340,6 +400,11 @@ export class SessionsService {
     }
     return {
       projectId,
+      executionProfileId: resolveExecutionProfileId({
+        explicitProfileId: parentProfileId ?? explicitProfileId,
+        personaProfileId,
+        projectProfileId: project.defaultExecutionProfileId,
+      }),
       runtimeContext: this.applyProjectPath(dto.runtimeContext, path),
     };
   }
@@ -411,6 +476,8 @@ export class SessionsService {
     parentTurnId?: string | null;
     parentToolCallId?: string | null;
     projectId?: string | null;
+    executionProfileId?: string | null;
+    externalThreadId?: string | null;
     runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
@@ -457,8 +524,10 @@ export class SessionsService {
     kind?: ChatSessionKind;
     parentSessionId?: string | null;
     parentTurnId?: string | null;
-    parentToolCallId?: string | null;
-    projectId?: string | null;
+      parentToolCallId?: string | null;
+      projectId?: string | null;
+      executionProfileId?: string | null;
+      externalThreadId?: string | null;
     runtimeContext?: SessionRuntimeContext | null;
     createdAt: number | Date;
     updatedAt: number | Date;
@@ -472,6 +541,8 @@ export class SessionsService {
       parentTurnId: row.parentTurnId ?? undefined,
       parentToolCallId: row.parentToolCallId ?? undefined,
       ...(row.projectId ? { projectId: row.projectId } : {}),
+      ...(row.executionProfileId ? { executionProfileId: row.executionProfileId } : {}),
+      ...(row.externalThreadId ? { externalThreadId: row.externalThreadId } : {}),
       runtimeContext: row.runtimeContext ?? undefined,
       createdAt: toMs(row.createdAt),
       updatedAt: toMs(row.updatedAt),

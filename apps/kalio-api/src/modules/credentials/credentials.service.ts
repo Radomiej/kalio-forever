@@ -16,7 +16,6 @@ import {
 
 const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
 const CREDENTIALS_MASTER_KEY_ENV = 'CREDENTIALS_MASTER_KEY';
-const DEV_FALLBACK_CREDENTIALS_MASTER_KEY = 'kalio-dev-credentials-master-key-not-for-production';
 
 function toCredentialResponse(row: typeof credentials.$inferSelect): Credential {
   return {
@@ -32,7 +31,6 @@ function toCredentialResponse(row: typeof credentials.$inferSelect): Credential 
 @Injectable()
 export class CredentialsService {
   private readonly logger = new Logger(CredentialsService.name);
-  private hasWarnedAboutFallbackMasterKey = false;
 
   constructor(
     private readonly drizzle: DrizzleService,
@@ -75,6 +73,25 @@ export class CredentialsService {
       return null;
     }
     return this.tryDecryptApiKey(row.apiKey, `Failed to decrypt API key for credential ${credentialId}`);
+  }
+
+  async getProviderConfigForCredential(credentialId: string): Promise<ProviderConfig | null> {
+    const row = await this.drizzle.db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, credentialId))
+      .then((r) => r[0]);
+    if (!row) return null;
+
+    const apiKey = this.tryDecryptApiKey(row.apiKey, `Failed to decrypt credential secret for ${credentialId}`);
+    if (apiKey === null) return null;
+
+    return {
+      provider: row.provider as LLMProviderType,
+      apiKey,
+      model: row.model ?? '',
+      baseUrl: row.baseUrl ?? undefined,
+    };
   }
 
   // ─── Active credential management ────────────────────────────────────────────
@@ -346,24 +363,11 @@ export class CredentialsService {
   }
 
   private getMasterKey(): string {
-    const configured = this.config.get<string>(CREDENTIALS_MASTER_KEY_ENV, '');
-    if (configured) {
-      return configured;
+    const configured = (this.config.get<string>(CREDENTIALS_MASTER_KEY_ENV, '') ?? '').trim();
+    if (!configured) {
+      throw new Error(`${CREDENTIALS_MASTER_KEY_ENV} must be configured before credentials can be stored or read`);
     }
-
-    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
-    if (nodeEnv === 'production') {
-      throw new Error(`${CREDENTIALS_MASTER_KEY_ENV} must be configured in production`);
-    }
-
-    if (nodeEnv !== 'test' && !this.hasWarnedAboutFallbackMasterKey) {
-      this.hasWarnedAboutFallbackMasterKey = true;
-      this.logger.warn(
-        `${CREDENTIALS_MASTER_KEY_ENV} is not set; using the development fallback key. Set it explicitly outside local dev.`,
-      );
-    }
-
-    return DEV_FALLBACK_CREDENTIALS_MASTER_KEY;
+    return configured;
   }
 
   async setMaxToolAttempts(size: number): Promise<void> {

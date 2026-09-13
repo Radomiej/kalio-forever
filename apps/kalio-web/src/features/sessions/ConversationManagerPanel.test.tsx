@@ -655,7 +655,8 @@ describe('ConversationManagerPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss runtime attention notice' }));
 
     expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
-    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.getByText(/No active agent runs/i)).toBeInTheDocument();
+    expect(screen.queryByText('Needs attention')).not.toBeInTheDocument();
   });
 
   it('persists reviewed runtime notices across reload while keeping active approvals visible', () => {
@@ -716,7 +717,8 @@ describe('ConversationManagerPanel', () => {
     });
 
     expect(screen.queryByTestId('runtime-attention-notice')).not.toBeInTheDocument();
-    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.getByText(/No active agent runs/i)).toBeInTheDocument();
+    expect(screen.queryByText('Needs attention')).not.toBeInTheDocument();
   });
 
   it('splits running and finished tool rows and shows llm activity counts', () => {

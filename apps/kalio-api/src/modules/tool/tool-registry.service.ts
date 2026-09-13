@@ -32,6 +32,7 @@ import { ImageViewTool } from './tools/image-view.tool';
 import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDeleteTool } from './tools/skill.tools';
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
 import { EscalateTool } from './tools/escalate.tool';
+import { IdeDiagnosticsTool, IdeQueryTool, IdeStatusTool } from '../code-intelligence/code-intelligence.tools';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
@@ -112,6 +113,9 @@ export class ToolRegistryService {
     private readonly personaUpdate: PersonaUpdateTool,
     private readonly personaDelete: PersonaDeleteTool,
     private readonly escalate: EscalateTool,
+    private readonly ideQuery: IdeQueryTool,
+    private readonly ideDiagnostics: IdeDiagnosticsTool,
+    private readonly ideStatus: IdeStatusTool,
   ) {
     const all: object[] = [
       vfsWrite, vfsRead, vfsList, vfsGrepSearch, vfsFileSearch, subagent, spawnSubagent, messageSubagent,
@@ -134,6 +138,7 @@ export class ToolRegistryService {
       skillList, skillRead, skillCreate, skillUpdate, skillDelete,
       personaList, personaCreate, personaUpdate, personaDelete,
       escalate,
+      ideQuery, ideDiagnostics, ideStatus,
     ];
     this.entries = all.map(t => this.toEntry(t));
   }
@@ -174,6 +179,7 @@ export class ToolRegistryService {
         name: opts.name,
         description: opts.description,
         parameters: opts.parameters,
+        ...(opts.domain ? { domain: opts.domain } : {}),
         requiresConfirmation: defaultRequiresConfirmation,
       },
       execute: (req: ToolCallRequest) => (tool as HasExecute).execute(req),

@@ -37,15 +37,20 @@ function assetByName(predicate, label) {
 
 async function platformEntry(predicate, label) {
   const artifactPath = assetByName(predicate, label);
-  const signaturePath = `${artifactPath}.sig`;
-  const signature = (await readFile(signaturePath, 'utf8')).trim();
-  if (!signature) {
-    throw new Error(`Empty updater signature: ${signaturePath}`);
-  }
-
   const artifactName = artifactPath.split(/[\\/]/).pop();
   if (!artifactName) {
     throw new Error(`Unable to determine updater asset name: ${artifactPath}`);
+  }
+
+  const signaturePath = files.find(
+    (candidate) => (candidate.split(/[\\/]/).pop() ?? '') === `${artifactName}.sig`,
+  );
+  if (!signaturePath) {
+    throw new Error(`Missing updater signature: ${artifactName}.sig`);
+  }
+  const signature = (await readFile(signaturePath, 'utf8')).trim();
+  if (!signature) {
+    throw new Error(`Empty updater signature: ${signaturePath}`);
   }
 
   return {

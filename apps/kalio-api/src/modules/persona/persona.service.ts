@@ -23,7 +23,7 @@ export class PersonaService implements OnApplicationBootstrap {
 
     for (const [id, config] of Object.entries(personasConfig)) {
       const existing = await this.drizzle.db
-        .select({ id: personas.id, systemPrompt: personas.systemPrompt, model: personas.model })
+        .select({ id: personas.id, systemPrompt: personas.systemPrompt, model: personas.model, executionProfileId: personas.executionProfileId })
         .from(personas)
         .where(eq(personas.id, id))
         .then((r) => r[0]);
@@ -34,8 +34,10 @@ export class PersonaService implements OnApplicationBootstrap {
           name: config.name,
           systemPrompt: config.systemPrompt,
           model: config.model ?? '',
+          ...(config.executionProfileId ? { executionProfileId: config.executionProfileId } : {}),
           maxToolAttempts: null,
           allowedTools: config.allowedTools,
+          providerToolNames: [],
           skillIds: config.skillIds ?? [],
           createdAt: now,
           updatedAt: now,
@@ -49,6 +51,7 @@ export class PersonaService implements OnApplicationBootstrap {
           updatedAt: Date;
           systemPrompt?: string;
           model?: string;
+          executionProfileId?: string;
         } = {
           name: config.name,
           allowedTools: config.allowedTools,
@@ -62,6 +65,9 @@ export class PersonaService implements OnApplicationBootstrap {
         const seededModel = config.model ?? '';
         if (this.shouldRefreshSeededModel(existing.model, seededModel)) {
           updatePayload.model = seededModel;
+        }
+        if (config.executionProfileId && !existing.executionProfileId) {
+          updatePayload.executionProfileId = config.executionProfileId;
         }
 
         await this.drizzle.db.update(personas).set(updatePayload).where(eq(personas.id, id));
@@ -167,7 +173,14 @@ export class PersonaService implements OnApplicationBootstrap {
     return false;
   }
 
-  private loadPersonasConfig(): Record<string, { name: string; systemPrompt: string; model?: string; allowedTools: string[]; skillIds?: string[] }> {
+  private loadPersonasConfig(): Record<string, {
+    name: string;
+    systemPrompt: string;
+    model?: string;
+    executionProfileId?: string;
+    allowedTools: string[];
+    skillIds?: string[];
+  }> {
     try {
       const configPath = join(__dirname, '../../assets/personas.json');
       const configContent = readFileSync(configPath, 'utf-8');
@@ -244,8 +257,10 @@ export class PersonaService implements OnApplicationBootstrap {
     return {
       systemPrompt: persona.systemPrompt,
       model: persona.model,
+      executionProfileId: persona.executionProfileId,
       maxToolAttempts: persona.maxToolAttempts ?? null,
       allowedTools: persona.allowedTools ?? [],
+      providerToolNames: persona.providerToolNames ?? [],
       skillIds: persona.skillIds ?? [],
       mcpPolicy: persona.mcpPolicy ?? 'allow_all',
       kv,
@@ -276,8 +291,10 @@ export class PersonaService implements OnApplicationBootstrap {
     name: string;
     systemPrompt: string;
     model: string;
+    executionProfileId?: string | null;
     maxToolAttempts?: number | null;
     allowedTools: string[] | null;
+    providerToolNames?: string[] | null;
     skillIds?: string[] | null;
     mcpPolicy?: string | null;
     avatarSeed?: string | null;
@@ -294,8 +311,10 @@ export class PersonaService implements OnApplicationBootstrap {
       name: row.name,
       systemPrompt: row.systemPrompt,
       model: row.model,
+      ...(row.executionProfileId ? { executionProfileId: row.executionProfileId } : {}),
       maxToolAttempts: row.maxToolAttempts ?? null,
       allowedTools: row.allowedTools ?? [],
+      providerToolNames: row.providerToolNames ?? [],
       skillIds: row.skillIds ?? [],
       mcpPolicy: (row.mcpPolicy as import('@kalio/types').MCPPolicy | null | undefined) ?? 'allow_all',
       ...avatar,

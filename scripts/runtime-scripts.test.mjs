@@ -52,16 +52,11 @@ test('prod stack fallback paths use prod defaults when --data-root is omitted', 
   );
 });
 
-test('installer stops managed stack before checking install target ports during upgrade', () => {
-  const stopIndex = installScriptSource.indexOf("Write-Step 'Stopping any existing managed stack'");
-  const backendPortCheckIndex = installScriptSource.indexOf('Test-PortFree -Port $BackendPort');
-  const frontendPortCheckIndex = installScriptSource.indexOf('Test-PortFree -Port $FrontendPort');
-
-  assert.notEqual(stopIndex, -1, 'stop step not found');
-  assert.notEqual(backendPortCheckIndex, -1, 'backend port check not found');
-  assert.notEqual(frontendPortCheckIndex, -1, 'frontend port check not found');
-  assert.ok(stopIndex < backendPortCheckIndex, 'existing stack should stop before backend port check');
-  assert.ok(stopIndex < frontendPortCheckIndex, 'existing stack should stop before frontend port check');
+test('installer protects upgrades with a runtime lock and stable launcher', () => {
+  assert.match(installScriptSource, /\.runtime\.lock/);
+  assert.match(installScriptSource, /Kalio appears to be running/);
+  assert.match(installScriptSource, /kalio-launcher\.ps1/);
+  assert.match(installScriptSource, /current\.json/);
 });
 
 test('autostart docs and scripts describe logon-based startup, not reboot startup', () => {
@@ -74,7 +69,7 @@ test('autostart docs and scripts describe logon-based startup, not reboot startu
   assert.match(quickstartSource, /after \*\*user sign-in\*\*/i);
   assert.match(localDevGuideSource, /for autostart after \*\*user sign-in\*\*/i);
   assert.match(scriptsReadmeSource, /Scheduled Task entrypoint after Windows sign-in/i);
-  assert.match(installScriptSource, /At logon/);
+  assert.match(installScriptSource, /AtLogOn/);
   assert.match(autostartScriptSource, /Scheduled Task after Windows sign-in/i);
 });
 

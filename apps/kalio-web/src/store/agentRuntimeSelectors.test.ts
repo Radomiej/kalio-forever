@@ -232,6 +232,34 @@ describe('agentRuntimeSelectors', () => {
     ]);
   });
 
+  it('clears stale typed runtime evidence after the run reaches completed state', () => {
+    const now = Date.now();
+    const baseRun = makeRuntimeSnapshot('session-1').run!;
+
+    expect(selectRuntimeAttentionItems({
+      runtimeActivitySnapshots: {
+        'session-1': makeRuntimeSnapshot('session-1', {
+          active: false,
+          updatedAt: now,
+          run: {
+            ...baseRun,
+            phase: 'completed',
+            status: 'completed',
+            updatedAt: now,
+            lastHeartbeatAt: now,
+          } as unknown as RuntimeActivitySnapshot['run'],
+        }),
+      },
+      sessions: [makeSession('session-1', 'Completed run')],
+      sessionMessages: {
+        'session-1': [makeToolResultMessage('session-1', {
+          errorCode: 'TOOL_RUNTIME_ERROR',
+          errorMessage: 'A previous attempt failed before the run completed.',
+        })],
+      },
+    })).toEqual([]);
+  });
+
   it('groups root and child failures for one typed architecture run and navigates to its root session', () => {
     const architectureContext = {
       architectureRunId: 'architecture-run-1',

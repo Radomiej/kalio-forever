@@ -141,20 +141,78 @@ export class LLMTurnRuntimeService {
 
       let chunkCount = 0;
       let usage: LLMUsage | undefined;
+      let toolResultHandler: ((callId: string, result: ToolResult) => Promise<void> | void) | undefined;
+      const toolResultChannel = {
+        setHandler: (handler: (callId: string, result: ToolResult) => Promise<void> | void) => {
+          toolResultHandler = handler;
+        },
+      };
       let lastAuditUpdate = performance.now();
       let structuredOutputRepairRetried = false;
       const structuredOutputBeforeAttempt: {
         hasStructuredOutput: boolean;
         latestStructuredOutput: unknown;
       } = { hasStructuredOutput, latestStructuredOutput };
+      const inlineCodexToolCalls = new Set<string>();
+
+      const dispatchToolCall = async (effectiveToolCall: { id: string; name: string; args: Record<string, unknown> }): Promise<void> => {
+        await request.callbacks?.onToolPending?.();
+        request.emit('tool:start', this.toolStartPayload(request, effectiveToolCall) as SocketEvents['tool:start']);
+        await request.callbacks?.onToolRunning?.();
+        await this.audit?.log({
+          sessionId: request.sessionId,
+          type: 'tool_call',
+          label: effectiveToolCall.name,
+          data: this.buildToolCallAuditData(request, effectiveToolCall),
+        });
+        const toolStartedAt = performance.now();
+        const result = await this.toolDispatch.dispatch(
+          effectiveToolCall.id,
+          effectiveToolCall.name,
+          effectiveToolCall.args,
+          ctx,
+          request.toolMetas,
+        );
+        const content = serializeToolResultContent(effectiveToolCall.name, result);
+        await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
+          turnId: request.turnId,
+          promptMessageId: request.promptMessageId,
+        });
+        request.emit('tool:result', result);
+        await this.audit?.log({
+          sessionId: request.sessionId,
+          type: 'tool_result',
+          label: effectiveToolCall.name,
+          data: this.buildToolResultAuditData(request, effectiveToolCall, result),
+          durationMs: Math.round(performance.now() - toolStartedAt),
+        });
+        await request.onToolResult?.(effectiveToolCall.id, result);
+        await toolResultHandler?.(effectiveToolCall.id, result);
+        if (effectiveToolCall.name === 'escalate' && result.status === 'success') {
+          const message = (result.data as Record<string, unknown>)?.['message'];
+          if (typeof message === 'string') {
+            request.callbacks?.onEscalation?.(message);
+          }
+        }
+      };
 
       const streamModel = async (messagesForAttempt: ContextManagedLLMMessage[]): Promise<void> => {
         for await (const chunk of this.llmSource.stream({
           messages: messagesForAttempt,
           tools: request.toolMetas,
-          sessionId: request.sessionId,
-          messageId,
-          model: request.model,
+           sessionId: request.sessionId,
+           messageId,
+           model: request.model,
+           providerToolNames: request.providerToolNames,
+           executionProfile: request.executionProfile,
+          runId: request.runId,
+          externalThreadId: request.externalThreadId,
+           cwd: request.cwd,
+           onExternalThreadBound: request.onExternalThreadBound,
+           onExternalRuntimeLost: request.onExternalRuntimeLost,
+           onNativeApprovalRequested: request.onNativeApprovalRequested,
+          onExternalAudit: request.onExternalAudit,
+          toolResultChannel,
           abortSignal: request.abortSignal,
           structuredOutput: request.structuredOutput,
         })) {
@@ -174,6 +232,15 @@ export class LLMTurnRuntimeService {
           }
           chunkCount++;
           await this.streamProcessor.process(chunk, ctx);
+          if (chunk.type === 'tool_call' && request.providerCompletesTurn) {
+            const rawToolCall = { id: chunk.callId, name: chunk.name, args: chunk.args };
+            const effectiveToolCall = request.transformToolCall
+              ? request.transformToolCall(rawToolCall)
+              : rawToolCall;
+            inlineCodexToolCalls.add(rawToolCall.id);
+            inlineCodexToolCalls.add(effectiveToolCall.id);
+            await dispatchToolCall(effectiveToolCall);
+          }
           if (auditResponseId && this.audit?.update && performance.now() - lastAuditUpdate >= 500) {
             void this.audit.update(auditResponseId, { chunkCount });
             lastAuditUpdate = performance.now();
@@ -223,6 +290,28 @@ export class LLMTurnRuntimeService {
         }
       }
 
+      if (request.abortSignal.aborted) {
+        await this.runtimeAudit?.log({
+          eventName: 'llm.turn.cancelled',
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          status: 'cancelled',
+          durationMs: Math.round(performance.now() - turnStart),
+          data: { runtimeKind: request.runtimeKind, iteration },
+        });
+        return {
+          lastMessageId,
+          finalText: latestText,
+          ...structuredOutputResult(),
+          iterationCount: iteration,
+          finalLimit: currentLimit,
+          exhausted: false,
+          aborted: true,
+          emptyNoToolRetriesExhausted,
+          maxIterationsReached: false,
+        };
+      }
+
       if (state.text.trim()) {
         latestText = state.text.trim();
       }
@@ -264,46 +353,13 @@ export class LLMTurnRuntimeService {
           const effectiveToolCall = request.transformToolCall
             ? request.transformToolCall(toolCall)
             : toolCall;
-          await request.callbacks?.onToolPending?.();
-          request.emit('tool:start', this.toolStartPayload(request, effectiveToolCall) as SocketEvents['tool:start']);
-          await request.callbacks?.onToolRunning?.();
-          await this.audit?.log({
-            sessionId: request.sessionId,
-            type: 'tool_call',
-            label: effectiveToolCall.name,
-            data: this.buildToolCallAuditData(request, effectiveToolCall),
-          });
-          const toolStartedAt = performance.now();
-          const result = await this.toolDispatch.dispatch(
-            effectiveToolCall.id,
-            effectiveToolCall.name,
-            effectiveToolCall.args,
-            ctx,
-            request.toolMetas,
-          );
-          const content = serializeToolResultContent(effectiveToolCall.name, result);
-          await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
-            turnId: request.turnId,
-            promptMessageId: request.promptMessageId,
-          });
-          request.emit('tool:result', result);
-          await this.audit?.log({
-            sessionId: request.sessionId,
-            type: 'tool_result',
-            label: effectiveToolCall.name,
-            data: this.buildToolResultAuditData(request, effectiveToolCall, result),
-            durationMs: Math.round(performance.now() - toolStartedAt),
-          });
-          if (effectiveToolCall.name === 'escalate' && result.status === 'success') {
-            const message = (result.data as Record<string, unknown>)?.['message'];
-            if (typeof message === 'string') {
-              request.callbacks?.onEscalation?.(message);
-            }
+          if (!inlineCodexToolCalls.has(toolCall.id) && !inlineCodexToolCalls.has(effectiveToolCall.id)) {
+            await dispatchToolCall(effectiveToolCall);
           }
         }
       }
 
-      if (state.toolCalls.length === 0) {
+      if (state.toolCalls.length === 0 || request.providerCompletesTurn) {
         const hasAssistantOutput = state.text.trim().length > 0 || state.thinking.trim().length > 0 || hasStructuredOutput;
         if (!hasAssistantOutput && maxEmptyNoToolRetries > 0) {
           emptyNoToolRetries++;

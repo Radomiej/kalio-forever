@@ -13,6 +13,7 @@ import { resolveArchitectureLabel } from './chatSessionLabels';
 interface ChatSessionHeaderProps {
   activeContext: { systemPrompt: string | null; activeToolNames: string[] };
   activeModel: string | null;
+  activeProvider?: string | null;
   activeSession: ChatSession;
   activeSessionId: string;
   copied: boolean;
@@ -37,6 +38,7 @@ interface ChatSessionHeaderProps {
 export function ChatSessionHeader({
   activeContext,
   activeModel,
+  activeProvider = null,
   activeSession,
   activeSessionId,
   copied,
@@ -61,6 +63,7 @@ export function ChatSessionHeader({
   onTalkViewChange ??= () => undefined;
   const architectureLabel = resolveArchitectureLabel(activeSession, messages);
   const pendingHostSession = isPendingHostSession(activeSession);
+  const runtimeLabel = [activeProvider, activeModel].filter(Boolean).join(' · ');
 
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
@@ -106,9 +109,13 @@ export function ChatSessionHeader({
           />
         )}
       </div>
-      {activeModel && (
-        <span className="text-[10px] font-mono text-base-content/65 shrink-0 truncate max-w-[9rem]" title={activeModel}>
-          {activeModel}
+      {runtimeLabel && (
+        <span
+          className="max-w-[14rem] shrink-0 truncate rounded-md border border-base-300/70 bg-base-200/50 px-2 py-1 text-[10px] font-medium text-base-content/65"
+          title={runtimeLabel}
+          data-testid="chat-runtime-label"
+        >
+          {runtimeLabel}
         </span>
       )}
     </div>

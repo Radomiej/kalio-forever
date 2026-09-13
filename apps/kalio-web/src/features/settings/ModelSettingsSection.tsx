@@ -1,13 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, RefreshCw, Check, AlertCircle } from 'lucide-react';
+import type { Credential } from '@kalio/types';
 import { ModelCombobox } from './ModelCombobox';
 import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
+import { PROVIDER_LABELS } from './llm-provider-settings';
 import { SettingsRangeField } from './SettingsRangeField';
 import { formatLargeTokenCount } from './settings-format';
 
 interface Props {
   activeRuntimeConfig: ActiveRuntimeConfig | null;
+  providers?: Credential[];
+  activeProviderId?: string | null;
+  envFallback?: { provider: string; label: string; model?: string } | null;
+  providerSyncing?: boolean;
   onRuntimeConfigChange: (updated: LLMConfigWithSource) => void;
+  onActivateProvider?: (credentialId: string) => void;
+  onUseEnvFallback?: () => void;
   focusModelInputSignal?: number;
 }
 
@@ -53,7 +61,13 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
 
 export function ModelSettingsSection({
   activeRuntimeConfig,
+  providers = [],
+  activeProviderId = null,
+  envFallback = null,
+  providerSyncing = false,
   onRuntimeConfigChange,
+  onActivateProvider = () => undefined,
+  onUseEnvFallback = () => undefined,
   focusModelInputSignal = 0,
 }: Props) {
   const [models, setModels] = useState<string[]>([]);
@@ -201,16 +215,51 @@ export function ModelSettingsSection({
     await persistGenerationSettings({ maxTokens: normalized }, previousValue);
   };
 
+  const runtimeProviderValue = activeRuntimeConfig?.source === 'db'
+    ? activeProviderId ?? activeRuntimeConfig.credentialId ?? ''
+    : '__env__';
+
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h3 className="text-sm font-semibold mb-1">Active Provider</h3>
+        <h3 className="text-sm font-semibold mb-1">Runtime provider</h3>
         {!activeRuntimeConfig ? (
           <p className="text-xs text-base-content/50 italic">
-            Select or configure an active provider before changing its model.
+            Add or select a provider in LLM Settings before changing its model.
           </p>
         ) : (
-          <div className="rounded-lg border border-base-300 bg-base-200/30 p-3 flex flex-col gap-2">
+          <div className="rounded-lg border border-base-300 bg-base-200/30 p-3 flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-xs text-base-content/60">
+              Provider used for new turns
+              <select
+                className="select select-bordered select-sm w-full"
+                value={runtimeProviderValue}
+                disabled={providerSyncing}
+                onChange={(event) => {
+                  if (event.target.value === '__env__') {
+                    onUseEnvFallback();
+                  } else if (event.target.value) {
+                    onActivateProvider(event.target.value);
+                  }
+                }}
+                aria-label="Runtime provider"
+                data-testid="runtime-provider-selector"
+              >
+                {envFallback ? (
+                  <option value="__env__">
+                    {envFallback.label} · environment
+                  </option>
+                ) : null}
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name} · {PROVIDER_LABELS[provider.provider] ?? provider.provider}
+                  </option>
+                ))}
+                {!envFallback && providers.length === 0 ? (
+                  <option value="">No provider configured</option>
+                ) : null}
+              </select>
+            </label>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="badge badge-sm badge-outline font-mono">{activeRuntimeConfig.provider}</span>
               <span className="text-sm font-medium text-base-content">{activeRuntimeConfig.displayName}</span>
@@ -290,7 +339,10 @@ export function ModelSettingsSection({
 
       {/* ── Generation Parameters ──────────────────────────────────────────────── */}
       <div>
-        <h3 className="text-sm font-semibold mb-3">Generation Parameters</h3>
+        <h3 className="text-sm font-semibold mb-1">Generation defaults</h3>
+        <p className="text-xs text-base-content/60 mb-3">
+          Saved for the selected runtime. Providers such as Codex may ignore fields they do not expose.
+        </p>
         {genLoading ? (
           <div className="flex items-center gap-2 text-xs text-base-content/50">
             <Loader2 size={12} className="animate-spin" /> Loading…

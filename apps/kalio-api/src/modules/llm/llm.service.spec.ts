@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import type { ExecutionProfile } from '@kalio/types';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
@@ -21,6 +22,7 @@ describe('LLMService - DB credential overrides env', () => {
   function buildCredentialsMock() {
     return {
       getActiveProviderConfig: vi.fn(),
+      getProviderConfigForCredential: vi.fn(),
       getActiveCredentialId: vi.fn().mockResolvedValue(null),
       updateModel: vi.fn(),
       getEnvModelOverride: vi.fn().mockResolvedValue(null),
@@ -384,6 +386,65 @@ describe('LLMService - DB credential overrides env', () => {
       );
 
       expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);
+    });
+  });
+
+  describe('streamChatWithExecutionProfile()', () => {
+    it('uses the credential bound to a direct profile and keeps its model authoritative', async () => {
+      credentialsService.getProviderConfigForCredential.mockResolvedValue({
+        provider: 'mock',
+        apiKey: 'mock',
+        model: 'credential-default',
+      });
+      const profile: ExecutionProfile = {
+        id: 'direct-mock',
+        name: 'Direct mock',
+        kind: 'direct-llm',
+        provider: 'mock',
+        model: 'profile-model',
+        authProfileId: 'credential-1',
+        approvalMode: 'codex_guard',
+        enabled: true,
+        capabilitiesVersion: '1',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+
+      await expect(service.streamChatWithExecutionProfile(
+        profile,
+        [{ role: 'user', content: 'hello' }],
+        [],
+        { sessionId: 'session-direct', messageId: 'message-direct', modelOverride: 'must-not-win', onChunk: () => {} },
+      )).resolves.toEqual([]);
+
+      expect(credentialsService.getProviderConfigForCredential).toHaveBeenCalledWith('credential-1');
+    });
+
+    it('fails closed when the bound credential provider no longer matches', async () => {
+      credentialsService.getProviderConfigForCredential.mockResolvedValue({
+        provider: 'openai',
+        apiKey: 'key',
+        model: 'gpt-4o',
+      });
+      const profile: ExecutionProfile = {
+        id: 'direct-mismatch',
+        name: 'Direct mismatch',
+        kind: 'direct-llm',
+        provider: 'openrouter',
+        model: 'openrouter/model',
+        authProfileId: 'credential-1',
+        approvalMode: 'codex_guard',
+        enabled: true,
+        capabilitiesVersion: '1',
+        createdAt: 1,
+        updatedAt: 1,
+      };
+
+      await expect(service.streamChatWithExecutionProfile(profile, [], [], {
+        sessionId: 'session-mismatch',
+        messageId: 'message-mismatch',
+        onChunk: () => {},
+      })).rejects.toThrow('does not match');
     });
   });
 

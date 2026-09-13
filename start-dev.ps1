@@ -55,7 +55,7 @@ function Stop-PreviousKalioLaunchers {
 
     foreach ($process in $processes) {
         try {
-            & taskkill.exe /PID $process.ProcessId /T /F 2>$null | Out-Null
+            Stop-ProcessTreePreservingManagedVscode -RootId $process.ProcessId
             Write-Host "  [kill] stale Kalio launcher PID $($process.ProcessId)" -ForegroundColor DarkYellow
         } catch {
             Write-Host "  [warn] Could not stop stale Kalio launcher PID $($process.ProcessId): $($_.Exception.Message)" -ForegroundColor Yellow
@@ -83,7 +83,7 @@ function Stop-PreviousKalioWatchers {
 
     foreach ($process in $processes) {
         try {
-            & taskkill.exe /PID $process.ProcessId /T /F 2>$null | Out-Null
+            Stop-ProcessTreePreservingManagedVscode -RootId $process.ProcessId
             Write-Host "  [kill] stale Kalio watcher PID $($process.ProcessId)" -ForegroundColor DarkYellow
         } catch {
             Write-Host "  [warn] Could not stop stale Kalio watcher PID $($process.ProcessId): $($_.Exception.Message)" -ForegroundColor Yellow
@@ -259,6 +259,36 @@ function Get-ProcessTree {
     return $all | Sort-Object -Unique
 }
 
+function Test-ManagedVscodeProcess {
+    param([int]$ProcessId)
+    $managedRoot = Join-Path $env:USERPROFILE '.kalio\runtime\code-intelligence\vscode'
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    return $process -and $process.Name -eq 'Code.exe' -and $process.CommandLine -like "*$managedRoot*"
+}
+
+function Stop-ProcessTreePreservingManagedVscode {
+    param([int]$RootId)
+    $tree = @(Get-ProcessTree -ParentId $RootId)
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $tree -contains $_.ProcessId } |
+        Sort-Object CreationDate -Descending)
+    $protectedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($process in $processes) {
+        if (Test-ManagedVscodeProcess -ProcessId $process.ProcessId) {
+            foreach ($managedProcessId in @(Get-ProcessTree -ParentId $process.ProcessId)) {
+                [void]$protectedProcessIds.Add([int]$managedProcessId)
+            }
+        }
+    }
+    foreach ($process in $processes) {
+        if ($protectedProcessIds.Contains([int]$process.ProcessId)) {
+            Write-Host "  [keep] managed VS Code PID $($process.ProcessId)" -ForegroundColor DarkGray
+            continue
+        }
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Stop-Processes {
     param(
         [int[]]$ProcessIds,
@@ -266,6 +296,10 @@ function Stop-Processes {
     )
 
     foreach ($processId in @($ProcessIds | Where-Object { $_ -gt 0 } | Sort-Object -Unique)) {
+        if (Test-ManagedVscodeProcess -ProcessId $processId) {
+            Write-Host "  [keep] managed VS Code PID $processId" -ForegroundColor DarkGray
+            continue
+        }
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
         Write-Host "  [kill] $Label PID $processId" -ForegroundColor DarkYellow
     }

@@ -97,7 +97,10 @@
             "persona_list",
             "fs_read",
             "fs_list",
-            "fs_write"
+            "fs_write",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -123,7 +126,10 @@
             "terminal_kill",
             "fs_read",
             "fs_list",
-            "fs_write"
+            "fs_write",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -175,7 +181,10 @@
             "kv_list",
             "fs_read",
             "fs_list",
-            "fs_write"
+            "fs_write",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -255,7 +264,10 @@
             "fs_read",
             "fs_list",
             "fs_write",
-            "design_preview"
+            "design_preview",
+            "ide_query",
+            "ide_diagnostics",
+            "ide_status"
         ],
         "skillIds": [
             "architecture-agent-superpowers"
@@ -331,5 +343,29 @@
         "skillIds": [
             "architecture-agent-superpowers"
         ]
+    },
+    "luna": {
+        "name": "Luna",
+        "systemPrompt": "You are Luna, Kalio's focused Codex agent. Work directly on the user's goal, use the available Kalio tools through their policy boundary, and report concrete evidence. Keep actions bounded, explain blockers, and never claim a change or tool result without observing it.",
+        "model": "gpt-5.6-luna",
+        "executionProfileId": "codex-luna",
+        "allowedTools": [],
+        "skillIds": []
+    },
+    "claude": {
+        "name": "Claude Sonnet",
+        "systemPrompt": "You are Claude Sonnet, Kalio's native Claude Code agent. Work directly on the user's goal through Kalio's policy boundary, keep actions bounded, and report concrete evidence without claiming unobserved results.",
+        "model": "claude-sonnet-4-6",
+        "executionProfileId": "claude-local",
+        "allowedTools": [],
+        "skillIds": []
+    },
+    "devin": {
+        "name": "Devin GLM-5.2",
+        "systemPrompt": "You are Devin, Kalio's host-local ACP agent. Work directly on the user's goal through the Kalio MCP bridge and policy boundary, keep actions bounded, and report concrete evidence without claiming unobserved results.",
+        "model": "glm-5-2",
+        "executionProfileId": "devin-local-glm-5-2",
+        "allowedTools": [],
+        "skillIds": []
     }
 }

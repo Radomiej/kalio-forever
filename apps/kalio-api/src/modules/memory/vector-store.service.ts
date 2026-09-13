@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import Database from 'better-sqlite3';
-import * as sqliteVec from 'sqlite-vec';
+import { createSqliteDatabase, loadSqliteVec, type SqliteClient } from '../../database/sqlite-runtime';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -35,7 +34,7 @@ function normalizeFtsQuery(query: string): string {
   return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' ');
 }
 
-function tableHasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
+function tableHasColumn(db: SqliteClient, tableName: string, columnName: string): boolean {
   const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: unknown }>;
   return rows.some((row) => row.name === columnName);
 }
@@ -45,7 +44,7 @@ function tableHasColumn(db: Database.Database, tableName: string, columnName: st
 @Injectable()
 export class VectorStoreService {
   private readonly logger = new Logger(VectorStoreService.name);
-  private db: Database.Database;
+  private db: SqliteClient;
   private readonly dimensions: number;
 
   constructor(dbPath: string, dimensions: number) {
@@ -56,8 +55,8 @@ export class VectorStoreService {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    this.db = new Database(dbPath);
-    sqliteVec.load(this.db);
+    this.db = createSqliteDatabase(dbPath, process.env.KALIO_SQLITE_DRIVER).client;
+    loadSqliteVec(this.db);
 
     this.initSchema();
     this.logger.debug(`Initialized vector store: ${dbPath}, dimensions: ${dimensions}`);

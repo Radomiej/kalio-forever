@@ -3,6 +3,8 @@ import type { RuntimeAttentionItem } from './agentRuntimeSelectors';
 
 export const RUNTIME_ATTENTION_NOTICE_LIMIT = 3;
 export const RUNTIME_ATTENTION_NOTICE_WINDOW_MS = 5 * 60 * 1000;
+export const RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE = 'kalio:runtime-attention-reviewed-keys';
+export const RUNTIME_ATTENTION_REVIEWED_EVENT = 'kalio:runtime-attention-reviewed';
 
 export interface RuntimeAttentionNotice {
   items: RuntimeAttentionItem[];
@@ -15,6 +17,38 @@ export interface RuntimeAttentionNotice {
 
 export function runtimeAttentionReviewKey(item: RuntimeAttentionItem, updatedAt: number): string {
   return `${item.id}:${updatedAt}`;
+}
+
+export function readReviewedRuntimeAttentionKeys(): Set<string> {
+  if (typeof window === 'undefined') {
+    return new Set();
+  }
+  try {
+    const raw = window.localStorage.getItem(RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((value): value is string => typeof value === 'string'));
+  } catch (err) {
+    console.warn('[runtimeAttentionNotice] failed to read runtime attention review state', err);
+    return new Set();
+  }
+}
+
+export function writeReviewedRuntimeAttentionKeys(keys: ReadonlySet<string>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE,
+      JSON.stringify(Array.from(keys).slice(-200)),
+    );
+    window.dispatchEvent(new Event(RUNTIME_ATTENTION_REVIEWED_EVENT));
+  } catch (err) {
+    console.warn('[runtimeAttentionNotice] failed to persist runtime attention review state', err);
+  }
 }
 
 export function selectRuntimeAttentionNotice(params: {

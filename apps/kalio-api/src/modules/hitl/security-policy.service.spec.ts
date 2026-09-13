@@ -20,6 +20,7 @@ function makeTestDrizzle(): DrizzleService {
       allowed_tools TEXT NOT NULL DEFAULT '[]',
       skill_ids TEXT NOT NULL DEFAULT '[]',
       mcp_policy TEXT NOT NULL DEFAULT 'allow_all',
+      execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
       avatar_seed TEXT,
       avatar_variant TEXT,
       avatar_palette_key TEXT,
@@ -33,6 +34,7 @@ function makeTestDrizzle(): DrizzleService {
       path TEXT,
       normalized_path TEXT,
       kind TEXT NOT NULL,
+      default_execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
       is_system INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -48,6 +50,11 @@ function makeTestDrizzle(): DrizzleService {
       parent_turn_id TEXT,
       parent_tool_call_id TEXT,
       project_id TEXT NOT NULL DEFAULT 'system:none' REFERENCES projects(id),
+      execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
+      external_thread_id TEXT,
+      toolset_fingerprint TEXT,
+      policy_fingerprint TEXT,
+      runtime_binding_version INTEGER NOT NULL DEFAULT 1,
       archived_at INTEGER,
       runtime_context TEXT,
       created_at INTEGER NOT NULL,
@@ -170,7 +177,7 @@ describe('SecurityPolicyService', () => {
     await expect(drizzleSvc.db.select().from(schema.messages)).resolves.toEqual([]);
   });
 
-  it('allows and writes a conversation policy message when external decision agrees', async () => {
+  it('holds critical actions for a human even when the evaluator agrees', async () => {
     await seedSession(drizzleSvc, 'session-1');
     hitlConfig.getConfig.mockResolvedValue({
       mode: 'manual',
@@ -203,8 +210,8 @@ describe('SecurityPolicyService', () => {
     });
 
     expect(response).toMatchObject({
-      decision: 'allow',
-      reason: 'Path is inside the approved project.',
+      decision: 'ask_user',
+      reason: 'Critical-risk action requires human approval. Path is inside the approved project.',
       risk: 'critical',
     });
     expect(hitlDecision.evaluateApproval).toHaveBeenCalledWith({
@@ -225,15 +232,45 @@ describe('SecurityPolicyService', () => {
       role: 'system',
     });
     expect(messages[0].content).toContain('Action: fs_write/fs_write');
-    expect(messages[0].content).toContain('Decision: allow');
+    expect(messages[0].content).toContain('Decision: ask_user');
 
     const auditRows = await drizzleSvc.db.select().from(schema.auditLog);
     expect(auditRows[0].data).toMatchObject({
-      eventType: 'external_security_allow',
+      eventType: 'external_security_ask_user',
       request: expect.objectContaining({
         source: 'mcp-cli-agents',
         context: expect.objectContaining({ permissionMode: 'write' }),
       }),
+    });
+  });
+
+  it('preserves an evaluator ask_user decision for non-critical actions', async () => {
+    hitlConfig.getConfig.mockResolvedValue({
+      mode: 'manual',
+      autoPersonaId: null,
+      unattendedFallback: 'pause',
+      representativePersonaId: null,
+      notificationChannel: 'none',
+      externalPolicyEnabled: true,
+      externalPolicyPersonaId: 'policy-persona',
+      raAppApprovalTimeoutMs: 600_000,
+    });
+    hitlDecision.evaluateApproval.mockResolvedValue({
+      agree: false,
+      decision: 'ask_user',
+      reason: 'The evaluator cannot establish that the operation is safe.',
+      risk: 'medium',
+    });
+
+    const response = await service.evaluate({
+      source: 'manual',
+      action: { kind: 'tool', name: 'project_lookup' },
+      risk: 'medium',
+    });
+
+    expect(response).toMatchObject({
+      decision: 'ask_user',
+      risk: 'medium',
     });
   });
 
@@ -271,5 +308,16 @@ describe('SecurityPolicyService', () => {
       eventType: 'external_security_ask_user',
       response: expect.objectContaining({ reason: 'External HITL policy failed: policy offline' }),
     });
+  });
+
+  it('raises a caller-supplied low risk when the action is a filesystem write', async () => {
+    const response = await service.evaluate({
+      source: 'manual',
+      action: { kind: 'filesystem', name: 'fs_write', paths: ['README.md'] },
+      risk: 'low',
+      context: {},
+    });
+
+    expect(response.risk).toBe('high');
   });
 });

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { normalize, resolve, win32 } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { CreateProjectDto, Project, ProjectKind, UpdateProjectDto } from '@kalio/types';
@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { DrizzleService } from '../../database/drizzle.service';
 import { projects } from '../../database/schema';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
+import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
 
 export const SYSTEM_PROJECT_IDS = {
   none: 'system:none',
@@ -48,6 +49,7 @@ export class ProjectsService {
   constructor(
     private readonly drizzle: DrizzleService,
     private readonly allowedPaths: AllowedPathsService,
+    @Optional() private readonly executionProfiles?: ExecutionProfileService,
   ) {}
 
   async list(): Promise<Project[]> {
@@ -83,6 +85,8 @@ export class ProjectsService {
 
     await this.allowedPaths.ensurePath(path);
     const name = dto.name.trim() || projectNameFromPath(path);
+    const defaultExecutionProfileId = dto.defaultExecutionProfileId?.trim() || 'local-direct-default';
+    await this.executionProfiles?.get(defaultExecutionProfileId);
     const now = new Date();
     const project = {
       id: nanoid(),
@@ -90,6 +94,7 @@ export class ProjectsService {
       path,
       normalizedPath,
       kind: 'workspace' as const,
+      defaultExecutionProfileId,
       isSystem: false,
       createdAt: now,
       updatedAt: now,
@@ -112,8 +117,19 @@ export class ProjectsService {
       throw new BadRequestException('Project name is required.');
     }
     const updatedAt = new Date();
-    await this.drizzle.db.update(projects).set({ name, updatedAt }).where(eq(projects.id, id));
-    return { ...project, name, updatedAt: updatedAt.getTime() };
+    const defaultExecutionProfileId = dto.defaultExecutionProfileId?.trim();
+    if (defaultExecutionProfileId) await this.executionProfiles?.get(defaultExecutionProfileId);
+    await this.drizzle.db.update(projects).set({
+      name,
+      ...(defaultExecutionProfileId ? { defaultExecutionProfileId } : {}),
+      updatedAt,
+    }).where(eq(projects.id, id));
+    return {
+      ...project,
+      name,
+      ...(defaultExecutionProfileId ? { defaultExecutionProfileId } : {}),
+      updatedAt: updatedAt.getTime(),
+    };
   }
 
   async assertAssignable(id: string): Promise<Project> {
@@ -132,6 +148,7 @@ export class ProjectsService {
       path: row.path,
       normalizedPath: row.normalizedPath,
       kind: row.kind as ProjectKind,
+      defaultExecutionProfileId: row.defaultExecutionProfileId,
       isSystem: row.isSystem,
       createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : row.createdAt,
       updatedAt: row.updatedAt instanceof Date ? row.updatedAt.getTime() : row.updatedAt,

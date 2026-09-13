@@ -145,7 +145,7 @@ describe('DrizzleService fail-fast migrations', () => {
       const journalRows = sqlite.prepare(
         'SELECT hash, created_at AS createdAt FROM "__drizzle_migrations" ORDER BY id ASC',
       ).all() as Array<{ hash: string; createdAt: number }>;
-      expect(journalRows).toHaveLength(27);
+      expect(journalRows).toHaveLength(28);
       expect(sqlite.prepare(
         'SELECT 1 FROM sqlite_master WHERE type = \'index\' AND name = \'messages_session_tool_result_unique\'',
       ).get()).toBeTruthy();
@@ -190,7 +190,7 @@ describe('DrizzleService fail-fast migrations', () => {
     }
   });
 
-  it('prevents Nest lifecycle initialization when a real migration cannot be applied', () => {
+  it('prevents Nest lifecycle initialization when a real migration cannot be applied', async () => {
     const dbPath = createTemporaryDatabasePath();
     migrateDatabase(dbPath, createMigrationFixtureAt(16));
 
@@ -198,16 +198,16 @@ describe('DrizzleService fail-fast migrations', () => {
     sqlite.exec("ALTER TABLE mcp_servers ADD COLUMN origin_source text NOT NULL DEFAULT 'manual'");
     sqlite.close();
 
-    const service = new DrizzleService({ get: () => dbPath } as never);
+    const service = new DrizzleService({ get: (key: string) => key === 'DATABASE_PATH' ? dbPath : undefined } as never);
 
     try {
-      expect(() => service.onModuleInit()).toThrow('Database migration failed');
+      await expect(service.onModuleInit()).rejects.toThrow('Database migration failed');
     } finally {
       service.onModuleDestroy();
     }
   });
 
-  it('rejects a journal-complete database whose migrated schema is incomplete', () => {
+  it('rejects a journal-complete database whose migrated schema is incomplete', async () => {
     const dbPath = createTemporaryDatabasePath();
     migrateDatabase(dbPath, migrationsFolder);
 
@@ -215,10 +215,10 @@ describe('DrizzleService fail-fast migrations', () => {
     sqlite.exec('ALTER TABLE messages DROP COLUMN turn_id');
     sqlite.close();
 
-    const service = new DrizzleService({ get: () => dbPath } as never);
+    const service = new DrizzleService({ get: (key: string) => key === 'DATABASE_PATH' ? dbPath : undefined } as never);
 
     try {
-      expect(() => service.onModuleInit()).toThrow('Database schema validation failed');
+      await expect(service.onModuleInit()).rejects.toThrow('Database schema validation failed');
     } finally {
       service.onModuleDestroy();
     }

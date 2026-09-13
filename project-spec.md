@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-08-03
+Last updated: 2026-08-22
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -180,3 +180,56 @@ classDiagram
 - The primary Kalio SQLite schema changes only through ordered Drizzle migrations.
 - Migration or required-schema validation failure is fatal to API startup; bootstrap must never run compatibility `ALTER TABLE` or silently repair primary database state.
 - A stale, interrupted, or manually altered primary database requires an explicit backup-and-reset operation or a separately invoked one-time upgrade tool. Runtime startup must not decide or perform that recovery.
+
+## Runtime And SQLite Distribution
+
+- The release runtime uses Node.js with the platform-native `better-sqlite3` addon by default; standalone packaging must include the compiled addon and prove startup from the extracted archive.
+- The API owns one SQLite runtime adapter. Node and Bun drivers share the adapter contract, while driver selection is process-wide and cannot change after initialization.
+- `KALIO_SQLITE_DRIVER=auto` is the default. `KALIO_SQLITE_DRIVER=bun` is an opt-in experimental path validated for source/runtime smoke tests; it is not yet the public compiled-executable release lane.
+- Bun is a candidate for a smaller executable and lower runtime overhead, but native `sharp`, `sqlite-vec`, and other platform modules require explicit sidecar/bundle validation before Bun becomes the release default.
+- The backend serves the built web UI and API from one HTTP port in the standalone runtime. Host-binding policy remains a separate verification gate because bootstrap metadata and the actual `listen` call must agree.
+
+## Agent Runtime And Codex Boundary
+
+- Persona identity is independent from execution engine. Projects, personas, and sessions select a persisted `ExecutionProfile`; the direct LLM profile remains available and Codex profiles use the ChatGPT/Codex App Server.
+- `devin-api` is a separate cloud task-agent profile. It uses the server-side Devin REST v3 session API with a bounded `DEVIN_MAX_ACU_LIMIT`; it does not receive Kalio `cwd`, local file contents, tool schemas, or native HITL callbacks. Kalio records when its available tool set is omitted at this boundary.
+- `devin-cli-acp` is a separate host-local profile family. It launches the authenticated Devin CLI directly as `devin --model <glm-5-2|swe-1-7> acp`, keeps one ACP process per model lane, and persists the opaque ACP `sessionId` through the existing `externalThreadId` binding. It is not `CLIAgentService`, `spawn_cli_agent`, or a Claude runtime.
+- Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server when the provider advertises HTTP MCP support. When the handshake does not advertise HTTP (the installed Devin CLI `3000.2.17` reports `mcpCapabilities.http=false`), Kalio passes a stdio MCP proxy compiled from `kalio-mcp-bridge-stdio.ts`; the proxy forwards only to the same authenticated bridge, so persona allow-lists, session/VFS scope, turn context, and HITL policy remain server-side. The stable session config carries the persona-filtered tool names and the serialized per-turn context registry supplies turn/message IDs without changing ACP session policy. The bridge token is resolved from the desktop Settings override first and `KALIO_MCP_BRIDGE_TOKEN` second, so local dev remains fail-closed when neither source is configured.
+- Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
+- Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
+- Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
+- The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
+- Codex dynamic tools are declared at `thread/start` and are dispatched through Kalio's existing tool broker/policy path. Native Codex tools remain Codex-native; their approval can use Codex auto-review (`codex_guard`) or Kalio HITL (`kalio_strict`).
+- Kalio starts the Codex App Server with inherited `mcp_servers` disabled by default, so MCP entries from the user's global Codex profile are not silently exposed to a Kalio persona. Settings > Integrations exposes a per-auth-profile toggle through `PATCH /api/runtime/native-cli-integrations/:authProfileId/settings`; the choice is persisted as `codex.mcp.inherit.<authProfileId>` and resets that profile's App Server so the next process applies it. `KALIO_CODEX_INHERIT_MCP=true|false` is only the fallback when no profile setting exists. Kalio's own MCP visibility remains controlled separately by the persona `mcpPolicy` (`allow_all`, `deny_all`, or `allow_list`).
+- Active execution is bounded by the shared runtime scheduler, defaulting to five leases across foreground, control, and child agents. Child agents are not an unbounded second process class.
+- External security/auto-check evaluation is a no-tools model call selected by the configured evaluator persona/profile. Its typed result preserves `allow`, `deny`, and `ask_user`; critical-risk actions always retain the human gate.
+- Codex `thread/resume` currently cannot replace dynamic tool definitions. Until fingerprint mismatch handling is implemented, changing a session's effective toolset requires an explicit fresh thread/rebinding decision.
+
+## Native MCP Interoperability Boundary
+
+- Kalio exposes a separate authenticated Streamable HTTP MCP server at
+  `/api/mcp/bridge`. It is an external-runtime interoperability adapter over
+  `ToolDispatchService`, not the client-side `MCPService` and not the child
+  `spawn_cli_agent`/subagent execution family.
+- The bridge is disabled unless a Settings token or `KALIO_MCP_BRIDGE_TOKEN` is
+  set. The first implementation accepts only loopback HTTP origins and
+  requires the bearer token on every request; it is not a public or
+  tunnel-facing endpoint. Settings can generate, override, or clear the local
+  token; status responses expose only the configured source, never the secret.
+- Without an explicit `x-kalio-tool-names` allow-list, only native tools that
+  do not require confirmation are exposed. Explicitly listed confirmation-gated
+  tools still pass through Kalio's normal HITL policy. Child/CLI/subagent tools
+  and connected external MCP tools are never re-exported through this bridge.
+- An explicit empty `x-kalio-tool-names` value exposes no tools; Devin always
+  sends this header so a persona with no allowed Kalio tools cannot fall back to
+  the bridge's read-only defaults.
+- Streamable HTTP session ids are transport state. Callers should provide the
+  Kalio session/VFS/turn headers when they need durable workspace or HITL
+  context; otherwise the bridge creates an isolated session id.
+- Managed Devin bridge connections fail closed on `tools/call` when no active
+  serialized Kalio turn context exists; direct MCP clients retain their static
+  header context and cannot inherit a Devin turn.
+- Claude Code, Codex, and other native runtimes may consume this endpoint as an
+  MCP server. Clients that only support stdio may use an HTTP-to-stdio adapter;
+  managed Devin ACP uses Kalio's compiled `kalio-mcp-bridge-stdio.js` so the
+  bearer token stays in the child environment and never in repo-managed config.

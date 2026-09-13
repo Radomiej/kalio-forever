@@ -8,6 +8,7 @@ import type { ChatSessionKind } from '@kalio/types';
 import type { SessionEventsService } from '../session-events.service';
 import type { LLMService } from '../../llm/llm.service';
 import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
+import type { PersonaService } from '../../persona/persona.service';
 
 interface FakeRow {
   id: string;
@@ -18,6 +19,7 @@ interface FakeRow {
   parentTurnId?: string | null;
   parentToolCallId?: string | null;
   projectId?: string;
+  executionProfileId?: string;
   runtimeContext?: unknown;
   archivedAt?: number | Date | null;
   createdAt: number | Date;
@@ -94,6 +96,7 @@ describe('SessionsService', () => {
   let llm: LLMService;
   let allowedPaths: AllowedPathsService;
   let projects: { assertAssignable: ReturnType<typeof vi.fn> };
+  let personas: { getSessionConfig: ReturnType<typeof vi.fn> };
   let activeSessionRegistry: { isActive: ReturnType<typeof vi.fn> };
   let rows: FakeRow[];
   let ops: string[];
@@ -135,10 +138,12 @@ describe('SessionsService', () => {
       name: 'Project',
       path: 'C:/Project',
       kind: 'workspace',
+      defaultExecutionProfileId: 'project-profile',
       isSystem: false,
       createdAt: 1,
       updatedAt: 1,
     }) };
+    personas = { getSessionConfig: vi.fn().mockResolvedValue({ executionProfileId: 'persona-profile' }) };
     activeSessionRegistry = { isActive: vi.fn().mockReturnValue(false) };
     service = new SessionsService(
       fixture.drizzle,
@@ -149,6 +154,8 @@ describe('SessionsService', () => {
       allowedPaths,
       projects as never,
       activeSessionRegistry as never,
+      undefined,
+      personas as unknown as PersonaService,
     );
   });
 
@@ -171,6 +178,44 @@ describe('SessionsService', () => {
 
       expect(projects.assertAssignable).toHaveBeenCalledWith('project-1');
       expect(result.projectId).toBe('project-1');
+    });
+
+    it('binds the explicit execution profile before persona and project defaults', async () => {
+      const result = await service.create({
+        personaId: 'p1',
+        projectId: 'project-1',
+        executionProfileId: 'explicit-profile',
+      });
+
+      expect(result.executionProfileId).toBe('explicit-profile');
+      expect(rows[0]?.executionProfileId).toBe('explicit-profile');
+    });
+
+    it('binds the persona profile when the session does not explicitly select one', async () => {
+      const result = await service.create({ personaId: 'p1', projectId: 'project-1' });
+
+      expect(result.executionProfileId).toBe('persona-profile');
+    });
+
+    it('inherits a parent execution profile and rejects a conflicting child profile', async () => {
+      rows.push({
+        id: 'host-session',
+        personaId: 'p1',
+        title: 'Host',
+        projectId: 'project-1',
+        executionProfileId: 'parent-profile',
+        createdAt: 1,
+        updatedAt: 2,
+      });
+
+      const child = await service.create({ personaId: 'p1', parentSessionId: 'host-session' });
+
+      expect(child.executionProfileId).toBe('parent-profile');
+      await expect(service.create({
+        personaId: 'p1',
+        parentSessionId: 'host-session',
+        executionProfileId: 'other-profile',
+      })).rejects.toThrow('execution profile');
     });
 
     it('inherits the host project for child sessions and rejects a conflicting project', async () => {
@@ -224,6 +269,45 @@ describe('SessionsService', () => {
     });
   });
 
+  describe('persona/profile binding', () => {
+    it('rebinds an empty chat to the selected persona execution profile', async () => {
+      rows.push({
+        id: 'empty-chat',
+        personaId: 'default',
+        title: 'New Chat',
+        projectId: 'system:none',
+        executionProfileId: 'local-direct-default',
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      personas.getSessionConfig.mockResolvedValue({ executionProfileId: 'codex-luna' });
+
+      await service.update('empty-chat', { personaId: 'luna' });
+
+      expect(rows[0]?.personaId).toBe('luna');
+      expect(rows[0]?.executionProfileId).toBe('codex-luna');
+    });
+
+    it('keeps a chat with history bound to its original execution profile', async () => {
+      rows.push({
+        id: 'started-chat',
+        personaId: 'default',
+        title: 'Started',
+        projectId: 'system:none',
+        executionProfileId: 'local-direct-default',
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      (repo.loadHistory as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'message-1' }]);
+      personas.getSessionConfig.mockResolvedValue({ executionProfileId: 'codex-luna' });
+
+      await expect(service.update('started-chat', { personaId: 'luna' }))
+        .rejects.toThrow('A session is bound to another execution profile');
+      expect(rows[0]?.personaId).toBe('default');
+      expect(rows[0]?.executionProfileId).toBe('local-direct-default');
+    });
+  });
+
   describe('assignProject', () => {
     it('moves a session subtree without changing activity timestamps', async () => {
       rows.push(
@@ -239,7 +323,7 @@ describe('SessionsService', () => {
         },
       );
       projects.assertAssignable.mockResolvedValue({
-        id: 'project-2', name: 'Project 2', path: 'C:/Project-2', kind: 'workspace', isSystem: false, createdAt: 1, updatedAt: 1,
+        id: 'project-2', name: 'Project 2', path: 'C:/Project-2', kind: 'workspace', defaultExecutionProfileId: 'project-profile', isSystem: false, createdAt: 1, updatedAt: 1,
       });
 
       await service.assignProject('host-session', { projectId: 'project-2', pathOverride: null });
@@ -250,6 +334,19 @@ describe('SessionsService', () => {
       expect(rows.map((row) => (
         (row.runtimeContext as { architectureContext?: { projectPath?: string } } | undefined)?.architectureContext?.projectPath
       ))).toEqual(['C:/Project-2', 'C:/Project-2']);
+    });
+
+    it('rejects moving a bound session to a project with another execution profile', async () => {
+      rows.push({
+        id: 'host-session', personaId: 'p1', title: 'Host', projectId: 'project-1', executionProfileId: 'bound-profile', createdAt: 1, updatedAt: 2,
+      });
+      projects.assertAssignable.mockResolvedValue({
+        id: 'project-2', name: 'Project 2', path: 'C:/Project-2', kind: 'workspace', defaultExecutionProfileId: 'other-profile', isSystem: false, createdAt: 1, updatedAt: 1,
+      });
+
+      await expect(service.assignProject('host-session', { projectId: 'project-2' }))
+        .rejects.toThrow('execution profile');
+      expect(rows[0]?.projectId).toBe('project-1');
     });
 
     it('rejects moving a subtree while one of its sessions is generating', async () => {

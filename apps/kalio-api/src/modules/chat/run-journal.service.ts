@@ -15,6 +15,9 @@ interface StartRunInput {
   turnId: string;
   provider?: string;
   model?: string;
+  runtimeKind?: ChatRunSnapshot['runtimeKind'];
+  executionProfileId?: string;
+  externalThreadId?: string;
 }
 
 interface AcceptQueuedRunInput {
@@ -31,6 +34,11 @@ interface CheckpointInput {
   status?: ChatRunStatus;
   provider?: string;
   model?: string;
+  runtimeKind?: ChatRunSnapshot['runtimeKind'];
+  executionProfileId?: string;
+  externalThreadId?: string;
+  externalTurnId?: string;
+  processEpoch?: string;
   retryCount?: number;
   safeResume?: boolean;
   errorCode?: string | null;
@@ -59,6 +67,9 @@ export class RunJournalService implements OnModuleInit {
       status: 'active',
       provider: input.provider ?? null,
       model: input.model ?? null,
+      runtimeKind: input.runtimeKind ?? null,
+      executionProfileId: input.executionProfileId ?? null,
+      externalThreadId: input.externalThreadId ?? null,
       revision: 1,
       retryCount: 0,
       safeResume: false,
@@ -117,6 +128,11 @@ export class RunJournalService implements OnModuleInit {
     if (patch.status !== undefined) set['status'] = patch.status;
     if (patch.provider !== undefined) set['provider'] = patch.provider;
     if (patch.model !== undefined) set['model'] = patch.model;
+    if (patch.runtimeKind !== undefined) set['runtimeKind'] = patch.runtimeKind;
+    if (patch.executionProfileId !== undefined) set['executionProfileId'] = patch.executionProfileId;
+    if (patch.externalThreadId !== undefined) set['externalThreadId'] = patch.externalThreadId;
+    if (patch.externalTurnId !== undefined) set['externalTurnId'] = patch.externalTurnId;
+    if (patch.processEpoch !== undefined) set['processEpoch'] = patch.processEpoch;
     if (patch.retryCount !== undefined) set['retryCount'] = patch.retryCount;
     if (patch.safeResume !== undefined) set['safeResume'] = patch.safeResume;
     if (patch.errorCode !== undefined) set['errorCode'] = patch.errorCode;
@@ -436,6 +452,11 @@ export class RunJournalService implements OnModuleInit {
       status: row.status,
       provider: row.provider ?? undefined,
       model: row.model ?? undefined,
+      runtimeKind: row.runtimeKind ?? undefined,
+      executionProfileId: row.executionProfileId ?? undefined,
+      externalThreadId: row.externalThreadId ?? undefined,
+      externalTurnId: row.externalTurnId ?? undefined,
+      processEpoch: row.processEpoch ?? undefined,
       revision: row.revision,
       retryCount: row.retryCount,
       safeResume: row.safeResume,

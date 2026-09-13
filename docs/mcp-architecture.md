@@ -132,6 +132,71 @@ a turn.
 - `deny_all` means none are visible.
 - `allow_list` uses concrete prefixed MCP tool names in `persona.allowedTools`.
 
+## Native runtime bridge
+
+Kalio also exposes its own native tool dispatcher as a separate MCP
+Streamable HTTP server. This is an interoperability boundary for native
+external runtimes such as Claude Code, Codex, or another MCP client; it is not
+the client-side `MCPService` and it is not the child `spawn_cli_agent` path.
+
+| Property | Contract |
+| --- | --- |
+| Endpoint | `/api/mcp/bridge` (all Streamable HTTP MCP methods) |
+| Enablement | A token generated/overridden in Settings is preferred; `KALIO_MCP_BRIDGE_TOKEN` remains the environment fallback. With neither configured the endpoint returns `503` |
+| Authentication | `Authorization: Bearer <token>` on every request |
+| Origin | Only absent or loopback `http://localhost`, `http://127.0.0.1`, or `http://[::1]` origins are accepted in this first slice |
+| Session | Stateful Streamable HTTP MCP sessions; the server returns and validates `mcp-session-id` |
+| Default tools | Native tools with `requiresConfirmation = false` |
+| Explicit mutation tools | Add `x-kalio-tool-names: name1,name2`; Kalio still applies its normal confirmation/HITL policy |
+| Empty explicit allow-list | No native tools are exposed (different from an omitted header) |
+| Always excluded | Child/CLI/subagent/AgentFlow launcher tools and tools whose `domain` is `mcp` |
+
+The bridge forwards `tools/list` and `tools/call` through the existing
+`ToolDispatchService`, preserving Kalio tool metadata, session/VFS context, and
+confirmation policy. Optional context headers are `x-kalio-session-id`,
+`x-kalio-vfs-session-id`, `x-kalio-turn-id`, and
+`x-kalio-prompt-message-id`. If no Kalio session header is supplied, the bridge
+uses an isolated `mcp-bridge:<connection-id>` session id; callers should send a
+real session id when a VFS or durable HITL continuation is required.
+
+For a client with native Streamable HTTP MCP support, configure the URL and
+bearer header in that client's MCP settings. The Devin Settings panel can
+generate a local token, save a manual override, or clear the override to return
+to the environment fallback; the token value is never returned by the status
+endpoint. Host-local Devin ACP receives the same stable bridge policy on
+`session/new`, `session/load`, and `session/resume`; it uses HTTP when the
+provider advertises it and the compiled stdio proxy otherwise. Per-turn
+VFS/turn/message context is activated only while a serialized ACP prompt is running. The
+adapter checks the provider handshake before sending the MCP config. The
+installed Devin CLI `3000.2.17` advertises `mcpCapabilities.http = false`, so
+Kalio passes a stdio MCP proxy instead of an ineffective HTTP server. The
+compiled `kalio-mcp-bridge-stdio.js` process forwards `tools/list` and
+`tools/call` to the same bearer-protected bridge; the persona allow-list and
+turn context therefore remain enforced by Kalio. A real Devin tool call still
+needs a provider/runtime canary because ACP capability discovery does not
+prove that a particular CLI build actually invokes a supplied stdio server.
+Devin's own filesystem, web, and terminal tools are separate category
+switches at `/api/runtime/devin-cli/settings`, defaulting to blocked and still
+requiring Kalio strict approval when enabled.
+
+For a generic stdio-only client, the existing bridge in
+`E:/Projekty/mcp-dev-servers` can adapt this endpoint. Managed Devin ACP uses
+the repository-owned compiled proxy instead:
+
+```text
+apps/kalio-api/dist/modules/mcp-bridge/kalio-mcp-bridge-stdio.js
+```
+
+```powershell
+$env:MCP_HTTP_STDIO_BRIDGE_HEADERS = '{"Authorization":"Bearer <token>","X-Kalio-Session-Id":"<session-id>"}'
+node E:/Projekty/mcp-dev-servers/scripts/mcp-http-stdio-bridge.mjs `
+  http://127.0.0.1:3016/api/mcp/bridge
+```
+
+Do not commit the bearer token or put it in repo-managed TOML. Remote exposure
+and re-exporting connected external MCP tools remain separate follow-up
+features; this boundary intentionally stays local and native-only.
+
 ## REST surface
 
 Current controller endpoints:

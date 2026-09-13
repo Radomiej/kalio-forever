@@ -76,11 +76,18 @@ The fastest first run uses the local production profile and the mock provider;
 no API key is required.
 
 ~~~powershell
-irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
 ~~~
 
-Open **http://localhost:6188**. The API health endpoint is
-**http://localhost:4016/api/health**.
+To use the Bun runtime instead of the default Node runtime:
+
+~~~powershell
+$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
+~~~
+
+
+Open **http://127.0.0.1:4016**. The API health endpoint is
+**http://127.0.0.1:4016/api/health**.
 
 1. Open **Settings**.
 2. Keep mock for a fully offline first run, or add a provider.
@@ -91,6 +98,35 @@ See the [Windows user guide](docs/quickstart-user.md) for upgrades,
 uninstall, data locations, and troubleshooting.
 
 ### Standalone desktop build
+### Install Kalio on Linux
+
+The command-line installer downloads the latest published runtime archive and keeps
+the SQLite database and workspaces in the user data directory:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh && bash /tmp/kalio-install.sh
+~~~
+
+For the Bun runtime:
+
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh && bash /tmp/kalio-install.sh --runtime bun
+~~~
+
+On Windows, an installed runtime can update itself through a separate helper process:
+
+~~~powershell
+& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
+~~~
+
+The safe command defers while Kalio is running. An explicit `--force` request stops
+only this installation's recorded process tree, downloads the matching Node or Bun
+archive, verifies the runtime manifest and SHA-256, switches versions atomically,
+health-checks the new process, and rolls back on failure. The Scheduled Task performs
+the same check without force at user sign-in. User data is preserved.
+
+For an older installation or a repair, run the release installer again. It refuses
+to replace a runtime while it is running and preserves the data directory.
 
 The Windows desktop build packages the web client, the production API, and a
 Node.js runtime into a per-user Tauri installer. The backend starts on loopback

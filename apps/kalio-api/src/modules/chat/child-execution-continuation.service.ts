@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import type { ChatMessage, ChatRunSnapshot, ToolResult } from '@kalio/types';
 import { CredentialsService } from '../credentials/credentials.service';
 import { ContextAssemblyService } from './context-assembly.service';
@@ -7,6 +7,8 @@ import { LLMTurnRuntimeService, serializeToolResultContent } from './llm-turn-ru
 import { RunJournalService } from './run-journal.service';
 import { SessionManagerService } from './session-manager.service';
 import { SessionsService } from './sessions.service';
+import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
+import { bindExternalRuntime } from './runtime-external-binding';
 
 const discardEmit: EmitFn = () => undefined;
 
@@ -22,6 +24,7 @@ export class ChildExecutionContinuationService implements OnApplicationBootstrap
     private readonly context: ContextAssemblyService,
     private readonly llm: LLMTurnRuntimeService,
     private readonly credentials: CredentialsService,
+    @Optional() private readonly executionProfiles?: ExecutionProfileService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -54,6 +57,9 @@ export class ChildExecutionContinuationService implements OnApplicationBootstrap
     if (!ownsToolCall) return false;
 
     const parent = await this.sessions.get(child.parentSessionId);
+    const executionProfile = this.executionProfiles
+      ? await this.executionProfiles.assertEnabled(parent.executionProfileId ?? '')
+      : undefined;
     const runtimeContext = parent.runtimeContext ?? {
       runtimeKind: 'subagent' as const,
       systemPromptProfile: 'subagent' as const,
@@ -102,6 +108,19 @@ export class ChildExecutionContinuationService implements OnApplicationBootstrap
         effectiveSystemPrompt: assembled.effectiveSystemPrompt,
         toolMetas: assembled.toolMetas,
         model: assembled.model,
+        providerToolNames: assembled.personaConfig?.providerToolNames,
+        executionProfile,
+        externalThreadId: parent.externalThreadId,
+         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api' || executionProfile?.kind === 'devin-cli-acp',
+         onExternalRuntimeLost: () => controller.abort(),
+         onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
+          sessions: this.sessions,
+          runJournal: this.runs,
+          sessionId: parent.id,
+          runId: parentRun.id,
+          externalThreadId,
+          binding,
+        }),
         abortSignal: controller.signal,
         emit: discardEmit,
         maxIterations,

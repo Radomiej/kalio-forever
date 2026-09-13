@@ -118,6 +118,8 @@ const PERSONA_TOOLS = new Set([
   'persona_update',
 ]);
 
+const CODE_INTELLIGENCE_TOOLS = new Set(['ide_query', 'ide_diagnostics', 'ide_status']);
+
 interface ToolGroupDefinition {
   key: string;
   label: string;
@@ -143,6 +145,7 @@ export const NATIVE_TOOL_GROUPS: ToolGroupDefinition[] = [
   { key: 'images', label: 'Images', domains: ['image'], legacyNames: IMAGE_TOOLS },
   { key: 'skills', label: 'Skills', domains: ['skill'], legacyNames: SKILL_TOOLS },
   { key: 'persona', label: 'Persona', domains: ['persona'], legacyNames: PERSONA_TOOLS },
+  { key: 'code-intelligence', label: 'Code Intelligence', domains: ['code_intelligence'], legacyNames: CODE_INTELLIGENCE_TOOLS },
 ];
 
 const MCP_TOOL_GROUP: ToolGroupDefinition = {

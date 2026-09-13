@@ -15,40 +15,11 @@ import {
   selectRunningLoops,
   selectRuntimeAttentionItems,
 } from '../../store/agentRuntimeSelectors';
-import { selectRuntimeAttentionNotice } from '../../store/agentRuntimeAttentionNotice';
-
-const RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE = 'kalio:runtime-attention-reviewed-keys';
-
-function readReviewedRuntimeAttentionKeys(): Set<string> {
-  if (typeof window === 'undefined') {
-    return new Set();
-  }
-  try {
-    const raw = window.localStorage.getItem(RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) {
-      return new Set();
-    }
-    return new Set(parsed.filter((value): value is string => typeof value === 'string'));
-  } catch (err) {
-    console.warn('[ConversationManagerPanel] failed to read runtime attention review state', err);
-    return new Set();
-  }
-}
-
-function writeReviewedRuntimeAttentionKeys(keys: ReadonlySet<string>): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      RUNTIME_ATTENTION_REVIEWED_KEYS_STORAGE,
-      JSON.stringify(Array.from(keys).slice(-200)),
-    );
-  } catch (err) {
-    console.warn('[ConversationManagerPanel] failed to persist runtime attention review state', err);
-  }
-}
+import {
+  readReviewedRuntimeAttentionKeys,
+  selectRuntimeAttentionNotice,
+  writeReviewedRuntimeAttentionKeys,
+} from '../../store/agentRuntimeAttentionNotice';
 
 function projectToolActivityForRuntimeState(
   activity: ToolActivity,
@@ -115,6 +86,8 @@ export function ConversationManagerPanel({
     nowMs: runtimeAttentionNowMs,
     reviewedItemKeys: reviewedRuntimeAttentionKeys,
   });
+  const runtimeAttentionNoticeMaxUpdatedAt = runtimeAttentionNotice?.maxUpdatedAt;
+  const runtimeAttentionNoticeNextExpiresInMs = runtimeAttentionNotice?.nextExpiresInMs;
   const pendingConfirmationCount = selectPendingApprovalCount({
     pendingConfirmations,
     pendingBudgetApprovals,
@@ -134,7 +107,8 @@ export function ConversationManagerPanel({
   const hasLiveRuntime = runningLoops.length > 0 || hasRunningLlmActivity;
   const inactiveLlmCount = llmActivities.filter((a) => a.status !== 'running').length;
   const inactiveCount = done.length + inactiveLlmCount;
-  const hasAttention = attentionItems.length > 0;
+  const hasActionableAttention = attentionItems.some((item) => item.actionable);
+  const hasAttention = hasActionableAttention || runtimeAttentionNotice !== null;
   const hasContinuationActions = continuationActions.length > 0;
   const openAttentionSession = (sessionId: string) => {
     if (onOpenSession) {
@@ -169,16 +143,16 @@ export function ConversationManagerPanel({
   };
 
   useEffect(() => {
-    if (!runtimeAttentionNotice) {
+    if (runtimeAttentionNoticeNextExpiresInMs === undefined) {
       return undefined;
     }
 
     const timeoutId = window.setTimeout(() => {
       setRuntimeAttentionNowMs(Date.now());
-    }, runtimeAttentionNotice.nextExpiresInMs);
+    }, runtimeAttentionNoticeNextExpiresInMs);
 
     return () => window.clearTimeout(timeoutId);
-  }, [runtimeAttentionNotice?.maxUpdatedAt, runtimeAttentionNotice?.nextExpiresInMs]);
+  }, [runtimeAttentionNoticeMaxUpdatedAt, runtimeAttentionNoticeNextExpiresInMs]);
 
   const isEmpty = runningLoops.length === 0
     && !hasRunningLlmActivity
@@ -186,7 +160,8 @@ export function ConversationManagerPanel({
     && llmActivities.length === 0
     && pendingConfirmationCount === 0
     && toolBudgetProgresses.length === 0
-    && runtimeAttentionItems.length === 0
+    && !hasActionableAttention
+    && runtimeAttentionNotice === null
     && continuationActions.length === 0;
 
   if (isEmpty) {

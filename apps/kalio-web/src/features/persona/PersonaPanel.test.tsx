@@ -10,8 +10,18 @@ const apiClientMock = vi.hoisted(() => ({
   put: vi.fn(),
   delete: vi.fn(),
 }));
+const getExecutionProfilesMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const getCredentialsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const getCredentialModelsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const resolveDirectExecutionProfileMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../../services/apiClient', () => ({ apiClient: apiClientMock }));
+vi.mock('../../services/apiClient', () => ({
+  apiClient: apiClientMock,
+  getExecutionProfiles: getExecutionProfilesMock,
+  getCredentials: getCredentialsMock,
+  getCredentialModels: getCredentialModelsMock,
+  resolveDirectExecutionProfile: resolveDirectExecutionProfileMock,
+}));
 
 vi.mock('./PersonaToolPicker', () => ({
   PersonaToolPicker: () => <div data-testid="persona-tool-picker" />,
@@ -68,6 +78,9 @@ function setPersonaGetResponse(personas: Persona[]) {
 describe('PersonaPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getExecutionProfilesMock.mockResolvedValue([]);
+    getCredentialsMock.mockResolvedValue([]);
+    getCredentialModelsMock.mockResolvedValue([]);
   });
 
   it('loads personas and creates a new persona from the main editor', async () => {
@@ -100,9 +113,10 @@ describe('PersonaPanel', () => {
         systemPrompt: 'Plan the next step before acting.',
         maxToolAttempts: 60,
         allowedTools: [],
+        providerToolNames: [],
         mcpPolicy: 'allow_all',
         avatarSeed: 'new planner',
-        avatarVariant: 'marble',
+        avatarVariant: 'bauhaus',
         avatarPaletteKey: 'ocean',
         avatarIndex: 0,
       });
@@ -135,9 +149,10 @@ describe('PersonaPanel', () => {
         systemPrompt: 'Trimmed prompt.',
         maxToolAttempts: 75,
         allowedTools: ['vfs_read_file'],
+        providerToolNames: [],
         mcpPolicy: 'allow_all',
         avatarSeed: 'existing persona',
-        avatarVariant: 'marble',
+        avatarVariant: 'pixel',
         avatarPaletteKey: 'ocean',
         avatarIndex: 0,
       });

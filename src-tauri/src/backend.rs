@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::fs::{create_dir_all, OpenOptions};
+use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -17,10 +17,12 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(45);
 #[derive(Clone, Default)]
 pub struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
+    lock: Arc<Mutex<Option<(File, PathBuf)>>>,
 }
 
 pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
-    let data_root = normalize_windows_path(app.path().app_local_data_dir()?);
+    let kalio_home = resolve_kalio_home(app)?;
+    let data_root = kalio_home.join("data");
     let resource_root = normalize_windows_path(app.path().resource_dir()?);
     let server_root = resource_root.join("kalio-server");
     let node_name = if cfg!(windows) {
@@ -29,7 +31,7 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
         "kalio-node"
     };
     let node_path = resource_root.join(node_name);
-    let bootstrap_path = server_root.join("desktop-server-bootstrap.mjs");
+    let bootstrap_path = server_root.join("runtime-server-bootstrap.mjs");
 
     let logs_root = data_root.join("logs");
     create_dir_all(&logs_root)?;
@@ -63,6 +65,18 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
     writeln!(startup_log, "[kalio] startup resources validated")?;
     drop(startup_log);
     let mut startup_log = OpenOptions::new().append(true).open(&log_path)?;
+    let lock_path = kalio_home.join(".runtime.lock");
+    let mut lock_file = match OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(std::io::Error::other(format!(
+                "another Kalio runtime appears to be using {}",
+                lock_path.display()
+            )).into());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    writeln!(lock_file, "{{\"pid\":{},\"profile\":\"desktop\"}}", std::process::id())?;
     writeln!(
         startup_log,
         "[kalio] spawning backend on port {BACKEND_PORT}"
@@ -85,7 +99,11 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
         .env("CORS_ORIGIN", TAURI_ORIGIN)
         .env("KALIO_INSTALL_PROFILE", "desktop")
         .env("KALIO_ENABLE_TEST_SUPPORT", "false")
-        .env("KALIO_DESKTOP_DATA_ROOT", &data_root)
+        .env("KALIO_HOME", &kalio_home)
+        .env("KALIO_DATA_ROOT", &data_root)
+        .env("KALIO_HOST", "127.0.0.1")
+        .env("KALIO_SERVE_UI", "false")
+        .env("KALIO_RUNTIME_VERSION", env!("CARGO_PKG_VERSION"))
         .env("DATABASE_PATH", &database_path)
         .env("WORKSPACE_ROOT", &workspace_root)
         .env("MEMORY_DB_PATH", &memory_db_path)
@@ -104,12 +122,14 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
             child
         }
         Err(error) => {
+            let _ = remove_file(&lock_path);
             writeln!(startup_log, "[kalio] backend spawn failed: {error}")?;
             return Err(error.into());
         }
     };
 
     if let Err(error) = wait_for_backend(&mut child) {
+        let _ = remove_file(&lock_path);
         writeln!(startup_log, "[kalio] backend health wait failed: {error}")?;
         if let Err(stop_error) = child.kill() {
             eprintln!("[kalio] backend cleanup failed: {stop_error}");
@@ -128,6 +148,11 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
         .lock()
         .map_err(|_| "backend state lock is poisoned")?;
     *state_child = Some(child);
+    let mut state_lock = state
+        .lock
+        .lock()
+        .map_err(|_| "backend runtime lock is poisoned")?;
+    *state_lock = Some((lock_file, lock_path));
     Ok(())
 }
 
@@ -147,6 +172,30 @@ pub fn stop(app: &AppHandle) {
     if let Err(error) = child.wait() {
         eprintln!("[kalio] backend wait failed: {error}");
     }
+    if let Ok(mut runtime_lock) = state.lock.lock() {
+        if let Some((lock_file, lock_path)) = runtime_lock.take() {
+            drop(lock_file);
+            let _ = remove_file(lock_path);
+        }
+    };
+}
+
+fn resolve_kalio_home(app: &App) -> Result<PathBuf, Box<dyn Error>> {
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or(app.path().app_local_data_dir()?)
+    } else if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
+        PathBuf::from(path)
+    } else if let Some(home) = std::env::var_os("HOME") {
+        PathBuf::from(home).join(".local").join("share")
+    } else {
+        app.path().app_local_data_dir()?
+    };
+    let name = if cfg!(windows) { "Kalio" } else { "kalio" };
+    let root = normalize_windows_path(base.join(name));
+    create_dir_all(&root)?;
+    Ok(root)
 }
 
 fn require_path(path: &Path, label: &str) -> Result<(), Box<dyn Error>> {
@@ -214,3 +263,4 @@ fn health_check(address: SocketAddr) -> bool {
     };
     String::from_utf8_lossy(&response[..read]).contains(" 200 ")
 }
+

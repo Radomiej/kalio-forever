@@ -1,3 +1,4 @@
+import type { Credential } from '@kalio/types';
 import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types';
 import { ModelSettingsSection } from './ModelSettingsSection';
 import { ProviderStreamsSection } from './ProviderStreamsSection';
@@ -8,12 +9,18 @@ import { formatLargeTokenCount } from './settings-format';
 
 export function LLMRuntimeSettingsSection({
   activeRuntimeConfig,
+  providers,
+  activeProviderId,
+  envFallback,
+  providerSyncing,
   contextWindow,
   maxToolAttempts,
   maxToolAttemptsSaveStatus,
   toolTimeouts,
   focusModelInputSignal,
   onRuntimeConfigChange,
+  onActivateProvider,
+  onUseEnvFallback,
   onContextWindowInputChange,
   onContextWindowCommit,
   onMaxToolAttemptsInputChange,
@@ -22,12 +29,18 @@ export function LLMRuntimeSettingsSection({
   onToolTimeoutCommit,
 }: {
   activeRuntimeConfig: ActiveRuntimeConfig | null;
+  providers: Credential[];
+  activeProviderId: string | null;
+  envFallback: { provider: string; label: string; model?: string } | null;
+  providerSyncing: boolean;
   contextWindow: number;
   maxToolAttempts: number;
   maxToolAttemptsSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   toolTimeouts: ToolTimeoutSettings;
   focusModelInputSignal: number;
   onRuntimeConfigChange: (updated: LLMConfigWithSource) => void;
+  onActivateProvider: (credentialId: string) => void;
+  onUseEnvFallback: () => void;
   onContextWindowInputChange: (size: number) => void;
   onContextWindowCommit: (size: number) => void;
   onMaxToolAttemptsInputChange: (size: number) => void;
@@ -39,8 +52,14 @@ export function LLMRuntimeSettingsSection({
     <section className="flex flex-col gap-6">
       <ModelSettingsSection
         activeRuntimeConfig={activeRuntimeConfig}
+        providers={providers}
+        activeProviderId={activeProviderId}
+        envFallback={envFallback}
+        providerSyncing={providerSyncing}
         focusModelInputSignal={focusModelInputSignal}
         onRuntimeConfigChange={onRuntimeConfigChange}
+        onActivateProvider={onActivateProvider}
+        onUseEnvFallback={onUseEnvFallback}
       />
 
       <div className="border-t border-base-300 pt-4">

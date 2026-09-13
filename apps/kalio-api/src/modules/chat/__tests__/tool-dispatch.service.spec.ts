@@ -34,6 +34,10 @@ function makeEntry(name: string, requiresConfirmation: boolean, result: unknown,
   };
 }
 
+const bypassApprovalPolicy = {
+  resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+};
+
 function makeDrizzleMock(personaId = 'persona-dispatch'): DrizzleService {
   const query = {
     select: vi.fn(() => query),
@@ -414,6 +418,7 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -438,6 +443,44 @@ describe('ToolDispatchService', () => {
         vfsSessionId: 'child-session',
         agentRun: expect.objectContaining({ agentType: 'subagent', vfsMode: 'isolated' }),
       }));
+    });
+
+    it('manual policy keeps isolated subagent writes behind a human confirmation', async () => {
+      const entry = makeEntry('vfs_write', true, { path: 'index.html' });
+      const manualPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'manual', source: 'manual' }),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: manualPolicy },
+        ],
+      }).compile();
+      const scopedService = moduleRef.get(ToolDispatchService);
+      const ctx = {
+        ...makeCtx(),
+        sessionId: 'child-session',
+        vfsSessionId: 'child-session',
+        agentRun: {
+          agentRunId: 'sub-run-manual',
+          agentType: 'subagent' as const,
+          parentSessionId: 'master-session',
+          vfsMode: 'isolated' as const,
+        },
+      };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
+
+      const result = await scopedService.dispatch('c1', 'vfs_write', { filePath: 'index.html', content: '<h1>x</h1>' }, ctx);
+
+      expect(manualPolicy.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: 'c1' }));
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(result.status).toBe('cancelled');
+      expect(entry.execute).not.toHaveBeenCalled();
     });
 
     it('rejects tool calls outside the provided runtime scope before HITL', async () => {
@@ -551,6 +594,7 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -593,6 +637,7 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -622,6 +667,7 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -651,6 +697,7 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -683,6 +730,7 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
+          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);

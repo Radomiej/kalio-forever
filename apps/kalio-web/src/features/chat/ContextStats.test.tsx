@@ -19,6 +19,11 @@ describe('ContextStats', () => {
     expect(screen.getByTestId('context-stats-panel')).toBeInTheDocument();
   });
 
+  it('labels the preflight numbers as an estimate', () => {
+    render(<ContextStats tokenCount={makeTokenCount()} onClose={vi.fn()} />);
+    expect(screen.getByTestId('context-stats-source')).toHaveTextContent('Preflight estimate');
+  });
+
   it('shows system prompt section when systemPrompt prop provided', () => {
     render(
       <ContextStats

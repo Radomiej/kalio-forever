@@ -1,6 +1,6 @@
 import type { ToolDomain, ToolMeta } from '@kalio/types';
 
-type ToolAuditDomain = 'subagent' | 'architecture' | 'vfs' | 'file' | 'generic';
+type ToolAuditDomain = 'subagent' | 'architecture' | 'code_intelligence' | 'vfs' | 'file' | 'generic';
 type ToolAuditMeta = Pick<ToolMeta, 'domain'>;
 
 const SUBAGENT_TOOL_NAMES = new Set(['run_subagent', 'spawn_subagent', 'message_subagent']);
@@ -114,6 +114,7 @@ function toolAuditDomain(
 function toolAuditDomainFromToolDomain(toolDomain: ToolDomain | undefined): ToolAuditDomain | undefined {
   if (toolDomain === 'subagent') return 'subagent';
   if (toolDomain === 'architecture') return 'architecture';
+  if (toolDomain === 'code_intelligence') return 'code_intelligence';
   if (toolDomain === 'vfs') return 'vfs';
   if (toolDomain === 'file_system' || toolDomain === 'file_search') return 'file';
   return undefined;

@@ -74,7 +74,12 @@ export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, 
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <span className="font-semibold text-sm">Context Usage</span>
+        <div>
+          <span className="font-semibold text-sm">Context Usage</span>
+          <p className="mt-0.5 text-[10px] text-base-content/45" data-testid="context-stats-source">
+            Preflight estimate · exact provider usage is logged after completion
+          </p>
+        </div>
         <div className="flex items-center gap-1">
           {onCompactNow && (
             <button

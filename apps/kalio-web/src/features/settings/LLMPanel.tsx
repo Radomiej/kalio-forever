@@ -90,6 +90,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
     () => buildActiveRuntimeConfig(activeCredential, runtimeConfig),
     [activeCredential, runtimeConfig],
   );
+  const envRuntimeConfig = runtimeConfig?.source === 'env' ? runtimeConfig : lastEnvRuntimeConfig;
   const derived = buildLLMPanelDerivedState({
     activeRuntimeConfig,
     runtimeConfig,
@@ -422,14 +423,16 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
       />
       {error && <LLMPanelErrorAlert error={error} onClear={() => setError(null)} />}
 
-      <LLMProviderHealthCard
-        activeProviderLabel={derived.activeProviderLabel}
-        activeProviderModel={derived.activeProviderModel}
-        activeProviderSource={derived.activeProviderSource}
-        testState={testState}
-        testError={testError}
-        showWindowsLocalHint={derived.showWindowsLocalHint}
-      />
+      {mode !== 'runtime' ? (
+        <LLMProviderHealthCard
+          activeProviderLabel={derived.activeProviderLabel}
+          activeProviderModel={derived.activeProviderModel}
+          activeProviderSource={derived.activeProviderSource}
+          testState={testState}
+          testError={testError}
+          showWindowsLocalHint={derived.showWindowsLocalHint}
+        />
+      ) : null}
 
       {mode !== 'runtime' ? (
         <ProviderSettingsSection
@@ -468,12 +471,22 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
       {mode !== 'providers' ? (
         <LLMRuntimeSettingsSection
           activeRuntimeConfig={activeRuntimeConfig}
+          providers={credentials}
+          activeProviderId={activeId}
+          envFallback={envRuntimeConfig ? {
+            provider: envRuntimeConfig.provider,
+            label: PROVIDER_LABELS[envRuntimeConfig.provider] ?? envRuntimeConfig.provider,
+            model: envRuntimeConfig.model,
+          } : null}
+          providerSyncing={syncing !== null}
           contextWindow={contextWindow}
           maxToolAttempts={maxToolAttempts}
           maxToolAttemptsSaveStatus={maxToolAttemptsSaveStatus}
           toolTimeouts={toolTimeouts}
           focusModelInputSignal={runtimeModelFocusRequest}
           onRuntimeConfigChange={handleRuntimeConfigChange}
+          onActivateProvider={(credentialId) => void handleActivate(credentialId)}
+          onUseEnvFallback={() => void handleUseEnvFallback()}
           onContextWindowInputChange={handleContextWindowInputChange}
           onContextWindowCommit={(size) => void handleContextWindowCommit(size)}
           onMaxToolAttemptsInputChange={handleMaxToolAttemptsInputChange}

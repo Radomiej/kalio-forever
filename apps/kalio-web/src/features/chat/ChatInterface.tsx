@@ -39,6 +39,7 @@ import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sess
 import { useChatAutoScroll } from './useChatAutoScroll';
 import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
 import { useChatProjectSelection } from './useChatProjectSelection';
+import { useRuntimeProfileLabel } from './useRuntimeProfileLabel';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -98,7 +99,8 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     chunkSessionIds,
   } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const activeModel = useSettingsStore((s) => s.getEffectiveModel());
+  const backendProvider = useSettingsStore((s) => s.backendConfig?.provider);
+  const backendModel = useSettingsStore((s) => s.backendConfig?.model);
   const conversationTitleSettings = useSettingsStore((state) => state.conversationTitleSettings);
   const setConversationTitleSettings = useSettingsStore((state) => state.setConversationTitleSettings);
   const {
@@ -187,6 +189,15 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     selectedPersonaId,
     setSelectedPersonaId,
   } = useLaunchPersonas(activeSession?.personaId);
+  const activePersona = personas.find((persona) => persona.id === activeSession?.personaId);
+  const runtimeProfileLabel = useRuntimeProfileLabel({
+    executionProfileId: activeSession?.executionProfileId ?? activePersona?.executionProfileId,
+    provider: backendProvider,
+    personaModel: activePersona?.model,
+    backendModel,
+  });
+  const activeModel = runtimeProfileLabel.model;
+  const activeProvider = runtimeProfileLabel.provider;
 
   const renderableConversationProjection = resolveRenderableConversationProjection({
     session: activeSession,
@@ -482,6 +493,7 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
         <ChatSessionHeader
           activeContext={activeContext}
           activeModel={activeModel}
+          activeProvider={activeProvider}
           activeSession={activeSession}
           activeSessionId={activeSessionId}
           copied={copied}

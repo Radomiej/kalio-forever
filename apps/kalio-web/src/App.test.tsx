@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import type { RuntimeActivitySnapshot, SessionRuntimeContext } from '@kalio/types';
+import { writeReviewedRuntimeAttentionKeys } from './store/agentRuntimeAttentionNotice';
 
 const CONFIG_WITH_API_KEY: LLMConfigWithSource = {
   provider: 'mock',
@@ -289,6 +290,7 @@ vi.mock('./features/settings/settingsStore', () => ({
 }));
 
 function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
+  const now = Date.now();
   return {
     sessionId,
     active: false,
@@ -298,7 +300,7 @@ function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot 
     pendingBudgetApprovals: [],
     toolActivities: [],
     childExecutions: [],
-    updatedAt: 2,
+    updatedAt: now,
     run: {
       id: 'run-1',
       sessionId,
@@ -307,9 +309,9 @@ function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot 
       status: 'waiting_on_orchestrator',
       retryCount: 0,
       safeResume: true,
-      startedAt: 1,
-      updatedAt: 2,
-      lastHeartbeatAt: 2,
+      startedAt: now - 1,
+      updatedAt: now,
+      lastHeartbeatAt: now,
     } as unknown as RuntimeActivitySnapshot['run'],
   };
 }
@@ -348,6 +350,10 @@ describe('App view state persistence', () => {
     loadRuntimeWatchlist.mockResolvedValue([
       { sessionId: 'session-1', reasons: ['active'] },
     ]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('hydrates the stored section and nested tab on first mount', () => {
@@ -576,6 +582,72 @@ describe('App view state persistence', () => {
     expect(badge).toHaveTextContent('1');
     expect(badge).toHaveAttribute('title', '1 runtime item needs attention');
     expect(badge).toHaveClass('badge-warning');
+  });
+
+  it('removes the Runs indicator when a passive runtime notice expires', () => {
+    const now = 60 * 60 * 1000;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const occurredAt = now - ((5 * 60 * 1000) - 500);
+    sessionStoreState.sessions = [{
+      id: 'session-1',
+      title: 'Expiring run',
+      updatedAt: occurredAt,
+      kind: 'subagent',
+    }];
+    sessionStoreState.sessionMessages = {
+      'session-1': [{
+        id: 'runtime-error-session-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        content: JSON.stringify({
+          toolResultErrorCode: 'TOOL_RUNTIME_ERROR',
+          toolResultErrorMessage: 'Runtime error',
+        }),
+        createdAt: occurredAt,
+      }],
+    };
+
+    render(<App />);
+
+    expect(screen.getByTestId('active-tab-pending-dot')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(screen.queryByTestId('active-tab-pending-dot')).not.toBeInTheDocument();
+  });
+
+  it('removes the Runs indicator when the runtime notice is reviewed', () => {
+    const now = 60 * 60 * 1000;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    sessionStoreState.sessions = [{
+      id: 'session-1',
+      title: 'Reviewed run',
+      updatedAt: now - 1_000,
+      kind: 'subagent',
+    }];
+    sessionStoreState.sessionMessages = {
+      'session-1': [{
+        id: 'runtime-error-session-1',
+        sessionId: 'session-1',
+        role: 'tool_result',
+        content: JSON.stringify({
+          toolResultErrorCode: 'TOOL_RUNTIME_ERROR',
+          toolResultErrorMessage: 'Runtime error',
+        }),
+        createdAt: now - 1_000,
+      }],
+    };
+
+    render(<App />);
+
+    expect(screen.getByTestId('active-tab-pending-dot')).toBeInTheDocument();
+    act(() => {
+      writeReviewedRuntimeAttentionKeys(new Set([`runtime_error:session-1:${now - 1_000}`]));
+    });
+
+    expect(screen.queryByTestId('active-tab-pending-dot')).not.toBeInTheDocument();
   });
 
   it('identifies only watched roots during bootstrap so Home can replay live HITL state', async () => {

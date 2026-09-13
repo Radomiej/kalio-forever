@@ -1,10 +1,10 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Kalio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.radomiej.kalio",
   "build": {
-    "frontendDist": "../apps/kalio-web/dist",
+    "frontendDist": "../src-tauri/frontend-dist",
     "devUrl": "http://127.0.0.1:5188",
     "beforeBuildCommand": "node scripts/tauri-prepare.mjs"
   },
@@ -49,3 +49,4 @@
     ]
   }
 }
+

@@ -7,6 +7,7 @@ import type {
 } from '@kalio/types';
 import type { RunSubagentRequest } from '../tool/subagent-runtime.port';
 import type { ActiveSubagentRunStatus } from '../tool/subagent-runtime.port';
+import type { EmitFn } from './interfaces/stream-context.interface';
 import { createWorkflowError, isWorkflowError } from '../../common/utils/workflow-error.util';
 
 export type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
@@ -134,6 +135,77 @@ export function buildAttachmentHint(attachmentPaths: string[]): string {
 
 export function runtimeContextsEqual(left: SessionRuntimeContext, right: SessionRuntimeContext): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function buildSubagentRuntimeContext(input: {
+  runtimeKind: SessionRuntimeContext['runtimeKind'];
+  parentSessionId: string;
+  parentToolCallId?: string;
+  vfsMode: SessionRuntimeContext['vfsMode'];
+  vfsSessionId: string;
+  modelOverride?: string;
+  explicitToolNames: string[];
+  systemPromptProfile: SessionRuntimeContext['systemPromptProfile'];
+  architectureContext?: ArchitectureRuntimeContext;
+  architectureSlotId?: string;
+  architectureSlotPolicy: SessionRuntimeContext['architectureSlotPolicy'];
+}): SessionRuntimeContext {
+  return {
+    runtimeKind: input.runtimeKind,
+    parentSessionId: input.parentSessionId,
+    parentToolCallId: input.parentToolCallId,
+    vfsMode: input.vfsMode,
+    vfsSessionId: input.vfsSessionId,
+    modelOverride: input.modelOverride,
+    explicitToolNames: input.explicitToolNames,
+    systemPromptProfile: input.systemPromptProfile,
+    architectureContext: input.architectureContext,
+    architectureSlotId: input.architectureSlotId,
+    architectureSlotPolicy: input.architectureSlotPolicy,
+  };
+}
+
+export function buildSubagentAgentRun(input: {
+  taskId: string;
+  parentSessionId: string;
+  parentToolCallId?: string;
+  vfsMode: AgentRunContext['vfsMode'];
+  vfsSessionId: string;
+  subagentDepth: number;
+  autoApproveTools?: string[];
+}): AgentRunWithDepth {
+  return {
+    agentRunId: `subagent-${input.taskId}`,
+    agentType: 'subagent',
+    parentSessionId: input.parentSessionId,
+    parentToolCallId: input.parentToolCallId,
+    vfsMode: input.vfsMode,
+    vfsSessionId: input.vfsSessionId,
+    label: 'Sub-agent',
+    autoApproveTools: input.autoApproveTools,
+    subagentDepth: input.subagentDepth,
+  };
+}
+
+export function createSubagentTrackingEmit(input: {
+  emit?: EmitFn;
+  runtimeKind: SessionRuntimeContext['runtimeKind'];
+  childSessionId: string;
+  turnId: string;
+  promptMessageId?: () => string | undefined;
+  onChunk: (delta: string) => void;
+}): EmitFn | undefined {
+  if (!input.emit) return undefined;
+  return (event, data) => {
+    if (event === 'chat:chunk') {
+      const payload = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
+      if (typeof payload['delta'] === 'string') input.onChunk(payload['delta']);
+    }
+    const forwarded = input.runtimeKind === 'agent-flow-branch' && typeof data === 'object' && data !== null
+      ? { ...data as Record<string, unknown>, architectureParentExecution: { childSessionId: input.childSessionId, childTurnId: input.turnId, promptMessageId: input.promptMessageId?.() } }
+      : data;
+    input.emit!(event, forwarded as never);
+  };
 }
 
 export function architectureContextForSubagent(request: RunSubagentRequest): ArchitectureRuntimeContext | undefined {

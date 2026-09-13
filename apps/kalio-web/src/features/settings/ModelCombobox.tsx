@@ -112,7 +112,7 @@ export function ModelCombobox({
             focusInput();
             inputRef.current?.select();
           }}
-          disabled={disabled || loading}
+          disabled={disabled}
           placeholder={loading ? 'Loading models…' : placeholder}
           data-testid={testId}
           role="combobox"
@@ -141,7 +141,7 @@ export function ModelCombobox({
             type="button"
             className="btn btn-ghost btn-xs min-h-8 w-8 px-0 text-base-content/60"
             onClick={() => {
-              if (disabled || loading) return;
+              if (disabled) return;
               if (open) {
                 setOpen(false);
               } else {

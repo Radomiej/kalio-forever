@@ -140,6 +140,25 @@ describe('CredentialsService', () => {
       expect(config?.apiKey).toBe('sk-top-secret');
     });
 
+    it('fails closed when the credential master key is missing', async () => {
+      const missingKeyConfig = {
+        get: (key: string | symbol, defaultValueOrOptions?: unknown) => {
+          if (key === 'NODE_ENV') return 'development';
+          return typeof defaultValueOrOptions === 'string' ? defaultValueOrOptions : undefined;
+        },
+      };
+      const serviceWithoutKey = new CredentialsService(
+        drizzleSvc,
+        timeoutSettings as unknown as TimeoutSettingsService,
+        missingKeyConfig as ConfigService,
+      );
+
+      await expect(serviceWithoutKey.create({
+        name: 'No key',
+        provider: 'openai',
+        apiKey: 'sk-never-store',
+      })).rejects.toThrow('CREDENTIALS_MASTER_KEY must be configured');
+    });
     it('removes a credential', async () => {
       const c = await svc.create({ name: 'C', provider: 'openai', apiKey: 'key' });
       await svc.remove(c.id);

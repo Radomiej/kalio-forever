@@ -18,7 +18,8 @@ export class SecurityPolicyService {
   ) {}
 
   async evaluate(rawRequest: unknown): Promise<SecurityPolicyResponse> {
-    const request = normalizeSecurityPolicyRequest(rawRequest);
+    const normalizedRequest = normalizeSecurityPolicyRequest(rawRequest);
+    const request = { ...normalizedRequest, risk: deriveRisk(normalizedRequest) };
     const startedAt = Date.now();
     const config = await this.hitlConfig.getConfig();
     const sessionId = request.subject?.sessionId ?? null;
@@ -49,11 +50,18 @@ export class SecurityPolicyService {
             toolCallId: request.subject?.turnId,
           },
         });
-        response = {
-          decision: decision.agree ? 'allow' : 'deny',
-          reason: decision.reason,
-          risk: request.risk,
-        };
+        const hardFloor = request.risk === 'critical' || decision.risk === 'critical';
+        response = hardFloor
+          ? {
+              decision: 'ask_user',
+              reason: `Critical-risk action requires human approval. ${decision.reason}`,
+              risk: 'critical',
+            }
+          : {
+              decision: decision.decision === 'ask_user' ? 'ask_user' : decision.agree ? 'allow' : 'deny',
+              reason: decision.reason,
+              risk: request.risk,
+            };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`External HITL policy failed: ${message}`);
@@ -223,4 +231,23 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function normalizeRisk(value: unknown): SecurityPolicyRequest['risk'] {
   return value === 'low' || value === 'medium' || value === 'high' || value === 'critical' ? value : 'medium';
+}
+
+function deriveRisk(request: SecurityPolicyRequest): SecurityPolicyRequest['risk'] {
+  const requested = request.risk;
+  const action = `${request.action.kind} ${request.action.name} ${request.action.commandOrTool ?? ''}`.toLowerCase();
+  const args = JSON.stringify(request.action.args ?? {}).toLowerCase();
+  const text = `${action} ${args}`;
+  if (/(credential|secret|token|password|private[_ -]?key|format|drop database|rm\s+-rf|remove-item|del\s+\/f)/i.test(text)) {
+    return maxRisk(requested, 'critical');
+  }
+  if (request.action.kind === 'shell' || request.action.kind === 'filesystem' || /(write|delete|remove|exec|spawn|network|upload)/i.test(text)) {
+    return maxRisk(requested, 'high');
+  }
+  return requested;
+}
+
+function maxRisk(left: SecurityPolicyRequest['risk'], right: SecurityPolicyRequest['risk']): SecurityPolicyRequest['risk'] {
+  const rank = { low: 0, medium: 1, high: 2, critical: 3 } as const;
+  return rank[left] >= rank[right] ? left : right;
 }

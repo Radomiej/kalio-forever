@@ -367,12 +367,12 @@ describe('ChatWelcomeScreen', () => {
     expect(onArchitectureChange).toHaveBeenCalledWith('single-chat');
     expect(screen.getByTestId('welcome-persona-select')).toBeInTheDocument();
     expect(screen.queryByTestId('welcome-architecture-select')).not.toBeInTheDocument();
-    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Chat runtime: Default');
+    expect(screen.queryByTestId('welcome-routing-summary')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('welcome-mode-workflow'));
     expect(screen.queryByTestId('welcome-persona-select')).not.toBeInTheDocument();
     expect(screen.getByTestId('welcome-architecture-select')).toBeInTheDocument();
-    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Workflow runtime: Strategic Decision Council');
+    expect(screen.queryByTestId('welcome-routing-summary')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('welcome-prompt-input'), {
       target: { value: 'Decide with the council.' },
@@ -415,7 +415,7 @@ describe('ChatWelcomeScreen', () => {
 
     expect(onSend).toHaveBeenCalledWith('Answer normally.', 'default');
     expect(onArchitectureRun).not.toHaveBeenCalled();
-    expect(screen.getByTestId('welcome-routing-summary')).toHaveTextContent('Chat runtime: Default');
+    expect(screen.queryByTestId('welcome-routing-summary')).not.toBeInTheDocument();
   });
 
   it('swaps persona and workflow controls when the launch mode changes', () => {
@@ -516,6 +516,39 @@ describe('ChatWelcomeScreen', () => {
 });
 
 describe('ChatSessionHeader', () => {
+  it('shows a friendly provider and model label', () => {
+    render(
+      <ChatSessionHeader
+        activeContext={{ systemPrompt: null, activeToolNames: [] }}
+        activeModel="gpt-5.6-luna"
+        activeProvider="Codex"
+        activeSession={session()}
+        activeSessionId="sess-1"
+        copied={false}
+        messages={[]}
+        needsCompact={false}
+        onCloseContextStats={vi.fn()}
+        onCompactNow={vi.fn()}
+        onCopyChat={vi.fn()}
+        onToggleContextStats={vi.fn()}
+        showContextStats={false}
+        tokenCount={{
+          total: 0,
+          breakdown: { systemPrompt: 0, skills: 0, tools: 0, history: 0, images: 0 },
+          cacheable: 0,
+          contextLimit: 32000,
+          usagePercent: 0,
+        }}
+        contextPreview={null}
+        contextPreviewStatus={{ loading: false, stale: false, error: null }}
+        vfsRefreshSignal={0}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-runtime-label')).toHaveTextContent('Codex · gpt-5.6-luna');
+    expect(screen.queryByText('mock')).not.toBeInTheDocument();
+  });
+
   it('does not mount the files bar while the active host session is still pending creation', () => {
     render(
       <ChatSessionHeader

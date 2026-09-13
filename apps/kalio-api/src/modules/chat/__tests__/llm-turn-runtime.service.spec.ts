@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ToolMeta } from '@kalio/types';
 import type { EmitFn, StreamContext } from '../interfaces/stream-context.interface';
-import type { ILLMSource } from '../interfaces/llm-source.interface';
+import type { ILLMSource, LLMSourceParams } from '../interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../interfaces/llm-chunk.types';
 import { LLMTurnRuntimeService } from '../llm-turn-runtime.service';
 import type { SessionManagerService } from '../session-manager.service';
@@ -634,6 +634,64 @@ describe('LLMTurnRuntimeService', () => {
       { turnId: 'turn-1', promptMessageId: 'user-1' },
     );
     expect(resultOrder).toEqual(['persist', 'emit']);
+  });
+
+  it('dispatches Codex dynamic tools while the provider waits for the tool result', async () => {
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({
+        history: [{ role: 'system', content: 'prompt' }],
+        unboundedHistoryCount: 1,
+      }),
+      saveToolResult: vi.fn().mockResolvedValue(undefined),
+    } satisfies Pick<SessionManagerService, 'loadHistoryForLLM' | 'saveToolResult'>;
+    const processor = {
+      process: vi.fn(async (chunk: InternalLLMChunk, ctx: StreamContext) => {
+        if (chunk.type === 'tool_call') {
+          ctx.state.addToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
+        }
+        if (chunk.type === 'text_delta') ctx.state.appendText(chunk.delta);
+      }),
+    } satisfies Pick<StreamProcessorService, 'process'>;
+    const toolDispatch = {
+      dispatch: vi.fn().mockResolvedValue({ callId: 'call-1', status: 'success', data: { entries: [] } }),
+    } satisfies Pick<ToolDispatchService, 'dispatch'>;
+    const llmSource: ILLMSource = {
+      stream: vi.fn(async function* (params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
+        let resolveTool: (() => void) | undefined;
+        const toolFinished = new Promise<void>((resolve) => { resolveTool = resolve; });
+        params.toolResultChannel?.setHandler((_callId, result) => {
+          if (result.status === 'success') resolveTool?.();
+        });
+        yield { type: 'tool_call', callId: 'call-1', name: 'vfs_list', args: {} };
+        await toolFinished;
+        yield { type: 'text_delta', delta: 'Found 0 files.' };
+        yield { type: 'done' };
+      }),
+    };
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      processor as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      toolDispatch as unknown as ToolDispatchService,
+    );
+
+    const result = await runtime.runAgentLoop({
+      runtimeKind: 'chat',
+      sessionId: 'sid',
+      turnId: 'turn-1',
+      promptMessageId: 'user-1',
+      personaId: 'persona-1',
+      effectiveSystemPrompt: 'prompt',
+      toolMetas: [{ name: 'vfs_list', description: 'list', parameters: {}, requiresConfirmation: false }],
+      providerCompletesTurn: true,
+      abortSignal: new AbortController().signal,
+      emit: vi.fn() as EmitFn,
+      maxIterations: 1,
+    });
+
+    expect(result.finalText).toBe('Found 0 files.');
+    expect(toolDispatch.dispatch).toHaveBeenCalledOnce();
+    expect(sessionManager.saveToolResult).toHaveBeenCalledOnce();
   });
 
   it('logs tool audit rows using typed ToolMeta domains', async () => {

@@ -248,8 +248,8 @@ describe('LLMPanel', () => {
       expect(screen.getByRole('heading', { name: 'Runtime Settings' })).toBeInTheDocument(),
     );
 
-    expect(screen.getByText('Active Provider').parentElement).toHaveTextContent(/xiaomi mimo/i);
-    expect(screen.getByText('Active Provider').parentElement).toHaveTextContent(/env fallback/i);
+    expect(screen.getByText('Runtime provider').parentElement).toHaveTextContent(/xiaomi mimo/i);
+    expect(screen.getByText('Runtime provider').parentElement).toHaveTextContent(/env fallback/i);
     expect(screen.queryByText(/activate a provider above to select its model/i)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('mimo-v2.5-pro'));
   });
@@ -274,7 +274,7 @@ describe('LLMPanel', () => {
 
     expect(screen.queryByTestId('add-provider-btn')).not.toBeInTheDocument();
     expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument();
-    expect(screen.getByTestId('provider-health-card')).toBeInTheDocument();
+    expect(screen.getByTestId('runtime-provider-selector')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { name: 'Runtime Settings' })).toHaveLength(1);
   });
 
