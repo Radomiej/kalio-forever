@@ -313,21 +313,26 @@ async function removeMuslSharpPrebuilds() {
     return;
   }
 
-  const imgRoot = join(serverRoot, 'node_modules', '@img');
-  let entries;
-  try {
-    entries = await readdir(imgRoot, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return;
+  const imgRoots = [
+    join(serverRoot, 'node_modules', '@img'),
+    join(serverRoot, 'node_modules', 'sharp', 'node_modules', '@img'),
+  ];
+  await Promise.all(imgRoots.map(async (imgRoot) => {
+    let entries;
+    try {
+      entries = await readdir(imgRoot, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return;
+      }
+      throw error;
     }
-    throw error;
-  }
 
-  const muslPackages = entries.filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'));
-  await Promise.all(
-    muslPackages.map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })),
-  );
+    const muslPackages = entries.filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'));
+    await Promise.all(
+      muslPackages.map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })),
+    );
+  }));
 }
 
 async function removeMuslClaudeAgentSdk() {
