@@ -263,4 +263,3 @@ fn health_check(address: SocketAddr) -> bool {
     };
     String::from_utf8_lossy(&response[..read]).contains(" 200 ")
 }
-

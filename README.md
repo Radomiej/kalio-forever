@@ -143,7 +143,7 @@ pnpm desktop:build
 ~~~
 
 The NSIS installer is written to
-`src-tauri/target/release/bundle/nsis/Kalio_1.0.0_x64-setup.exe`.
+`src-tauri/target/release/bundle/nsis/Kalio_1.0.2_x64-setup.exe`.
 The desktop backend uses `http://127.0.0.1:4516`; this port is reserved for
 the installed desktop app and should not be shared with another local service.
 

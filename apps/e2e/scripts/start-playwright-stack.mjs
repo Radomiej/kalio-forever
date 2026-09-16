@@ -287,14 +287,34 @@ async function killChild(child) {
   }
 
   if (process.platform === 'win32') {
-    const exitPromise = new Promise((resolvePromise) => child.once('exit', resolvePromise));
     await new Promise((resolvePromise) => {
       const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
       killer.once('exit', () => resolvePromise());
       killer.once('error', () => resolvePromise());
     });
     if (child.exitCode === null) {
-      await exitPromise;
+      child.kill();
+    }
+    if (child.exitCode === null) {
+      const exited = await new Promise((resolvePromise) => {
+        const timer = setTimeout(() => {
+          child.off('exit', onExit);
+          resolvePromise(false);
+        }, 5_000);
+        const onExit = () => {
+          clearTimeout(timer);
+          resolvePromise(true);
+        };
+        child.once('exit', onExit);
+        if (child.exitCode !== null) {
+          child.off('exit', onExit);
+          clearTimeout(timer);
+          resolvePromise(true);
+        }
+      });
+      if (!exited) {
+        throw new Error(`Timed out stopping ${child.pid}`);
+      }
     }
     return;
   }

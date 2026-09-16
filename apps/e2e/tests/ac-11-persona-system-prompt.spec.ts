@@ -86,7 +86,14 @@ test.describe('AC-11: Persona system prompt & tool access', () => {
     await expect(page.getByTestId('persona-tool-picker')).toBeVisible({ timeout: 5000 });
     await expect(page.getByTestId('tool-toggle-run_raapp')).toBeVisible();
     await page.getByTestId('tool-toggle-run_raapp').locator('input[type="checkbox"]').check();
+
+    const updateResponse = page.waitForResponse(
+      (response) => response.url().includes(`/api/personas/${persona.id}`)
+        && response.request().method() === 'PUT'
+        && response.ok(),
+    );
     await page.getByTestId('persona-save-btn').click();
+    await updateResponse;
 
     const saved = await request.get(`${API_BASE}/personas/${persona.id}`);
     expect(saved.ok()).toBeTruthy();

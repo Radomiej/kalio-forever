@@ -418,7 +418,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -431,8 +430,14 @@ describe('ToolDispatchService', () => {
           agentType: 'subagent' as const,
           parentSessionId: 'master-session',
           vfsMode: 'isolated' as const,
+          autoApproveTools: ['vfs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'vfs_write', { filePath: 'index.html', content: '<h1>x</h1>' }, ctx);
 
@@ -594,7 +599,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -610,6 +614,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['vfs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch(
         'c1',
@@ -637,7 +646,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -653,6 +661,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['image_generate'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'image_generate', { prompt: 'hero coffee' }, ctx);
 
@@ -667,7 +680,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -683,6 +695,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['run_cli_agent'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'run_cli_agent', { agentId: 'copilot' }, ctx);
 
@@ -697,7 +714,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -713,6 +729,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['fs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'fs_write', {
         path: 'C:\\Projekty\\TurboProject2\\package.json',
@@ -730,7 +751,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -746,6 +766,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['terminal_spawn'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'terminal_spawn', {
         command: 'npm',

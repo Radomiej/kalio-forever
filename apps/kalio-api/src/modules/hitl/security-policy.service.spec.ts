@@ -20,12 +20,13 @@ function makeTestDrizzle(): DrizzleService {
       allowed_tools TEXT NOT NULL DEFAULT '[]',
       skill_ids TEXT NOT NULL DEFAULT '[]',
       mcp_policy TEXT NOT NULL DEFAULT 'allow_all',
-      execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
-      avatar_seed TEXT,
-      avatar_variant TEXT,
-      avatar_palette_key TEXT,
-      avatar_index INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
+        execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
+        avatar_seed TEXT,
+        avatar_variant TEXT,
+        avatar_palette_key TEXT,
+        avatar_index INTEGER DEFAULT 0,
+        provider_tool_names TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS projects (

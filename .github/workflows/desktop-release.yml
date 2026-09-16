@@ -3,20 +3,22 @@ name: Desktop release
 on:
   pull_request:
     paths:
-      - '.github/workflows/desktop-release.yml'
-      - 'apps/**'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'src-tauri/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'LICENSE'
-      - 'COMMERCIAL-LICENSE.md'
-      - 'COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md'
+      - ".github/workflows/desktop-release.yml"
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "LICENSE"
+      - "COMMERCIAL-LICENSE.md"
+      - "COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md"
   push:
+    branches:
+      - main
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -74,6 +76,15 @@ jobs:
           node scripts/build-runtime-package.mjs --platform windows --output release --runtime node
           node scripts/build-runtime-package.mjs --platform windows --output release --runtime bun
 
+      - name: Smoke test Windows runtime archives
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath 'src-tauri\tauri.conf.json' -Raw | ConvertFrom-Json).version
+          pnpm runtime:smoke -- --archive "release\kalio-runtime-$version-windows-x64.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Node runtime archive smoke test failed' }
+          pnpm runtime:smoke -- --archive "release\kalio-runtime-$version-bun-windows-x64.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Bun runtime archive smoke test failed' }
+
       - name: Configure optional updater signing
         id: updater
         if: startsWith(github.ref, 'refs/tags/')
@@ -117,6 +128,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config "$env:TAURI_UPDATER_CONFIG"
+
+      - name: Smoke test installed Windows Tauri app
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath 'src-tauri\target\release\bundle\nsis' -Filter '*-setup.exe' -File | Select-Object -First 1
+          if ($null -eq $installer) { throw 'The NSIS installer was not found' }
+          & .\scripts\desktop-installer-smoke.ps1 -InstallerPath $installer.FullName
+
+      - name: Smoke test packaged Windows backend
+        run: pnpm desktop:smoke
 
       - name: Prepare Windows release metadata
         shell: pwsh
@@ -254,6 +275,12 @@ jobs:
           name: kalio-linux-bun-part-03
           if-no-files-found: ignore
           path: release-bun-parts/kalio-bun-runtime.part.03
+      - name: Smoke test Linux runtime archives
+        shell: bash
+        run: |
+          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          pnpm runtime:smoke -- --archive "release/kalio-runtime-${version}-linux-x64.tar.gz"
+          pnpm runtime:smoke -- --archive "release/kalio-runtime-${version}-bun-linux-x64.tar.gz"
 
       - name: Configure optional updater signing
         id: updater
@@ -292,6 +319,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config src-tauri/tauri.linux.conf.json --config "$TAURI_UPDATER_CONFIG" --verbose
+
+      - name: Smoke test packaged Linux backend
+        run: pnpm desktop:smoke
 
       - name: Prepare Linux release metadata
         shell: bash
@@ -350,6 +380,16 @@ jobs:
           pattern: kalio-*
           path: release-assets
           merge-multiple: true
+
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content -LiteralPath 'src-tauri\tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $tagVersion = $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($packageVersion -ne $tauriVersion -or $tagVersion -ne $tauriVersion) {
+            throw "Release version mismatch: tag=$tagVersion package=$packageVersion tauri=$tauriVersion"
+          }
 
       - name: Generate updater manifest when signatures exist
         shell: pwsh

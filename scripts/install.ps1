@@ -1,7 +1,7 @@
 # Kalio Windows runtime installer
 # Usage:
-#   .\scripts\install.ps1 -ArchivePath .\kalio-runtime-1.0.0-windows-x64.zip
-#   .\scripts\install.ps1 -ArchivePath .\kalio-runtime-1.0.0-windows-x64.zip -NoLaunch
+#   .\scripts\install.ps1 -ArchivePath .\kalio-runtime-1.0.2-windows-x64.zip
+#   .\scripts\install.ps1 -ArchivePath .\kalio-runtime-1.0.2-windows-x64.zip -NoLaunch
 
 param(
     [Parameter(Mandatory = $true)]
