@@ -364,7 +364,7 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(screen.getByTestId('graph-empty-persona-select')).toBeInTheDocument();
     expect(screen.queryByTestId('graph-empty-architecture-select')).not.toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-project-picker-trigger')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Chat runtime: RaBuilder');
+    expect(screen.getByTestId('graph-empty-prompt-input')).toHaveAttribute('placeholder', 'Ask RaBuilder...');
     expect(screen.queryByTestId('execution-graph-live-sidebar')).not.toBeInTheDocument();
   });
 
@@ -555,7 +555,7 @@ describe('ExecutionGraphView empty-session state', () => {
       target: { value: 'goal-master-delivery-loop' },
     });
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toHaveValue('goal-master-delivery-loop'));
-    await waitFor(() => expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Workflow runtime: Goal Master Delivery Loop'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-prompt-input')).toHaveAttribute('placeholder', 'Run prompt through Goal Master Delivery Loop'));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Run the workflow' },
     });
@@ -666,7 +666,7 @@ describe('ExecutionGraphView empty-session state', () => {
       target: { value: 'strategic-decision-council' },
     });
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toHaveValue('strategic-decision-council'));
-    await waitFor(() => expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Workflow runtime: Strategic Decision Council'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-prompt-input')).toHaveAttribute('placeholder', 'Run prompt through Strategic Decision Council'));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Run the standard workflow' },
     });

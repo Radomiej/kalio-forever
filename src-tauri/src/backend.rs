@@ -177,7 +177,7 @@ pub fn stop(app: &AppHandle) {
             drop(lock_file);
             let _ = remove_file(lock_path);
         }
-    }
+    };
 }
 
 fn resolve_kalio_home(app: &App) -> Result<PathBuf, Box<dyn Error>> {
@@ -263,4 +263,3 @@ fn health_check(address: SocketAddr) -> bool {
     };
     String::from_utf8_lossy(&response[..read]).contains(" 200 ")
 }
-

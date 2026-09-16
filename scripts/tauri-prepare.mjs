@@ -12,6 +12,50 @@ const webDist = join(root, 'src-tauri', 'frontend-dist');
 const bootstrapSource = join(root, 'scripts', 'runtime-server-bootstrap.mjs');
 const desktopBackendOrigin = 'http://127.0.0.1:4516';
 
+const PRUNABLE_NODE_MODULE_DIRECTORIES = new Set([
+  '.bin',
+  '.github',
+  '.pnpm',
+  '__mocks__',
+  '__tests__',
+  'benchmark',
+  'benchmarks',
+  'docs',
+  'example',
+  'examples',
+  'test',
+  'tests',
+]);
+
+const PRUNABLE_SERVER_ROOT_DIRECTORIES = [
+  '.turbo',
+  'coverage',
+  'src',
+  'src-tauri',
+  'test',
+  'tests',
+  'tmp',
+];
+
+const PRUNABLE_SERVER_ROOT_FILES = [
+  'desktop-server-bootstrap.mjs',
+  'drizzle.config.ts',
+  'eslint.config.mjs',
+  'nest-cli.json',
+  'tsconfig.json',
+  'vitest.config.ts',
+];
+
+function isPrunableRuntimeFile(name) {
+  const lowerName = name.toLowerCase();
+  return lowerName.endsWith('.d.ts')
+    || lowerName.endsWith('.map')
+    || lowerName.endsWith('.ts')
+    || lowerName.endsWith('.tsx')
+    || /\.(spec|test)\.(c|m)?js$/i.test(name)
+    || /^(readme|changelog|history|contributing)([-_.].*)?$/i.test(name);
+}
+
 function run(command, args, cwd = root) {
   const currentPath = process.env.PATH ?? process.env.Path ?? '';
   const systemPath = process.platform === 'win32'
@@ -70,7 +114,6 @@ async function requirePath(path, label) {
   }
 }
 
-async function installFlatRuntimeDependencies() {
 async function findFile(directory, fileName) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
@@ -102,6 +145,8 @@ async function ensureNativeSqliteAddon() {
     await cp(sourcePath, targetPath, { force: true });
   }
 }
+
+async function installFlatRuntimeDependencies() {
   const packageJsonPath = join(serverRoot, 'package.json');
   const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   const runtimeDependencies = Object.fromEntries(
@@ -130,6 +175,124 @@ async function ensureNativeSqliteAddon() {
     '--prod',
     'install',
   ], serverRoot);
+}
+
+async function pruneTree(directory) {
+  let removedFiles = 0;
+  let removedDirectories = 0;
+
+  async function visit(current) {
+    const entries = await readdir(current, { withFileTypes: true });
+    await Promise.all(entries.map(async (entry) => {
+      const entryPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (PRUNABLE_NODE_MODULE_DIRECTORIES.has(entry.name)) {
+          await rm(entryPath, { recursive: true, force: true });
+          removedDirectories += 1;
+          return;
+        }
+        await visit(entryPath);
+        return;
+      }
+      if (entry.isFile() && isPrunableRuntimeFile(entry.name)) {
+        await rm(entryPath, { force: true });
+        removedFiles += 1;
+      }
+    }));
+  }
+
+  await visit(directory);
+  return { removedFiles, removedDirectories };
+}
+
+async function removeUnneededOnnxRuntimeArtifacts() {
+  const onnxRoot = join(serverRoot, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
+  const platformName = process.platform === 'win32'
+    ? 'win32'
+    : process.platform === 'linux'
+      ? 'linux'
+      : process.platform === 'darwin'
+        ? 'darwin'
+        : null;
+  const architecture = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : null;
+  if (!platformName || !architecture) {
+    return;
+  }
+
+  const targetRoot = join(onnxRoot, platformName, architecture);
+  try {
+    await stat(targetRoot);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  const platformEntries = await readdir(onnxRoot, { withFileTypes: true });
+  await Promise.all(platformEntries
+    .filter((entry) => entry.isDirectory() && entry.name !== platformName)
+    .map((entry) => rm(join(onnxRoot, entry.name), { recursive: true, force: true })));
+
+  const architectureEntries = await readdir(join(onnxRoot, platformName), { withFileTypes: true });
+  await Promise.all(architectureEntries
+    .filter((entry) => entry.isDirectory() && entry.name !== architecture)
+    .map((entry) => rm(join(onnxRoot, platformName, entry.name), { recursive: true, force: true })));
+
+  if (platformName === 'linux') {
+    await Promise.all([
+      rm(join(targetRoot, 'libonnxruntime_providers_cuda.so'), { force: true }),
+      rm(join(targetRoot, 'libonnxruntime_providers_tensorrt.so'), { force: true }),
+    ]);
+  }
+}
+
+async function removeUnneededOnnxRuntimeWebArtifacts() {
+  // Transformers.js loads only the /webgpu entry in the Node runtime. Keep its
+  // bundle and asyncify binary; the remaining browser/provider variants are not
+  // reachable from the desktop server and add tens of MiB to every installer.
+  const onnxWebRoot = join(serverRoot, 'node_modules', 'onnxruntime-web');
+  const distRoot = join(onnxWebRoot, 'dist');
+  const keepDistFiles = new Set([
+    'ort.webgpu.bundle.min.mjs',
+    'ort.webgpu.min.js',
+    'ort.webgpu.min.mjs',
+    'ort-wasm-simd-threaded.asyncify.mjs',
+    'ort-wasm-simd-threaded.asyncify.wasm',
+  ]);
+
+  await Promise.all([
+    rm(join(onnxWebRoot, 'lib'), { recursive: true, force: true }),
+    rm(join(onnxWebRoot, 'node_modules'), { recursive: true, force: true }),
+  ]);
+
+  let entries;
+  try {
+    entries = await readdir(distRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && !keepDistFiles.has(entry.name))
+    .map((entry) => rm(join(distRoot, entry.name), { force: true })));
+}
+
+async function pruneServerArtifacts() {
+  await Promise.all(PRUNABLE_SERVER_ROOT_DIRECTORIES.map((name) => (
+    rm(join(serverRoot, name), { recursive: true, force: true })
+  )));
+  await Promise.all(PRUNABLE_SERVER_ROOT_FILES.map((name) => (
+    rm(join(serverRoot, name), { force: true })
+  )));
+
+  const nodeModulesRoot = join(serverRoot, 'node_modules');
+  await rm(join(nodeModulesRoot, '@types'), { recursive: true, force: true });
+  await pruneTree(nodeModulesRoot);
+  await pruneTree(join(serverRoot, 'dist'));
 }
 
 async function removeBareRuntimePrebuilds() {
@@ -167,17 +330,15 @@ async function removeMuslSharpPrebuilds() {
   );
 }
 
-async function removeUnneededOnnxRuntimeArtifacts() {
+async function removeMuslClaudeAgentSdk() {
   if (process.platform !== 'linux') {
     return;
   }
 
-  const linuxRuntimeRoot = join(serverRoot, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6', 'linux');
-  await rm(join(linuxRuntimeRoot, 'arm64'), { recursive: true, force: true });
-  await Promise.all([
-    rm(join(linuxRuntimeRoot, 'x64', 'libonnxruntime_providers_cuda.so'), { force: true }),
-    rm(join(linuxRuntimeRoot, 'x64', 'libonnxruntime_providers_tensorrt.so'), { force: true }),
-  ]);
+  await rm(
+    join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
+    { recursive: true, force: true },
+  );
 }
 
 await rm(resourcesRoot, { recursive: true, force: true });
@@ -207,13 +368,16 @@ await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies')
 await installFlatRuntimeDependencies();
 await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
+await removeMuslClaudeAgentSdk();
 await removeUnneededOnnxRuntimeArtifacts();
+await removeUnneededOnnxRuntimeWebArtifacts();
 await ensureNativeSqliteAddon();
 await requirePath(join(serverRoot, 'node_modules', 'reflect-metadata'), 'materialized API dependencies');
 
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
 await cp(apiDist, join(serverRoot, 'dist'), { recursive: true });
 await cp(bootstrapSource, join(serverRoot, 'runtime-server-bootstrap.mjs'));
+await pruneServerArtifacts();
 
 const nodeResourceName = process.platform === 'win32' ? 'kalio-node.exe' : 'kalio-node';
 const systemNode = process.platform === 'win32' ? 'C:\\Program Files\\nodejs\\node.exe' : process.execPath;
@@ -233,4 +397,3 @@ await writeFile(join(webDist, 'runtime-config.js'), runtimeConfig, 'utf8');
 console.log(`[desktop] staged API resources in ${serverRoot}`);
 console.log(`[desktop] bundled Node runtime in ${stagedNodeBinary}`);
 console.log(`[desktop] staged frontend in ${webDist}; runtime config points to ${desktopBackendOrigin}`);
-

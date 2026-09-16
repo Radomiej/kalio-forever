@@ -34,16 +34,19 @@ an unpublished draft to normal clients.
 
 ## Trust model
 
-Tauri updater signatures and Windows Authenticode are separate controls:
+Tauri updater signatures and Windows Authenticode are separate controls. The
+current workflow uses the first control and intentionally leaves the second
+disabled:
 
 - `TAURI_UPDATER_PUBLIC_KEY` is embedded in the production app and verifies
   the updater artifact.
 - `TAURI_SIGNING_PRIVATE_KEY` signs updater artifacts in CI. Never commit,
   print, or send this key in chat. Keep an offline backup; losing it prevents
   future updates for already-installed versions.
-- `WINDOWS_CERTIFICATE_PFX_BASE64` and its password sign the Windows executable
-  and installer for SmartScreen reputation. They do not replace the Tauri
-  updater key.
+- `WINDOWS_CERTIFICATE_PFX_BASE64`, its password, and a timestamp URL would
+  sign the Windows executable and installer for SmartScreen reputation, but
+  they are not consumed by the current release lane and do not need to be
+  configured now. They would not replace the Tauri updater key.
 
 Create the updater key once on a trusted machine:
 
@@ -53,9 +56,11 @@ pnpm tauri signer generate -w "$HOME\.tauri\kalio-updater.key"
 
 The command creates a private key and prints the public key. Store the public
 key as the GitHub Actions secret `TAURI_UPDATER_PUBLIC_KEY` and the private key
-content as `TAURI_SIGNING_PRIVATE_KEY`. Store the optional password as
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Tauri reads signing variables from the
-CI environment; a repository `.env` file is not a release secret mechanism.
+content as `TAURI_SIGNING_PRIVATE_KEY`. Store the generation password as
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The current workflow requires all three
+values together when signing is enabled. Tauri reads signing variables from
+the CI environment; a repository `.env` file is not a release secret
+mechanism.
 
 Do not rotate the updater key casually. Existing installations contain the old
 public key and will reject artifacts signed by an unrelated key. A deliberate
@@ -68,9 +73,11 @@ key migration needs a separately shipped migration path.
 2. Push the commit and a matching tag, for example `v1.0.1` for version `1.0.1`.
 3. Let `.github/workflows/desktop-release.yml` build Windows and Linux in
    separate runners.
-4. Verify the draft release contains `latest.json`, the Windows installer and
-   signature, the Linux AppImage and signature, the DEB package, licenses,
-   notices, and checksums.
+4. If updater signing is configured, verify the draft release contains
+   `latest.json`, the Windows installer and signature, the Linux AppImage and
+   signature, the DEB package, licenses, notices, and checksums. Without the
+   updater secrets, verify the unsigned/manual-update warning and use the
+   installer and SHA-256 files only.
 5. Publish the release. The updater then finds it through the `latest.json`
    endpoint.
 

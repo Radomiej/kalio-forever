@@ -33,6 +33,7 @@ tmp/runtime-report/
 docs/sessions/
 apps/output/
 src-tauri/resources/
+src-tauri/frontend-dist/
 src-tauri/target/
 .tauri-signing/
 release/

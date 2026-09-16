@@ -33,6 +33,25 @@ const updaterSource = join(root, 'scripts', 'kalio-updater.mjs');
 const updaterHelpersSource = join(root, 'scripts', 'kalio-updater-helpers.mjs');
 const launcherSource = join(root, 'scripts', 'kalio-launcher.ps1');
 
+const PRUNABLE_STAGE_ROOT_DIRECTORIES = [
+  '.turbo',
+  'coverage',
+  'src',
+  'src-tauri',
+  'test',
+  'tests',
+  'tmp',
+];
+
+const PRUNABLE_STAGE_ROOT_FILES = [
+  'desktop-server-bootstrap.mjs',
+  'drizzle.config.ts',
+  'eslint.config.mjs',
+  'nest-cli.json',
+  'tsconfig.json',
+  'vitest.config.ts',
+];
+
 function run(command, commandArgs, cwd = root) {
   const currentPath = process.env.PATH ?? process.env.Path ?? '';
   const systemPath = process.platform === 'win32'
@@ -186,6 +205,7 @@ function isPrunableFile(name) {
     || lowerName.endsWith('.map')
     || lowerName.endsWith('.ts')
     || lowerName.endsWith('.tsx')
+    || /\.(spec|test)\.(c|m)?js$/i.test(name)
     || /^(readme|changelog|history|contributing)([-_.].*)?$/i.test(name);
 }
 
@@ -214,8 +234,16 @@ async function pruneRuntimeArtifacts() {
     }));
   }
 
+  await Promise.all(PRUNABLE_STAGE_ROOT_DIRECTORIES.map((name) => (
+    rm(join(serverRoot, name), { recursive: true, force: true })
+  )));
+  await Promise.all(PRUNABLE_STAGE_ROOT_FILES.map((name) => (
+    rm(join(serverRoot, name), { force: true })
+  )));
+
   await rm(join(nodeModulesRoot, '@types'), { recursive: true, force: true });
   await visit(nodeModulesRoot);
+  await visit(join(serverRoot, 'dist'));
   return { removedFiles, removedDirectories };
 }
 
@@ -242,6 +270,83 @@ async function measureTree(directory) {
   await visit(directory);
   return { files, bytes };
 }
+
+async function removeUnneededOnnxRuntimeArtifacts() {
+  const onnxRoot = join(serverRoot, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
+  const platformName = process.platform === 'win32'
+    ? 'win32'
+    : process.platform === 'linux'
+      ? 'linux'
+      : process.platform === 'darwin'
+        ? 'darwin'
+        : null;
+  const architecture = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : null;
+  if (!platformName || !architecture) {
+    return;
+  }
+
+  const targetRoot = join(onnxRoot, platformName, architecture);
+  try {
+    await stat(targetRoot);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  const platformEntries = await readdir(onnxRoot, { withFileTypes: true });
+  await Promise.all(platformEntries
+    .filter((entry) => entry.isDirectory() && entry.name !== platformName)
+    .map((entry) => rm(join(onnxRoot, entry.name), { recursive: true, force: true })));
+
+  const architectureEntries = await readdir(join(onnxRoot, platformName), { withFileTypes: true });
+  await Promise.all(architectureEntries
+    .filter((entry) => entry.isDirectory() && entry.name !== architecture)
+    .map((entry) => rm(join(onnxRoot, platformName, entry.name), { recursive: true, force: true })));
+
+  if (platformName === 'linux') {
+    await Promise.all([
+      rm(join(targetRoot, 'libonnxruntime_providers_cuda.so'), { force: true }),
+      rm(join(targetRoot, 'libonnxruntime_providers_tensorrt.so'), { force: true }),
+    ]);
+  }
+}
+
+async function removeUnneededOnnxRuntimeWebArtifacts() {
+  // Transformers.js loads only the /webgpu entry in the Node runtime. Keep its
+  // bundle and asyncify binary; the remaining browser/provider variants are not
+  // reachable from the desktop server and add tens of MiB to every package.
+  const onnxWebRoot = join(serverRoot, 'node_modules', 'onnxruntime-web');
+  const distRoot = join(onnxWebRoot, 'dist');
+  const keepDistFiles = new Set([
+    'ort.webgpu.bundle.min.mjs',
+    'ort.webgpu.min.js',
+    'ort.webgpu.min.mjs',
+    'ort-wasm-simd-threaded.asyncify.mjs',
+    'ort-wasm-simd-threaded.asyncify.wasm',
+  ]);
+
+  await Promise.all([
+    rm(join(onnxWebRoot, 'lib'), { recursive: true, force: true }),
+    rm(join(onnxWebRoot, 'node_modules'), { recursive: true, force: true }),
+  ]);
+
+  let entries;
+  try {
+    entries = await readdir(distRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && !keepDistFiles.has(entry.name))
+    .map((entry) => rm(join(distRoot, entry.name), { force: true })));
+}
+
 async function removeLinuxOptionalArtifacts() {
   if (platform !== 'linux') {
     return;
@@ -262,6 +367,10 @@ async function removeLinuxOptionalArtifacts() {
       throw error;
     }
   }
+  await rm(
+    join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
+    { recursive: true, force: true },
+  );
 }
 
 await rm(stagingParent, { recursive: true, force: true });
@@ -285,6 +394,8 @@ if (getPnpmMajor(pnpm) >= 10) {
 run(pnpm, deployArgs);
 await installFlatRuntimeDependencies();
 await removeLinuxOptionalArtifacts();
+await removeUnneededOnnxRuntimeArtifacts();
+await removeUnneededOnnxRuntimeWebArtifacts();
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
 await cp(apiDist, join(serverRoot, 'dist'), { recursive: true });
 await ensureNativeSqliteAddon();

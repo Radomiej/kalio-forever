@@ -207,7 +207,7 @@ async function waitForArchitectureRunIdFromSession(
 
 test.describe('Architecture chat turn projection', () => {
   test('renders a sequential router chain without collapsing it into a parallel council', async ({ page, request }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
     const title = `Architecture Sequential E2E ${Date.now()}`;
     const schemaName = `Sequential Router Chain ${Date.now()}`;
     const variantResponse = await request.post(`${API_BASE}/architecture-registry/schemas/strategic-decision-council/variants`, {

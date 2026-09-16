@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Kalio",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "identifier": "com.radomiej.kalio",
   "build": {
     "frontendDist": "../src-tauri/frontend-dist",
@@ -23,6 +23,17 @@
     ],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4516 ws://127.0.0.1:4516; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzQ0ZDNjc5NkQ3NzE0RjAKUldUd0ZIZHRlY2JQczZ6YlN5MnFvK3c5V3pvbXJRY1RDM2NKQzF2RzF4dkIwVTBVamt0WlVTdysK",
+      "endpoints": [
+        "https://github.com/Radomiej/kalio-forever/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
@@ -49,4 +60,3 @@
     ]
   }
 }
-

@@ -314,6 +314,18 @@ async function waitForOutputCount(child, output, pattern, expectedCount, timeout
   });
 }
 
+async function requestControl(url, options, output) {
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Control plane request failed: ${message}\n\n${output.join('')}`, { cause: error });
+  }
+}
+
 async function terminateProcess(child) {
   if (child.exitCode !== null || child.killed) {
     return;
@@ -626,13 +638,21 @@ test('launcher control plane authenticates and restarts backend after health rec
     try {
       await waitForReady(child, output, launcherReadyTimeoutMs);
 
-      const unauthorized = await fetch(`http://127.0.0.1:${controlPort}/restart-backend`, { method: 'POST' });
+      const unauthorized = await requestControl(
+        `http://127.0.0.1:${controlPort}/restart-backend`,
+        { method: 'POST' },
+        output,
+      );
       assert.equal(unauthorized.status, 401);
 
-      const restart = await fetch(`http://127.0.0.1:${controlPort}/restart-backend`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${controlToken}` },
-      });
+      const restart = await requestControl(
+        `http://127.0.0.1:${controlPort}/restart-backend`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${controlToken}` },
+        },
+        output,
+      );
       assert.equal(restart.status, 200);
       assert.deepEqual(await restart.json(), { status: 'ready' });
       await waitForOutputCount(child, output, /\[fake-backend\] listening on/g, 2, launcherReadyTimeoutMs);

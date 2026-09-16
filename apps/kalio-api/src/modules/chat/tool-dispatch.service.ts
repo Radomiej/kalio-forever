@@ -10,6 +10,16 @@ import { HitlNotificationService } from '../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 
+const SUBAGENT_AUTO_APPROVE_TOOL_NAMES = new Set([
+  'vfs_write',
+  'image_generate',
+  'run_cli_agent',
+  'spawn_cli_agent',
+  'message_cli_agent',
+  'fs_write',
+  'terminal_spawn',
+]);
+
 /**
  * Resolves tool calls by name, handles HITL (human-in-the-loop) confirmation
  * for tools with requiresConfirmation=true, and executes the tool.
@@ -120,7 +130,11 @@ export class ToolDispatchService {
       }, toolName, ctx);
     }
 
-    if (requestConfirmation && entry.meta.requiresConfirmation) {
+    if (
+      requestConfirmation
+      && entry.meta.requiresConfirmation
+      && !isAutoApprovedSubagentTool(toolName, ctx)
+    ) {
       const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
       if (!approval.approved) {
         return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
@@ -200,4 +214,22 @@ export class ToolDispatchService {
     }, toolName, ctx);
   }
 
+}
+
+function isAutoApprovedSubagentTool(toolName: string, ctx: StreamContext): boolean {
+  const agentRun = ctx.agentRun;
+  if (!agentRun || agentRun.agentType !== 'subagent') {
+    return false;
+  }
+
+  if (!agentRun.autoApproveTools?.includes(toolName)) {
+    return false;
+  }
+  if (!SUBAGENT_AUTO_APPROVE_TOOL_NAMES.has(toolName)) {
+    return false;
+  }
+
+  const isIsolatedChildVfs = agentRun.vfsMode === 'isolated'
+    && (agentRun.vfsSessionId ?? ctx.vfsSessionId) === ctx.sessionId;
+  return toolName !== 'image_generate' || isIsolatedChildVfs;
 }

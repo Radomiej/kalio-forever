@@ -57,6 +57,13 @@ function createMigrationFixtureAt(index: number): string {
   return fixture;
 }
 
+function readMigrationCount(): number {
+  const journal = JSON.parse(readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+    entries: unknown[];
+  };
+  return journal.entries.length;
+}
+
 function migrateDatabase(dbPath: string, folder: string): void {
   const sqlite = new Database(dbPath);
   try {
@@ -145,7 +152,7 @@ describe('DrizzleService fail-fast migrations', () => {
       const journalRows = sqlite.prepare(
         'SELECT hash, created_at AS createdAt FROM "__drizzle_migrations" ORDER BY id ASC',
       ).all() as Array<{ hash: string; createdAt: number }>;
-      expect(journalRows).toHaveLength(28);
+      expect(journalRows).toHaveLength(readMigrationCount());
       expect(sqlite.prepare(
         'SELECT 1 FROM sqlite_master WHERE type = \'index\' AND name = \'messages_session_tool_result_unique\'',
       ).get()).toBeTruthy();
