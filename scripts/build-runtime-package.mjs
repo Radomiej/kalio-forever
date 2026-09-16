@@ -356,17 +356,22 @@ async function removeLinuxOptionalArtifacts() {
   await Promise.all(entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('bare-'))
     .map((entry) => rm(join(nodeModulesRoot, entry.name, 'prebuilds'), { recursive: true, force: true })));
-  const imgRoot = join(nodeModulesRoot, '@img');
-  try {
-    const imageEntries = await readdir(imgRoot, { withFileTypes: true });
-    await Promise.all(imageEntries
-      .filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'))
-      .map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })));
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      throw error;
+  const imgRoots = [
+    join(nodeModulesRoot, '@img'),
+    join(nodeModulesRoot, 'sharp', 'node_modules', '@img'),
+  ];
+  await Promise.all(imgRoots.map(async (imgRoot) => {
+    try {
+      const imageEntries = await readdir(imgRoot, { withFileTypes: true });
+      await Promise.all(imageEntries
+        .filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'))
+        .map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
     }
-  }
+  }));
   await rm(
     join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
     { recursive: true, force: true },

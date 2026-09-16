@@ -59,6 +59,8 @@ test('v1.0.2 release surfaces stay synchronized across Node, Tauri, Rust, and do
 
 test('tagged desktop release is version-gated and unsigned Windows signing is explicit', async () => {
   const workflow = await readRootFile('.github/workflows/desktop-release.yml');
+  const tauriPrepare = await readRootFile('scripts/tauri-prepare.mjs');
+  const runtimePackage = await readRootFile('scripts/build-runtime-package.mjs');
 
   assert.match(workflow, /tags:\r?\n\s+- "v\*"/);
   assert.match(workflow, /release:\r?\n\s+if: startsWith\(github\.ref, 'refs\/tags\/'\)/);
@@ -70,6 +72,8 @@ test('tagged desktop release is version-gated and unsigned Windows signing is ex
   assert.match(workflow, /pnpm tauri build --no-sign/);
   assert.match(workflow, /Windows Authenticode signing is intentionally disabled/);
   assert.doesNotMatch(workflow, /WINDOWS_CERTIFICATE|CERTIFICATE_PASSWORD/);
+  assert.match(tauriPrepare, /sharp[\s\S]*node_modules[\s\S]*@img[\s\S]*linuxmusl/);
+  assert.match(runtimePackage, /sharp[\s\S]*node_modules[\s\S]*@img[\s\S]*linuxmusl/);
 });
 
 test('runtime manifest includes only the tagged archives and detects payload tampering', async () => {
