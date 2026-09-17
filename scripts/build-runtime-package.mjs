@@ -364,7 +364,7 @@ async function removeLinuxOptionalArtifacts() {
     try {
       const imageEntries = await readdir(imgRoot, { withFileTypes: true });
       await Promise.all(imageEntries
-        .filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'))
+        .filter((entry) => entry.name.includes('linuxmusl'))
         .map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })));
     } catch (error) {
       if (error?.code !== 'ENOENT') {

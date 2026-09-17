@@ -74,6 +74,8 @@ test('tagged desktop release is version-gated and unsigned Windows signing is ex
   assert.doesNotMatch(workflow, /WINDOWS_CERTIFICATE|CERTIFICATE_PASSWORD/);
   assert.match(tauriPrepare, /sharp[\s\S]*node_modules[\s\S]*@img[\s\S]*linuxmusl/);
   assert.match(runtimePackage, /sharp[\s\S]*node_modules[\s\S]*@img[\s\S]*linuxmusl/);
+  assert.doesNotMatch(tauriPrepare, /entry\.isDirectory\(\)\s*&&\s*entry\.name\.includes\('linuxmusl'\)/);
+  assert.doesNotMatch(runtimePackage, /entry\.isDirectory\(\)\s*&&\s*entry\.name\.includes\('linuxmusl'\)/);
 });
 
 test('runtime manifest includes only the tagged archives and detects payload tampering', async () => {
