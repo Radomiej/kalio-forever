@@ -328,7 +328,7 @@ async function removeMuslSharpPrebuilds() {
       throw error;
     }
 
-    const muslPackages = entries.filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'));
+    const muslPackages = entries.filter((entry) => entry.name.includes('linuxmusl'));
     await Promise.all(
       muslPackages.map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })),
     );
