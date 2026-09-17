@@ -121,6 +121,9 @@ jobs:
 
       - name: Build Windows Tauri package with optional updater signature
         if: steps.updater.outputs.enabled == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config "$env:TAURI_UPDATER_CONFIG"
 
       - name: Smoke test installed Windows Tauri app
@@ -169,7 +172,7 @@ jobs:
           path: src-tauri/target/release/bundle/nsis/*.sig
 
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -201,7 +204,7 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libc6-dev libfuse2 patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libc6-dev libfuse2t64 patchelf
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -263,6 +266,9 @@ jobs:
 
       - name: Build Linux Tauri package with optional updater signature
         if: steps.updater.outputs.enabled == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config src-tauri/tauri.linux.conf.json --config "$TAURI_UPDATER_CONFIG" --verbose
 
       - name: Smoke test packaged Linux backend
