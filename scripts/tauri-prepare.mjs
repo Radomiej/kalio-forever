@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resourcesRoot = join(root, 'src-tauri', 'resources');
@@ -374,6 +375,7 @@ await installFlatRuntimeDependencies();
 await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
 await removeMuslClaudeAgentSdk();
+if (process.platform === 'linux') await compressClaudeAgentSdkExecutable(join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64'));
 await removeUnneededOnnxRuntimeArtifacts();
 await removeUnneededOnnxRuntimeWebArtifacts();
 await ensureNativeSqliteAddon();

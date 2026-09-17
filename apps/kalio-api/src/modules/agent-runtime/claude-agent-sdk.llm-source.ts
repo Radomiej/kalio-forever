@@ -6,6 +6,7 @@ import type { ExecutionProfile, ToolMeta, ToolResult } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { resolveClaudeAgentSdkExecutable } from './claude-agent-sdk-executable';
 
 type ZodSchema = z.ZodType<unknown>;
 type ZodShape = Record<string, ZodSchema>;
@@ -86,6 +87,7 @@ export class ClaudeAgentSdkLLMSource implements ILLMSource {
 
     const consume = async (): Promise<void> => {
       try {
+        const claudeExecutable = await resolveClaudeAgentSdkExecutable();
         const stream = query({
           prompt: buildPrompt(params.messages, params.externalThreadId),
           options: {
@@ -100,6 +102,7 @@ export class ClaudeAgentSdkLLMSource implements ILLMSource {
             tools: providerToolNames,
             mcpServers: { kalio: mcpServer },
             env: localClaudeEnvironment(),
+            ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
             ...(params.externalThreadId ? { resume: params.externalThreadId } : {}),
             canUseTool: async (toolName, input, options) => {
               if (autoAllowedToolNames.has(toolName)) {
