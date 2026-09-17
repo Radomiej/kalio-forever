@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,6 +14,7 @@ import { loadRelease, verifyUpdateSignature } from './kalio-updater-helpers.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const expectedVersion = '1.0.2';
+const execFileAsync = promisify(execFile);
 const gunzipAsync = promisify(gunzip);
 const workspaceManifestPaths = [
   'package.json',
@@ -237,5 +239,31 @@ test('Linux runtime staging compresses Claude without changing its payload', asy
 
     await assert.rejects(readFile(join(directory, 'claude')), /ENOENT/);
     assert.deepEqual(await gunzipAsync(await readFile(join(directory, 'claude.gz'))), payload);
+  });
+});
+
+test('updater manifest finds signatures flattened by GitHub artifact download', async () => {
+  await withTempDirectory(async (directory) => {
+    const windowsDirectory = join(directory, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
+    const linuxDirectory = join(directory, 'src-tauri', 'target', 'release', 'bundle', 'appimage');
+    const windowsName = 'Kalio_1.0.2_x64-setup.exe';
+    const linuxName = 'Kalio_1.0.2_amd64.AppImage';
+    const outputPath = join(directory, 'latest.json');
+    await mkdir(windowsDirectory, { recursive: true });
+    await mkdir(linuxDirectory, { recursive: true });
+    await writeFile(join(windowsDirectory, windowsName), 'windows artifact');
+    await writeFile(join(linuxDirectory, linuxName), 'linux artifact');
+    await writeFile(join(directory, `${windowsName}.sig`), 'windows signature');
+    await writeFile(join(directory, `${linuxName}.sig`), 'linux signature');
+
+    await execFileAsync(
+      process.execPath,
+      [join(root, 'scripts', 'generate-tauri-latest-json.mjs'), directory, outputPath],
+      { env: { ...process.env, GITHUB_REF_NAME: 'v1.0.2', KALIO_RELEASE_VERSION: expectedVersion } },
+    );
+
+    const manifest = JSON.parse(await readFile(outputPath, 'utf8'));
+    assert.equal(manifest.platforms['windows-x86_64'].signature, 'windows signature');
+    assert.equal(manifest.platforms['linux-x86_64'].signature, 'linux signature');
   });
 });
