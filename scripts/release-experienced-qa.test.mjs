@@ -195,3 +195,24 @@ test('updater rejects draft and unsigned releases unless the unsigned path is ex
     }
   });
 });
+
+test('desktop workflow passes updater secrets to Tauri and uses a compatible Linux runner', async () => {
+  const workflow = await readRootFile('.github/workflows/desktop-release.yml');
+
+  assert.match(workflow, /build-linux:\r?\n\s+runs-on: ubuntu-24\.04/);
+  assert.match(workflow, /libfuse2t64/);
+
+  const windowsBuild = workflow.match(
+    /- name: Build Windows Tauri package with optional updater signature[\s\S]*?(?=\r?\n      - name: Smoke test installed Windows Tauri app)/,
+  )?.[0];
+  assert.ok(windowsBuild, 'signed Windows Tauri build step is missing');
+  assert.match(windowsBuild, /env:\r?\n\s+TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
+  assert.match(windowsBuild, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}/);
+
+  const linuxBuild = workflow.match(
+    /- name: Build Linux Tauri package with optional updater signature[\s\S]*?(?=\r?\n      - name: Smoke test packaged Linux backend)/,
+  )?.[0];
+  assert.ok(linuxBuild, 'signed Linux Tauri build step is missing');
+  assert.match(linuxBuild, /env:\r?\n\s+TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
+  assert.match(linuxBuild, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}/);
+});
