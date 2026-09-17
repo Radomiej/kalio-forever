@@ -4,12 +4,16 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { gunzip } from 'node:zlib';
+import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
 import { createRuntimeManifest } from './generate-runtime-release-manifest.mjs';
 import { loadRelease, verifyUpdateSignature } from './kalio-updater-helpers.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const expectedVersion = '1.0.2';
+const gunzipAsync = promisify(gunzip);
 const workspaceManifestPaths = [
   'package.json',
   'apps/kalio-api/package.json',
@@ -61,6 +65,8 @@ test('tagged desktop release is version-gated and unsigned Windows signing is ex
   const workflow = await readRootFile('.github/workflows/desktop-release.yml');
   const tauriPrepare = await readRootFile('scripts/tauri-prepare.mjs');
   const runtimePackage = await readRootFile('scripts/build-runtime-package.mjs');
+  const claudeExecutable = await readRootFile('apps/kalio-api/src/modules/agent-runtime/claude-agent-sdk-executable.ts');
+  const claudeSource = await readRootFile('apps/kalio-api/src/modules/agent-runtime/claude-agent-sdk.llm-source.ts');
 
   assert.match(workflow, /tags:\r?\n\s+- "v\*"/);
   assert.match(workflow, /release:\r?\n\s+if: startsWith\(github\.ref, 'refs\/tags\/'\)/);
@@ -76,6 +82,11 @@ test('tagged desktop release is version-gated and unsigned Windows signing is ex
   assert.match(runtimePackage, /sharp[\s\S]*node_modules[\s\S]*@img[\s\S]*linuxmusl/);
   assert.doesNotMatch(tauriPrepare, /entry\.isDirectory\(\)\s*&&\s*entry\.name\.includes\('linuxmusl'\)/);
   assert.doesNotMatch(runtimePackage, /entry\.isDirectory\(\)\s*&&\s*entry\.name\.includes\('linuxmusl'\)/);
+  assert.match(tauriPrepare, /if \(process\.platform === 'linux'\) await compressClaudeAgentSdkExecutable/);
+  assert.match(runtimePackage, /if \(platform === 'linux'\) await compressClaudeAgentSdkExecutable/);
+  assert.match(claudeExecutable, /createGunzip/);
+  assert.match(claudeExecutable, /claude\.gz/);
+  assert.match(claudeSource, /pathToClaudeCodeExecutable/);
 });
 
 test('runtime manifest includes only the tagged archives and detects payload tampering', async () => {
@@ -215,4 +226,16 @@ test('desktop workflow passes updater secrets to Tauri and uses a compatible Lin
   assert.ok(linuxBuild, 'signed Linux Tauri build step is missing');
   assert.match(linuxBuild, /env:\r?\n\s+TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
   assert.match(linuxBuild, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}/);
+});
+
+test('Linux runtime staging compresses Claude without changing its payload', async () => {
+  await withTempDirectory(async (directory) => {
+    const payload = Buffer.from('fake-linux-claude-executable');
+    await writeFile(join(directory, 'claude'), payload);
+
+    await compressClaudeAgentSdkExecutable(directory);
+
+    await assert.rejects(readFile(join(directory, 'claude')), /ENOENT/);
+    assert.deepEqual(await gunzipAsync(await readFile(join(directory, 'claude.gz'))), payload);
+  });
 });

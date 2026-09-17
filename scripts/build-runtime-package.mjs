@@ -2,6 +2,7 @@ import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:f
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -399,6 +400,7 @@ if (getPnpmMajor(pnpm) >= 10) {
 run(pnpm, deployArgs);
 await installFlatRuntimeDependencies();
 await removeLinuxOptionalArtifacts();
+if (platform === 'linux') await compressClaudeAgentSdkExecutable(join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64'));
 await removeUnneededOnnxRuntimeArtifacts();
 await removeUnneededOnnxRuntimeWebArtifacts();
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
