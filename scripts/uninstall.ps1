@@ -18,6 +18,35 @@ function Assert-UnderRoot {
     }
 }
 
+function Get-AutostartShortcutPath {
+    $startupRoot = [Environment]::GetFolderPath('Startup')
+    if (-not $startupRoot) {
+        $startupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+    }
+    return Join-Path $startupRoot 'Kalio Forever.lnk'
+}
+
+function Remove-AutostartShortcut {
+    Remove-Item -LiteralPath (Get-AutostartShortcutPath) -Force -ErrorAction SilentlyContinue
+}
+
+function Remove-LegacyScheduledTasks {
+    $schtasksPath = Join-Path $env:SystemRoot 'System32\schtasks.exe'
+    if (-not (Test-Path -LiteralPath $schtasksPath -PathType Leaf)) {
+        return
+    }
+
+    foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
+        $process = Start-Process -FilePath $schtasksPath -ArgumentList @('/Delete', '/TN', ('"{0}"' -f $taskName), '/F') -WindowStyle Hidden -PassThru
+        try {
+            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction Stop
+        } catch {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Write-Warning "Timed out while removing legacy Scheduled Task '$taskName'; it may require manual removal"
+        }
+    }
+}
+
 try {
     $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
     if (-not $localAppData) {
@@ -32,14 +61,8 @@ try {
         throw "Kalio appears to be running. Close it and rerun the uninstaller: $lockPath"
     }
 
-    foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
-        $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-        if ($scheduledTask) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-            Write-Host "[kalio] removed Scheduled Task $taskName" -ForegroundColor Yellow
-        }
-
-    }
+    Remove-AutostartShortcut
+    Remove-LegacyScheduledTasks
     $appRoot = Join-Path $InstallRoot 'app'
     $binRoot = Join-Path $InstallRoot 'bin'
     Assert-UnderRoot -Path $appRoot -Root $InstallRoot

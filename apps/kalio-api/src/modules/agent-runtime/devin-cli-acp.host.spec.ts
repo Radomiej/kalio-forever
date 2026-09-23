@@ -8,6 +8,7 @@ describe('Devin CLI ACP host contract', () => {
       args: ['--model', 'glm-5-2', 'acp'],
     });
     expect(isDevinCliModel('swe-1-7')).toBe(true);
+    expect(isDevinCliModel('swe-2-high')).toBe(true);
     expect(isDevinCliModel('claude-sonnet-4-6')).toBe(false);
   });
 
@@ -23,6 +24,29 @@ describe('Devin CLI ACP host contract', () => {
       authenticated: true,
       acp: true,
       models: ['glm-5-2', 'swe-1-7'],
+    });
+  });
+
+  it('recognizes the free SWE-2 lanes exposed by Devin 3000.11.1', () => {
+    expect(parseDevinCliProbe('devin.exe', {
+      version: { text: 'devin 3000.11.1 (cc4e349ca55e)', exitCode: 0 },
+      authStatus: { text: 'Logged in (via Devin)', exitCode: 0 },
+      acpHelp: { text: 'Usage: devin acp\nRun as an ACP agent', exitCode: 0 },
+      models: {
+        text: [
+          'glm-5-2 GLM-5.2 High [Free]',
+          'swe-2-high SWE-2.0 High [Free]',
+          'swe-2-medium SWE-2.0 Medium [Free]',
+          'swe-2-max SWE-2.0 Max [Free]',
+        ].join('\n'),
+        exitCode: 0,
+      },
+    })).toEqual({
+      executable: 'devin.exe',
+      version: '3000.11.1',
+      authenticated: true,
+      acp: true,
+      models: ['glm-5-2', 'swe-2-high', 'swe-2-medium', 'swe-2-max'],
     });
   });
 

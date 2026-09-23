@@ -2,24 +2,28 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CodexAppServerHost,
   CodexAppServerProtocolRouter,
-  buildCodexAppServerArgs,
-  buildCodexSpawnSpec,
   type CodexAppServerConnection,
 } from './codex-app-server.host';
+import { buildCodexAppServerArgs, buildCodexSpawnSpec } from './codex-app-server-process';
 
 describe('CodexAppServerProtocolRouter', () => {
   it('blocks inherited Codex MCP servers unless explicitly opted in', () => {
-    expect(buildCodexAppServerArgs(['multi_agent'], false, ['vscode_lsp', 'mcp-playwright-orchestrator'])).toEqual([
+    const configuredServers = [
+      { id: 'vscode_lsp', transport: { type: 'http' as const, url: 'http://127.0.0.1:36521/mcp' } },
+      { id: 'mcp-playwright-orchestrator', transport: { type: 'stdio' as const, command: 'node' } },
+    ];
+
+    expect(buildCodexAppServerArgs(['multi_agent'], false, configuredServers)).toEqual([
       'app-server',
       '--stdio',
       '-c',
-      'mcp_servers."vscode_lsp".enabled=false',
+      'mcp_servers."vscode_lsp"={url="http://127.0.0.1:36521/mcp",enabled=false}',
       '-c',
-      'mcp_servers."mcp-playwright-orchestrator".enabled=false',
+      'mcp_servers."mcp-playwright-orchestrator"={command="node",enabled=false}',
       '--disable',
       'multi_agent',
     ]);
-    expect(buildCodexAppServerArgs(['multi_agent'], true, ['vscode_lsp'])).toEqual([
+    expect(buildCodexAppServerArgs(['multi_agent'], true, configuredServers)).toEqual([
       'app-server',
       '--stdio',
       '--disable',
@@ -28,9 +32,23 @@ describe('CodexAppServerProtocolRouter', () => {
   });
 
   it('runs Windows command shims through ComSpec instead of spawning .cmd directly', () => {
-    expect(buildCodexSpawnSpec('codex.cmd', ['app-server', '--stdio'], 'win32', 'C:\\Windows\\System32\\cmd.exe')).toEqual({
+    expect(buildCodexSpawnSpec(
+      'C:\\Program Files\\Codex\\codex.cmd',
+      ['app-server', '--stdio', '-c', 'mcp_servers."tools"={command="node",enabled=false}'],
+      'win32',
+      'C:\\Windows\\System32\\cmd.exe',
+    )).toEqual({
       command: 'C:\\Windows\\System32\\cmd.exe',
-      args: ['/d', '/s', '/c', 'codex.cmd', 'app-server', '--stdio'],
+      args: [
+        '/d',
+        '/s',
+        '/c',
+        '"C:\\Program Files\\Codex\\codex.cmd"',
+        'app-server',
+        '--stdio',
+        '-c',
+        '"mcp_servers.\\"tools\\"={command=\\"node\\",enabled=false}"',
+      ],
       windowsVerbatimArguments: true,
     });
   });

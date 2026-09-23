@@ -9,13 +9,15 @@ export function DesktopUpdateNotice(): React.ReactElement | null {
     errorMessage,
     install,
     dismiss,
+    retry,
   } = useDesktopUpdater();
 
-  if (!update) {
+  if (!update && !errorMessage) {
     return null;
   }
 
   const isInstalling = status === 'installing';
+  const isChecking = status === 'checking';
 
   return (
     <div
@@ -23,20 +25,27 @@ export function DesktopUpdateNotice(): React.ReactElement | null {
       data-testid="desktop-update-notice"
       role="status"
       aria-live="polite"
-      aria-busy={isInstalling}
+      aria-busy={isInstalling || isChecking}
     >
       <div className="flex items-start gap-3">
         <Download className="mt-0.5 shrink-0 text-sky-300" size={18} aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-base-content">Kalio update available</p>
-          <p className="mt-1 text-xs text-base-content/70">
-            Version {update.version} is ready to install and will restart Kalio.
+          <p className="font-semibold text-base-content">
+            {update ? 'Kalio update available' : 'Kalio updates'}
           </p>
-          {update.body && (
+          {update && (
+            <p className="mt-1 text-xs text-base-content/70">
+              Version {update.version} is ready to install and will restart Kalio.
+            </p>
+          )}
+          {update?.body && (
             <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs text-base-content/60">{update.body}</p>
           )}
           {errorMessage && (
             <p className="mt-2 text-xs text-error" role="alert">{errorMessage}</p>
+          )}
+          {isChecking && (
+            <p className="mt-2 text-xs text-sky-300">Checking for updates…</p>
           )}
           {isInstalling && (
             <p className="mt-2 text-xs text-sky-300">
@@ -48,7 +57,7 @@ export function DesktopUpdateNotice(): React.ReactElement | null {
           type="button"
           className="btn btn-ghost btn-xs h-7 min-h-0 w-7 shrink-0 p-0"
           onClick={dismiss}
-          disabled={isInstalling}
+          disabled={isInstalling || isChecking}
           aria-label="Dismiss update notification"
           title="Later"
         >
@@ -60,18 +69,29 @@ export function DesktopUpdateNotice(): React.ReactElement | null {
           type="button"
           className="btn btn-ghost btn-xs"
           onClick={dismiss}
-          disabled={isInstalling}
+          disabled={isInstalling || isChecking}
         >
           Later
         </button>
-        <button
-          type="button"
-          className="btn btn-info btn-xs"
-          onClick={() => { void install(); }}
-          disabled={isInstalling}
-        >
-          {isInstalling ? 'Installing…' : 'Install and restart'}
-        </button>
+        {update ? (
+          <button
+            type="button"
+            className="btn btn-info btn-xs"
+            onClick={() => { void install(); }}
+            disabled={isInstalling || isChecking}
+          >
+            {isInstalling ? 'Installing…' : errorMessage ? 'Retry install' : 'Install and restart'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-info btn-xs"
+            onClick={() => { void retry(); }}
+            disabled={isChecking}
+          >
+            {isChecking ? 'Checking…' : 'Retry check'}
+          </button>
+        )}
       </div>
     </div>
   );

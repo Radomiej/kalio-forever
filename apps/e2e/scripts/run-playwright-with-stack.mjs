@@ -176,7 +176,14 @@ const playwrightStateDir = resolve(repoRoot, 'data/playwright-stack', runId);
 const playwrightDatabasePath = process.env.DATABASE_PATH ?? resolve(playwrightStateDir, 'kalio-e2e.db');
 const playwrightWorkspaceRoot = process.env.WORKSPACE_ROOT ?? resolve(playwrightStateDir, 'workspaces');
 const playwrightMemoryDbPath = process.env.MEMORY_DB_PATH ?? resolve(playwrightStateDir, 'memory');
+const explicitProjectPath = process.env.KALIO_E2E_PROJECT_PATH?.trim();
+const playwrightProjectPath = explicitProjectPath
+  ? resolve(repoRoot, explicitProjectPath)
+  : resolve(playwrightStateDir, 'project');
 mkdirSync(playwrightStateDir, { recursive: true });
+if (!explicitProjectPath) {
+  mkdirSync(playwrightProjectPath, { recursive: true });
+}
 const stackEnv = normalizedWindowsEnv(process.env);
 const stack = spawn(process.execPath, ['./scripts/start-playwright-stack.mjs'], {
   cwd: e2eDir,
@@ -281,6 +288,7 @@ try {
     DATABASE_PATH: playwrightDatabasePath,
     WORKSPACE_ROOT: playwrightWorkspaceRoot,
     MEMORY_DB_PATH: playwrightMemoryDbPath,
+    KALIO_E2E_PROJECT_PATH: playwrightProjectPath,
   });
   const result = await run(process.execPath, [playwrightCli, 'test', ...forwardedArgs], {
     cwd: e2eDir,

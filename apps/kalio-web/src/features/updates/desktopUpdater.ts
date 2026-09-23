@@ -47,6 +47,7 @@ export function useDesktopUpdater() {
     }
 
     setStatus('checking');
+    setErrorMessage(null);
     try {
       const candidate = await checkForDesktopUpdate();
       if (!candidate) {
@@ -59,6 +60,7 @@ export function useDesktopUpdater() {
       setStatus('available');
     } catch (error: unknown) {
       console.warn('[DesktopUpdater] Update check failed', error);
+      setErrorMessage('Updates are temporarily unavailable. Try again.');
       setStatus('idle');
     }
   }, []);
@@ -127,5 +129,6 @@ export function useDesktopUpdater() {
     errorMessage,
     install,
     dismiss,
+    retry: checkNow,
   };
 }

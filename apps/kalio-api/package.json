@@ -17,13 +17,13 @@
     "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.4.0",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.240",
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.280",
     "@huggingface/transformers": "^4.2.0",
     "@iarna/toml": "^2.2.5",
     "@kalio/types": "workspace:*",
     "@lydell/node-pty": "1.2.0-beta.12",
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@nestjs/common": "^11.1.19",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.19",
