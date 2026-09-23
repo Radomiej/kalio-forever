@@ -34,7 +34,19 @@ async function readCurrent(home) {
   return { current, versionRoot };
 }
 
-async function acquireLock(home) {
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== 'ESRCH';
+  }
+}
+
+async function acquireLock(home, recoverStaleLock = true) {
   const lockPath = join(home, '.runtime.lock');
   try {
     const handle = await open(lockPath, 'wx');
@@ -43,12 +55,20 @@ async function acquireLock(home) {
   } catch (error) {
     if (error?.code === 'EEXIST') {
       let owner = 'unknown';
+      let ownerPid = null;
       try {
         owner = (await readFile(lockPath, 'utf8')).trim();
+        const parsedOwner = JSON.parse(owner);
+        ownerPid = Number.isInteger(parsedOwner?.pid) ? parsedOwner.pid : null;
       } catch (error) {
         if (error?.code !== 'ENOENT') {
-          throw error;
+          throw new Error('Kalio runtime lock cannot be verified safely: ' + lockPath);
         }
+      }
+      if (recoverStaleLock && ownerPid !== null && !isProcessAlive(ownerPid)) {
+        console.warn('[kalio] Removing stale runtime lock for dead PID ' + ownerPid);
+        await rm(lockPath, { force: true });
+        return acquireLock(home, false);
       }
       throw new Error('Another Kalio runtime appears to be running: ' + owner);
     }

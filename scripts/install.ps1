@@ -39,6 +39,31 @@ function Assert-UnderRoot {
     }
 }
 
+function Assert-RuntimeLockAvailable {
+    param([string]$LockPath)
+
+    if (-not (Test-Path -LiteralPath $LockPath -PathType Leaf)) {
+        return
+    }
+
+    try {
+        $lockOwner = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Kalio runtime lock cannot be verified safely: $LockPath"
+    }
+    if ($null -eq $lockOwner.pid -or [int]$lockOwner.pid -le 0) {
+        throw "Kalio runtime lock does not contain a valid PID: $LockPath"
+    }
+
+    $ownerProcess = Get-Process -Id $lockOwner.pid -ErrorAction SilentlyContinue
+    if ($ownerProcess) {
+        throw "Kalio appears to be running; stop it before updating: $LockPath"
+    }
+
+    Write-Step "Removing stale runtime lock for dead PID $($lockOwner.pid)"
+    Remove-Item -LiteralPath $LockPath -Force
+}
+
 function New-DataEnv {
     param([string]$DataRoot, [ValidateSet('node', 'bun')][string]$Runtime = 'node')
 
@@ -84,37 +109,67 @@ LLM_MODEL=mock
     Write-Ok "Created data environment: $envPath"
 }
 
-function Register-AutostartTask {
-    param(
-        [string]$InstallRoot,
-        [string]$Launcher,
-        [string]$WorkingDirectory,
-        [string]$LogPath
-    )
+function Get-AutostartShortcutPath {
+    $startupRoot = [Environment]::GetFolderPath('Startup')
+    if (-not $startupRoot) {
+        $startupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+    }
+    return Join-Path $startupRoot 'Kalio Forever.lnk'
+}
 
-    if (-not (Get-Command -Name Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        Write-Warning 'Scheduled Task cmdlets are unavailable; Kalio will not start automatically'
+function Expand-RuntimeArchive {
+    param([string]$ArchivePath, [string]$DestinationPath)
+
+    $tarPath = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (Test-Path -LiteralPath $tarPath -PathType Leaf) {
+        & $tarPath -xf $ArchivePath -C $DestinationPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows tar failed to extract the runtime archive (exit $LASTEXITCODE)"
+        }
         return
     }
 
-    $wrapperPath = Join-Path $InstallRoot 'bin\kalio-autostart.cmd'
-    $wrapperContent = @"
-@echo off
-setlocal
-cd /d "$WorkingDirectory"
-call "$Launcher" update --auto --no-launch >> "$LogPath" 2>&1
-set "UPDATE_EXIT=%ERRORLEVEL%"
-if not "%UPDATE_EXIT%"=="0" echo [kalio] updater warning: exit code %UPDATE_EXIT% >> "$LogPath"
-call "$Launcher" serve >> "$LogPath" 2>&1
-"@
-    Set-Content -LiteralPath $wrapperPath -Value $wrapperContent -Encoding ASCII
-    $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $action = New-ScheduledTaskAction -Execute $wrapperPath -WorkingDirectory $WorkingDirectory
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
-    $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType InteractiveToken -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName 'Kalio Forever' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-    Write-Ok 'Registered per-user startup task: Kalio Forever'
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $DestinationPath -Force
+}
+
+function Remove-AutostartShortcut {
+    $shortcutPath = Get-AutostartShortcutPath
+    Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+}
+
+function Remove-LegacyScheduledTasks {
+    $schtasksPath = Join-Path $env:SystemRoot 'System32\schtasks.exe'
+    if (-not (Test-Path -LiteralPath $schtasksPath -PathType Leaf)) {
+        return
+    }
+
+    foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
+        $process = Start-Process -FilePath $schtasksPath -ArgumentList @('/Delete', '/TN', ('"{0}"' -f $taskName), '/F') -WindowStyle Hidden -PassThru
+        try {
+            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction Stop
+        } catch {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Write-Warning "Timed out while removing legacy Scheduled Task '$taskName'; it may require manual removal"
+        }
+    }
+}
+
+function Register-AutostartShortcut {
+    param([string]$LauncherScript)
+
+    $shortcutPath = Get-AutostartShortcutPath
+    $startupRoot = Split-Path -Parent $shortcutPath
+    New-Item -ItemType Directory -Path $startupRoot -Force | Out-Null
+    $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $powershellPath
+    $shortcut.Arguments = ('-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" serve' -f $LauncherScript)
+    $shortcut.WorkingDirectory = Split-Path -Parent $LauncherScript
+    $shortcut.WindowStyle = 7
+    $shortcut.Description = 'Start Kalio after Windows sign-in'
+    $shortcut.Save()
+    Write-Ok "Registered per-user Startup shortcut: $shortcutPath"
 }
 
 try {
@@ -132,14 +187,12 @@ try {
     }
 
     $lockPath = Join-Path $InstallRoot '.runtime.lock'
-    if (Test-Path -LiteralPath $lockPath) {
-        throw "Kalio appears to be running; stop it before updating: $lockPath"
-    }
+    Assert-RuntimeLockAvailable -LockPath $lockPath
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('kalio-runtime-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
         Write-Step "Extracting runtime archive: $ArchivePath"
-        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $tempRoot -Force
+        Expand-RuntimeArchive -ArchivePath $ArchivePath -DestinationPath $tempRoot
         $metadataFile = Get-ChildItem -LiteralPath $tempRoot -Filter 'runtime.json' -File -Recurse | Select-Object -First 1
         if ($null -eq $metadataFile) {
             throw 'runtime.json is missing from the archive'
@@ -207,8 +260,12 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0kalio-laun
 exit /b %ERRORLEVEL%
 '@
         Set-Content -LiteralPath $stableLauncher -Value $stableLauncherContent -Encoding ASCII
-        if (-not $NoAutostart) {
-            Register-AutostartTask -InstallRoot $InstallRoot -Launcher $stableLauncher -WorkingDirectory (Join-Path $InstallRoot 'bin') -LogPath (Join-Path $InstallRoot 'logs\autostart.log')
+        Remove-LegacyScheduledTasks
+        if ($NoAutostart) {
+            Remove-AutostartShortcut
+            Write-Ok 'Autostart disabled by explicit request'
+        } else {
+            Register-AutostartShortcut -LauncherScript $stableLauncherScript
         }
         Write-Ok "Kalio runtime installed at $InstallRoot"
         Write-Host "  data -> $dataRoot" -ForegroundColor Green

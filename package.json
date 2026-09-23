@@ -11,14 +11,15 @@
     "qa:status": "node scripts/stack-manager.mjs status",
     "prod": "powershell -ExecutionPolicy Bypass -File start-prod.ps1",
     "prod:rebuild": "powershell -ExecutionPolicy Bypass -File start-prod.ps1 -Rebuild",
-    "prod:install": "powershell -ExecutionPolicy Bypass -File scripts/install.ps1",
-    "prod:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1 -KeepData",
+    "prod:install": "powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1",
+    "prod:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1",
     "dev:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
     "build": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run build",
     "db:reset": "node scripts/reset-kalio-db.mjs",
     "typecheck": "corepack pnpm --filter @kalio/types run build && corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run typecheck",
     "lint": "corepack pnpm -r --filter kalio-api --filter kalio-web run lint",
     "test": "node scripts/run-test-gate.mjs",
+    "test:mutation:web-updates": "corepack pnpm --filter kalio-web run test:mutation",
     "test:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
     "test:e2e:qa-ac13": "node scripts/run-ac13-qa-stack.mjs",
     "preflight": "node scripts/repo-preflight.mjs",
@@ -51,7 +52,7 @@
     "runtime:install:release:windows": "powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.0",
+    "@tauri-apps/cli": "2.11.5",
     "turbo": "^2.4.0",
     "typescript": "~5.8.2"
   },

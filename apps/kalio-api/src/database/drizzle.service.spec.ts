@@ -101,6 +101,21 @@ describe('DrizzleService fail-fast migrations', () => {
 
     expectRequiredColumns(dbPath);
     expectSessionProjectDefault(dbPath);
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      expect(sqlite.prepare(
+        "SELECT id, enabled FROM execution_profiles WHERE kind = 'devin-cli-acp' ORDER BY id",
+      ).all()).toEqual([
+        { id: 'devin-local-glm-5-2', enabled: 1 },
+        { id: 'devin-local-swe-1-7', enabled: 0 },
+        { id: 'devin-local-swe-2-high', enabled: 1 },
+        { id: 'devin-local-swe-2-max', enabled: 1 },
+        { id: 'devin-local-swe-2-medium', enabled: 1 },
+      ]);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('upgrades a legal database at migration 0016 without relying on runtime repairs', () => {

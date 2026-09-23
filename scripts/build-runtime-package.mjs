@@ -296,7 +296,7 @@ await cp(bootstrapSource, join(serverRoot, 'runtime-server-bootstrap.mjs'));
 await cp(webDist, join(stageRoot, 'web'), { recursive: true });
 await writeFile(
   join(stageRoot, 'web', 'runtime-config.js'),
-  'window.__KALIO_RUNTIME_CONFIG__ = {};\n',
+  'window.__KALIO_RUNTIME_CONFIG__ = { apiUrl: window.location.origin, wsUrl: window.location.origin };\n',
   'utf8',
 );
 await cp(cliSource, join(stageRoot, 'bin', 'kalio-cli.mjs'));

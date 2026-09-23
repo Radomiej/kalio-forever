@@ -6,7 +6,7 @@ Canonical guide for running Kalio locally, choosing the right stack, and underst
 
 | Goal | Command | UI URL |
 |---|---|---|
-| **Windows user install** | `irm .../install.ps1 \| iex` | http://localhost:6188 |
+| **Windows user install** | download and `call scripts/install.cmd` from CMD | http://127.0.0.1:4016 |
 | Code with hot reload | `pnpm dev` | http://localhost:5188 |
 | Stable manual QA (built dist) | `pnpm qa` or `pnpm qa:rebuild` | http://localhost:5288 |
 | Prod profile (built dist) | `pnpm prod` or `pnpm prod:rebuild` | http://localhost:6188 |
@@ -28,7 +28,7 @@ There is **no Docker** and **no automated deploy of the main Kalio API/web stack
 $env:PATH = "C:\Program Files\nodejs;" + $env:PATH
 node -p "process.execPath"   # must be C:\Program Files\nodejs\node.exe
 
-cd C:\Projekty\kalio-forever
+cd E:\Projekty\kalio-forever
 pnpm install
 cp .env.example .env         # optional; mock LLM works offline
 ```
@@ -137,25 +137,25 @@ node scripts/stack-manager.mjs <start|status|stop>
   [--provider ...] [--model ...] [--base-url ...]
 ```
 
-Port rule: dev uses `3016/5188`, fixed QA uses `3316/5288`, prod client uses `4016/6188`. **E2E must not depend on those ports** — Playwright allocates random ports per run.
+Port rule: dev uses `3016/5188`, fixed QA uses `3316/5288`, the installed runtime uses `4016`, and the contributor prod profile uses `4016/6188`. **E2E must not depend on those ports** — Playwright allocates random ports per run.
 
-### Prod install — Windows (`install.ps1`)
+### Prod install — Windows CMD (`install.cmd`)
 
-End-user production path. Installs to `%LocalAppData%\kalio-forever\app`, stores data in `%LocalAppData%\kalio-forever\`, registers Scheduled Task **Kalio-Forever** for autostart after **user sign-in**.
+End-user production path. Installs versioned runtime files under `%LocalAppData%\Kalio\app`, stores persistent data under `%LocalAppData%\Kalio\data`, and adds a per-user Startup shortcut for autostart after **user sign-in**. Pass `-NoAutostart` only when the user explicitly does not want autostart.
 
-```powershell
-irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.ps1 | iex
+```cmd
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
 ```
 
 | | |
 |---|---|
-| UI | http://localhost:6188 |
-| API | http://localhost:4016 |
-| Data | `%LocalAppData%\kalio-forever\kalio.db` + workspaces/memory |
-| Autostart | Scheduled Task `Kalio-Forever` → `scripts/kalio-autostart.ps1` |
+| UI and API | http://127.0.0.1:4016 |
+| API health | http://127.0.0.1:4016/api/health |
+| Data | `%LocalAppData%\Kalio\data` (database, workspaces, memory) |
+| Autostart | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Kalio Forever.lnk` → stable PowerShell launcher |
 | Uninstall | `scripts/uninstall.ps1` (see [quickstart-user.md](./quickstart-user.md)) |
 
-Contributor local prod profile (same ports/data layout, no Scheduled Task):
+Contributor local prod profile (same ports/data layout, no Startup shortcut):
 
 ```powershell
 pnpm prod

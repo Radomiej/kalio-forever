@@ -133,4 +133,23 @@ describe('ExecutionProfileService', () => {
     await expect(service.resolveDirect({ credentialId: 'credential-1', model: 'openrouter/missing' }))
       .rejects.toThrow('not available');
   });
+
+  it('accepts current Devin SWE-2 profiles and rejects unknown Devin models', async () => {
+    const { service } = makeService();
+
+    await expect(service.create({
+      name: 'Devin SWE-2 High',
+      kind: 'devin-cli-acp',
+      model: 'swe-2-high',
+    })).resolves.toEqual(expect.objectContaining({
+      kind: 'devin-cli-acp',
+      model: 'swe-2-high',
+    }));
+
+    await expect(service.create({
+      name: 'Unknown Devin',
+      kind: 'devin-cli-acp',
+      model: 'swe-3-unknown',
+    })).rejects.toThrow('Devin CLI ACP supports only');
+  });
 });

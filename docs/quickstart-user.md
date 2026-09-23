@@ -2,19 +2,31 @@
 
 Install Kalio as a local production stack on your machine. No API key required for the first run (mock LLM). Add a real provider later in **Settings**.
 
-## One-line install
+## Install from Windows CMD
+
+Open `cmd.exe` and run:
+
+This CMD entry point is available from `main` only after its PR is merged and
+a compatible runtime archive is published in GitHub Releases.
+
+```cmd
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
+```
+
+Autostart after Windows sign-in is enabled by default. To opt out explicitly:
+
+```cmd
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -NoAutostart && del "%TEMP%\kalio-install.cmd"
+```
+
+For the Bun runtime, add `-Runtime bun` after the `call` command. PowerShell is
+also available as an alternative:
 
 ```powershell
 irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
 ```
 
-For the Bun runtime, use:
-
-```powershell
-$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
-```
-
-**Requirements:** Windows 10+, PowerShell 5+. The release archive contains the selected runtime; Git and a separate Node.js installation are not required.
+**Requirements:** Windows 10+, built-in `curl.exe`, and PowerShell 5+. The release archive contains the selected runtime; Git and a separate Node.js installation are not required.
 
 The installer will:
 
@@ -22,7 +34,7 @@ The installer will:
 2. Install Kalio to `%LocalAppData%\Kalio\app`
 3. Store your data in `%LocalAppData%\Kalio\data` (database, workspaces, memory)
 4. Start the production stack with the embedded UI
-5. Register a **Scheduled Task** so Kalio starts automatically after **user sign-in**
+5. Add a per-user **Startup shortcut** so Kalio starts automatically after **user sign-in**
 
 ## Open Kalio
 
@@ -57,22 +69,20 @@ the release manifest and SHA-256, switches the version pointer atomically, check
 & "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update --force
 ```
 
-At Windows sign-in the Scheduled Task runs a non-forcing update check before
-starting Kalio. A network or signature warning does not prevent the currently
-installed version from starting. User data under `%LocalAppData%\Kalio\data` is
-preserved.
+At Windows sign-in the Startup shortcut starts the currently installed version.
+User data under `%LocalAppData%\Kalio\data` is preserved.
 
 For an older installation without the built-in updater, re-run the release installer:
 
-```powershell
-irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
+```cmd
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
 ```
 
 The same built-in `kalio.cmd update` command upgrades a Bun installation; the
 release installer remains available as a repair/reinstall path:
 
-```powershell
-$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
+```cmd
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -Runtime bun && del "%TEMP%\kalio-install.cmd"
 ```
 
 ## Linux install and upgrade
@@ -94,17 +104,17 @@ Keep your database and workspaces:
 irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/uninstall.ps1 | iex
 ```
 
-Remove everything (app + data):
+Remove everything (app + data) without another confirmation prompt:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/uninstall.ps1))) -Force
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/uninstall.ps1))) -PurgeData -Force
 ```
 
 Or from an existing install directory:
 
 ```powershell
-.\scripts\uninstall.ps1 -KeepData
-.\scripts\uninstall.ps1 -Force
+.\scripts\uninstall.ps1
+.\scripts\uninstall.ps1 -PurgeData -Force
 ```
 
 ## Troubleshooting
@@ -113,7 +123,7 @@ Or from an existing install directory:
 |---|---|
 | Runtime not found | Use the Node archive for the default runtime or the Bun archive; no separate runtime installation is needed |
 | Port 4016 in use | Stop the other process or choose another backend port |
-| Stack not running after sign-in | Check `Get-ScheduledTask -TaskName Kalio-Forever`; autostart log is `%LocalAppData%\kalio-forever\app\.kalio-stack\logs\autostart.log`, backend/frontend logs are in `%LocalAppData%\kalio-forever\app\.tmp\qa-stack-logs\` |
+| Stack not running after sign-in | Check `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Kalio Forever.lnk`, then run `%LocalAppData%\Kalio\bin\kalio.cmd serve` in CMD to see the startup error |
 | Provider errors | Open Settings, verify API key and base URL |
 
 ## For developers

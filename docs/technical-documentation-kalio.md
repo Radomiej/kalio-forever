@@ -270,7 +270,7 @@ Zasady:
 
 ### 3.5a. Codex App Server i profile wykonawcze
 
-`execution_profiles` przechowuje typ runtime (`direct-llm`, `codex-app-server`, `claude-agent-sdk`, `devin-api` albo `devin-cli-acp`), model, opcjonalny provider/auth profile, reasoning effort i tryb approval (`codex_guard` albo `kalio_strict`). Projekt wskazuje domyślny profil, persona może go nadpisać, a sesja zapisuje profil rozstrzygnięty przy utworzeniu. Child session dziedziczy profil rodzica. Migracja `0034_devin_local_cli_profiles.sql` seedsuje hostowe profile `devin-local-glm-5-2` i `devin-local-swe-1-7`.
+`execution_profiles` przechowuje typ runtime (`direct-llm`, `codex-app-server`, `claude-agent-sdk`, `devin-api` albo `devin-cli-acp`), model, opcjonalny provider/auth profile, reasoning effort i tryb approval (`codex_guard` albo `kalio_strict`). Projekt wskazuje domyślny profil, persona może go nadpisać, a sesja zapisuje profil rozstrzygnięty przy utworzeniu. Child session dziedziczy profil rodzica. Migracja `0034_devin_local_cli_profiles.sql` seedsuje historyczne profile `devin-local-glm-5-2` i `devin-local-swe-1-7`; migracja `0035_devin_swe_2_profiles.sql` wyłącza domyślnie lane SWE-1.7 i dodaje aktualne darmowe profile `devin-local-swe-2-high`, `devin-local-swe-2-medium` oraz `devin-local-swe-2-max`.
 
 `CodexAppServerHost` utrzymuje jeden proces `codex app-server --stdio` na profil zaufania/auth. `thread/start` otrzymuje model, cwd, sandbox, system instructions i dynamic tools. `item/tool/call` jest mapowany na `ToolDispatchService`; native command/file/permission approval w `codex_guard` pozostaje po stronie Codex auto-review, a w `kalio_strict` trafia do istniejącego kanału `tool:confirmation_required`.
 

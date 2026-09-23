@@ -5,16 +5,21 @@ import { existsSync, readFileSync } from 'node:fs';
 const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.meta.url), 'utf8');
 const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
 const installScriptSource = readFileSync(new URL('./install.ps1', import.meta.url), 'utf8');
-const autostartScriptSource = readFileSync(new URL('./kalio-autostart.ps1', import.meta.url), 'utf8');
+const installReleaseScriptSource = readFileSync(new URL('./install-release.ps1', import.meta.url), 'utf8');
+const uninstallScriptSource = readFileSync(new URL('./uninstall.ps1', import.meta.url), 'utf8');
 const prodScriptSource = readFileSync(new URL('../start-prod.ps1', import.meta.url), 'utf8');
 const devScriptSource = readFileSync(new URL('../start-dev.ps1', import.meta.url), 'utf8');
 const devCmdSource = readFileSync(new URL('../start-dev.cmd', import.meta.url), 'utf8');
 const quickstartSource = readFileSync(new URL('../docs/quickstart-user.md', import.meta.url), 'utf8');
 const localDevGuideSource = readFileSync(new URL('../docs/local-dev-guide.md', import.meta.url), 'utf8');
+const rootReadmeSource = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const scriptsReadmeSource = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
 const ac13QaStackSource = readFileSync(new URL('./run-ac13-qa-stack.mjs', import.meta.url), 'utf8');
 const workflowReleaseGateSource = readFileSync(new URL('./workflow-release-gate.mjs', import.meta.url), 'utf8');
+const runtimePackageSource = readFileSync(new URL('./build-runtime-package.mjs', import.meta.url), 'utf8');
+const runtimeCliSource = readFileSync(new URL('./kalio-cli.mjs', import.meta.url), 'utf8');
 const webViteConfigSource = readFileSync(new URL('../apps/kalio-web/vite.config.ts', import.meta.url), 'utf8');
+const rootPackage = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const releaseManifestUrls = [
   '../package.json',
   '../apps/kalio-api/package.json',
@@ -55,22 +60,96 @@ test('prod stack fallback paths use prod defaults when --data-root is omitted', 
 test('installer protects upgrades with a runtime lock and stable launcher', () => {
   assert.match(installScriptSource, /\.runtime\.lock/);
   assert.match(installScriptSource, /Kalio appears to be running/);
+  assert.match(installScriptSource, /Removing stale runtime lock/);
+  assert.match(installScriptSource, /Get-Process -Id \$lockOwner\.pid/);
   assert.match(installScriptSource, /kalio-launcher\.ps1/);
   assert.match(installScriptSource, /current\.json/);
 });
 
-test('autostart docs and scripts describe logon-based startup, not reboot startup', () => {
+test('runtime launcher recovers only a stale lock with a confirmed dead pid', () => {
+  assert.match(runtimeCliSource, /process\.kill\(pid, 0\)/);
+  assert.match(runtimeCliSource, /await rm\(lockPath, \{ force: true \}\)/);
+  assert.match(runtimeCliSource, /Removing stale runtime lock/);
+  assert.match(runtimeCliSource, /Another Kalio runtime appears to be running/);
+});
+
+test('Windows installer prefers built-in tar and keeps Expand-Archive as a fallback', () => {
+  assert.match(installScriptSource, /System32\\tar\.exe/);
+  assert.match(installScriptSource, /& \$tarPath -xf \$ArchivePath -C \$DestinationPath/);
+  assert.match(installScriptSource, /Expand-Archive -LiteralPath \$ArchivePath -DestinationPath \$DestinationPath -Force/);
+});
+
+test('CMD bootstrap downloads the release installer to a temporary file and forwards options', () => {
+  const installCmdUrl = new URL('./install.cmd', import.meta.url);
+  assert.equal(existsSync(installCmdUrl), true, 'scripts/install.cmd is missing');
+  const installCmdSource = existsSync(installCmdUrl) ? readFileSync(installCmdUrl, 'utf8') : '';
+
+  assert.match(installCmdSource, /install-release\.ps1/);
+  assert.match(installCmdSource, /-File "%INSTALLER_PATH%" %\*/);
+  assert.match(installCmdSource, /del \/q "%INSTALLER_PATH%"/i);
+  assert.doesNotMatch(installCmdSource, /\biex\b/i);
+});
+
+test('release installer forwards an explicit autostart opt-out', () => {
+  assert.match(installReleaseScriptSource, /\[switch\]\$NoAutostart/);
+  assert.match(installReleaseScriptSource, /if \(\$NoAutostart\) \{\s*\$installerArgs \+= '-NoAutostart'/s);
+});
+
+test('release installer combines the verified release archive with the current main installer', () => {
+  assert.match(installReleaseScriptSource, /\$installerBaseUrl = "https:\/\/raw\.githubusercontent\.com\/\$Repository\/main"/);
+  assert.match(installReleaseScriptSource, /"\$installerBaseUrl\/scripts\/install\.ps1"/);
+  assert.doesNotMatch(installReleaseScriptSource, /\$rawBaseUrl = "https:\/\/raw\.githubusercontent\.com\/\$Repository\/\$tag"/);
+});
+
+test('installer registers a per-user Startup shortcut for the stable launcher', () => {
+  assert.match(installScriptSource, /Join-Path \$env:SystemRoot 'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe'/);
+  assert.match(installScriptSource, /GetFolderPath\('Startup'\)/);
+  assert.match(installScriptSource, /CreateShortcut\(\$shortcutPath\)/);
+  assert.match(installScriptSource, /\$shortcut\.TargetPath = \$powershellPath/);
+  assert.match(installScriptSource, /\$shortcut\.Arguments = \('-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "\{0\}" serve' -f \$LauncherScript\)/);
+  assert.match(installScriptSource, /Register-AutostartShortcut -LauncherScript \$stableLauncherScript/);
+  assert.doesNotMatch(installScriptSource, /Register-ScheduledTask|New-ScheduledTaskAction/);
+  assert.doesNotMatch(installScriptSource, /update --auto/);
+});
+
+test('explicit autostart opt-out removes an existing Startup shortcut', () => {
+  assert.match(installScriptSource, /if \(\$NoAutostart\) \{\s*Remove-AutostartShortcut/s);
+  assert.match(uninstallScriptSource, /Remove-AutostartShortcut/);
+});
+
+test('prod install command uses the release installer that resolves an archive', () => {
+  assert.equal(
+    rootPackage.scripts['prod:install'],
+    'powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1',
+  );
+});
+
+test('runtime package forces embedded UI traffic to its serving origin', () => {
+  assert.match(
+    runtimePackageSource,
+    /window\.__KALIO_RUNTIME_CONFIG__ = \{ apiUrl: window\.location\.origin, wsUrl: window\.location\.origin \}/,
+  );
+  assert.doesNotMatch(
+    runtimePackageSource,
+    /window\.__KALIO_RUNTIME_CONFIG__ = \{\}/,
+  );
+});
+
+test('Windows docs make CMD primary, autostart default, and Tauri optional', () => {
+  const cmdInstall = /curl\.exe -fsSL https:\/\/raw\.githubusercontent\.com\/Radomiej\/kalio-forever\/main\/scripts\/install\.cmd -o "%TEMP%\\kalio-install\.cmd" && call "%TEMP%\\kalio-install\.cmd"/i;
+
+  assert.match(rootReadmeSource, cmdInstall);
+  assert.match(quickstartSource, cmdInstall);
+  assert.match(rootReadmeSource, /autostart[^\r\n]+default/i);
+  assert.match(rootReadmeSource, /-NoAutostart/);
+  assert.match(rootReadmeSource, /Tauri[^\r\n]+optional/i);
   assert.doesNotMatch(quickstartSource, /after \*\*system reboot/i);
   assert.doesNotMatch(localDevGuideSource, /after \*\*system reboot/i);
   assert.doesNotMatch(scriptsReadmeSource, /after reboot/i);
-  assert.doesNotMatch(installScriptSource, /after user logon \/ system reboot/i);
-  assert.doesNotMatch(autostartScriptSource, /after logon \/ system reboot/i);
 
   assert.match(quickstartSource, /after \*\*user sign-in\*\*/i);
   assert.match(localDevGuideSource, /for autostart after \*\*user sign-in\*\*/i);
-  assert.match(scriptsReadmeSource, /Scheduled Task entrypoint after Windows sign-in/i);
-  assert.match(installScriptSource, /AtLogOn/);
-  assert.match(autostartScriptSource, /Scheduled Task after Windows sign-in/i);
+  assert.match(scriptsReadmeSource, /Startup shortcut after Windows sign-in/i);
 });
 
 test('fixed QA mock mode forces env LLM so stale DB credentials cannot override mock', () => {

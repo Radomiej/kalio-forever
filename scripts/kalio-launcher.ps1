@@ -1,5 +1,5 @@
 # Stable Windows launcher. It resolves current.json so upgrades never leave the
-# Scheduled Task pointing at a version-specific directory.
+# Startup shortcut pointing at a version-specific directory.
 
 [CmdletBinding()]
 param(
