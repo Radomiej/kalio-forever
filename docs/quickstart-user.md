@@ -19,6 +19,10 @@ Autostart after Windows sign-in is enabled by default. To opt out explicitly:
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -NoAutostart && del "%TEMP%\kalio-install.cmd"
 ```
 
+The opt-out is saved under `%LocalAppData%\Kalio\data` and survives a repair.
+To enable autostart later, rerun the CMD command with `-EnableAutostart`
+instead of `-NoAutostart`.
+
 For the Bun runtime, add `-Runtime bun` after the `call` command. PowerShell is
 also available as an alternative:
 
@@ -110,7 +114,8 @@ Remove everything (app + data) without another confirmation prompt:
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/uninstall.ps1))) -PurgeData -Force
 ```
 
-Or from an existing install directory:
+Or from a cloned repository checkout (the installed runtime does not contain
+the `scripts` directory):
 
 ```powershell
 .\scripts\uninstall.ps1

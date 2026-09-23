@@ -10,6 +10,7 @@ param(
     [string]$InstallRoot = '',
     [switch]$NoLaunch,
     [switch]$NoAutostart,
+    [switch]$EnableAutostart,
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string]$Repository = 'Radomiej/kalio-forever'
 )
@@ -101,6 +102,9 @@ try {
         }
         if ($NoAutostart) {
             $installerArgs += '-NoAutostart'
+        }
+        if ($EnableAutostart) {
+            $installerArgs += '-EnableAutostart'
         }
         & powershell.exe @installerArgs
         if ($LASTEXITCODE -ne 0) {

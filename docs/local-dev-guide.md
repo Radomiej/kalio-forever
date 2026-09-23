@@ -141,7 +141,7 @@ Port rule: dev uses `3016/5188`, fixed QA uses `3316/5288`, the installed runtim
 
 ### Prod install — Windows CMD (`install.cmd`)
 
-End-user production path. Installs versioned runtime files under `%LocalAppData%\Kalio\app`, stores persistent data under `%LocalAppData%\Kalio\data`, and adds a per-user Startup shortcut for autostart after **user sign-in**. Pass `-NoAutostart` only when the user explicitly does not want autostart.
+End-user production path. Installs versioned runtime files under `%LocalAppData%\Kalio\app`, stores persistent data under `%LocalAppData%\Kalio\data`, and adds a per-user Startup shortcut for autostart after **user sign-in**. Pass `-NoAutostart` only when the user explicitly does not want autostart. The opt-out persists across repairs; `-EnableAutostart` reverses it.
 
 ```cmd
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"

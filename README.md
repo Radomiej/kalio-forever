@@ -84,7 +84,8 @@ curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scr
 
 Autostart after Windows sign-in is enabled by default. To install without it,
 pass `-NoAutostart` to the downloaded CMD wrapper. To use Bun instead of the
-default Node runtime, pass `-Runtime bun`.
+default Node runtime, pass `-Runtime bun`. An explicit opt-out is kept across
+repairs; pass `-EnableAutostart` to turn autostart back on.
 
 ~~~bat
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -Runtime bun && del "%TEMP%\kalio-install.cmd"

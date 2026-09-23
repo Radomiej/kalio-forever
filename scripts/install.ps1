@@ -8,7 +8,8 @@ param(
     [string]$ArchivePath,
     [string]$InstallRoot = '',
     [switch]$NoLaunch,
-    [switch]$NoAutostart
+    [switch]$NoAutostart,
+    [switch]$EnableAutostart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -134,24 +135,38 @@ function Expand-RuntimeArchive {
 
 function Remove-AutostartShortcut {
     $shortcutPath = Get-AutostartShortcutPath
-    Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
+        Remove-Item -LiteralPath $shortcutPath -Force
+    }
 }
 
 function Remove-LegacyScheduledTasks {
-    $schtasksPath = Join-Path $env:SystemRoot 'System32\schtasks.exe'
-    if (-not (Test-Path -LiteralPath $schtasksPath -PathType Leaf)) {
-        return
-    }
-
     foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
-        $process = Start-Process -FilePath $schtasksPath -ArgumentList @('/Delete', '/TN', ('"{0}"' -f $taskName), '/F') -WindowStyle Hidden -PassThru
         try {
-            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction Stop
+            Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop | Out-Null
         } catch {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            Write-Warning "Timed out while removing legacy Scheduled Task '$taskName'; it may require manual removal"
+            if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') {
+                continue
+            }
+            throw
         }
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction Stop
     }
+}
+
+function Set-AutostartPreference {
+    param([string]$DataRoot, [switch]$NoAutostart, [switch]$EnableAutostart)
+
+    if ($NoAutostart -and $EnableAutostart) {
+        throw 'Choose either -NoAutostart or -EnableAutostart'
+    }
+    $optOutPath = Join-Path $DataRoot 'autostart-disabled'
+    if ($NoAutostart) {
+        [IO.File]::WriteAllText($optOutPath, 'disabled')
+    } elseif ($EnableAutostart -and (Test-Path -LiteralPath $optOutPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $optOutPath -Force
+    }
+    return -not (Test-Path -LiteralPath $optOutPath -PathType Leaf)
 }
 
 function Register-AutostartShortcut {
@@ -260,10 +275,11 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0kalio-laun
 exit /b %ERRORLEVEL%
 '@
         Set-Content -LiteralPath $stableLauncher -Value $stableLauncherContent -Encoding ASCII
+        $autostartEnabled = Set-AutostartPreference -DataRoot $dataRoot -NoAutostart:$NoAutostart -EnableAutostart:$EnableAutostart
         Remove-LegacyScheduledTasks
-        if ($NoAutostart) {
+        if (-not $autostartEnabled) {
             Remove-AutostartShortcut
-            Write-Ok 'Autostart disabled by explicit request'
+            Write-Ok 'Autostart disabled by saved user preference'
         } else {
             Register-AutostartShortcut -LauncherScript $stableLauncherScript
         }

@@ -82,7 +82,8 @@ from `main`, not an open PR. Open **http://127.0.0.1:4016** and check
 
 For an installation smoke test, repeat the Talk/reload flow above, sign out
 and back into Windows to verify autostart (unless installed with
-`-NoAutostart`), and check that the existing data remains after a normal
+`-NoAutostart`), and check that existing data and the autostart preference
+remain after a normal
 update. Do not force an update while agents are active. A packaged Tauri/NSIS
 desktop build is a separate, optional installation path and requires its own
 smoke test.

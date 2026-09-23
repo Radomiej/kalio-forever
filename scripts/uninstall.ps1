@@ -27,23 +27,23 @@ function Get-AutostartShortcutPath {
 }
 
 function Remove-AutostartShortcut {
-    Remove-Item -LiteralPath (Get-AutostartShortcutPath) -Force -ErrorAction SilentlyContinue
+    $shortcutPath = Get-AutostartShortcutPath
+    if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
+        Remove-Item -LiteralPath $shortcutPath -Force
+    }
 }
 
 function Remove-LegacyScheduledTasks {
-    $schtasksPath = Join-Path $env:SystemRoot 'System32\schtasks.exe'
-    if (-not (Test-Path -LiteralPath $schtasksPath -PathType Leaf)) {
-        return
-    }
-
     foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
-        $process = Start-Process -FilePath $schtasksPath -ArgumentList @('/Delete', '/TN', ('"{0}"' -f $taskName), '/F') -WindowStyle Hidden -PassThru
         try {
-            Wait-Process -Id $process.Id -Timeout 5 -ErrorAction Stop
+            Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop | Out-Null
         } catch {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            Write-Warning "Timed out while removing legacy Scheduled Task '$taskName'; it may require manual removal"
+            if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') {
+                continue
+            }
+            throw
         }
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction Stop
     }
 }
 

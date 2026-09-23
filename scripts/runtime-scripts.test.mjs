@@ -113,7 +113,7 @@ test('installer registers a per-user Startup shortcut for the stable launcher', 
 });
 
 test('explicit autostart opt-out removes an existing Startup shortcut', () => {
-  assert.match(installScriptSource, /if \(\$NoAutostart\) \{\s*Remove-AutostartShortcut/s);
+  assert.match(installScriptSource, /if \(-not \$autostartEnabled\) \{\s*Remove-AutostartShortcut/s);
   assert.match(uninstallScriptSource, /Remove-AutostartShortcut/);
 });
 
