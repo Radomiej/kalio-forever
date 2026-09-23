@@ -6,8 +6,8 @@ Install Kalio as a local production stack on your machine. No API key required f
 
 Open `cmd.exe` and run:
 
-This CMD entry point is available from `main` only after its PR is merged and
-a compatible runtime archive is published in GitHub Releases.
+This command downloads the current installer scripts from `main` and a
+compatible published runtime archive; it does not install unmerged PR code.
 
 ```cmd
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"

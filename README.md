@@ -75,8 +75,8 @@ for day-to-day graph editing.
 Open **Command Prompt (`cmd.exe`)** and run this one line. The installer uses the
 local production profile and the mock provider, so no API key is required:
 
-The CMD entry point becomes available from `main` only after this change is
-merged and a compatible runtime archive has been published.
+This command downloads the current installer scripts from `main` and a
+compatible published runtime archive; it does not install unmerged PR code.
 
 ~~~bat
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"

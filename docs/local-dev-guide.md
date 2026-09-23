@@ -28,7 +28,7 @@ There is **no Docker** and **no automated deploy of the main Kalio API/web stack
 $env:PATH = "C:\Program Files\nodejs;" + $env:PATH
 node -p "process.execPath"   # must be C:\Program Files\nodejs\node.exe
 
-cd E:\Projekty\kalio-forever
+# Run the following from your kalio-forever checkout.
 pnpm install
 cp .env.example .env         # optional; mock LLM works offline
 ```

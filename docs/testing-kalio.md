@@ -6,10 +6,9 @@ prove that a published installer or another laptop works.
 
 ## Recommended: built QA stack
 
-From a PowerShell terminal in the repository:
+From a PowerShell terminal at the root of your repository checkout:
 
 ```powershell
-cd E:\Projekty\kalio-forever
 $env:PATH = "C:\Program Files\nodejs;" + $env:PATH
 node -p "process.execPath" # should be C:\Program Files\nodejs\node.exe
 corepack pnpm install
@@ -74,11 +73,10 @@ modes.
 
 ## Installed Windows release
 
-Once the CMD installer is published on `main` and a compatible runtime archive
-is available in GitHub Releases, follow the
-[Windows user guide](quickstart-user.md) on the target laptop. The install
-command in that guide reads scripts from `main`; an open PR does not publish
-them. Open **http://127.0.0.1:4016** and check
+Follow the [Windows user guide](quickstart-user.md) on the target laptop after
+the intended installer changes are merged to `main` and a compatible runtime
+archive is published in GitHub Releases. The install command reads scripts
+from `main`, not an open PR. Open **http://127.0.0.1:4016** and check
 **http://127.0.0.1:4016/api/health**. The installed runtime uses
 `%LocalAppData%\Kalio\data`, not the repository QA data.
 
