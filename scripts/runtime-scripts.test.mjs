@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { removeLinuxMuslSharpPackages } from './remove-linux-musl-sharp-packages.mjs';
 
 const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.meta.url), 'utf8');
 const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
@@ -35,6 +38,36 @@ test('all workspace manifests match the root release version', () => {
   for (const manifestPath of releaseManifestUrls) {
     const manifest = JSON.parse(readFileSync(new URL(manifestPath, import.meta.url), 'utf8'));
     assert.equal(manifest.version, rootPackage.version, `${manifestPath} has a mismatched release version`);
+  }
+});
+
+test('runtime staging removes root and nested musl Sharp packages but keeps glibc builds', async () => {
+  const fixtureParent = join(process.cwd(), '.tmp');
+  await mkdir(fixtureParent, { recursive: true });
+  const fixtureRoot = await mkdtemp(join(fixtureParent, 'kalio-sharp-staging-'));
+  const nodeModulesRoot = join(fixtureRoot, 'node_modules');
+  const packagePaths = [
+    '@img/sharp-linuxmusl-x64',
+    '@img/sharp-libvips-linuxmusl-x64',
+    '@img/sharp-linux-x64',
+    'sharp/node_modules/@img/sharp-linuxmusl-x64',
+    'sharp/node_modules/@img/sharp-libvips-linuxmusl-x64',
+    'sharp/node_modules/@img/sharp-linux-x64',
+  ];
+
+  try {
+    await Promise.all(packagePaths.map((packagePath) => mkdir(join(nodeModulesRoot, packagePath), { recursive: true })));
+    await removeLinuxMuslSharpPackages(nodeModulesRoot);
+
+    for (const packagePath of packagePaths) {
+      assert.equal(
+        existsSync(join(nodeModulesRoot, packagePath)),
+        !packagePath.includes('linuxmusl'),
+        `${packagePath} should ${packagePath.includes('linuxmusl') ? 'be removed' : 'be preserved'}`,
+      );
+    }
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
@@ -198,6 +231,8 @@ test('desktop build contract keeps the bundled backend and AppData paths aligned
   assert.match(desktopPrepareSource, /node-linker=hoisted/);
   assert.match(desktopPrepareSource, /--ignore-workspace/);
   assert.match(desktopPrepareSource, /name !== '@kalio\/types'/);
+  assert.match(desktopPrepareSource, /await removeLinuxMuslSharpPackages\(join\(serverRoot, 'node_modules'\)\)/);
+  assert.match(runtimePackageSource, /await removeLinuxMuslSharpPackages\(nodeModulesRoot\)/);
   assert.match(desktopBootstrapSource, /CREDENTIALS_MASTER_KEY/);
   assert.match(desktopBootstrapSource, /randomBytes\(32\)/);
   assert.match(tauriConfigSource, /"installMode": "currentUser"/);
