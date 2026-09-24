@@ -15,6 +15,14 @@ export class HitlPolicyService {
   async resolveApproval(_request: HitlApprovalRequest): Promise<HitlApprovalResolution> {
     const request = _request;
 
+    if (isIsolatedSubagentVfsWrite(request) && !request.abortSignal?.aborted) {
+      return {
+        status: 'approved',
+        source: 'auto',
+        reason: 'Built-in isolated subagent VFS write policy.',
+      };
+    }
+
     try {
       const config = await this.hitlConfig.getConfig();
 
@@ -67,4 +75,15 @@ export class HitlPolicyService {
       return { status: 'manual', source: 'manual' };
     }
   }
+}
+
+function isIsolatedSubagentVfsWrite(request: HitlApprovalRequest): boolean {
+  const agentRun = request.agentRun;
+  return request.kind === 'tool'
+    && request.name === 'vfs_write'
+    && agentRun?.agentType === 'subagent'
+    && agentRun.vfsMode === 'isolated'
+    && typeof request.vfsSessionId === 'string'
+    && request.vfsSessionId === request.sessionId
+    && agentRun.parentSessionId !== request.sessionId;
 }

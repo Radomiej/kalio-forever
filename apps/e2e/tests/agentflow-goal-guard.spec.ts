@@ -40,6 +40,39 @@ type AgentFlowRunSnapshot = {
 };
 
 const GOAL_FLOW_ROOT_LABEL = /Goal Guard|Architecture|Goal Master Delivery Loop/i;
+const activeApprovalSockets = new Set<ReturnType<typeof io>>();
+
+test.afterEach(() => {
+  for (const socket of activeApprovalSockets) socket.close();
+  activeApprovalSockets.clear();
+});
+
+function hasSuccessfulImplementerVfsWrite(snapshot: Pick<AgentFlowRunSnapshot, 'events'>): boolean {
+  return snapshot.events.some((event) => {
+    if (event.type !== 'flow:node_result' || event['roleSlotId'] !== 'implementer') return false;
+    const data = event['data'];
+    if (!data || typeof data !== 'object') return false;
+    if ((data as Record<string, unknown>)['sourceEventType'] !== 'participant_output') return false;
+    const toolEvidence = (data as Record<string, unknown>)['toolEvidence'];
+    if (!toolEvidence || typeof toolEvidence !== 'object') return false;
+    const successfulToolNames = (toolEvidence as Record<string, unknown>)['successfulToolNames'];
+    return Array.isArray(successfulToolNames) && successfulToolNames.includes('vfs_write');
+  });
+}
+
+async function hasSuccessfulImplementerVfsWriteForRun(request: APIRequestContext, runId: string): Promise<boolean> {
+  const response = await request.get(`${API_BASE}/agent-flows/runs/${runId}/events`);
+  expect(response.ok(), `Could not load events for AgentFlow run ${runId}`).toBe(true);
+  const events = await response.json() as AgentFlowRunSnapshot['events'];
+  return hasSuccessfulImplementerVfsWrite({ events });
+}
+
+async function waitForSuccessfulImplementerVfsWriteForRun(request: APIRequestContext, runId: string): Promise<void> {
+  await expect.poll(
+    () => hasSuccessfulImplementerVfsWriteForRun(request, runId),
+    { timeout: 60_000, message: `AgentFlow run ${runId} did not persist successful Implementer vfs_write evidence` },
+  ).toBe(true);
+}
 
 const requireBackend = createRequire(resolve(__dirname, '../../kalio-api/package.json'));
 const BetterSqlite3 = requireBackend('better-sqlite3') as new (path: string) => SeedDb;
@@ -285,9 +318,9 @@ async function approvePendingToolConfirmation(
   const socket = io(API_BASE.replace(/\/api\/?$/, ''), { transports: ['websocket'] });
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let refreshInterval: ReturnType<typeof setInterval> | undefined;
-  const subscribedSessionIds = new Set<string>();
   const handledRequestIds = new Set<string>();
   let refreshingSessionTree = false;
+  let approvalReceived = false;
 
   const subscribeToSessionTree = async () => {
     if (refreshingSessionTree) return;
@@ -295,8 +328,6 @@ async function approvePendingToolConfirmation(
     try {
       const sessionIds = await getSessionTreeIds(request, sessionId);
       for (const id of sessionIds) {
-        if (subscribedSessionIds.has(id)) continue;
-        subscribedSessionIds.add(id);
         socket.emit('session:identify', { sessionId: id });
       }
     } finally {
@@ -322,20 +353,10 @@ async function approvePendingToolConfirmation(
         }
         if (handledRequestIds.has(request.requestId)) return;
         handledRequestIds.add(request.requestId);
-        socket.on('tool:result', (event: {
-          callId: string;
-          sessionId: string;
-          status: 'success' | 'error' | 'cancelled';
-        }) => {
-          if (event.callId !== request.toolCallId || event.sessionId !== request.sessionId) return;
-          clearTimeout(timeout);
-          if (event.status === 'success') {
-            resolveApproval();
-          } else {
-            reject(new Error(`Approved tool ${request.toolCallId} ended with status ${event.status}`));
-          }
-        });
         socket.emit('tool:confirm', { requestId: request.requestId, sessionId: request.sessionId });
+        approvalReceived = true;
+        if (timeout) clearTimeout(timeout);
+        resolveApproval();
       });
       socket.on('connect', () => {
         void subscribeToSessionTree().catch(reject);
@@ -345,8 +366,10 @@ async function approvePendingToolConfirmation(
   } finally {
     if (timeout) clearTimeout(timeout);
     if (refreshInterval) clearInterval(refreshInterval);
-    socket.close();
+    if (!approvalReceived) socket.close();
   }
+
+  activeApprovalSockets.add(socket);
 }
 
 async function waitForParentAgentFlowRun(
@@ -552,6 +575,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         || snapshot.result?.status === 'done'
         || snapshot.result?.status === 'waiting_on_orchestrator'
       ));
+      await waitForSuccessfulImplementerVfsWriteForRun(request, run.run.id);
       childSessionId = run.result?.openChatSessionId ?? run.result?.childSessionId ?? run.run.childSessionId;
       expect(childSessionId).toBeTruthy();
 
@@ -610,6 +634,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(parentTimeline).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
 
       const snapshot = await waitForParentAgentFlowRun(request, sessionId, (run) => run.run.status === 'done' || run.result?.status === 'done');
+      await waitForSuccessfulImplementerVfsWriteForRun(request, snapshot.run.id);
       runId = snapshot.run.id;
       childSessionId = snapshot.result?.openChatSessionId
         ?? snapshot.result?.childSessionId
@@ -676,6 +701,13 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
     await expect(page.getByText('Run in progress')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
+
+    const completedRunsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=architect-ui`);
+    expect(completedRunsResponse.ok()).toBeTruthy();
+    const completedRuns = await completedRunsResponse.json() as AgentFlowRunSnapshot[];
+    const completedRun = completedRuns.find((snapshot) => snapshot.run.checkpoint?.goal?.includes(marker));
+    expect(completedRun).toBeTruthy();
+    await waitForSuccessfulImplementerVfsWriteForRun(request, completedRun!.run.id);
 
     await page.getByTestId('architect-projection-graph').click();
     await expect(page.getByTestId('architect-graph-status')).toBeVisible({ timeout: 10_000 });
@@ -953,18 +985,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
       if (!response.ok()) return 'http-error';
       const snapshot = await response.json() as AgentFlowRunSnapshot;
-      const hasWriteEvidence = snapshot.events.some((event) => {
-        if (event.type !== 'flow:node_result' || event['roleSlotId'] !== 'implementer') return false;
-        const data = event['data'];
-        if (!data || typeof data !== 'object') return false;
-        const source = data as Record<string, unknown>;
-        if (source['sourceEventType'] !== 'participant_output') return false;
-        const toolEvidence = source['toolEvidence'];
-        if (!toolEvidence || typeof toolEvidence !== 'object') return false;
-        const successfulToolNames = (toolEvidence as Record<string, unknown>)['successfulToolNames'];
-        return Array.isArray(successfulToolNames) && successfulToolNames.includes('vfs_write');
-      });
-      return `${snapshot.run.status}:${hasWriteEvidence}`;
+      return `${snapshot.run.status}:${hasSuccessfulImplementerVfsWrite(snapshot)}`;
     }, { timeout: 60_000 }).toBe('waiting_on_orchestrator:true');
 
     const resumeResponse = await request.post(`${API_BASE}/agent-flows/runs/${started.run.id}/resume`, {
@@ -1048,6 +1069,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
     expect(resumed.run.status).not.toBe('failed');
     expect(resumed.run.status).not.toBe('blocked');
+    await waitForSuccessfulImplementerVfsWriteForRun(request, runId);
     expect(resumed.events.some((event) => event.type === 'flow:waiting_on_orchestrator')).toBeTruthy();
     expect(resumed.events.some((event) => event.type === 'flow:resume_input')).toBeTruthy();
     expect(JSON.stringify(resumed.run.checkpoint?.resumeContext ?? {})).toContain('Playwright Orchestrator passed');

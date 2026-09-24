@@ -124,7 +124,6 @@ jobs:
       CI: 'true'
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
-      KALIO_E2E_PROJECT_PATH: ${{ github.workspace }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
