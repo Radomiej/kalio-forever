@@ -257,18 +257,94 @@ async function waitForNestedSubagent(
   return match;
 }
 
-async function approvePendingToolConfirmation(sessionId: string): Promise<void> {
+async function getSessionTreeIds(request: APIRequestContext, rootSessionId: string): Promise<string[]> {
+  const sessionIds = new Set([rootSessionId]);
+  const queue = [rootSessionId];
+
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    if (!parentId) continue;
+    const response = await request.get(`${API_BASE}/sessions/${encodeURIComponent(parentId)}/children`);
+    if (!response.ok()) continue;
+    const children = await response.json() as Array<{ id: string }>;
+    for (const child of children) {
+      if (sessionIds.has(child.id)) continue;
+      sessionIds.add(child.id);
+      queue.push(child.id);
+    }
+  }
+
+  return [...sessionIds];
+}
+
+async function approvePendingToolConfirmation(
+  request: APIRequestContext,
+  sessionId: string,
+  expectedToolName?: string,
+): Promise<void> {
   const socket = io(API_BASE.replace(/\/api\/?$/, ''), { transports: ['websocket'] });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let refreshInterval: ReturnType<typeof setInterval> | undefined;
+  const subscribedSessionIds = new Set<string>();
+  const handledRequestIds = new Set<string>();
+  let refreshingSessionTree = false;
+
+  const subscribeToSessionTree = async () => {
+    if (refreshingSessionTree) return;
+    refreshingSessionTree = true;
+    try {
+      const sessionIds = await getSessionTreeIds(request, sessionId);
+      for (const id of sessionIds) {
+        if (subscribedSessionIds.has(id)) continue;
+        subscribedSessionIds.add(id);
+        socket.emit('session:identify', { sessionId: id });
+      }
+    } finally {
+      refreshingSessionTree = false;
+    }
+  };
+
   try {
     await new Promise<void>((resolveApproval, reject) => {
-      socket.on('connect_error', reject);
-      socket.on('tool:confirmation_required', (request: { requestId: string }) => {
-        socket.once('tool:result', () => resolveApproval());
-        socket.emit('tool:confirm', { requestId: request.requestId, sessionId });
+      timeout = setTimeout(() => {
+        reject(new Error(`Timed out waiting for ${expectedToolName ?? 'a tool'} confirmation in session ${sessionId}`));
+      }, 30_000);
+      socket.on('connect_error', (error) => reject(error));
+      socket.on('tool:confirmation_required', (request: {
+        requestId: string;
+        toolCallId: string;
+        sessionId: string;
+        toolName: string;
+      }) => {
+        if (expectedToolName && request.toolName !== expectedToolName) {
+          reject(new Error(`Expected ${expectedToolName} confirmation, received ${request.toolName}`));
+          return;
+        }
+        if (handledRequestIds.has(request.requestId)) return;
+        handledRequestIds.add(request.requestId);
+        socket.on('tool:result', (event: {
+          callId: string;
+          sessionId: string;
+          status: 'success' | 'error' | 'cancelled';
+        }) => {
+          if (event.callId !== request.toolCallId || event.sessionId !== request.sessionId) return;
+          clearTimeout(timeout);
+          if (event.status === 'success') {
+            resolveApproval();
+          } else {
+            reject(new Error(`Approved tool ${request.toolCallId} ended with status ${event.status}`));
+          }
+        });
+        socket.emit('tool:confirm', { requestId: request.requestId, sessionId: request.sessionId });
       });
-      socket.on('connect', () => socket.emit('session:identify', { sessionId }));
+      socket.on('connect', () => {
+        void subscribeToSessionTree().catch(reject);
+        refreshInterval = setInterval(() => void subscribeToSessionTree().catch(reject), 500);
+      });
     });
   } finally {
+    if (timeout) clearTimeout(timeout);
+    if (refreshInterval) clearInterval(refreshInterval);
     socket.close();
   }
 }
@@ -457,7 +533,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await sendMessageFromComposer(page, [
         'Start the required Dev/Implementer <-> Goal Guard architecture from Talk.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
-        '[[mock:tool:run_sub_agentflow]]',
+        '[[mock:tool:run_sub_agentflow:durable]]',
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
@@ -465,6 +541,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
       await expect(liveBubble.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
+      await approvePendingToolConfirmation(request, sessionId, 'vfs_write');
 
       const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
       await expect(parentResult).toBeVisible({ timeout: 150_000 });
@@ -514,9 +591,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await selectSession(page, sessionId, title);
 
       await sendMessageFromComposer(page, [
-        'Run Goal Guard from Talk as a durable child flow and complete it without manual intervention.',
+        'Run Goal Guard from Talk as a durable child flow and complete it after required explicit tool approvals.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
-        '[[mock:tool:run_sub_agentflow]]',
+        '[[mock:tool:run_sub_agentflow:durable]]',
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
@@ -524,6 +601,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
       await expect(liveBubble.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
+      await approvePendingToolConfirmation(request, sessionId, 'vfs_write');
 
       const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
       await expect(parentResult).toBeVisible({ timeout: 150_000 });
@@ -594,6 +672,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await startGoalGuardFromArchitectModal(page);
+    await approvePendingToolConfirmation(request, 'architect-ui', 'vfs_write');
 
     await expect(page.getByText('Run in progress')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
@@ -682,6 +761,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       requireImplementerWriteProof: true,
     }));
 
+    await approvePendingToolConfirmation(request, 'architect-ui', 'vfs_write');
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
 
     const runsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=architect-ui`);
@@ -866,6 +946,26 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       (status) => status === 'waiting_on_orchestrator',
     );
     expect(waiting.run.checkpoint?.continuation).toBeTruthy();
+    const rootSessionId = waiting.run.childSessionId;
+    expect(rootSessionId).toBeTruthy();
+    await approvePendingToolConfirmation(request, rootSessionId!, 'vfs_write');
+    await expect.poll(async () => {
+      const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+      if (!response.ok()) return 'http-error';
+      const snapshot = await response.json() as AgentFlowRunSnapshot;
+      const hasWriteEvidence = snapshot.events.some((event) => {
+        if (event.type !== 'flow:node_result' || event['roleSlotId'] !== 'implementer') return false;
+        const data = event['data'];
+        if (!data || typeof data !== 'object') return false;
+        const source = data as Record<string, unknown>;
+        if (source['sourceEventType'] !== 'participant_output') return false;
+        const toolEvidence = source['toolEvidence'];
+        if (!toolEvidence || typeof toolEvidence !== 'object') return false;
+        const successfulToolNames = (toolEvidence as Record<string, unknown>)['successfulToolNames'];
+        return Array.isArray(successfulToolNames) && successfulToolNames.includes('vfs_write');
+      });
+      return `${snapshot.run.status}:${hasWriteEvidence}`;
+    }, { timeout: 60_000 }).toBe('waiting_on_orchestrator:true');
 
     const resumeResponse = await request.post(`${API_BASE}/agent-flows/runs/${started.run.id}/resume`, {
       data: {
@@ -920,6 +1020,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await startGoalGuardFromArchitectModal(page);
+    await approvePendingToolConfirmation(request, 'architect-ui', 'vfs_write');
 
     await expect(page.getByRole('button', { name: /Resume with QA evidence/i })).toBeVisible({ timeout: 120_000 });
 
@@ -1091,7 +1192,7 @@ test.describe('AgentFlow restart recovery', () => {
     const nested = await waitForNestedSubagent(request, rootSessionId!);
 
     await restartPlaywrightBackend();
-    await approvePendingToolConfirmation(nested.nestedSessionId);
+    await approvePendingToolConfirmation(request, nested.nestedSessionId);
 
     await expect.poll(async () => {
       const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
