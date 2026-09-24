@@ -18,6 +18,7 @@ function makeTestDrizzle(): DrizzleService {
       model TEXT NOT NULL,
       max_tool_attempts INTEGER,
       allowed_tools TEXT NOT NULL DEFAULT '[]',
+      provider_tool_names TEXT NOT NULL DEFAULT '[]',
       skill_ids TEXT NOT NULL DEFAULT '[]',
       mcp_policy TEXT NOT NULL DEFAULT 'allow_all',
       execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
