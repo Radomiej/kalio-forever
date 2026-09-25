@@ -38,8 +38,8 @@ function startCliWorker(home) {
     child.once('close', (code, signal) => {
       closed = true;
       resolve({ code, signal });
-      if (!started && stdout.includes('READY\n')) {
-        rejectReady(new Error('Worker closed before the start gate opened'));
+      if (!started) {
+        rejectReady(new Error('Worker exited before the start gate opened: ' + JSON.stringify({ code, signal, stdout, stderr })));
       }
     });
   });
@@ -58,7 +58,7 @@ function startCliWorker(home) {
     ready,
     exit,
     start() {
-      if (started) return;
+      if (started || closed) return;
       started = true;
       child.stdin.write('go\n');
     },
@@ -133,15 +133,17 @@ async function createRuntimeFixture() {
 }
 
 function waitForExitCount(workers, target, timeoutMs) {
-  if (workers.filter((worker) => worker.isClosed()).length >= target) return Promise.resolve(true);
+  const closed = new Set(workers.filter((worker) => worker.isClosed()));
+  if (closed.size >= target) return Promise.resolve(true);
 
-  let count = workers.filter((worker) => worker.isClosed()).length;
   let timer;
   const reached = new Promise((resolve) => {
     for (const worker of workers) {
+      if (closed.has(worker)) continue;
       worker.exit.then(() => {
-        count += 1;
-        if (count >= target) resolve(true);
+        if (closed.has(worker)) return;
+        closed.add(worker);
+        if (closed.size >= target) resolve(true);
       });
     }
   });
@@ -153,7 +155,7 @@ function waitForExitCount(workers, target, timeoutMs) {
 }
 
 async function releaseAndStop(workers, releasePath) {
-  await writeFile(releasePath, 'release', 'utf8').catch(() => {});
+  await writeFile(releasePath, 'release', 'utf8');
   for (const worker of workers) worker.start();
   await Promise.all(workers.map((worker) => waitForExitCount([worker], 1, 5000)));
   for (const worker of workers) {
