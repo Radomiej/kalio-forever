@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 function startCliWorker(home) {
   const workerCode = [
-    "process.stdout.write('READY\n');",
+    "process.stdout.write('READY\\n');",
     "await new Promise((resolve) => process.stdin.once('data', resolve));",
     "process.argv.splice(1, process.argv.length, 'scripts/kalio-cli.mjs', 'serve');",
     'await import(process.env.KALIO_CLI_URL);',
@@ -107,7 +107,7 @@ async function createRuntimeFixture() {
       "import { appendFile } from 'node:fs/promises';",
       "import { join } from 'node:path';",
       'const home = process.env.KALIO_HOME;',
-      "await appendFile(join(home, 'runtime-started.log'), 'started\n');",
+      "await appendFile(join(home, 'runtime-started.log'), 'started\\n');",
       "const releasePath = join(home, 'release-runtime');",
       'await new Promise((resolve, reject) => {',
       '  let watcher;',
