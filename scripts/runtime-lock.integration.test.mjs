@@ -164,12 +164,48 @@ async function releaseAndStop(workers, releasePath) {
   await Promise.all(workers.map((worker) => worker.exit));
 }
 
-test('runtime launcher fails closed on an orphaned reclaim lock and admits one stale-lock recovery winner', {
+test('runtime launcher admits exactly one stale-lock recovery winner', {
   timeout: 20_000,
 }, async () => {
   const fixture = await createRuntimeFixture();
-  const workers = [];
+  const contenders = [];
   const deadPid = await getDeadPid();
+
+  try {
+    await writeFile(
+      fixture.lockPath,
+      JSON.stringify({ pid: deadPid, startedAt: 'stale' }) + '\n',
+      'utf8',
+    );
+
+    contenders.push(...Array.from({ length: 8 }, () => startCliWorker(fixture.home)));
+    await Promise.all(contenders.map((worker) => worker.ready));
+    for (const worker of contenders) worker.start();
+
+    const oneWorkerRemainedLive = await waitForExitCount(contenders, contenders.length - 1, 3500);
+    await writeFile(fixture.releasePath, 'release', 'utf8');
+    await Promise.all(contenders.map((worker) => worker.exit));
+
+    const startedCount = existsSync(fixture.startedPath)
+      ? (await readFile(fixture.startedPath, 'utf8')).split(/\r?\n/).filter(Boolean).length
+      : 0;
+
+    assert.equal(oneWorkerRemainedLive, true, 'all but the one runtime owner should reject the lock');
+    assert.equal(startedCount, 1, 'only one launcher may start the runtime during stale-lock recovery');
+    assert.equal(existsSync(fixture.lockPath), false, 'the winner should release its own primary lock');
+    assert.equal(existsSync(fixture.reclaimPath), false, 'the reclaim mutex should be removed after recovery');
+  } finally {
+    await releaseAndStop(contenders, fixture.releasePath);
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('runtime launcher fails closed on an orphaned reclaim lock', {
+  timeout: 20_000,
+}, async () => {
+  const fixture = await createRuntimeFixture();
+  const deadPid = await getDeadPid();
+  const worker = startCliWorker(fixture.home);
 
   try {
     await writeFile(
@@ -179,49 +215,19 @@ test('runtime launcher fails closed on an orphaned reclaim lock and admits one s
     );
     await writeFile(fixture.reclaimPath, JSON.stringify({ pid: deadPid }) + '\n', 'utf8');
 
-    const orphanedReclaimWorker = startCliWorker(fixture.home);
-    workers.push(orphanedReclaimWorker);
-    await orphanedReclaimWorker.ready;
-    orphanedReclaimWorker.start();
+    await worker.ready;
+    worker.start();
 
-    const rejectedWithoutRelease = await waitForExitCount([orphanedReclaimWorker], 1, 1200);
+    const rejectedWithoutRelease = await waitForExitCount([worker], 1, 1200);
     if (!rejectedWithoutRelease) await writeFile(fixture.releasePath, 'release', 'utf8');
-    const orphanedResult = await orphanedReclaimWorker.exit;
+    const result = await worker.exit;
 
-    assert.equal(orphanedResult.code, 1, orphanedReclaimWorker.output());
+    assert.equal(result.code, 1, worker.output());
     assert.equal(existsSync(fixture.startedPath), false, 'an orphaned reclaim mutex must fail closed');
     assert.equal(existsSync(fixture.lockPath), true, 'the stale primary lock must remain untouched');
     assert.equal(existsSync(fixture.reclaimPath), true, 'the unowned reclaim mutex must remain untouched');
-
-    await rm(fixture.releasePath, { force: true });
-    await rm(fixture.reclaimPath, { force: true });
-    await writeFile(fixture.startedPath, '', 'utf8');
-    await writeFile(
-      fixture.lockPath,
-      JSON.stringify({ pid: deadPid, startedAt: 'stale' }) + '\n',
-      'utf8',
-    );
-
-    const contenders = Array.from({ length: 8 }, () => startCliWorker(fixture.home));
-    workers.push(...contenders);
-    await Promise.all(contenders.map((worker) => worker.ready));
-    for (const worker of contenders) worker.start();
-
-    const oneWorkerRemainedLive = await waitForExitCount(contenders, contenders.length - 1, 3500);
-    await writeFile(fixture.releasePath, 'release', 'utf8');
-    await Promise.all(contenders.map((worker) => worker.exit));
-
-    const startedCount = (await readFile(fixture.startedPath, 'utf8'))
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .length;
-
-    assert.equal(oneWorkerRemainedLive, true, 'all but the one runtime owner should reject the lock');
-    assert.equal(startedCount, 1, 'only one launcher may start the runtime during stale-lock recovery');
-    assert.equal(existsSync(fixture.lockPath), false, 'the winner should release its own primary lock');
-    assert.equal(existsSync(fixture.reclaimPath), false, 'the reclaim mutex should be removed after recovery');
   } finally {
-    await releaseAndStop(workers, fixture.releasePath);
+    await releaseAndStop([worker], fixture.releasePath);
     await rm(fixture.root, { recursive: true, force: true });
   }
 });
