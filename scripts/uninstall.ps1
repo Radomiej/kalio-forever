@@ -18,6 +18,35 @@ function Assert-UnderRoot {
     }
 }
 
+function Get-AutostartShortcutPath {
+    $startupRoot = [Environment]::GetFolderPath('Startup')
+    if (-not $startupRoot) {
+        $startupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+    }
+    return Join-Path $startupRoot 'Kalio Forever.lnk'
+}
+
+function Remove-AutostartShortcut {
+    $shortcutPath = Get-AutostartShortcutPath
+    if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
+        Remove-Item -LiteralPath $shortcutPath -Force
+    }
+}
+
+function Remove-LegacyScheduledTasks {
+    foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
+        try {
+            Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop | Out-Null
+        } catch {
+            if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') {
+                continue
+            }
+            throw
+        }
+        Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction Stop
+    }
+}
+
 try {
     $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
     if (-not $localAppData) {
@@ -32,14 +61,8 @@ try {
         throw "Kalio appears to be running. Close it and rerun the uninstaller: $lockPath"
     }
 
-    foreach ($taskName in @('Kalio Forever', 'Kalio-Forever')) {
-        $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-        if ($scheduledTask) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-            Write-Host "[kalio] removed Scheduled Task $taskName" -ForegroundColor Yellow
-        }
-
-    }
+    Remove-AutostartShortcut
+    Remove-LegacyScheduledTasks
     $appRoot = Join-Path $InstallRoot 'app'
     $binRoot = Join-Path $InstallRoot 'bin'
     Assert-UnderRoot -Path $appRoot -Root $InstallRoot

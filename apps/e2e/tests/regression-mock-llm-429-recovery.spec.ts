@@ -49,10 +49,16 @@ test.describe('REGRESSION: mock LLM 429 recovery', () => {
       await expect(page.getByTestId('chat-error')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('chat-error')).toContainText(/429|Too Many Requests|quota exhausted/i);
       await expectComposerEnabled(page, 10_000);
-      await expect(page.getByTestId('active-tab-pending-dot')).toHaveCount(0);
+      await page.getByTestId('chat-error').getByRole('button').click();
 
-      await page.getByTestId('talk-tab-agents').click();
-      await expect(page.getByText('No active agent runs.')).toBeVisible({ timeout: 10_000 });
+      await sendMessageFromComposer(
+        page,
+        'Confirm the chat recovered after the 429. [[mock:script]]return("Recovered after 429.")[[/mock:script]]',
+      );
+      const assistantTurn = page.getByTestId('agent-turn-bubble');
+      await expect(assistantTurn).toHaveCount(1, { timeout: 10_000 });
+      await expect(assistantTurn).toContainText('Recovered after 429.');
+      await expectComposerEnabled(page, 10_000);
     } finally {
       await deleteSessionIfExists(request, session.id);
       await restoreActiveCredential(request, previousActiveCredentialId);

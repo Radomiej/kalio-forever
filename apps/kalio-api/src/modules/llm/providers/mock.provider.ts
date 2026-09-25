@@ -32,6 +32,7 @@ import {
   MOCK_RAAPP_CREATE_TRIGGER,
   MOCK_RUN_SUBAGENT_AUTO_APPROVE_TRIGGER,
   MOCK_RUN_SUBAGENT_HITL_TRIGGER,
+  MOCK_RUN_SUB_AGENTFLOW_DURABLE_TRIGGER,
   MOCK_RUN_SUB_AGENTFLOW_TRIGGER,
   MOCK_VFS_WRITE_NO_ARG_PROGRESS_TRIGGER,
   MOCK_VFS_WRITE_TRIGGER,
@@ -268,12 +269,19 @@ export class MockLLMProvider implements ILLMProvider {
       return [toolCall];
     }
 
-    if (lastMessage.includes(MOCK_RUN_SUB_AGENTFLOW_TRIGGER) && hasTool(tools, 'run_sub_agentflow')) {
+    const runSubAgentFlowStartMode = lastMessage.includes(MOCK_RUN_SUB_AGENTFLOW_DURABLE_TRIGGER)
+      ? 'durable'
+      : 'blocking';
+    if (
+      (lastMessage.includes(MOCK_RUN_SUB_AGENTFLOW_TRIGGER)
+        || runSubAgentFlowStartMode === 'durable')
+      && hasTool(tools, 'run_sub_agentflow')
+    ) {
       if (hasPriorToolResult(messages, 'run_sub_agentflow') || hasPriorAgentFlowResult(messages)) {
         emitText(options, 'Goal Guard AgentFlow result is available in the parent chat.');
         return [];
       }
-      const toolCall = createRunSubAgentFlowToolCall();
+      const toolCall = createRunSubAgentFlowToolCall(runSubAgentFlowStartMode);
       emitMockToolArgProgress(options, toolCall);
       return [toolCall];
     }

@@ -656,6 +656,67 @@ describe('getGoalGuardAgentFlowRunResult', () => {
   });
 
   it.each([
+    {
+      name: 'keeps polling while a tool confirmation is pending',
+      events: [{
+        id: 'gate', sequence: 1, type: 'flow:edge_taken', status: 'waiting_on_orchestrator' as const,
+        reasonCode: 'runtime_pause' as const, data: { reasonCode: 'runtime_pause' as const }, message: 'Approval required.', createdAt: 3,
+      }],
+      awaitingHumanInput: true,
+    },
+    {
+      name: 'stops treating the run as human-blocked after approval resumes it',
+      events: [
+        {
+          id: 'gate', sequence: 1, type: 'flow:edge_taken', status: 'waiting_on_orchestrator' as const,
+          reasonCode: 'runtime_pause' as const, data: { reasonCode: 'runtime_pause' as const }, message: 'Approval required.', createdAt: 3,
+        },
+        { id: 'resume', sequence: 2, type: 'flow:resume_input', message: 'Approval granted.', createdAt: 4 },
+      ],
+      awaitingHumanInput: false,
+    },
+    {
+      name: 'leaves an external quality-gate wait paused',
+      events: [{
+        id: 'wait', sequence: 1, type: 'flow:edge_taken', status: 'waiting_on_orchestrator' as const,
+        reasonCode: 'return_to_orchestrator' as const, data: { reasonCode: 'return_to_orchestrator' as const },
+        message: 'QA evidence required.', createdAt: 3,
+      }],
+      awaitingHumanInput: false,
+    },
+  ])('$name', async ({ events, awaitingHumanInput }) => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/architecture-runs/graph-from-run/events') return Promise.resolve({ data: [] });
+      if (url === '/api/architecture-runs/graph-from-run/graph') {
+        return Promise.resolve({ data: { runId: 'graph-from-run', nodes: [], edges: [] } });
+      }
+      if (url === '/api/architecture-runs/graph-from-run/chat') {
+        return Promise.resolve({ data: { runId: 'graph-from-run', messages: [] } });
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const snapshot: AgentFlowRunSnapshot = {
+      run: {
+        id: 'flow-run-1',
+        parentSessionId: 'architect-ui',
+        childSessionId: 'child-1',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'waiting_on_orchestrator',
+        startMode: 'durable',
+        returnMode: 'summary',
+        openGraphRunId: 'graph-from-run',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events,
+    };
+
+    const result = await getGoalGuardAgentFlowRunResult(snapshot, 'Build and verify.');
+
+    expect(result).toHaveProperty('agentFlowAwaitingHumanInput', awaitingHumanInput);
+  });
+
+  it.each([
     ['done', 'completed'],
     ['failed', 'failed'],
     ['blocked', 'failed'],

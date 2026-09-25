@@ -43,6 +43,96 @@ describe('HitlPolicyService', () => {
     expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
   });
 
+  it('auto-approves built-in VFS writes for a verified isolated subagent before manual mode', async () => {
+    await expect(service.resolveApproval({
+      kind: 'tool',
+      sessionId: 'child-session',
+      vfsSessionId: 'child-session',
+      name: 'vfs_write',
+      args: {},
+      agentRun: {
+        agentRunId: 'sub-run-1',
+        agentType: 'subagent',
+        parentSessionId: 'parent-session',
+        vfsMode: 'isolated',
+      },
+    })).resolves.toEqual({
+      status: 'approved',
+      source: 'auto',
+      reason: 'Built-in isolated subagent VFS write policy.',
+    });
+
+    expect(configService.getConfig).not.toHaveBeenCalled();
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['shared VFS', 'shared' as const, 'child-session', 'parent-session'],
+    ['mismatched VFS session', 'isolated' as const, 'parent-session', 'parent-session'],
+    ['parent session equal to the child session', 'isolated' as const, 'child-session', 'child-session'],
+  ])('keeps %s VFS writes behind manual HITL', async (_label, vfsMode, vfsSessionId, parentSessionId) => {
+    await expect(service.resolveApproval({
+      kind: 'tool',
+      sessionId: 'child-session',
+      vfsSessionId,
+      name: 'vfs_write',
+      args: {},
+      agentRun: {
+        agentRunId: 'sub-run-1',
+        agentType: 'subagent',
+        parentSessionId,
+        vfsMode,
+      },
+    })).resolves.toEqual({ status: 'manual', source: 'manual' });
+  });
+
+  it('keeps parent-session VFS writes behind manual HITL', async () => {
+    await expect(service.resolveApproval({
+      kind: 'tool',
+      sessionId: 'parent-session',
+      vfsSessionId: 'parent-session',
+      name: 'vfs_write',
+      args: {},
+    })).resolves.toEqual({ status: 'manual', source: 'manual' });
+  });
+
+  it('does not apply the isolated VFS exception to other tools', async () => {
+    await expect(service.resolveApproval({
+      kind: 'tool',
+      sessionId: 'child-session',
+      vfsSessionId: 'child-session',
+      name: 'terminal_spawn',
+      args: {},
+      agentRun: {
+        agentRunId: 'sub-run-1',
+        agentType: 'subagent',
+        parentSessionId: 'parent-session',
+        vfsMode: 'isolated',
+        autoApproveTools: ['terminal_spawn'],
+      },
+    })).resolves.toEqual({ status: 'manual', source: 'manual' });
+  });
+
+  it('does not auto-approve an already aborted isolated subagent run', async () => {
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(service.resolveApproval({
+      kind: 'tool',
+      sessionId: 'child-session',
+      vfsSessionId: 'child-session',
+      name: 'vfs_write',
+      args: {},
+      abortSignal: abortController.signal,
+      agentRun: {
+        agentRunId: 'sub-run-1',
+        agentType: 'subagent',
+        parentSessionId: 'parent-session',
+        vfsMode: 'isolated',
+      },
+    })).resolves.toEqual({ status: 'manual', source: 'manual' });
+  });
+
   it('auto-approves when the config mode is bypass', async () => {
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'bypass' }));
 

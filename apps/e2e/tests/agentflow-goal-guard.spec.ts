@@ -21,6 +21,7 @@ type AgentFlowRunSnapshot = {
   run: {
     id: string;
     childSessionId?: string;
+    openChatSessionId?: string;
     status: string;
     checkpoint?: {
       continuation?: unknown;
@@ -40,6 +41,54 @@ type AgentFlowRunSnapshot = {
 };
 
 const GOAL_FLOW_ROOT_LABEL = /Goal Guard|Architecture|Goal Master Delivery Loop/i;
+const activeApprovalSockets = new Set<ReturnType<typeof io>>();
+const activeAgentFlowRunIds = new Set<string>();
+
+test.afterEach(async ({ request }) => {
+  try {
+    for (const runId of activeAgentFlowRunIds) {
+      const response = await request.get(`${API_BASE}/agent-flows/runs/${runId}`);
+      if (response.status() === 404) continue;
+      expect(response.ok(), `Could not inspect AgentFlow ${runId} during test cleanup`).toBeTruthy();
+      const snapshot = await response.json() as AgentFlowRunSnapshot;
+      if (['done', 'failed', 'cancelled', 'blocked'].includes(snapshot.run.status)) continue;
+
+      const stopResponse = await request.post(`${API_BASE}/agent-flows/runs/${runId}/stop`);
+      expect(stopResponse.ok(), `Could not stop unfinished AgentFlow ${runId} during test cleanup`).toBeTruthy();
+    }
+  } finally {
+    activeAgentFlowRunIds.clear();
+    for (const socket of activeApprovalSockets) socket.close();
+    activeApprovalSockets.clear();
+  }
+});
+
+function hasSuccessfulImplementerVfsWrite(snapshot: Pick<AgentFlowRunSnapshot, 'events'>): boolean {
+  return snapshot.events.some((event) => {
+    if (event.type !== 'flow:node_result' || event['roleSlotId'] !== 'implementer') return false;
+    const data = event['data'];
+    if (!data || typeof data !== 'object') return false;
+    if ((data as Record<string, unknown>)['sourceEventType'] !== 'participant_output') return false;
+    const toolEvidence = (data as Record<string, unknown>)['toolEvidence'];
+    if (!toolEvidence || typeof toolEvidence !== 'object') return false;
+    const successfulToolNames = (toolEvidence as Record<string, unknown>)['successfulToolNames'];
+    return Array.isArray(successfulToolNames) && successfulToolNames.includes('vfs_write');
+  });
+}
+
+async function hasSuccessfulImplementerVfsWriteForRun(request: APIRequestContext, runId: string): Promise<boolean> {
+  const response = await request.get(`${API_BASE}/agent-flows/runs/${runId}/events`);
+  expect(response.ok(), `Could not load events for AgentFlow run ${runId}`).toBe(true);
+  const events = await response.json() as AgentFlowRunSnapshot['events'];
+  return hasSuccessfulImplementerVfsWrite({ events });
+}
+
+async function waitForSuccessfulImplementerVfsWriteForRun(request: APIRequestContext, runId: string): Promise<void> {
+  await expect.poll(
+    () => hasSuccessfulImplementerVfsWriteForRun(request, runId),
+    { timeout: 60_000, message: `AgentFlow run ${runId} did not persist successful Implementer vfs_write evidence` },
+  ).toBe(true);
+}
 
 const requireBackend = createRequire(resolve(__dirname, '../../kalio-api/package.json'));
 const BetterSqlite3 = requireBackend('better-sqlite3') as new (path: string) => SeedDb;
@@ -212,6 +261,7 @@ async function waitForAgentFlow(
   terminal: (status: string) => boolean,
   timeoutMs = 40_000,
 ) {
+  activeAgentFlowRunIds.add(runId);
   let snapshot: AgentFlowRunSnapshot | null = null;
   await expect
     .poll(async () => {
@@ -257,20 +307,86 @@ async function waitForNestedSubagent(
   return match;
 }
 
-async function approvePendingToolConfirmation(sessionId: string): Promise<void> {
+async function getSessionTreeIds(request: APIRequestContext, rootSessionId: string): Promise<string[]> {
+  const sessionIds = new Set([rootSessionId]);
+  const queue = [rootSessionId];
+
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    if (!parentId) continue;
+    const response = await request.get(`${API_BASE}/sessions/${encodeURIComponent(parentId)}/children`);
+    if (!response.ok()) continue;
+    const children = await response.json() as Array<{ id: string }>;
+    for (const child of children) {
+      if (sessionIds.has(child.id)) continue;
+      sessionIds.add(child.id);
+      queue.push(child.id);
+    }
+  }
+
+  return [...sessionIds];
+}
+
+async function approvePendingToolConfirmation(
+  request: APIRequestContext,
+  sessionId: string,
+  expectedToolName?: string,
+): Promise<void> {
   const socket = io(API_BASE.replace(/\/api\/?$/, ''), { transports: ['websocket'] });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let refreshInterval: ReturnType<typeof setInterval> | undefined;
+  const handledRequestIds = new Set<string>();
+  let refreshingSessionTree = false;
+  let approvalReceived = false;
+
+  const subscribeToSessionTree = async () => {
+    if (refreshingSessionTree) return;
+    refreshingSessionTree = true;
+    try {
+      const sessionIds = await getSessionTreeIds(request, sessionId);
+      for (const id of sessionIds) {
+        socket.emit('session:identify', { sessionId: id });
+      }
+    } finally {
+      refreshingSessionTree = false;
+    }
+  };
+
   try {
     await new Promise<void>((resolveApproval, reject) => {
-      socket.on('connect_error', reject);
-      socket.on('tool:confirmation_required', (request: { requestId: string }) => {
-        socket.once('tool:result', () => resolveApproval());
-        socket.emit('tool:confirm', { requestId: request.requestId, sessionId });
+      timeout = setTimeout(() => {
+        reject(new Error(`Timed out waiting for ${expectedToolName ?? 'a tool'} confirmation in session ${sessionId}`));
+      }, 30_000);
+      socket.on('connect_error', (error) => reject(error));
+      socket.on('tool:confirmation_required', (request: {
+        requestId: string;
+        toolCallId: string;
+        sessionId: string;
+        toolName: string;
+      }) => {
+        if (expectedToolName && request.toolName !== expectedToolName) {
+          reject(new Error(`Expected ${expectedToolName} confirmation, received ${request.toolName}`));
+          return;
+        }
+        if (handledRequestIds.has(request.requestId)) return;
+        handledRequestIds.add(request.requestId);
+        socket.emit('tool:confirm', { requestId: request.requestId, sessionId: request.sessionId });
+        approvalReceived = true;
+        if (timeout) clearTimeout(timeout);
+        resolveApproval();
       });
-      socket.on('connect', () => socket.emit('session:identify', { sessionId }));
+      socket.on('connect', () => {
+        void subscribeToSessionTree().catch(reject);
+        refreshInterval = setInterval(() => void subscribeToSessionTree().catch(reject), 500);
+      });
     });
   } finally {
-    socket.close();
+    if (timeout) clearTimeout(timeout);
+    if (refreshInterval) clearInterval(refreshInterval);
+    if (!approvalReceived) socket.close();
   }
+
+  activeApprovalSockets.add(socket);
 }
 
 async function waitForParentAgentFlowRun(
@@ -290,6 +406,7 @@ async function waitForParentAgentFlowRun(
         return lastError;
       }
       const runs = await response.json() as AgentFlowRunSnapshot[];
+      for (const entry of runs) activeAgentFlowRunIds.add(entry.run.id);
       matched = runs.find((entry) => terminal(entry));
       snapshot = runs.at(-1) ?? runs[0];
       lastError = undefined;
@@ -304,6 +421,34 @@ async function waitForParentAgentFlowRun(
     throw new Error(`AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'} error=${lastError ?? 'none'}`);
   }
   return matched;
+}
+
+async function waitForAgentFlowSessionForGoal(
+  request: APIRequestContext,
+  parentSessionId: string,
+  goalMarker: string,
+): Promise<string> {
+  let sessionId: string | undefined;
+  await expect.poll(async () => {
+    const response = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(parentSessionId)}`);
+    if (!response.ok()) return `http:${response.status()}`;
+
+    const runs = await response.json() as AgentFlowRunSnapshot[];
+    const matchingRun = runs.find((entry) => entry.run.checkpoint?.goal?.includes(goalMarker));
+    if (!matchingRun) return 'missing-run';
+    activeAgentFlowRunIds.add(matchingRun.run.id);
+    sessionId = matchingRun.result?.openChatSessionId
+      ?? matchingRun.result?.childSessionId
+      ?? matchingRun.run.openChatSessionId
+      ?? matchingRun.run.childSessionId;
+    return sessionId ? 'found-session' : `missing-session:${matchingRun.run.status}`;
+  }, {
+    timeout: 30_000,
+    message: `AgentFlow child session for goal marker ${goalMarker} was not persisted`,
+  }).toBe('found-session');
+
+  if (!sessionId) throw new Error(`AgentFlow child session for goal marker ${goalMarker} was not available`);
+  return sessionId;
 }
 
 async function waitForAuditEntry(
@@ -457,7 +602,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await sendMessageFromComposer(page, [
         'Start the required Dev/Implementer <-> Goal Guard architecture from Talk.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
-        '[[mock:tool:run_sub_agentflow]]',
+        '[[mock:tool:run_sub_agentflow:durable]]',
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
@@ -465,6 +610,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
       await expect(liveBubble.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
+      await approvePendingToolConfirmation(request, sessionId, 'vfs_write');
 
       const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
       await expect(parentResult).toBeVisible({ timeout: 150_000 });
@@ -475,6 +621,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         || snapshot.result?.status === 'done'
         || snapshot.result?.status === 'waiting_on_orchestrator'
       ));
+      await waitForSuccessfulImplementerVfsWriteForRun(request, run.run.id);
       childSessionId = run.result?.openChatSessionId ?? run.result?.childSessionId ?? run.run.childSessionId;
       expect(childSessionId).toBeTruthy();
 
@@ -514,9 +661,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await selectSession(page, sessionId, title);
 
       await sendMessageFromComposer(page, [
-        'Run Goal Guard from Talk as a durable child flow and complete it without manual intervention.',
+        'Run Goal Guard from Talk as a durable child flow and complete it after required explicit tool approvals.',
         'Use the native child AgentFlow tool, not the legacy council flow.',
-        '[[mock:tool:run_sub_agentflow]]',
+        '[[mock:tool:run_sub_agentflow:durable]]',
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
@@ -524,6 +671,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
       await expect(liveBubble.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
+      await approvePendingToolConfirmation(request, sessionId, 'vfs_write');
 
       const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
       await expect(parentResult).toBeVisible({ timeout: 150_000 });
@@ -532,6 +680,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(parentTimeline).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
 
       const snapshot = await waitForParentAgentFlowRun(request, sessionId, (run) => run.run.status === 'done' || run.result?.status === 'done');
+      await waitForSuccessfulImplementerVfsWriteForRun(request, snapshot.run.id);
       runId = snapshot.run.id;
       childSessionId = snapshot.result?.openChatSessionId
         ?? snapshot.result?.childSessionId
@@ -594,9 +743,17 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await startGoalGuardFromArchitectModal(page);
+    const flowSessionId = await waitForAgentFlowSessionForGoal(request, 'architect-ui', marker);
+    await approvePendingToolConfirmation(request, flowSessionId, 'vfs_write');
 
-    await expect(page.getByText('Run in progress')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
+
+    const completedRunsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=architect-ui`);
+    expect(completedRunsResponse.ok()).toBeTruthy();
+    const completedRuns = await completedRunsResponse.json() as AgentFlowRunSnapshot[];
+    const completedRun = completedRuns.find((snapshot) => snapshot.run.checkpoint?.goal?.includes(marker));
+    expect(completedRun).toBeTruthy();
+    await waitForSuccessfulImplementerVfsWriteForRun(request, completedRun!.run.id);
 
     await page.getByTestId('architect-projection-graph').click();
     await expect(page.getByTestId('architect-graph-status')).toBeVisible({ timeout: 10_000 });
@@ -682,6 +839,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       requireImplementerWriteProof: true,
     }));
 
+    const flowSessionId = await waitForAgentFlowSessionForGoal(request, 'architect-ui', marker);
+    await approvePendingToolConfirmation(request, flowSessionId, 'vfs_write');
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
 
     const runsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=architect-ui`);
@@ -866,6 +1025,15 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       (status) => status === 'waiting_on_orchestrator',
     );
     expect(waiting.run.checkpoint?.continuation).toBeTruthy();
+    const rootSessionId = waiting.run.childSessionId;
+    expect(rootSessionId).toBeTruthy();
+    await approvePendingToolConfirmation(request, rootSessionId!, 'vfs_write');
+    await expect.poll(async () => {
+      const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);
+      if (!response.ok()) return 'http-error';
+      const snapshot = await response.json() as AgentFlowRunSnapshot;
+      return `${snapshot.run.status}:${hasSuccessfulImplementerVfsWrite(snapshot)}`;
+    }, { timeout: 60_000 }).toBe('waiting_on_orchestrator:true');
 
     const resumeResponse = await request.post(`${API_BASE}/agent-flows/runs/${started.run.id}/resume`, {
       data: {
@@ -920,6 +1088,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await startGoalGuardFromArchitectModal(page);
+    const flowSessionId = await waitForAgentFlowSessionForGoal(request, 'architect-ui', marker);
+    await approvePendingToolConfirmation(request, flowSessionId, 'vfs_write');
 
     await expect(page.getByRole('button', { name: /Resume with QA evidence/i })).toBeVisible({ timeout: 120_000 });
 
@@ -947,6 +1117,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
 
     expect(resumed.run.status).not.toBe('failed');
     expect(resumed.run.status).not.toBe('blocked');
+    await waitForSuccessfulImplementerVfsWriteForRun(request, runId);
     expect(resumed.events.some((event) => event.type === 'flow:waiting_on_orchestrator')).toBeTruthy();
     expect(resumed.events.some((event) => event.type === 'flow:resume_input')).toBeTruthy();
     expect(JSON.stringify(resumed.run.checkpoint?.resumeContext ?? {})).toContain('Playwright Orchestrator passed');
@@ -1091,7 +1262,7 @@ test.describe('AgentFlow restart recovery', () => {
     const nested = await waitForNestedSubagent(request, rootSessionId!);
 
     await restartPlaywrightBackend();
-    await approvePendingToolConfirmation(nested.nestedSessionId);
+    await approvePendingToolConfirmation(request, nested.nestedSessionId);
 
     await expect.poll(async () => {
       const response = await request.get(`${API_BASE}/agent-flows/runs/${started.run.id}`);

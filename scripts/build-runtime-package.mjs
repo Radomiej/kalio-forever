@@ -2,6 +2,7 @@ import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:f
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { removeLinuxMuslSharpPackages } from './remove-linux-musl-sharp-packages.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -251,17 +252,7 @@ async function removeLinuxOptionalArtifacts() {
   await Promise.all(entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('bare-'))
     .map((entry) => rm(join(nodeModulesRoot, entry.name, 'prebuilds'), { recursive: true, force: true })));
-  const imgRoot = join(nodeModulesRoot, '@img');
-  try {
-    const imageEntries = await readdir(imgRoot, { withFileTypes: true });
-    await Promise.all(imageEntries
-      .filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'))
-      .map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })));
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      throw error;
-    }
-  }
+  await removeLinuxMuslSharpPackages(nodeModulesRoot);
   await rm(
     join(nodeModulesRoot, '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
     { recursive: true, force: true },
@@ -296,7 +287,7 @@ await cp(bootstrapSource, join(serverRoot, 'runtime-server-bootstrap.mjs'));
 await cp(webDist, join(stageRoot, 'web'), { recursive: true });
 await writeFile(
   join(stageRoot, 'web', 'runtime-config.js'),
-  'window.__KALIO_RUNTIME_CONFIG__ = {};\n',
+  'window.__KALIO_RUNTIME_CONFIG__ = { apiUrl: window.location.origin, wsUrl: window.location.origin };\n',
   'utf8',
 );
 await cp(cliSource, join(stageRoot, 'bin', 'kalio-cli.mjs'));

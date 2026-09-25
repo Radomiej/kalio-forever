@@ -12,6 +12,8 @@ import type { SessionEventsService } from '../session-events.service';
 import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import type { ModuleRef } from '@nestjs/core';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from '../architecture-runtime-stop.port';
+import type { ChatService } from '../chat.service';
+import type { EmitFn } from '../interfaces/stream-context.interface';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 type SessionCreatedHandler = (event: { session: ChatSession }) => void;
@@ -1243,8 +1245,22 @@ describe('ChatGateway', () => {
     });
 
     it('atomically approves and resumes a durable tool when the in-memory confirmation was lost', async () => {
+      const approveAndResumeTool: ChatService['approveAndResumeTool'] = async (
+        _requestId,
+        sessionId,
+        _message,
+        emit: EmitFn,
+      ) => {
+        emit('tool:result', {
+          callId: 'call-durable',
+          sessionId,
+          status: 'success',
+          toolName: 'fs_write',
+        });
+        return true;
+      };
       const chatService = {
-        approveAndResumeTool: vi.fn().mockResolvedValue(true),
+        approveAndResumeTool: vi.fn(approveAndResumeTool),
         cancelPendingTool: vi.fn().mockResolvedValue(false),
       };
       (toolDispatch.resolveConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
@@ -1254,9 +1270,11 @@ describe('ChatGateway', () => {
         undefined, chatService,
       );
       gateway.handleConnection(client as never);
-      (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
-        .get(client.id)
-        ?.add('session-1');
+      gateway.handleConnection(observer as never);
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+      await gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
+      client.emit.mockClear();
+      observer.emit.mockClear();
 
       await gateway.handleToolConfirm(client as never, { requestId: 'durable-request', sessionId: 'session-1' });
 
@@ -1266,9 +1284,13 @@ describe('ChatGateway', () => {
         undefined,
         expect.any(Function),
       );
-      expect(client.emit).not.toHaveBeenCalledWith(
-        'tool:confirmation_invalidated',
-        expect.anything(),
+      expect(client.emit).toHaveBeenCalledWith(
+        'tool:result',
+        expect.objectContaining({ callId: 'call-durable', sessionId: 'session-1', status: 'success' }),
+      );
+      expect(observer.emit).toHaveBeenCalledWith(
+        'tool:result',
+        expect.objectContaining({ callId: 'call-durable', sessionId: 'session-1', status: 'success' }),
       );
     });
 

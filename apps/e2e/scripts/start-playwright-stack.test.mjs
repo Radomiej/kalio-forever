@@ -75,7 +75,10 @@ export const devices = {
   process.exit(1);
 }
 
-console.log('[fake-playwright] ran with ' + process.env.PLAYWRIGHT_BASE_URL);
+console.log(
+  '[fake-playwright] ran with ' + process.env.PLAYWRIGHT_BASE_URL
+  + ' project=' + process.env.KALIO_E2E_PROJECT_PATH,
+);
 `,
     'utf8',
   );
@@ -760,6 +763,7 @@ test('playwright wrapper gives each run isolated database and workspace paths', 
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]kalio-e2e\.db/);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]workspaces/);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]memory/);
+      assert.match(fullOutput, /project=.*data[\\/]playwright-stack[\\/]\d+-\d+[\\/]project/);
       assert.doesNotMatch(fullOutput, /shared-from-env-file/);
     } finally {
       stopCollecting();

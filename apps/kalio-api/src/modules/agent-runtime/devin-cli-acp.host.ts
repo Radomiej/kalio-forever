@@ -18,7 +18,13 @@ import {
   type StopReason,
 } from '@agentclientprotocol/sdk';
 
-export const DEVIN_CLI_MODELS = ['glm-5-2', 'swe-1-7'] as const satisfies readonly DevinCliModel[];
+export const DEVIN_CLI_MODELS = [
+  'glm-5-2',
+  'swe-1-7',
+  'swe-2-high',
+  'swe-2-medium',
+  'swe-2-max',
+] as const satisfies readonly DevinCliModel[];
 const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 const PROBE_TIMEOUT_MS = 10_000;
 

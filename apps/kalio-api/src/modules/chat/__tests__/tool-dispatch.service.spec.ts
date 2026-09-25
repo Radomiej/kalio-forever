@@ -412,13 +412,16 @@ describe('ToolDispatchService', () => {
       expect(result.status).toBe('cancelled');
     });
 
-    it('auto-approves isolated subagent VFS writes without HITL confirmation', async () => {
+    it('passes isolated subagent VFS ownership to the central HITL policy', async () => {
       const entry = makeEntry('vfs_write', true, { path: 'index.html' });
+      const autoPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'auto' }),
+      };
       const moduleRef = await Test.createTestingModule({
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
+          { provide: HitlPolicyService, useValue: autoPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -431,12 +434,24 @@ describe('ToolDispatchService', () => {
           agentType: 'subagent' as const,
           parentSessionId: 'master-session',
           vfsMode: 'isolated' as const,
+          autoApproveTools: ['vfs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'vfs_write', { filePath: 'index.html', content: '<h1>x</h1>' }, ctx);
 
       expect(result.status).toBe('success');
+      expect(autoPolicy.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'child-session',
+        vfsSessionId: 'child-session',
+        name: 'vfs_write',
+        agentRun: expect.objectContaining({ agentType: 'subagent', vfsMode: 'isolated' }),
+      }));
       expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
       expect(entry.execute).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: 'child-session',
@@ -445,7 +460,7 @@ describe('ToolDispatchService', () => {
       }));
     });
 
-    it('manual policy keeps isolated subagent writes behind a human confirmation', async () => {
+    it('manual policy keeps isolated subagent writes without an allowlist behind a human confirmation', async () => {
       const entry = makeEntry('vfs_write', true, { path: 'index.html' });
       const manualPolicy = {
         resolveApproval: vi.fn().mockResolvedValue({ status: 'manual', source: 'manual' }),
@@ -528,6 +543,7 @@ describe('ToolDispatchService', () => {
           agentType: 'subagent' as const,
           parentSessionId: 'master-session',
           vfsMode: 'shared' as const,
+          autoApproveTools: ['vfs_write'],
         },
       };
       ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {

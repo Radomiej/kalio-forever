@@ -117,6 +117,7 @@ export class ToolConfirmationService {
         const resolution = await this.hitlPolicy.resolveApproval({
           kind: 'tool',
           sessionId: ctx.sessionId,
+          vfsSessionId: ctx.vfsSessionId,
           name: toolName,
           args,
           abortSignal: ctx.abortSignal,
@@ -161,6 +162,7 @@ export class ToolConfirmationService {
       const resolution = await this.hitlPolicy.resolveUnattendedApproval({
         kind: 'tool',
         sessionId: ctx.sessionId,
+        vfsSessionId: ctx.vfsSessionId,
         name: toolName,
         args,
         abortSignal: ctx.abortSignal,

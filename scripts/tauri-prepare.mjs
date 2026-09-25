@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { removeLinuxMuslSharpPackages } from './remove-linux-musl-sharp-packages.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resourcesRoot = join(root, 'src-tauri', 'resources');
@@ -151,21 +152,7 @@ async function removeMuslSharpPrebuilds() {
     return;
   }
 
-  const imgRoot = join(serverRoot, 'node_modules', '@img');
-  let entries;
-  try {
-    entries = await readdir(imgRoot, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-
-  const muslPackages = entries.filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'));
-  await Promise.all(
-    muslPackages.map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })),
-  );
+  await removeLinuxMuslSharpPackages(join(serverRoot, 'node_modules'));
 }
 
 async function removeMuslClaudeAgentSdk() {

@@ -24,6 +24,7 @@ export interface IMessageRepository {
   */
   ensureSession(sessionId: string, personaId: string): Promise<void>;
   loadHistory(sessionId: string): Promise<ChatMessage[]>;
+  loadMessagesForTurn(sessionId: string, turnId: string): Promise<ChatMessage[]>;
   loadHistoryPage(sessionId: string, options?: SessionMessagePageOptions): Promise<SessionMessagePage>;
   saveMessage(msg: ChatMessage): Promise<void>;
 }
