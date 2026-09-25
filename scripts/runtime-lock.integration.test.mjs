@@ -8,11 +8,11 @@ import { join } from 'node:path';
 
 function startCliWorker(home) {
   const workerCode = [
-    "process.stdout.write('READY\\n');",
+    "process.stdout.write('READY\n');",
     "await new Promise((resolve) => process.stdin.once('data', resolve));",
     "process.argv.splice(1, process.argv.length, 'scripts/kalio-cli.mjs', 'serve');",
     'await import(process.env.KALIO_CLI_URL);',
-  ].join('\\n');
+  ].join('\n');
   const child = spawn(process.execPath, ['--input-type=module', '--eval', workerCode], {
     cwd: process.cwd(),
     env: {
@@ -38,7 +38,7 @@ function startCliWorker(home) {
     child.once('close', (code, signal) => {
       closed = true;
       resolve({ code, signal });
-      if (!started && stdout.includes('READY\\n')) {
+      if (!started && stdout.includes('READY\n')) {
         rejectReady(new Error('Worker closed before the start gate opened'));
       }
     });
@@ -47,7 +47,7 @@ function startCliWorker(home) {
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk) => {
     stdout += chunk;
-    if (stdout.includes('READY\\n')) resolveReady();
+    if (stdout.includes('READY\n')) resolveReady();
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -60,7 +60,7 @@ function startCliWorker(home) {
     start() {
       if (started) return;
       started = true;
-      child.stdin.write('go\\n');
+      child.stdin.write('go\n');
     },
     isClosed: () => closed,
     output: () => stdout + stderr,
@@ -107,7 +107,7 @@ async function createRuntimeFixture() {
       "import { appendFile } from 'node:fs/promises';",
       "import { join } from 'node:path';",
       'const home = process.env.KALIO_HOME;',
-      "await appendFile(join(home, 'runtime-started.log'), 'started\\n');",
+      "await appendFile(join(home, 'runtime-started.log'), 'started\n');",
       "const releasePath = join(home, 'release-runtime');",
       'await new Promise((resolve, reject) => {',
       '  let watcher;',
@@ -118,7 +118,7 @@ async function createRuntimeFixture() {
       "  watcher.once('error', (error) => { watcher.close(); reject(error); });",
       '  if (existsSync(releasePath)) finish();',
       '});',
-    ].join('\\n'),
+    ].join('\n'),
     'utf8',
   );
 
@@ -172,10 +172,10 @@ test('runtime launcher fails closed on an orphaned reclaim lock and admits one s
   try {
     await writeFile(
       fixture.lockPath,
-      JSON.stringify({ pid: deadPid, startedAt: 'stale' }) + '\\n',
+      JSON.stringify({ pid: deadPid, startedAt: 'stale' }) + '\n',
       'utf8',
     );
-    await writeFile(fixture.reclaimPath, JSON.stringify({ pid: deadPid }) + '\\n', 'utf8');
+    await writeFile(fixture.reclaimPath, JSON.stringify({ pid: deadPid }) + '\n', 'utf8');
 
     const orphanedReclaimWorker = startCliWorker(fixture.home);
     workers.push(orphanedReclaimWorker);
@@ -196,7 +196,7 @@ test('runtime launcher fails closed on an orphaned reclaim lock and admits one s
     await writeFile(fixture.startedPath, '', 'utf8');
     await writeFile(
       fixture.lockPath,
-      JSON.stringify({ pid: deadPid, startedAt: 'stale' }) + '\\n',
+      JSON.stringify({ pid: deadPid, startedAt: 'stale' }) + '\n',
       'utf8',
     );
 
@@ -210,7 +210,7 @@ test('runtime launcher fails closed on an orphaned reclaim lock and admits one s
     await Promise.all(contenders.map((worker) => worker.exit));
 
     const startedCount = (await readFile(fixture.startedPath, 'utf8'))
-      .split(/\\r?\\n/)
+      .split(/\r?\n/)
       .filter(Boolean)
       .length;
 
