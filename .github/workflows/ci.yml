@@ -36,6 +36,9 @@ jobs:
       - name: Run workspace tests
         run: pnpm turbo run test --filter=!@kalio/e2e
 
+      - name: Run runtime lock integration test
+        run: node --test ./scripts/runtime-lock.integration.test.mjs
+
       - name: Run Playwright launcher tests
         run: pnpm --filter @kalio/e2e test
 
