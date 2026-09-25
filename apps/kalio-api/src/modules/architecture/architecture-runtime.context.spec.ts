@@ -55,8 +55,10 @@ describe('ArchitectureRuntimeService context defaults and resume behavior', () =
       prompt: 'Start with the base prompt.',
       context: {
         existing: 'keep',
+        maxArchitectureSteps: 1,
       },
     });
+    expect(run.status).not.toBe('completed');
 
     const resumed = await service.resumeRun(run.id, {
       input: 'Please continue with the next pass.',
