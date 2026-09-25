@@ -57,7 +57,7 @@ export function ArchitectRunProjection({
             {run && <span className="badge badge-ghost badge-sm">{run.run.executionMode}</span>}
             <span className="badge badge-ghost badge-sm">{isActivelyRunning ? 'running' : displayStatus}</span>
             {isWaitingAgentFlow && (
-              <ResumeQualityGateForm onSubmit={onResumeWithQualityGate} disabled={!onResumeWithQualityGate || running} />
+              <ResumeQualityGateForm onSubmit={onResumeWithQualityGate} disabled={!onResumeWithQualityGate || isActivelyRunning} />
             )}
           </div>
         )}
