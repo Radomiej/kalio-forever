@@ -137,13 +137,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       this.auditWriter.logRun(prepared.schema, prepared.run, liveEvents);
       await this.chatProjection.persistParentSafely(prepared.schema, prepared.run, liveEvents);
       return prepared.run;
-    }).finally(() => {
-      if (this.activeRunExecutions.get(prepared.run.id) === execution) {
-        this.activeRunExecutions.delete(prepared.run.id);
-      }
     });
-    this.activeRunExecutions.set(prepared.run.id, execution);
-    void execution;
+    this.trackActiveRunExecution(prepared.run.id, execution);
 
     return prepared.run;
   }
@@ -385,7 +380,28 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     return this.auditRecovery.reconstructEvents(runId);
   }
 
-  async resumeRun(
+  resumeRun(
+    runId: string,
+    dto: { input?: string; context?: Record<string, unknown>; maxSteps?: number; continuation?: AgentFlowContinuationCursor },
+    emit?: ArchitectureRoleExecutionInput['emit'],
+  ): Promise<ArchitectureRun> {
+    const activeExecution = this.activeRunExecutions.get(runId);
+    if (activeExecution) return activeExecution;
+    return this.trackActiveRunExecution(runId, this.resumeRunOnce(runId, dto, emit));
+  }
+
+  private trackActiveRunExecution(runId: string, execution: Promise<ArchitectureRun>): Promise<ArchitectureRun> {
+    this.activeRunExecutions.set(runId, execution);
+    const clearExecution = () => {
+      if (this.activeRunExecutions.get(runId) === execution) {
+        this.activeRunExecutions.delete(runId);
+      }
+    };
+    void execution.then(clearExecution, clearExecution);
+    return execution;
+  }
+
+  private async resumeRunOnce(
     runId: string,
     dto: { input?: string; context?: Record<string, unknown>; maxSteps?: number; continuation?: AgentFlowContinuationCursor },
     emit?: ArchitectureRoleExecutionInput['emit'],
@@ -393,6 +409,9 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     const existing = await this.findRunDurable(runId);
     if (!existing) {
       throw new NotFoundException(`Architecture run ${runId} not found`);
+    }
+    if (existing.status === 'completed' || existing.status === 'cancelled') {
+      return existing;
     }
     const schema = this.schemasByRunId.get(runId) ?? this.registry.findOne(existing.schemaId);
     if (!schema) {

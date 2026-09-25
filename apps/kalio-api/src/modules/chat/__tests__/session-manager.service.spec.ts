@@ -13,6 +13,8 @@ function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
     ensureSession: vi.fn().mockResolvedValue(undefined),
     loadHistory: vi.fn().mockResolvedValue(messages),
+    loadMessagesForTurn: vi.fn(async (_sessionId: string, turnId: string) =>
+      messages.filter((message) => message.turnId === turnId)),
     loadHistoryPage: vi.fn().mockResolvedValue({
       messages,
       totalCount: messages.length,
@@ -341,6 +343,8 @@ describe('SessionManagerService', () => {
           }
           return [];
         }),
+        loadMessagesForTurn: vi.fn(async (sessionId: string, turnId: string) =>
+          (await nextRepo.loadHistory(sessionId)).filter((message) => message.turnId === turnId)),
         loadHistoryPage: vi.fn(async (sessionId: string) => {
           const messages = await nextRepo.loadHistory(sessionId);
           return {

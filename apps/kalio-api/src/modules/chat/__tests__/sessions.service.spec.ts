@@ -106,6 +106,7 @@ describe('SessionsService', () => {
     repo = {
       ensureSession: vi.fn().mockResolvedValue(undefined),
       loadHistory: vi.fn().mockResolvedValue([]),
+      loadMessagesForTurn: vi.fn().mockResolvedValue([]),
       loadHistoryPage: vi.fn().mockResolvedValue({
         messages: [],
         totalCount: 0,

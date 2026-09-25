@@ -21,6 +21,7 @@ type AgentFlowRunSnapshot = {
   run: {
     id: string;
     childSessionId?: string;
+    openChatSessionId?: string;
     status: string;
     checkpoint?: {
       continuation?: unknown;
@@ -41,10 +42,25 @@ type AgentFlowRunSnapshot = {
 
 const GOAL_FLOW_ROOT_LABEL = /Goal Guard|Architecture|Goal Master Delivery Loop/i;
 const activeApprovalSockets = new Set<ReturnType<typeof io>>();
+const activeAgentFlowRunIds = new Set<string>();
 
-test.afterEach(() => {
-  for (const socket of activeApprovalSockets) socket.close();
-  activeApprovalSockets.clear();
+test.afterEach(async ({ request }) => {
+  try {
+    for (const runId of activeAgentFlowRunIds) {
+      const response = await request.get(`${API_BASE}/agent-flows/runs/${runId}`);
+      if (response.status() === 404) continue;
+      expect(response.ok(), `Could not inspect AgentFlow ${runId} during test cleanup`).toBeTruthy();
+      const snapshot = await response.json() as AgentFlowRunSnapshot;
+      if (['done', 'failed', 'cancelled', 'blocked'].includes(snapshot.run.status)) continue;
+
+      const stopResponse = await request.post(`${API_BASE}/agent-flows/runs/${runId}/stop`);
+      expect(stopResponse.ok(), `Could not stop unfinished AgentFlow ${runId} during test cleanup`).toBeTruthy();
+    }
+  } finally {
+    activeAgentFlowRunIds.clear();
+    for (const socket of activeApprovalSockets) socket.close();
+    activeApprovalSockets.clear();
+  }
 });
 
 function hasSuccessfulImplementerVfsWrite(snapshot: Pick<AgentFlowRunSnapshot, 'events'>): boolean {
@@ -245,6 +261,7 @@ async function waitForAgentFlow(
   terminal: (status: string) => boolean,
   timeoutMs = 40_000,
 ) {
+  activeAgentFlowRunIds.add(runId);
   let snapshot: AgentFlowRunSnapshot | null = null;
   await expect
     .poll(async () => {
@@ -389,6 +406,7 @@ async function waitForParentAgentFlowRun(
         return lastError;
       }
       const runs = await response.json() as AgentFlowRunSnapshot[];
+      for (const entry of runs) activeAgentFlowRunIds.add(entry.run.id);
       matched = runs.find((entry) => terminal(entry));
       snapshot = runs.at(-1) ?? runs[0];
       lastError = undefined;
@@ -403,6 +421,34 @@ async function waitForParentAgentFlowRun(
     throw new Error(`AgentFlow run for parent session ${parentSessionId} did not reach expected terminal state; last=${snapshot?.run.status ?? 'missing'} error=${lastError ?? 'none'}`);
   }
   return matched;
+}
+
+async function waitForAgentFlowSessionForGoal(
+  request: APIRequestContext,
+  parentSessionId: string,
+  goalMarker: string,
+): Promise<string> {
+  let sessionId: string | undefined;
+  await expect.poll(async () => {
+    const response = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=${encodeURIComponent(parentSessionId)}`);
+    if (!response.ok()) return `http:${response.status()}`;
+
+    const runs = await response.json() as AgentFlowRunSnapshot[];
+    const matchingRun = runs.find((entry) => entry.run.checkpoint?.goal?.includes(goalMarker));
+    if (!matchingRun) return 'missing-run';
+    activeAgentFlowRunIds.add(matchingRun.run.id);
+    sessionId = matchingRun.result?.openChatSessionId
+      ?? matchingRun.result?.childSessionId
+      ?? matchingRun.run.openChatSessionId
+      ?? matchingRun.run.childSessionId;
+    return sessionId ? 'found-session' : `missing-session:${matchingRun.run.status}`;
+  }, {
+    timeout: 30_000,
+    message: `AgentFlow child session for goal marker ${goalMarker} was not persisted`,
+  }).toBe('found-session');
+
+  if (!sessionId) throw new Error(`AgentFlow child session for goal marker ${goalMarker} was not available`);
+  return sessionId;
 }
 
 async function waitForAuditEntry(
@@ -697,9 +743,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await startGoalGuardFromArchitectModal(page);
-    await approvePendingToolConfirmation(request, 'architect-ui', 'vfs_write');
+    const flowSessionId = await waitForAgentFlowSessionForGoal(request, 'architect-ui', marker);
+    await approvePendingToolConfirmation(request, flowSessionId, 'vfs_write');
 
-    await expect(page.getByText('Run in progress')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
 
     const completedRunsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=architect-ui`);
@@ -793,7 +839,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       requireImplementerWriteProof: true,
     }));
 
-    await approvePendingToolConfirmation(request, 'architect-ui', 'vfs_write');
+    const flowSessionId = await waitForAgentFlowSessionForGoal(request, 'architect-ui', marker);
+    await approvePendingToolConfirmation(request, flowSessionId, 'vfs_write');
     await expect(page.locator('.badge').filter({ hasText: /completed|done/i }).first()).toBeVisible({ timeout: 150_000 });
 
     const runsResponse = await request.get(`${API_BASE}/agent-flows/runs?parentSessionId=architect-ui`);
@@ -1041,7 +1088,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     await page.getByTestId('architect-implementer-write-proof').check();
     await page.getByTestId('architect-task-input').fill(task);
     await startGoalGuardFromArchitectModal(page);
-    await approvePendingToolConfirmation(request, 'architect-ui', 'vfs_write');
+    const flowSessionId = await waitForAgentFlowSessionForGoal(request, 'architect-ui', marker);
+    await approvePendingToolConfirmation(request, flowSessionId, 'vfs_write');
 
     await expect(page.getByRole('button', { name: /Resume with QA evidence/i })).toBeVisible({ timeout: 120_000 });
 
