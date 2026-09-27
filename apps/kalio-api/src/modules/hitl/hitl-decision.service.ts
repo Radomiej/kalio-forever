@@ -67,6 +67,13 @@ function parseDecision(raw: string): HitlDecisionResult {
     throw new Error('Auto HITL response is missing a boolean agree field.');
   }
 
+  if (decision !== undefined && decision !== 'allow' && decision !== 'deny' && decision !== 'ask_user') {
+    throw new Error('Auto HITL response contains an invalid decision field.');
+  }
+  if (typeof agree === 'boolean' && decision !== undefined && agree !== (decision === 'allow')) {
+    throw new Error('Auto HITL response contains conflicting agree and decision fields.');
+  }
+
   if (typeof reason !== 'string' || reason.trim().length === 0) {
     throw new Error('Auto HITL response is missing a non-empty reason field.');
   }

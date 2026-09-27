@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Loader2, Save, ShieldAlert } from 'lucide-react';
-import type { Persona } from '@kalio/types';
+import type { Credential, Persona } from '@kalio/types';
 import { HITLUnattendedSection, MAX_RAAPP_APPROVAL_TIMEOUT_MINUTES } from './HITLSettingsPanel.Unattended';
-import type { HitlConfig, HitlMode, HitlNotificationChannel, HitlUnattendedFallback } from './hitl-settings.types';
+import { HITLJevSettings } from './HITLSettingsPanel.Jev';
+import { HITLHardRules } from './HITLSettingsPanel.Rules';
+import type { HitlConfig } from './hitl-settings.types';
 
 const DEFAULT_CONFIG: HitlConfig = {
   mode: 'manual',
   autoPersonaId: null,
+  jevCredentialId: null,
+  jevInstructions: '',
+  jevApprovalThreshold: 0.9,
+  rules: [],
   unattendedFallback: 'pause',
   representativePersonaId: null,
   notificationChannel: 'none',
@@ -14,6 +20,20 @@ const DEFAULT_CONFIG: HitlConfig = {
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
 };
+
+function normalizeConfig(config: Partial<HitlConfig>): HitlConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    ...config,
+    autoPersonaId: config.autoPersonaId ?? null,
+    jevCredentialId: config.jevCredentialId ?? null,
+    jevInstructions: config.jevInstructions ?? '',
+    jevApprovalThreshold: config.jevApprovalThreshold ?? DEFAULT_CONFIG.jevApprovalThreshold,
+    rules: config.rules ?? [],
+    representativePersonaId: config.representativePersonaId ?? null,
+    externalPolicyPersonaId: config.externalPolicyPersonaId ?? null,
+  };
+}
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -36,36 +56,41 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
 export function HITLSettingsPanel() {
   const [config, setConfig] = useState<HitlConfig>(DEFAULT_CONFIG);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [credentials, setCredentials] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
+  const [credentialError, setCredentialError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const loadCredentials = useCallback(async () => {
+    try {
+      const loadedCredentials = await apiFetch<Credential[]>('/credentials', { cache: 'no-store' });
+      setCredentials(loadedCredentials);
+      setCredentialError(null);
+    } catch (err) {
+      setCredentials([]);
+      setCredentialError(err instanceof Error ? err.message : 'Failed to load OpenRouter credentials');
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    void loadCredentials();
     try {
       const [loadedConfig, loadedPersonas] = await Promise.all([
         apiFetch<HitlConfig>('/hitl/config', { cache: 'no-store' }),
         apiFetch<Persona[]>('/personas', { cache: 'no-store' }),
       ]);
-      setConfig({
-        mode: loadedConfig.mode,
-        autoPersonaId: loadedConfig.autoPersonaId ?? null,
-        unattendedFallback: loadedConfig.unattendedFallback ?? 'pause',
-        representativePersonaId: loadedConfig.representativePersonaId ?? null,
-        notificationChannel: loadedConfig.notificationChannel ?? 'none',
-        externalPolicyEnabled: loadedConfig.externalPolicyEnabled,
-        externalPolicyPersonaId: loadedConfig.externalPolicyPersonaId ?? null,
-        raAppApprovalTimeoutMs: loadedConfig.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
-      });
+      setConfig(normalizeConfig(loadedConfig));
       setPersonas(loadedPersonas);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HITL settings');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadCredentials]);
 
   useEffect(() => {
     void load();
@@ -73,6 +98,20 @@ export function HITLSettingsPanel() {
 
   const personaValidationMessage = config.mode === 'auto' && !config.autoPersonaId
     ? 'Choose a persona for auto approvals.'
+    : null;
+  const jevCredentialValidationMessage = config.mode === 'jev'
+    ? credentialError ?? (!credentials.some((credential) => (
+      credential.id === config.jevCredentialId && credential.provider.toLowerCase() === 'openrouter'
+    )) ? 'Choose an OpenRouter credential for Jev approvals.' : null)
+    : null;
+  const jevThresholdValidationMessage = config.jevApprovalThreshold < 0.51
+    || config.jevApprovalThreshold > 0.99
+    || !Number.isFinite(config.jevApprovalThreshold)
+    ? 'Jev approval threshold must be between 0.51 and 0.99.'
+    : null;
+  const invalidRuleIndex = config.rules.findIndex((rule) => !rule.name.trim());
+  const ruleValidationMessage = invalidRuleIndex >= 0
+    ? `Rule ${invalidRuleIndex + 1} needs an operation or tool name.`
     : null;
   const externalPolicyValidationMessage = config.externalPolicyEnabled && !config.externalPolicyPersonaId
     ? 'Choose a persona for the external HITL policy service.'
@@ -88,8 +127,8 @@ export function HITLSettingsPanel() {
     : null;
 
   const handleSave = async () => {
-    if (personaValidationMessage || externalPolicyValidationMessage || representativeValidationMessage || timeoutValidationMessage) {
-      setError(personaValidationMessage ?? externalPolicyValidationMessage ?? representativeValidationMessage ?? timeoutValidationMessage);
+    if (personaValidationMessage || jevCredentialValidationMessage || jevThresholdValidationMessage || ruleValidationMessage || externalPolicyValidationMessage || representativeValidationMessage || timeoutValidationMessage) {
+      setError(personaValidationMessage ?? jevCredentialValidationMessage ?? jevThresholdValidationMessage ?? ruleValidationMessage ?? externalPolicyValidationMessage ?? representativeValidationMessage ?? timeoutValidationMessage);
       return;
     }
 
@@ -97,17 +136,13 @@ export function HITLSettingsPanel() {
     setError(null);
     setSaved(false);
     try {
-      const payload: {
-        mode: HitlMode;
-        autoPersonaId?: string | null;
-        unattendedFallback: HitlUnattendedFallback;
-        representativePersonaId?: string | null;
-        notificationChannel: HitlNotificationChannel;
-        externalPolicyEnabled: boolean;
-        externalPolicyPersonaId?: string | null;
-        raAppApprovalTimeoutMs: number;
-      } = {
+      const payload: HitlConfig = {
         mode: config.mode,
+        autoPersonaId: config.mode === 'auto' || config.mode === 'jev' ? config.autoPersonaId : null,
+        jevCredentialId: config.jevCredentialId,
+        jevInstructions: config.jevInstructions,
+        jevApprovalThreshold: config.jevApprovalThreshold,
+        rules: config.rules,
         unattendedFallback: config.unattendedFallback,
         representativePersonaId: config.representativePersonaId,
         notificationChannel: config.notificationChannel,
@@ -115,23 +150,11 @@ export function HITLSettingsPanel() {
         externalPolicyPersonaId: config.externalPolicyPersonaId,
         raAppApprovalTimeoutMs: config.raAppApprovalTimeoutMs,
       };
-      if (config.mode === 'auto') {
-        payload.autoPersonaId = config.autoPersonaId;
-      }
       const updated = await apiFetch<HitlConfig>('/hitl/config', {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      setConfig({
-        mode: updated.mode,
-        autoPersonaId: updated.autoPersonaId ?? null,
-        unattendedFallback: updated.unattendedFallback ?? 'pause',
-        representativePersonaId: updated.representativePersonaId ?? null,
-        notificationChannel: updated.notificationChannel ?? 'none',
-        externalPolicyEnabled: updated.externalPolicyEnabled,
-        externalPolicyPersonaId: updated.externalPolicyPersonaId ?? null,
-        raAppApprovalTimeoutMs: updated.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
-      });
+      setConfig(normalizeConfig(updated));
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save HITL settings');
@@ -155,27 +178,26 @@ export function HITLSettingsPanel() {
         <h2 className="text-sm font-semibold text-base-content/80 mb-0.5">HITL Approvals</h2>
         <p className="text-xs text-base-content/50">
           Choose how approval-gated tools and RA-App native operations are resolved.
-          Manual keeps the current user confirmation flow, auto delegates the decision to one persona,
-          and bypass approves every approval-gated operation.
+          Manual asks the user, Auto persona delegates to a persona, Jev evaluates eligible operations, and Bypass skips fixed rules and prompts after earlier permission checks pass.
         </p>
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-xs">
+        <div role="alert" className="flex items-start gap-2 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-xs">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {saved && !error && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-success/10 border border-success/20 text-success text-xs">
+        <div role="status" className="flex items-start gap-2 p-3 rounded-lg bg-success/10 border border-success/20 text-success text-xs">
           <ShieldAlert size={14} className="mt-0.5 shrink-0" />
           <span>HITL settings saved.</span>
         </div>
       )}
 
-      <div className="space-y-3 rounded-lg border border-base-300/50 bg-base-200/30 p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-base-content/60">Approval mode</h3>
+      <fieldset className="space-y-3 rounded-lg border border-base-300/50 bg-base-200/30 p-4">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-base-content/60">Approval mode</legend>
 
         <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
           <input
@@ -193,6 +215,25 @@ export function HITLSettingsPanel() {
           <span>
             <span className="block text-sm font-medium">Manual</span>
             <span className="block text-xs text-base-content/50">User confirms every approval request.</span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
+          <input
+            aria-label="Jev"
+            type="radio"
+            name="hitl-mode"
+            className="radio radio-sm mt-0.5"
+            checked={config.mode === 'jev'}
+            onChange={() => {
+              setConfig((current) => ({ ...current, mode: 'jev' }));
+              setError(null);
+              setSaved(false);
+            }}
+          />
+          <span>
+            <span className="block text-sm font-medium">Jev 1.13</span>
+            <span className="block text-xs text-base-content/50">OpenRouter evaluates eligible operations; uncertain results go to the fallback persona or user.</span>
           </span>
         </label>
 
@@ -233,16 +274,18 @@ export function HITLSettingsPanel() {
             <span className="block text-xs text-base-content/50">Approve every gated operation without prompting.</span>
           </span>
         </label>
-      </div>
+      </fieldset>
 
       <div className="space-y-2 rounded-lg border border-base-300/50 bg-base-200/30 p-4">
         <label className="form-control gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-base-content/60">Approval persona</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+              {config.mode === 'jev' ? 'Jev fallback persona (optional)' : 'Approval persona'}
+            </span>
           <select
             aria-label="Approval persona"
             className="select select-sm select-bordered w-full"
             value={config.autoPersonaId ?? ''}
-            disabled={config.mode !== 'auto'}
+            disabled={config.mode !== 'auto' && config.mode !== 'jev'}
             onChange={(event) => {
               const nextPersonaId = event.target.value.trim();
               setConfig((current) => ({
@@ -260,9 +303,36 @@ export function HITLSettingsPanel() {
           </select>
         </label>
         <p className="text-xs text-base-content/50">
-          The selected persona must return JSON in the shape <span className="font-mono">&#123;agree, reason&#125;</span>.
+          {config.mode === 'jev'
+            ? 'Used when Jev is uncertain or unavailable. If no persona is selected, the user decides.'
+            : config.mode === 'auto'
+              ? <>The selected persona must return JSON in the shape <span className="font-mono">&#123;agree, reason&#125;</span>.</>
+              : 'Select a persona to use Auto persona mode.'}
         </p>
       </div>
+
+      {config.mode === 'jev' && (
+        <HITLJevSettings
+          config={config}
+          credentials={credentials}
+          credentialError={credentialError}
+          onRetryCredentials={() => { void loadCredentials(); }}
+          onChange={(next) => {
+            setConfig(next);
+            setError(null);
+            setSaved(false);
+          }}
+        />
+      )}
+
+      <HITLHardRules
+        config={config}
+        onChange={(next) => {
+          setConfig(next);
+          setError(null);
+          setSaved(false);
+        }}
+      />
 
       <HITLUnattendedSection
         config={config}

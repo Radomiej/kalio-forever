@@ -76,6 +76,9 @@ function isSameStep(
 }
 
 function branchSessionCandidates(runId: string, step: TraceStep): string[] {
+  if (step.speaker === 'auto_router') {
+    return [];
+  }
   const explicitSessionId = step.sessionId;
   if (explicitSessionId) {
     return [explicitSessionId];
@@ -187,9 +190,11 @@ function ArchitectureTraceCard({
   const visibleMessages = visibleTranscript(transcript);
   const tone = step.speaker === 'participant'
     ? 'border-sky-500/20 bg-sky-500/5'
-    : step.speaker === 'router'
-      ? 'border-amber-500/20 bg-amber-500/5'
-      : 'border-emerald-500/20 bg-emerald-500/5';
+    : step.speaker === 'auto_router'
+      ? 'border-cyan-500/20 bg-cyan-500/5'
+      : step.speaker === 'router'
+        ? 'border-amber-500/20 bg-amber-500/5'
+        : 'border-emerald-500/20 bg-emerald-500/5';
   const status = statusForStep(step);
   const stepTestId = step.eventId ?? step.nodeId ?? stepLabel(step).replace(/\s+/g, '-').toLowerCase();
 
@@ -206,8 +211,11 @@ function ArchitectureTraceCard({
         <div className="min-w-0 flex-1">
           <p className="font-medium text-base-content truncate">{stepLabel(step, label)}</p>
           <p className="text-[10px] uppercase tracking-wide text-base-content/40">
-            {step.speaker}
+            {step.speaker === 'auto_router' ? 'Auto-routing' : step.speaker}
             {step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}
+            {step.selectedEdgeId ? ` / edge ${step.selectedEdgeId}` : ''}
+            {step.confidence !== undefined ? ` / ${Math.round(step.confidence * 100)}%` : ''}
+            {step.decisionReason ? ` / ${step.decisionReason}` : ''}
           </p>
         </div>
         <StatusBadge status={status} />
@@ -408,6 +416,8 @@ function ArchitectureTranscriptEntry({
       <div className="mb-1 flex items-center gap-2">
         {step.speaker === 'participant' ? (
           <GitBranch size={11} className="text-sky-300" />
+        ) : step.speaker === 'auto_router' ? (
+          <Route size={11} className="text-cyan-300" />
         ) : step.speaker === 'router' ? (
           <Route size={11} className="text-amber-300" />
         ) : (
@@ -415,11 +425,14 @@ function ArchitectureTranscriptEntry({
         )}
         <p className="font-medium text-base-content">{stepLabel(step, label)}</p>
         <span className="ml-auto rounded bg-base-100/70 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-base-content/45">
-          {step.speaker}
+          {step.speaker === 'auto_router' ? 'Auto-routing' : step.speaker}
         </span>
       </div>
       <p className="mb-1 text-[10px] font-mono text-base-content/40">
-        {step.nodeId ?? step.speaker}{step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}
+          {step.nodeId ?? step.speaker}{step.nextNodeId ? ` -> ${step.nextNodeId}` : ''}
+          {step.selectedEdgeId ? ` / edge ${step.selectedEdgeId}` : ''}
+          {step.confidence !== undefined ? ` / ${Math.round(step.confidence * 100)}%` : ''}
+          {step.decisionReason ? ` / ${step.decisionReason}` : ''}
       </p>
       <p className="text-base-content/60 leading-relaxed">
         {compact(compactArchitectureTraceContent(step.content, step.speaker))}

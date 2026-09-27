@@ -73,6 +73,90 @@ describe('ArchitectureRunTimeline', () => {
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Unknown');
   });
 
+  it('renders Auto-routing choices without attaching a router persona session', () => {
+    const run: ArchitectureChatRunSummary = {
+      runId: 'run-auto',
+      schemaId: 'auto-routing-flow',
+      status: 'completed',
+      routeHops: [],
+      trace: [{
+        speaker: 'auto_router',
+        content: '',
+        eventId: 'run-auto:event:1',
+        nodeId: 'auto-route',
+        nextNodeId: 'implementer',
+        selectedEdgeId: 'choice-implementer',
+        confidence: 0.93,
+        decisionReason: 'confidence_met',
+      }],
+    };
+    const onOpenBranch = vi.fn();
+    const routerSession = {
+      id: 'router-session',
+      personaId: 'default',
+      title: 'Legacy Router session',
+      createdAt: 1,
+      updatedAt: 1,
+      runtimeContext: { runtimeKind: 'agent-flow-branch', architectureSlotId: 'orchestrator', roleSlotType: 'router' },
+    } as ChatSession;
+
+    render(
+      <ArchitectureRunTimeline
+        run={run}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={onOpenBranch}
+        runSessions={[routerSession]}
+        knownBranchSessionIds={new Set(['router-session'])}
+      />,
+    );
+
+    const step = screen.getByTestId('architecture-route-auto-routing');
+    expect(step).toHaveTextContent('Auto-routing');
+    expect(step).toHaveTextContent('to implementer');
+    expect(step).toHaveTextContent('edge choice-implementer');
+    expect(step).toHaveTextContent('93%');
+    expect(step).toHaveTextContent('confidence_met');
+    expect(screen.queryByTestId('architecture-route-router')).toBeNull();
+    expect(screen.queryByTestId('architecture-open-branch-router-session')).toBeNull();
+    expect(onOpenBranch).not.toHaveBeenCalled();
+  });
+
+  it('shows only the selected Auto-routing successor instead of presenting alternatives as parallel work', () => {
+    const run: ArchitectureRunWithGraph = {
+      runId: 'run-auto-selected',
+      schemaId: 'auto-routing-flow',
+      status: 'completed',
+      routeHops: [],
+      graphNodes: [
+        { id: 'auto-route', label: 'Choose reviewer', kind: 'auto_router', status: 'completed', eventIds: ['run-auto-selected:event:1'] },
+        { id: 'choice-agent', label: 'Choice Agent', kind: 'role', status: 'pending', eventIds: [] },
+        { id: 'default-agent', label: 'Default Agent', kind: 'role', status: 'completed', eventIds: ['run-auto-selected:event:2'] },
+      ],
+      graphEdges: [
+        { id: 'choice-edge', fromNodeId: 'auto-route', toNodeId: 'choice-agent' },
+        { id: 'default-edge', fromNodeId: 'auto-route', toNodeId: 'default-agent' },
+      ],
+      trace: [{
+        speaker: 'auto_router',
+        content: '',
+        eventId: 'run-auto-selected:event:1',
+        nodeId: 'auto-route',
+        nextNodeId: 'default-agent',
+        selectedEdgeId: 'default-edge',
+        confidence: 0,
+        decisionReason: 'credential_missing',
+      }],
+    };
+
+    render(
+      <ArchitectureRunTimeline run={run} onOpenCanvas={vi.fn()} onOpenBranch={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId('architecture-route-agent')).toHaveTextContent('Default Agent');
+    expect(screen.queryByText('Choice Agent')).toBeNull();
+    expect(screen.queryByTestId('architecture-route-parallel-agents')).toBeNull();
+  });
+
   it('surfaces router contract confidence, next action, and fallback status', () => {
     const run: ArchitectureChatRunSummary = {
       runId: 'run-1',

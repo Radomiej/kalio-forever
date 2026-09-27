@@ -12,6 +12,14 @@ This repository copy records the expected behavior for agents that only read rep
 
 Treat Kalio architecture and appflow changes as runtime-contract work, not local UI patching. Backend owns durable truth; frontend renders a rebuildable projection.
 
+### Jev Auto-routing contract
+
+- Keep `auto_router` distinct from the persona-backed `router` in schema, event, timeline, Canvas, and Execution Graph projections. An auto-router must not link to a router persona session.
+- Require one or more `choice` edges and exactly one `default` edge. Persist the selected edge keyed by run, node, and visit before dispatch; recovery must reuse that decision and consume completed successors.
+- Treat missing credentials, low confidence, timeout, malformed decisions, and provider errors as the schema's default route. Never dispatch if the durable checkpoint write fails.
+- HITL rules run after earlier permissions and before Manual/Auto/Jev modes; enforce `deny > ask_user > allow`. Do not expose OpenRouter secrets to the frontend.
+- Production automatic approval remains gated on RAD-15 control-plane authentication.
+
 ## When To Use
 
 - You are changing chat runtime, reconnect/F5 hydration, queueing, interrupt/stop, session activation, or child-session visibility.

@@ -16,6 +16,7 @@ export interface GraphDraft {
   nodePositions: Record<string, { x: number; y: number }>;
   nodeBehaviors: NodeBehaviorOverrideMap;
   nodeToolOverrides: NodeToolOverrideMap;
+  nodeAutoRouting: Record<string, NonNullable<ArchitectureSchemaNode['autoRouting']>>;
   nodeMaxToolAttempts: Record<string, number | undefined>;
   addedNodes: ArchitectNode[];
   edges: ArchitectSchema['edges'] | null;
@@ -25,6 +26,7 @@ export const EMPTY_GRAPH_DRAFT: GraphDraft = {
   nodePositions: {},
   nodeBehaviors: {},
   nodeToolOverrides: {},
+  nodeAutoRouting: {},
   nodeMaxToolAttempts: {},
   addedNodes: [],
   edges: null,
@@ -81,6 +83,7 @@ export function applyGraphDraft(
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
+      autoRouting: graphDraft.nodeAutoRouting[node.id] ?? node.autoRouting,
     })).concat(graphDraft.addedNodes.map((node) => ({
       ...node,
       ...(graphDraft.nodePositions[node.id] ?? {}),
@@ -88,6 +91,7 @@ export function applyGraphDraft(
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
+      autoRouting: graphDraft.nodeAutoRouting[node.id] ?? node.autoRouting,
     }))),
     edges: graphDraft.edges ?? schema.edges,
     contextPolicy: {
@@ -109,9 +113,25 @@ export function toSchemaNodes(schema: ArchitectSchema): ArchitectureSchemaNode[]
     maxToolAttempts: node.maxToolAttempts,
     toolOverride: node.toolOverride,
     behavior: node.behavior ? { ...node.behavior } : undefined,
+    autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
     x: node.x,
     y: node.y,
   }));
+}
+
+export function setEdgeLabel(
+  schema: ArchitectSchema,
+  currentEdges: ArchitectSchema['edges'] | null,
+  edgeId: string,
+  label: string,
+): ArchitectSchema['edges'] {
+  const sourceEdges = currentEdges ?? schema.edges;
+  if (!sourceEdges.some((edge) => edge.id === edgeId)) return sourceEdges;
+  return sourceEdges.map((edge) => (
+    edge.id === edgeId
+      ? { ...edge, label: label.length > 0 ? label : undefined }
+      : edge
+  ));
 }
 
 export function createDraftNode(
@@ -163,6 +183,17 @@ export function createDraftNode(
       connections: [],
     };
   }
+  if (kind === 'auto_router') {
+    return {
+      id,
+      label: `Auto-routing ${index}`,
+      kind,
+      autoRouting: { confidenceThreshold: 0.8, instructions: '' },
+      ...roundedPosition,
+      slots: [],
+      connections: [],
+    };
+  }
   return {
     id,
     label: `Custom Node ${index}`,
@@ -202,9 +233,13 @@ export function setEdgeSelection(
   fromNodeId: string,
   toNodeId: string,
   selection: ArchitectureSchemaEdgeSelection | undefined,
+  edgeId?: string,
 ): ArchitectSchema['edges'] {
   const sourceEdges = currentEdges ?? schema.edges;
-  const existing = sourceEdges.find((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId);
+  const existing = sourceEdges.find((edge) => edgeId
+    ? edge.id === edgeId
+    : edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId);
+  if (edgeId && !existing) return sourceEdges;
   if (existing) {
     return sourceEdges.map((edge) => (
       edge.id === existing.id
@@ -212,9 +247,15 @@ export function setEdgeSelection(
             ...edge,
             selection,
           }
-        : edge
+        : schema.nodes.find((node) => node.id === fromNodeId)?.kind === 'auto_router'
+          && selection === 'default'
+          && edge.fromNodeId === fromNodeId
+          && edge.selection === 'default'
+          ? { ...edge, selection: 'choice' }
+          : edge
     ));
   }
+  if (edgeId) return sourceEdges;
   const baseId = `${fromNodeId}-${toNodeId}`;
   const ids = new Set(sourceEdges.map((edge) => edge.id));
   let id = baseId;

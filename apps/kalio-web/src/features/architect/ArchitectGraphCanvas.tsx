@@ -310,7 +310,10 @@ export function ArchitectGraphCanvas({
 
   const nodes = schema?.nodes ?? EMPTY_NODES;
   const schemaEdges = schema?.edges ?? EMPTY_EDGES;
-  const executedEdgeIds = useMemo(() => new Set((routeHops ?? []).map((hop) => `${hop.fromNodeId}->${hop.toNodeId}`)), [routeHops]);
+  const executedEdgeIds = useMemo(() => new Set((routeHops ?? []).flatMap((hop) => hop.selectedEdgeId ? [hop.selectedEdgeId] : [])), [routeHops]);
+  const executedTransitions = useMemo(() => new Set((routeHops ?? [])
+    .filter((hop) => !hop.selectedEdgeId)
+    .map((hop) => `${hop.fromNodeId}->${hop.toNodeId}`)), [routeHops]);
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
   const edges = useMemo(() => {
     const pairs = schemaEdges.length > 0
@@ -334,10 +337,10 @@ export function ArchitectGraphCanvas({
         id: pair.id,
         path: connectionPath(source, target),
         kind,
-        executed: executedEdgeIds.has(`${pair.sourceId}->${pair.targetId}`),
+        executed: executedEdgeIds.has(pair.id) || executedTransitions.has(`${pair.sourceId}->${pair.targetId}`),
       };
     });
-  }, [executedEdgeIds, nodeById, nodes, schemaEdges, zoom]);
+  }, [executedEdgeIds, executedTransitions, nodeById, nodes, schemaEdges, zoom]);
 
   const draggingConnector = connectorDrag.draggingConnector;
   const connectionPreviewPath = useMemo(() => {

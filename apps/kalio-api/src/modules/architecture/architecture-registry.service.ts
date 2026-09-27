@@ -76,6 +76,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
       const nodes = (dto.nodes ?? baseSchema.nodes).map((node) => ({
         ...node,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
+        autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
         kind: nodeKindOverrides[node.id] ?? node.kind,
       }));
       const variant: ArchitectureSchema = {
@@ -245,6 +246,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
       nodes: schema.nodes.map((node) => ({
         ...node,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
+        autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
       })),
       edges: schema.edges.map((edge) => ({ ...edge })),
       routerPolicy: { ...schema.routerPolicy },
@@ -381,6 +383,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
     return value === 'parallel'
       || value === 'role'
       || value === 'router'
+      || value === 'auto_router'
       || value === 'artifact';
   }
 

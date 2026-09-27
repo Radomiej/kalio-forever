@@ -156,6 +156,56 @@ describe('architecture runtime schema utils', () => {
     })).toThrow(BadRequestException);
   });
 
+  it('validates auto-routing choice/default edges and clones its node configuration', () => {
+    const schema: ArchitectureSchema = {
+      ...validSchema,
+      nodes: [
+        ...validSchema.nodes,
+        {
+          id: 'auto-route',
+          label: 'Auto-routing',
+          kind: 'auto_router',
+          autoRouting: { confidenceThreshold: 0.8, instructions: 'Choose the best next step.' },
+        },
+      ],
+      edges: [
+        ...validSchema.edges,
+        { id: 'route-to-choice', fromNodeId: 'auto-route', toNodeId: 'router-node', selection: 'choice' },
+        { id: 'route-to-fallback', fromNodeId: 'auto-route', toNodeId: 'final-node', selection: 'default' },
+      ],
+    };
+
+    expect(validateArchitectureCreateRunDto({ schemaId: schema.id, prompt: 'Route this task.', schema })).toBeDefined();
+    const clone = cloneArchitectureRuntimeSchema(schema);
+    expect(clone.nodes.find((node) => node.id === 'auto-route')?.autoRouting).toEqual({
+      confidenceThreshold: 0.8,
+      instructions: 'Choose the best next step.',
+    });
+    expect(clone.nodes.find((node) => node.id === 'auto-route')?.autoRouting).not.toBe(
+      schema.nodes.find((node) => node.id === 'auto-route')?.autoRouting,
+    );
+
+    const invalidSchemas = [
+      { ...schema, edges: schema.edges.filter((edge) => edge.selection !== 'choice') },
+      { ...schema, edges: [...schema.edges, { id: 'route-default-2', fromNodeId: 'auto-route', toNodeId: 'router-node', selection: 'default' as const }] },
+      { ...schema, edges: schema.edges.filter((edge) => edge.fromNodeId !== 'auto-route' || edge.selection !== 'default') },
+      {
+        ...schema,
+        nodes: schema.nodes.map((node) => node.id === 'auto-route'
+          ? { ...node, autoRouting: { confidenceThreshold: 1.1, instructions: '' } }
+          : node),
+      },
+    ];
+
+    for (const invalidSchema of invalidSchemas) {
+      expect(() => validateArchitectureCreateRunDto({
+        schemaId: invalidSchema.id,
+        prompt: 'Route this task.',
+        schema: invalidSchema,
+      })).toThrow(BadRequestException);
+    }
+  });
+
   it('rejects invalid inline schema node behavior and topology contracts', () => {
     const cases: Array<[string, ArchitectureSchema]> = [
       [

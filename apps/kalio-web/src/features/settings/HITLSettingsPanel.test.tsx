@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Persona } from '@kalio/types';
+import type { Credential, HitlConfig, Persona } from '@kalio/types';
 import { HITLSettingsPanel } from './HITLSettingsPanel';
 import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
@@ -32,23 +32,34 @@ const PERSONAS: Persona[] = [
   },
 ];
 
-function installFetchMock(initialConfig = {
-  mode: 'manual',
-  autoPersonaId: null as string | null,
-  unattendedFallback: 'pause' as 'pause' | 'representative',
+const CREDENTIALS: Credential[] = [
+  { id: 'openrouter-management', name: 'OpenRouter management', provider: 'openrouter', createdAt: 3 },
+  { id: 'openai-key', name: 'OpenAI', provider: 'openai', createdAt: 4 },
+];
+
+function installFetchMock(initialConfig: Partial<HitlConfig> = {}) {
+  const state: { config: HitlConfig } = { config: {
+    mode: 'manual',
+    autoPersonaId: null as string | null,
+    jevCredentialId: null,
+    jevInstructions: '',
+    jevApprovalThreshold: 0.9,
+    rules: [],
+    unattendedFallback: 'pause' as 'pause' | 'representative',
   representativePersonaId: null as string | null,
   notificationChannel: 'none' as 'none' | 'telegram',
   externalPolicyEnabled: false,
-  externalPolicyPersonaId: null as string | null,
-  raAppApprovalTimeoutMs: 600_000,
-}) {
+    externalPolicyPersonaId: null as string | null,
+    raAppApprovalTimeoutMs: 600_000,
+    ...initialConfig,
+  } };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, opts?: RequestInit) => {
       const method = opts?.method?.toUpperCase() ?? 'GET';
 
       if (method === 'GET' && url === '/api/hitl/config') {
-        return new Response(JSON.stringify(initialConfig), {
+        return new Response(JSON.stringify(state.config), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -61,8 +72,16 @@ function installFetchMock(initialConfig = {
         });
       }
 
+      if (method === 'GET' && url === '/api/credentials') {
+        return new Response(JSON.stringify(CREDENTIALS), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       if (method === 'PUT' && url === '/api/hitl/config') {
-        return new Response(String(opts?.body ?? '{}'), {
+        state.config = JSON.parse(String(opts?.body ?? '{}')) as HitlConfig;
+        return new Response(JSON.stringify(state.config), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -102,6 +121,10 @@ describe('HITLSettingsPanel', () => {
       expect(getPutBody()).toEqual({
         mode: 'auto',
         autoPersonaId: 'ops-persona',
+        jevCredentialId: null,
+        jevInstructions: '',
+        jevApprovalThreshold: 0.9,
+        rules: [],
         unattendedFallback: 'pause',
         representativePersonaId: null,
         notificationChannel: 'none',
@@ -127,7 +150,7 @@ describe('HITLSettingsPanel', () => {
     expect(getPutBody()).toBeNull();
   });
 
-  it('does not send stale autoPersonaId when saving manual mode', async () => {
+  it('clears a stale autoPersonaId when saving manual mode', async () => {
     installFetchMock({
       mode: 'auto',
       autoPersonaId: 'ops-persona',
@@ -148,6 +171,11 @@ describe('HITLSettingsPanel', () => {
     await waitFor(() => {
       expect(getPutBody()).toEqual({
         mode: 'manual',
+        autoPersonaId: null,
+        jevCredentialId: null,
+        jevInstructions: '',
+        jevApprovalThreshold: 0.9,
+        rules: [],
         unattendedFallback: 'pause',
         representativePersonaId: null,
         notificationChannel: 'none',
@@ -156,6 +184,56 @@ describe('HITLSettingsPanel', () => {
         raAppApprovalTimeoutMs: 600_000,
       });
     });
+  });
+
+  it('saves Jev settings, hard rules, and an optional fallback persona for the next load', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<HITLSettingsPanel />);
+    await screen.findByText('HITL Approvals');
+
+    await user.click(screen.getByLabelText('Jev'));
+    fireEvent.change(screen.getByLabelText('Approval persona'), { target: { value: 'ops-persona' } });
+    fireEvent.change(screen.getByLabelText('Jev OpenRouter credential'), { target: { value: 'openrouter-management' } });
+    fireEvent.change(screen.getByLabelText('Jev approval threshold'), { target: { value: '0.85' } });
+    fireEvent.change(screen.getByLabelText('Jev approval instructions'), { target: { value: 'Allow only bounded read operations.' } });
+    await user.click(screen.getByRole('button', { name: 'Add hard rule' }));
+    fireEvent.change(screen.getByLabelText('Rule 1 operation type'), { target: { value: 'raapp_native' } });
+    fireEvent.change(screen.getByLabelText('Rule 1 name'), { target: { value: 'terminal_spawn' } });
+    fireEvent.change(screen.getByLabelText('Rule 1 decision'), { target: { value: 'deny' } });
+    fireEvent.change(screen.getByLabelText('Rule 1 executable'), { target: { value: 'powershell.exe' } });
+    fireEvent.change(screen.getByLabelText('Rule 1 argument substring'), { target: { value: '--production' } });
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getPutBody()).toMatchObject({
+        mode: 'jev',
+        autoPersonaId: 'ops-persona',
+        jevCredentialId: 'openrouter-management',
+        jevInstructions: 'Allow only bounded read operations.',
+        jevApprovalThreshold: 0.85,
+        rules: [{ kind: 'raapp_native', name: 'terminal_spawn', decision: 'deny', executable: 'powershell.exe', argumentsContains: '--production' }],
+      });
+    });
+
+    unmount();
+    render(<HITLSettingsPanel />);
+    await screen.findByText('HITL Approvals');
+    expect(screen.getByLabelText('Jev')).toBeChecked();
+    expect(screen.getByLabelText('Jev OpenRouter credential')).toHaveValue('openrouter-management');
+    expect(screen.getByLabelText('Jev approval threshold')).toHaveValue(0.85);
+    expect(screen.getByLabelText('Rule 1 decision')).toHaveValue('deny');
+  });
+
+  it('requires an OpenRouter credential before enabling Jev approval mode', async () => {
+    const user = userEvent.setup();
+    render(<HITLSettingsPanel />);
+    await screen.findByText('HITL Approvals');
+
+    await user.click(screen.getByLabelText('Jev'));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose an OpenRouter credential for Jev approvals.');
+    expect(getPutBody()).toBeNull();
   });
 
   it('persists external HITL policy enablement with a persona', async () => {

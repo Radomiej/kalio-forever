@@ -1,5 +1,5 @@
 import type { ArchitectureNodeKind } from '@kalio/types';
-import { Bot, Box, GitBranch, HelpCircle, LayoutTemplate, LocateFixed, Merge, Minus, MoreHorizontal, MousePointer2, Plus, Route } from 'lucide-react';
+import { Bot, Box, GitBranch, HelpCircle, LayoutTemplate, LocateFixed, Merge, Minus, MoreHorizontal, MousePointer2, Plus, Route, Workflow } from 'lucide-react';
 import { useState } from 'react';
 
 type EditMode = 'select' | 'add' | 'connect';
@@ -23,6 +23,7 @@ const PALETTE: ReadonlyArray<{
 }> = [
   { kind: 'role', label: 'Agent', title: 'Add agent node', icon: Bot },
   { kind: 'router', label: 'Router', title: 'Add router node', icon: Route },
+  { kind: 'auto_router', label: 'Auto-routing', title: 'Add Jev auto-routing node', icon: Workflow },
   { kind: 'parallel', label: 'Parallel', title: 'Add parallel router node', icon: GitBranch },
   { kind: 'artifact', label: 'Artifact', title: 'Add final artifact node', icon: Box },
 ];

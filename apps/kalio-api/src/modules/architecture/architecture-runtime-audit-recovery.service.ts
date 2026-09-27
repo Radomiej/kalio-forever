@@ -201,11 +201,21 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
     if (!this.audit) {
       return [];
     }
-    const rows = await this.audit.listEntries({
-      limit: 5000,
-      source: 'all',
-      runId,
-    });
+    const pageSize = 5_000;
+    const rows: AuditLogEntry[] = [];
+    const until = Date.now();
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.audit.listEntries({
+        limit: pageSize,
+        offset,
+        source: 'all',
+        types: ['architecture_event', 'tool_result', 'error'],
+        runId,
+        until,
+      });
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
     return rows
       .filter((row) => {
         const data = this.auditData(row);

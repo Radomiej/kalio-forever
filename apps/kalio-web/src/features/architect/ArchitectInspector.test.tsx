@@ -92,8 +92,53 @@ describe('ArchitectInspector', () => {
     await user.click(screen.getByTestId('architect-node-properties-open'));
     await user.selectOptions(screen.getByTestId('architect-edge-selection-pragmatist-review'), 'converge');
 
-    expect(onEdgeSelectionOverride).toHaveBeenLastCalledWith('pragmatist', 'review', 'converge');
+    expect(onEdgeSelectionOverride).toHaveBeenLastCalledWith('pragmatist', 'review', 'converge', 'pragmatist-review');
     expect(screen.queryByTestId('architect-node-converge-target')).toBeNull();
+  });
+
+  it('edits Jev confidence and instructions for auto-routing nodes', async () => {
+    const user = userEvent.setup();
+    const onAutoRoutingOverride = vi.fn();
+    render(<InspectorHarness
+      node={{ ...baseNode, kind: 'auto_router', autoRouting: { confidenceThreshold: 0.75, instructions: 'Prefer the agent.' } }}
+      onAutoRoutingOverride={onAutoRoutingOverride}
+    />);
+
+    await user.click(screen.getByTestId('architect-node-properties-open'));
+    expect(screen.getByTestId('architect-auto-routing-confidence')).toHaveValue(0.75);
+    expect(screen.getByTestId('architect-auto-routing-instructions')).toHaveValue('Prefer the agent.');
+
+    fireEvent.change(screen.getByTestId('architect-auto-routing-confidence'), { target: { value: '0.88' } });
+    expect(onAutoRoutingOverride).toHaveBeenLastCalledWith('pragmatist', {
+      confidenceThreshold: 0.88,
+      instructions: 'Prefer the agent.',
+    });
+    fireEvent.change(screen.getByTestId('architect-auto-routing-instructions'), { target: { value: 'Use the default when uncertain.' } });
+    expect(onAutoRoutingOverride).toHaveBeenLastCalledWith('pragmatist', {
+      confidenceThreshold: 0.75,
+      instructions: 'Use the default when uncertain.',
+    });
+  });
+
+  it('requires Auto-routing edges to have a role and edits the Jev choice label', async () => {
+    const user = userEvent.setup();
+    const onEdgeLabelOverride = vi.fn();
+    const schema: ArchitectSchema = {
+      ...baseSchema,
+      nodes: baseSchema.nodes.map((candidate) => candidate.id === 'pragmatist' ? { ...candidate, kind: 'auto_router' } : candidate),
+      edges: [{ id: 'choice-edge', fromNodeId: 'pragmatist', toNodeId: 'review', selection: 'choice' }],
+    };
+    render(<InspectorHarness
+      node={{ ...baseNode, kind: 'auto_router', autoRouting: { confidenceThreshold: 0.8, instructions: '' } }}
+      schema={schema}
+      onEdgeLabelOverride={onEdgeLabelOverride}
+    />);
+
+    await user.click(screen.getByTestId('architect-node-properties-open'));
+
+    expect(screen.queryByRole('option', { name: 'Normal transition' })).toBeNull();
+    await user.type(screen.getByTestId('architect-edge-label-choice-edge'), 'Choose implementation');
+    expect(onEdgeLabelOverride).toHaveBeenLastCalledWith('choice-edge', 'Choose implementation');
   });
 
   it('collapses the inspector to a narrow restore control', () => {
@@ -121,19 +166,27 @@ describe('ArchitectInspector', () => {
 function InspectorHarness({
   collapsed = false,
   onCollapsedChange,
+  node = baseNode,
   onNodeMaxToolAttemptsOverride = vi.fn(),
   onNodeToolOverride = vi.fn(),
+  onAutoRoutingOverride = vi.fn(),
   onEdgeSelectionOverride = vi.fn(),
+  onEdgeLabelOverride = vi.fn(),
+  schema: initialSchema = baseSchema,
 }: {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  node?: ArchitectNode;
   onNodeMaxToolAttemptsOverride?: (nodeId: string, maxToolAttempts?: number) => void;
   onNodeToolOverride?: (nodeId: string, toolOverride?: NonNullable<ArchitectNode['toolOverride']>) => void;
-  onEdgeSelectionOverride?: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection) => void;
+  onAutoRoutingOverride?: (nodeId: string, autoRouting: NonNullable<ArchitectNode['autoRouting']>) => void;
+  onEdgeSelectionOverride?: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection, edgeId?: string) => void;
+  onEdgeLabelOverride?: (edgeId: string, label: string) => void;
+  schema?: ArchitectSchema;
 }) {
-  const [nodeState, setNodeState] = useState<ArchitectNode>(baseNode);
+  const [nodeState, setNodeState] = useState<ArchitectNode>(node);
   const [personaOverrides, setPersonaOverrides] = useState<PersonaOverrideMap>({});
-  const [schema, setSchema] = useState<ArchitectSchema>(baseSchema);
+  const [schema, setSchema] = useState<ArchitectSchema>(initialSchema);
 
   return (
     <ArchitectInspector
@@ -157,6 +210,7 @@ function InspectorHarness({
       }}
       onNodeKindOverride={vi.fn()}
       onNodeBehaviorOverride={vi.fn()}
+      onAutoRoutingOverride={onAutoRoutingOverride}
       onNodeMaxToolAttemptsOverride={(nodeId, maxToolAttempts) => {
         setNodeState((current) => (
           current.id === nodeId
@@ -173,16 +227,23 @@ function InspectorHarness({
         ));
         onNodeToolOverride(nodeId, toolOverride);
       }}
-      onEdgeSelectionOverride={(fromNodeId, toNodeId, selection) => {
+      onEdgeSelectionOverride={(fromNodeId, toNodeId, selection, edgeId) => {
         setSchema((current) => ({
           ...current,
           edges: current.edges.map((edge) => (
-            edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId
+            (edgeId ? edge.id === edgeId : edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId)
               ? { ...edge, selection }
               : edge
           )),
         }));
-        onEdgeSelectionOverride(fromNodeId, toNodeId, selection);
+        onEdgeSelectionOverride(fromNodeId, toNodeId, selection, edgeId);
+      }}
+      onEdgeLabelOverride={(edgeId, label) => {
+        setSchema((current) => ({
+          ...current,
+          edges: current.edges.map((edge) => edge.id === edgeId ? { ...edge, label } : edge),
+        }));
+        onEdgeLabelOverride(edgeId, label);
       }}
       onCollapsedChange={onCollapsedChange}
       onContextPolicyOverride={(slotId, override) => {

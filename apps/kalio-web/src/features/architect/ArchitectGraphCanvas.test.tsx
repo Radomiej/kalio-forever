@@ -38,6 +38,28 @@ describe('ArchitectGraphCanvas', () => {
     expect(screen.getByTestId('architect-edge-start-end')).toHaveClass('animate-pulse');
   });
 
+  it('highlights the selected edge ID when multiple choices share endpoints', () => {
+    renderCanvas({
+      ...baseSchema,
+      nodes: [{ ...baseSchema.nodes[0], kind: 'auto_router' }, baseSchema.nodes[1]],
+      edges: [
+        { id: 'choice-a', fromNodeId: 'start', toNodeId: 'end', selection: 'choice' },
+        { id: 'choice-b', fromNodeId: 'start', toNodeId: 'end', selection: 'choice' },
+      ],
+    }, vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn(), [{
+      eventId: 'event-2',
+      source: 'jev_choice',
+      fromNodeId: 'start',
+      toNodeId: 'end',
+      selectedEdgeId: 'choice-b',
+      confidence: 0.91,
+      decisionReason: 'confidence_met',
+    }]);
+
+    expect(screen.getByTestId('architect-edge-choice-a')).not.toHaveClass('stroke-emerald-300/90');
+    expect(screen.getByTestId('architect-edge-choice-b')).toHaveClass('stroke-emerald-300/90');
+  });
+
   it('styles edge types as forced, routing, or parallel transitions', () => {
     renderCanvas({
       ...baseSchema,

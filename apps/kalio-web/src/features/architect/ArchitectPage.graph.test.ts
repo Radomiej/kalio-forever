@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ArchitectSchema } from './architect.types';
-import { applyGraphDraft, EMPTY_GRAPH_DRAFT, setEdgeSelection, toSchemaNodes } from './ArchitectPage.graph';
+import { applyGraphDraft, createDraftNode, EMPTY_GRAPH_DRAFT, setEdgeLabel, setEdgeSelection, toSchemaNodes } from './ArchitectPage.graph';
 
 describe('ArchitectPage graph draft', () => {
   it('preserves explicit node tool overrides when building runtime schema nodes', () => {
@@ -36,6 +36,49 @@ describe('ArchitectPage graph draft', () => {
       fromNodeId: 'orchestrator',
       toNodeId: 'artifact',
     }]);
+  });
+
+  it('creates and serializes an auto-routing node with its Jev threshold and instructions', () => {
+    const schema = makeSchema();
+    const node = createDraftNode(schema.nodes, { x: 600, y: 240 }, 'auto_router');
+    const drafted = applyGraphDraft(schema, {}, {
+      ...EMPTY_GRAPH_DRAFT,
+      addedNodes: [node],
+    });
+
+    expect(node).toMatchObject({
+      kind: 'auto_router',
+      autoRouting: { confidenceThreshold: 0.8, instructions: '' },
+    });
+    expect(node).not.toHaveProperty('roleSlotId');
+    expect(toSchemaNodes(drafted as ArchitectSchema).at(-1)?.autoRouting).toEqual({
+      confidenceThreshold: 0.8,
+      instructions: '',
+    });
+  });
+
+  it('changes an auto-router default by stable edge ID and turns the previous default into a choice', () => {
+    const schema = makeSchema();
+    schema.nodes[0] = { ...schema.nodes[0], kind: 'auto_router' };
+    const edges = [
+      { id: 'agent-route', fromNodeId: 'orchestrator', toNodeId: 'artifact', selection: 'default' as const },
+      { id: 'fallback-route', fromNodeId: 'orchestrator', toNodeId: 'artifact', selection: 'choice' as const },
+    ];
+
+    expect(setEdgeSelection(schema, edges, 'orchestrator', 'artifact', 'default', 'fallback-route')).toEqual([
+      { ...edges[0], selection: 'choice' },
+      { ...edges[1], selection: 'default' },
+    ]);
+  });
+
+  it('edits a Jev choice label by stable edge ID', () => {
+    const schema = makeSchema();
+    const edges = [{ id: 'choice-agent', fromNodeId: 'orchestrator', toNodeId: 'artifact', selection: 'choice' as const }];
+
+    expect(setEdgeLabel(schema, edges, 'choice-agent', 'Use the implementation agent')).toEqual([
+      { ...edges[0], label: 'Use the implementation agent' },
+    ]);
+    expect(setEdgeLabel(schema, edges, 'missing', 'Ignored')).toEqual(edges);
   });
 });
 

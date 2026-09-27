@@ -279,6 +279,45 @@ describe('ArchitectureRegistryService', () => {
     ]));
   });
 
+  it('persists Auto-routing nodes and their Jev edge configuration in variants', async () => {
+    const registryPath = await makeTempRegistryPath(tempDirs);
+    const service = new ArchitectureRegistryService(makeConfig(registryPath));
+
+    const variant = await service.createVariant('strategic-decision-council', {
+      name: 'Auto-routing council',
+      nodes: [
+        {
+          id: 'auto-route',
+          label: 'Auto-routing',
+          kind: 'auto_router',
+          autoRouting: { confidenceThreshold: 0.8, instructions: 'Choose the best reviewer.' },
+        },
+        { id: 'reviewer', label: 'Reviewer', kind: 'role', roleSlotId: 'pragmatist' },
+        { id: 'fallback', label: 'Fallback', kind: 'role', roleSlotId: 'innovator' },
+        { id: 'final-artifact', label: 'Final Artifact', kind: 'artifact', roleSlotId: 'finalizer' },
+      ],
+      edges: [
+        { id: 'auto-choice', fromNodeId: 'auto-route', toNodeId: 'reviewer', selection: 'choice', label: 'Review delivery risk.' },
+        { id: 'auto-default', fromNodeId: 'auto-route', toNodeId: 'fallback', selection: 'default' },
+        { id: 'reviewer-final', fromNodeId: 'reviewer', toNodeId: 'final-artifact' },
+        { id: 'fallback-final', fromNodeId: 'fallback', toNodeId: 'final-artifact' },
+      ],
+    });
+
+    expect(variant?.nodes.find((node) => node.id === 'auto-route')).toMatchObject({
+      kind: 'auto_router',
+      autoRouting: { confidenceThreshold: 0.8, instructions: 'Choose the best reviewer.' },
+    });
+    expect(service.findOne(variant?.id ?? '')?.nodes.find((node) => node.id === 'auto-route')?.autoRouting)
+      .toEqual({ confidenceThreshold: 0.8, instructions: 'Choose the best reviewer.' });
+    expect(variant?.edges).toContainEqual(expect.objectContaining({
+      id: 'auto-choice',
+      selection: 'choice',
+      label: 'Review delivery risk.',
+    }));
+    expect(variant?.edges).toContainEqual(expect.objectContaining({ id: 'auto-default', selection: 'default' }));
+  });
+
   it('returns null when creating a variant from a missing schema', async () => {
     const service = new ArchitectureRegistryService();
 

@@ -114,7 +114,7 @@ export async function terminateManagedProcess(lease: ManagedVscodeLease, rootHas
 
 async function inspectProcess(pid: number): Promise<ManagedProcessIdentity | undefined> {
   if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return undefined;
-  const script = `$p=Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\"; if ($null -eq $p) { exit 1 }; $p | Select-Object ProcessId,ExecutablePath,CommandLine,@{Name='CreationDateUtc';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress`;
+  const script = `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($null -eq $p) { exit 1 }; $p | Select-Object ProcessId,ExecutablePath,CommandLine,@{Name='CreationDateUtc';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress`;
   try {
     const result = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 5_000, windowsHide: true });
     const parsed = JSON.parse(String(result.stdout)) as { ProcessId?: number; ExecutablePath?: string; CommandLine?: string; CreationDateUtc?: string };

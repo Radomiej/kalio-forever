@@ -9,6 +9,7 @@ import type {
   ArchitectureRun,
   CreateArchitectureRunDto,
 } from '@kalio/types';
+import { randomUUID } from 'node:crypto';
 import { SessionsService } from '../chat/sessions.service';
 import { SessionManagerService } from '../chat/session-manager.service';
 import { AuditService } from '../chat/audit.service';
@@ -33,10 +34,9 @@ import {
 import { terminalWorkflowFailureFromEvents } from './architecture-runtime-failure.utils';
 import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import {
-  getArchitectureHistorySessionId,
-  getArchitectureHostSessionId,
-  getArchitectureParentSessionId,
-} from './architecture-session-context';
+  architectureRunBelongsToSessionSet,
+  findActiveArchitectureRunSessionId,
+} from './architecture-runtime-session.utils';
 import type { ArchitectureRuntimeStopPort } from '../chat/architecture-runtime-stop.port';
 import { ArchitectureRunPreparationService, type PreparedArchitectureRun } from './architecture-run-preparation.service';
 import {
@@ -49,6 +49,14 @@ import {
 } from './architecture-runtime-audit-recovery.service';
 import { ArchitectureRuntimeChatProjectionService } from './architecture-runtime-chat-projection.service';
 import { ArchitectureRuntimeGraphProjectionService } from './architecture-runtime-graph-projection.service';
+import { ArchitectureAutoRoutingService } from './architecture-auto-routing.service';
+import {
+  mergeArchitectureRuntimeEvents,
+  recoverAutoRoutingCursor,
+  type ArchitectureRuntimeResumeCursor,
+} from './architecture-runtime-auto-routing-recovery.utils';
+import { createArchitectureRuntimeAutoRoutingHooks } from './architecture-runtime-auto-routing-hooks';
+import { ArchitectureRuntimeRunAbort } from './architecture-runtime-run-abort';
 
 @Injectable()
 export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
@@ -58,6 +66,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   private readonly schemasByRunId = new Map<string, ArchitectureSchema>();
   private readonly stoppedRunIds = new Set<string>();
   private readonly activeRunExecutions = new Map<string, Promise<ArchitectureRun>>();
+  private readonly runAbortControllers = new ArchitectureRuntimeRunAbort();
   private readonly preparation: ArchitectureRunPreparationService;
   private readonly auditWriter: ArchitectureRuntimeAuditWriter;
   private readonly auditRecovery: ArchitectureRuntimeAuditRecovery;
@@ -78,6 +87,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     @Optional() @Inject(ArchitectureRuntimeAuditRecoveryService) auditRecovery?: ArchitectureRuntimeAuditRecovery,
     @Optional() chatProjection?: ArchitectureRuntimeChatProjectionService,
     @Optional() graphProjection?: ArchitectureRuntimeGraphProjectionService,
+    @Optional() private readonly autoRouting?: ArchitectureAutoRoutingService,
   ) {
     // TODO: legacy fallback: preserve direct-construction compatibility for existing tests and integrations.
     this.preparation = preparation ?? new ArchitectureRunPreparationService(registry, sessions, vfs, cliAgentConfig);
@@ -93,7 +103,9 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
 
   async createRun(dto: CreateArchitectureRunDto, emit?: ArchitectureRoleExecutionInput['emit']): Promise<ArchitectureRun> {
     const prepared = await this.preparation.prepareRun(dto, 'running');
-    return this.executePreparedRun(prepared, emit);
+    return this.runAbortControllers.execute(prepared.run.id, (signal) => (
+      this.executePreparedRun(prepared, emit, undefined, undefined, undefined, signal)
+    ));
   }
 
   async createRunAsync(dto: CreateArchitectureRunDto, emit?: ArchitectureRoleExecutionInput['emit']): Promise<ArchitectureRun> {
@@ -104,7 +116,9 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     this.eventsByRunId.set(prepared.run.id, liveEvents);
     await this.chatProjection.persistParentSafely(prepared.schema, prepared.run, liveEvents);
 
-    const execution = this.executePreparedRun(prepared, emit, liveEvents).catch(async (error: unknown) => {
+    const execution = this.runAbortControllers.execute(prepared.run.id, (signal) => (
+      this.executePreparedRun(prepared, emit, liveEvents, undefined, undefined, signal)
+    )).catch(async (error: unknown) => {
       if (prepared.run.status !== 'running' || this.stoppedRunIds.has(prepared.run.id)) {
         return this.runs.get(prepared.run.id) ?? prepared.run;
       }
@@ -153,10 +167,29 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     emit?: ArchitectureRoleExecutionInput['emit'],
     liveEvents?: ArchitectureExecutionEvent[],
     priorEvents?: ArchitectureExecutionEvent[],
-    resumeFrom?: AgentFlowContinuationCursor,
+    resumeFrom?: AgentFlowContinuationCursor | ArchitectureRuntimeResumeCursor,
+    signal?: AbortSignal,
   ): Promise<ArchitectureRun> {
     const { hydration, run, schema } = prepared;
     const emittedEvents = liveEvents ?? [];
+    const eventHooks = createArchitectureRuntimeAutoRoutingHooks({
+      run,
+      signal,
+      autoRouting: this.autoRouting,
+      emittedEvents,
+      liveEvents,
+      getEvents: () => this.eventsByRunId.get(run.id) ?? emittedEvents,
+      isStopped: () => this.stoppedRunIds.has(run.id),
+      persistDecision: (event, checkpointId) => this.auditWriter.logRouteDecisionRequired(schema, run, event, checkpointId),
+      persistStoppedEvent: (event) => {
+        this.eventsByRunId.set(run.id, mergeArchitectureRuntimeEvents(this.getEvents(run.id), [event]));
+      },
+      updateRun: () => {
+        run.updatedAt = Date.now();
+        this.runs.set(run.id, run);
+      },
+      logEvent: (event) => this.auditWriter.logEvent(schema, run, event),
+    });
     let events: ArchitectureExecutionEvent[];
     try {
       events = await createArchitectureGraphEvents({
@@ -168,17 +201,9 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
         priorEvents,
         resumeFrom,
         emit,
-        onEvent: (event) => {
-          if (this.stoppedRunIds.has(run.id)) {
-            throw new Error(`Architecture run ${run.id} was stopped by the user.`);
-          }
-          emittedEvents.push(event);
-          if (liveEvents) {
-            run.updatedAt = Date.now();
-            this.runs.set(run.id, run);
-            this.auditWriter.logEvent(schema, run, event);
-          }
-        },
+        chooseAutoRoute: eventHooks.chooseAutoRoute,
+        persistAutoRouteDecision: eventHooks.persistAutoRouteDecision,
+        onEvent: eventHooks.onEvent,
       });
     } catch (error) {
       if (emittedEvents.length === 0) {
@@ -279,12 +304,14 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       completedAt: now,
     };
     this.stoppedRunIds.add(id);
+    this.runAbortControllers.abort(id, new Error(`Architecture run ${id} was stopped by the user.`));
     this.runs.set(id, stoppedRun);
     const events = this.eventsByRunId.get(id) ?? await this.getEventsDurable(id);
+    const sequence = Math.max(0, ...events.map((event) => event.sequence)) + 1;
     const stopEvent: ArchitectureExecutionEvent = {
-      id: `${id}:event:${events.length + 1}`,
+      id: `${id}:event:stop:${randomUUID()}`,
       runId: id,
-      sequence: events.length + 1,
+      sequence,
       type: 'run_stopped',
       message: 'Architecture run stopped by user.',
       actionSummary: architectureActionSummaryForEvent('run_stopped'),
@@ -320,7 +347,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       if (run.status !== 'running' && run.status !== 'queued') {
         continue;
       }
-      if (!this.runBelongsToSessionSet(run, sessionIdSet)) {
+      if (!architectureRunBelongsToSessionSet(run, sessionIdSet)) {
         continue;
       }
       await this.stopRun(run.id);
@@ -342,35 +369,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
   }
 
   findActiveSessionIdForSessions(sessionIds: readonly string[]): string | undefined {
-    const sessionIdSet = new Set(sessionIds.filter((sessionId) => sessionId.trim().length > 0));
-    for (const run of this.runs.values()) {
-      if (run.status !== 'running' && run.status !== 'queued') {
-        continue;
-      }
-      const runSessionIds = [
-        run.rootSessionId,
-        ...Object.values(run.branchSessionIds ?? {}),
-        getArchitectureParentSessionId(run.context),
-        getArchitectureHostSessionId(run.context),
-        getArchitectureHistorySessionId(run.context),
-      ].filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0);
-      const activeSessionId = runSessionIds.find((sessionId) => sessionIdSet.has(sessionId));
-      if (activeSessionId) {
-        return activeSessionId;
-      }
-    }
-    return undefined;
-  }
-
-  private runBelongsToSessionSet(run: ArchitectureRun, sessionIds: ReadonlySet<string>): boolean {
-    const runSessionIds = [
-      run.rootSessionId,
-      ...Object.values(run.branchSessionIds ?? {}),
-      getArchitectureParentSessionId(run.context),
-      getArchitectureHostSessionId(run.context),
-      getArchitectureHistorySessionId(run.context),
-    ].filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0);
-    return runSessionIds.some((sessionId) => sessionIds.has(sessionId));
+    return findActiveArchitectureRunSessionId(this.runs.values(), sessionIds);
   }
 
   getEvents(runId: string): ArchitectureExecutionEvent[] {
@@ -379,10 +378,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
 
   async getEventsDurable(runId: string): Promise<ArchitectureExecutionEvent[]> {
     const liveEvents = this.getEvents(runId);
-    if (liveEvents.length > 0) {
-      return liveEvents;
-    }
-    return this.auditRecovery.reconstructEvents(runId);
+    const persistedEvents = await this.auditRecovery.reconstructEvents(runId);
+    return mergeArchitectureRuntimeEvents(liveEvents, persistedEvents);
   }
 
   async resumeRun(
@@ -390,6 +387,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     dto: { input?: string; context?: Record<string, unknown>; maxSteps?: number; continuation?: AgentFlowContinuationCursor },
     emit?: ArchitectureRoleExecutionInput['emit'],
   ): Promise<ArchitectureRun> {
+    const activeExecution = this.activeRunExecutions.get(runId);
+    await this.runAbortControllers.waitForStoppedExecution(this.stoppedRunIds.has(runId), activeExecution);
     const existing = await this.findRunDurable(runId);
     if (!existing) {
       throw new NotFoundException(`Architecture run ${runId} not found`);
@@ -398,6 +397,8 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
     if (!schema) {
       throw new NotFoundException(`Architecture schema ${existing.schemaId} not found`);
     }
+    const priorEvents = await this.getEventsDurable(runId);
+    const resumeFrom = dto.continuation ?? recoverAutoRoutingCursor(schema, priorEvents);
     const now = Date.now();
     const context = {
       ...(existing.context ?? {}),
@@ -414,11 +415,19 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       updatedAt: now,
       completedAt: undefined,
     };
+    this.stoppedRunIds.delete(runId);
     this.runs.set(run.id, run);
     this.schemasByRunId.set(run.id, cloneArchitectureRuntimeSchema(schema));
-    const priorEvents = await this.getEventsDurable(runId);
     this.eventsByRunId.set(run.id, []);
-    return this.executePreparedRun({ schema, run, hydration: null }, emit, [], priorEvents, dto.continuation);
+    const execution = this.runAbortControllers.execute(runId, (signal) => (
+      this.executePreparedRun({ schema, run, hydration: null }, emit, [], priorEvents, resumeFrom, signal)
+    ));
+    this.activeRunExecutions.set(runId, execution);
+    try {
+      return await execution;
+    } finally {
+      if (this.activeRunExecutions.get(runId) === execution) this.activeRunExecutions.delete(runId);
+    }
   }
 
   getGraph(runId: string): ArchitectureGraphProjection | null {

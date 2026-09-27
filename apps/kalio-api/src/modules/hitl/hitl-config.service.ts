@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import type { HitlHardRule } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { PersonaService } from '../persona/persona.service';
+import { CredentialsService } from '../credentials/credentials.service';
 import {
   isHitlMode,
   isHitlNotificationChannel,
@@ -21,6 +23,10 @@ const DEFAULT_HITL_CONFIG: HitlConfig = {
   externalPolicyEnabled: false,
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
+  jevCredentialId: null,
+  jevInstructions: '',
+  jevApprovalThreshold: 0.9,
+  rules: [],
 };
 
 const HITL_SETTING_KEYS = {
@@ -32,6 +38,10 @@ const HITL_SETTING_KEYS = {
   externalPolicyEnabled: 'hitl.externalPolicyEnabled',
   externalPolicyPersonaId: 'hitl.externalPolicyPersonaId',
   raAppApprovalTimeoutMs: 'hitl.raAppApprovalTimeoutMs',
+  jevCredentialId: 'hitl.jevCredentialId',
+  jevInstructions: 'hitl.jevInstructions',
+  jevApprovalThreshold: 'hitl.jevApprovalThreshold',
+  rules: 'hitl.rules',
 } as const;
 
 function normalizePersonaId(value: string | null | undefined): string | null {
@@ -44,6 +54,7 @@ export class HitlConfigService {
   constructor(
     private readonly appSettings: AppSettingsService,
     private readonly personaService: PersonaService,
+    private readonly credentials: CredentialsService,
   ) {}
 
   async getConfig(): Promise<HitlConfig> {
@@ -56,6 +67,10 @@ export class HitlConfigService {
       storedExternalEnabled,
       storedExternalPersonaId,
       storedRaAppApprovalTimeoutMs,
+      storedJevCredentialId,
+      storedJevInstructions,
+      storedJevApprovalThreshold,
+      storedRules,
     ] = await Promise.all([
       this.appSettings.get(HITL_SETTING_KEYS.mode),
       this.appSettings.get(HITL_SETTING_KEYS.autoPersonaId),
@@ -65,6 +80,10 @@ export class HitlConfigService {
       this.appSettings.get(HITL_SETTING_KEYS.externalPolicyEnabled),
       this.appSettings.get(HITL_SETTING_KEYS.externalPolicyPersonaId),
       this.appSettings.get(HITL_SETTING_KEYS.raAppApprovalTimeoutMs),
+      this.appSettings.get(HITL_SETTING_KEYS.jevCredentialId),
+      this.appSettings.get(HITL_SETTING_KEYS.jevInstructions),
+      this.appSettings.get(HITL_SETTING_KEYS.jevApprovalThreshold),
+      this.appSettings.get(HITL_SETTING_KEYS.rules),
     ]);
 
     return {
@@ -80,6 +99,10 @@ export class HitlConfigService {
       externalPolicyEnabled: storedExternalEnabled === 'true',
       externalPolicyPersonaId: normalizePersonaId(storedExternalPersonaId),
       raAppApprovalTimeoutMs: this.parseStoredRaAppApprovalTimeout(storedRaAppApprovalTimeoutMs),
+      jevCredentialId: normalizePersonaId(storedJevCredentialId),
+      jevInstructions: (storedJevInstructions ?? '').slice(0, 2_000),
+      jevApprovalThreshold: this.parseStoredJevApprovalThreshold(storedJevApprovalThreshold),
+      rules: this.parseStoredRules(storedRules),
     };
   }
 
@@ -105,6 +128,18 @@ export class HitlConfigService {
     const nextRaAppApprovalTimeoutMs = dto.raAppApprovalTimeoutMs !== undefined
       ? this.normalizeRaAppApprovalTimeoutMs(dto.raAppApprovalTimeoutMs)
       : current.raAppApprovalTimeoutMs;
+    const nextJevCredentialId = dto.jevCredentialId !== undefined
+      ? normalizePersonaId(dto.jevCredentialId)
+      : current.jevCredentialId;
+    const nextJevInstructions = dto.jevInstructions !== undefined
+      ? this.normalizeJevInstructions(dto.jevInstructions)
+      : current.jevInstructions;
+    const nextJevApprovalThreshold = dto.jevApprovalThreshold !== undefined
+      ? this.normalizeJevApprovalThreshold(dto.jevApprovalThreshold)
+      : current.jevApprovalThreshold;
+    const nextRules = dto.rules !== undefined
+      ? this.normalizeRules(dto.rules)
+      : current.rules;
 
     if (nextMode === 'auto' && nextAutoPersonaId === null) {
       throw new BadRequestException('Auto HITL mode requires a configured persona.');
@@ -112,6 +147,15 @@ export class HitlConfigService {
 
     if (nextMode === 'auto' && nextAutoPersonaId !== null) {
       await this.ensurePersonaExists(nextAutoPersonaId);
+    }
+
+    if (nextMode === 'jev' && nextJevCredentialId === null) {
+      throw new BadRequestException('Jev HITL mode requires an OpenRouter management credential.');
+    }
+
+    if (nextJevCredentialId !== null
+      && (dto.jevCredentialId !== undefined || nextMode === 'jev')) {
+      await this.ensureOpenRouterCredential(nextJevCredentialId);
     }
 
     if (nextUnattendedFallback === 'representative' && nextRepresentativePersonaId === null) {
@@ -156,6 +200,14 @@ export class HitlConfigService {
       await this.appSettings.set(HITL_SETTING_KEYS.externalPolicyPersonaId, nextExternalPolicyPersonaId);
     }
     await this.appSettings.set(HITL_SETTING_KEYS.raAppApprovalTimeoutMs, String(nextRaAppApprovalTimeoutMs));
+    if (nextJevCredentialId === null) {
+      await this.appSettings.delete(HITL_SETTING_KEYS.jevCredentialId);
+    } else {
+      await this.appSettings.set(HITL_SETTING_KEYS.jevCredentialId, nextJevCredentialId);
+    }
+    await this.appSettings.set(HITL_SETTING_KEYS.jevInstructions, nextJevInstructions);
+    await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
+    await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
 
     return {
       mode: nextMode,
@@ -166,6 +218,10 @@ export class HitlConfigService {
       externalPolicyEnabled: nextExternalPolicyEnabled,
       externalPolicyPersonaId: nextExternalPolicyPersonaId,
       raAppApprovalTimeoutMs: nextRaAppApprovalTimeoutMs,
+      jevCredentialId: nextJevCredentialId,
+      jevInstructions: nextJevInstructions,
+      jevApprovalThreshold: nextJevApprovalThreshold,
+      rules: nextRules,
     };
   }
 
@@ -220,6 +276,81 @@ export class HitlConfigService {
     }
 
     return value;
+  }
+
+  private parseStoredJevApprovalThreshold(value: string | null): number {
+    if (value === null) return DEFAULT_HITL_CONFIG.jevApprovalThreshold;
+    const parsed = Number(value);
+    try {
+      return this.normalizeJevApprovalThreshold(parsed);
+    } catch {
+      return DEFAULT_HITL_CONFIG.jevApprovalThreshold;
+    }
+  }
+
+  private normalizeJevApprovalThreshold(value: number): number {
+    if (!Number.isFinite(value) || value < 0.51 || value > 0.99) {
+      throw new BadRequestException('Jev approval threshold must be between 0.51 and 0.99.');
+    }
+    return value;
+  }
+
+  private normalizeJevInstructions(value: string): string {
+    if (typeof value !== 'string' || value.length > 2_000) {
+      throw new BadRequestException('Jev instructions must be text with at most 2000 characters.');
+    }
+    return value.trim();
+  }
+
+  private parseStoredRules(value: string | null): HitlHardRule[] {
+    if (!value) return [];
+    try {
+      return this.normalizeRules(JSON.parse(value) as unknown);
+    } catch {
+      return [];
+    }
+  }
+
+  private normalizeRules(value: unknown): HitlHardRule[] {
+    if (!Array.isArray(value) || value.length > 100) {
+      throw new BadRequestException('HITL hard rules must be an array with at most 100 entries.');
+    }
+    return value.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new BadRequestException(`HITL hard rule ${index + 1} is invalid.`);
+      }
+      const rule = entry as Record<string, unknown>;
+      const kind = rule['kind'];
+      const name = typeof rule['name'] === 'string' ? rule['name'].trim() : '';
+      const decision = rule['decision'];
+      const executable = typeof rule['executable'] === 'string' ? rule['executable'].trim() : undefined;
+      const argumentsContains = typeof rule['argumentsContains'] === 'string'
+        ? rule['argumentsContains'].trim()
+        : undefined;
+      if ((kind !== '*' && kind !== 'tool' && kind !== 'raapp_native' && kind !== 'external_security')
+        || name.length === 0
+        || (decision !== 'allow' && decision !== 'deny' && decision !== 'ask_user')
+        || (rule['id'] !== undefined && (typeof rule['id'] !== 'string' || rule['id'].trim().length === 0))
+        || (executable !== undefined && executable.length === 0)
+        || (argumentsContains !== undefined && argumentsContains.length === 0)) {
+        throw new BadRequestException(`HITL hard rule ${index + 1} is invalid.`);
+      }
+      return {
+        id: typeof rule['id'] === 'string' ? rule['id'] : `rule-${index + 1}`,
+        kind,
+        name,
+        decision,
+        ...(executable ? { executable } : {}),
+        ...(argumentsContains ? { argumentsContains } : {}),
+      };
+    });
+  }
+
+  private async ensureOpenRouterCredential(credentialId: string): Promise<void> {
+    const config = await this.credentials.getProviderConfigForCredential(credentialId);
+    if (!config || config.provider !== 'openrouter' || config.apiKey.trim().length === 0) {
+      throw new BadRequestException('Jev requires a usable OpenRouter management credential.');
+    }
   }
 
   private async ensurePersonaExists(personaId: string): Promise<void> {

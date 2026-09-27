@@ -147,6 +147,27 @@ Current behavior:
 - Cycles are bounded by runtime step and per-node visit limits.
 - Branch output may contain `route_to(targetNodeId, response)` to force the next hop when that target is a valid outgoing node.
 
+### Jev Auto-routing
+
+`auto_router` is separate from the persona-backed `router`. It asks the backend Jev Decisions client to choose one labeled `choice` edge. The schema must contain at least one `choice` edge and exactly one `default` edge. The default threshold is `0.80`; a missing OpenRouter credential, invalid response, low confidence, timeout, or provider error selects the default edge. OpenRouter credentials are resolved server-side.
+
+The runtime persists every selected choice or fallback before it executes the successor. The key is `(runId, nodeId, visit)`, and the event includes the selected edge id, target, confidence when available, and a typed decision reason. Recovery rebuilds its pending frontier from durable events, consumes completed successors, and resumes an interrupted router choice without rerunning completed upstream nodes. A checkpoint write failure blocks successor dispatch.
+
+```mermaid
+flowchart TD
+    Enter["Enter auto_router"] --> Saved{"Decision saved for visit?"}
+    Saved -- "yes" --> Replay["Use saved edge"]
+    Saved -- "no" --> Jev["Jev chooses among choice edges"]
+    Jev --> Confidence{"Valid choice and confidence >= 0.80?"}
+    Confidence -- "yes" --> Choice["Selected choice edge"]
+    Confidence -- "no or provider error" --> Default["Required default edge"]
+    Choice --> Persist["Persist edge checkpoint"]
+    Default --> Persist
+    Persist -- "success" --> Replay
+    Persist -- "failure" --> Pause["Do not dispatch successor"]
+    Replay --> Next["Run the target node"]
+```
+
 ## Parallel Stream Shape
 
 ```mermaid

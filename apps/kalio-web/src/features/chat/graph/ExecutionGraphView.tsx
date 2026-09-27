@@ -16,7 +16,7 @@ import { isLiveTool } from './ExecutionGraphLiveSidebar';
 import { ExecutionGraphNoNodesState, ExecutionGraphNoSessionState } from './ExecutionGraphEmptyStates';
 import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './executionGraphFocus';
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
-import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
+import { architectureRunIdFromSessionTree, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 import { useExecutionGraphLaunch } from './useExecutionGraphLaunch';
 import type { TalkView } from '../../../App.types';
 import {
@@ -236,7 +236,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
   const hasActiveLoopForSession = (sessionId: string) => runningLoops.some((loop) => loop.sessionId === sessionId);
   const runningToolActivities = toolActivities.filter((activity) => isLiveTool(activity));
   const sessionTitleById = new Map(sessions.map((session) => [session.id, session.title]));
-  const activeArchitectureRunId = architectureRunIdFromRootSession(activeSession);
+  const activeArchitectureRunId = architectureRunIdFromSessionTree(activeSession, sessions);
   const activeSessionMessages = activeSessionId ? getSessionMessages(activeSessionId) : messages;
   const activeSessionAgentTurns = activeSessionId ? getSessionAgentTurns(activeSessionId) : agentTurns;
   const architectureRootGraph = useArchitectureRootGraph(activeSessionId, activeArchitectureRunId);

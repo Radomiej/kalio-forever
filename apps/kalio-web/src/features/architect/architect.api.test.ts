@@ -235,6 +235,10 @@ describe('startArchitectureRun', () => {
             scoringPolicy: 'risk',
             description: 'Prefer the safer branch.',
           },
+          autoRouting: {
+            confidenceThreshold: 0.86,
+            instructions: 'Choose the implementation route.',
+          },
           x: 120,
           y: 90,
           slots: [],
@@ -299,6 +303,7 @@ describe('startArchitectureRun', () => {
     expect(posted.schema?.nodes[0]).not.toBe(schema.nodes[0]);
     expect(posted.schema?.nodes[0].toolOverride).not.toBe(schema.nodes[0].toolOverride);
     expect(posted.schema?.nodes[0].behavior).not.toBe(schema.nodes[0].behavior);
+    expect(posted.schema?.nodes[0].autoRouting).not.toBe(schema.nodes[0].autoRouting);
     expect(posted.schema?.edges[0]).not.toBe(schema.edges[0]);
     expect(posted.schema).toMatchObject({
       id: 'schema-1',
@@ -315,6 +320,10 @@ describe('startArchitectureRun', () => {
             maxBranches: 2,
             scoringPolicy: 'risk',
             description: 'Prefer the safer branch.',
+          },
+          autoRouting: {
+            confidenceThreshold: 0.86,
+            instructions: 'Choose the implementation route.',
           },
         },
       ],

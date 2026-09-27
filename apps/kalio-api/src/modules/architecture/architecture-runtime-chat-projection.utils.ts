@@ -36,7 +36,11 @@ function toRuntimeChatMessage(event: ArchitectureExecutionEvent): ArchitectureCh
 function speakerForRuntimeChatEvent(event: ArchitectureExecutionEvent): ArchitectureChatMessage['speaker'] {
   if (event.type === 'run_created') return 'system';
   if (event.type === 'run_stopped') return 'system';
-  if (event.type === 'router_decision') return 'router';
+  if (event.type === 'router_decision') {
+    return event.route?.source === 'jev_choice' || event.data?.['autoRoutingVisit'] !== undefined
+      ? 'auto_router'
+      : 'router';
+  }
   if (event.type === 'router_output') return 'router';
   if (event.type === 'final_artifact') return 'finalizer';
   if (event.type === 'artifact_created') return 'finalizer';

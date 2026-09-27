@@ -92,6 +92,9 @@ export function renderArchitectureRunProjection({
           source: hop.source,
           fromNodeId: hop.fromNodeId,
           toNodeId: hop.toNodeId,
+          selectedEdgeId: hop.selectedEdgeId,
+          confidence: hop.confidence,
+          decisionReason: hop.decisionReason,
           branchSessionOpenable: Boolean(branchSessionId),
           streamStatus: traceStep?.stream?.status,
           chunkCount: traceStep?.stream?.chunkCount,
@@ -194,6 +197,10 @@ function architectureRouteSourceForTraceStep(step: TraceStep): RouteHop['source'
 }
 
 function architectureRouteTitle(run: ArchitectureRun, traceStep: TraceStep | undefined, hop: RouteHop): string {
+  if (traceStep?.speaker === 'auto_router') {
+    return 'Auto-routing';
+  }
+
   if (hop.source === 'parallel') {
     return architectureNodeDisplayLabel(run, hop.toNodeId);
   }

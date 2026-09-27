@@ -80,6 +80,32 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     return id;
   }
 
+  async logRequired(id: string, entry: AuditLogInput): Promise<void> {
+    const data = entry.data ?? null;
+    await this.drizzle.db.insert(auditLog).values({
+      id,
+      sessionId: entry.sessionId ?? null,
+      type: entry.type,
+      label: entry.label,
+      data,
+      durationMs: entry.durationMs ?? null,
+      chunkCount: entry.chunkCount ?? null,
+      createdAt: new Date(),
+    }).onConflictDoNothing();
+
+    const rows = await this.drizzle.db.select().from(auditLog).where(eq(auditLog.id, id));
+    const stored = rows.find((row) => row.id === id);
+    if (!stored) throw new Error('Required audit checkpoint was not written.');
+    if (
+      stored.type !== entry.type
+      || stored.label !== entry.label
+      || stored.sessionId !== (entry.sessionId ?? null)
+      || JSON.stringify(stored.data ?? null) !== JSON.stringify(data)
+    ) {
+      throw new Error('Required audit checkpoint key already contains a different decision.');
+    }
+  }
+
   async update(id: string, patch: { chunkCount?: number; durationMs?: number; data?: Record<string, unknown> }): Promise<void> {
     try {
       await this.drizzle.db
@@ -133,11 +159,13 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     const dbWithAll = this.drizzle.db as typeof this.drizzle.db & {
       all?: <T = unknown>(query: unknown) => T[] | Promise<T[]>;
     };
+    const offset = Math.max(0, Math.trunc(query.offset ?? 0));
     const rows = await dbWithAll.all?.<RawAuditLogEntry>(sql`
       SELECT *
       FROM (${sql.join(statements, sql` UNION ALL `)})
       ORDER BY createdAt DESC, id DESC
       LIMIT ${query.limit}
+      OFFSET ${offset}
     `) ?? [];
 
     return rows

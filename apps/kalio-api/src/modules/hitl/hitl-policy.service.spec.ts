@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HitlDecisionService } from './hitl-decision.service';
 import { HitlPolicyService } from './hitl-policy.service';
+import type { HitlJevService } from './hitl-jev.service';
 import type { HitlConfigService } from './hitl-config.service';
 import type { HitlConfig } from './hitl.types';
 
@@ -8,6 +9,10 @@ function makeConfig(overrides: Partial<HitlConfig> = {}): HitlConfig {
   return {
     mode: 'manual',
     autoPersonaId: null,
+    jevCredentialId: null,
+    jevInstructions: '',
+    jevApprovalThreshold: 0.9,
+    rules: [],
     unattendedFallback: 'pause',
     representativePersonaId: null,
     notificationChannel: 'none',
@@ -22,6 +27,7 @@ describe('HitlPolicyService', () => {
   let service: HitlPolicyService;
   let configService: { getConfig: ReturnType<typeof vi.fn> };
   let decisionService: { evaluateApproval: ReturnType<typeof vi.fn> };
+  let jevService: { evaluateApproval: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     configService = {
@@ -30,8 +36,15 @@ describe('HitlPolicyService', () => {
     decisionService = {
       evaluateApproval: vi.fn(),
     };
+    jevService = {
+      evaluateApproval: vi.fn(),
+    };
 
-    service = new HitlPolicyService(configService as unknown as HitlConfigService, decisionService as unknown as HitlDecisionService);
+    service = new HitlPolicyService(
+      configService as unknown as HitlConfigService,
+      decisionService as unknown as HitlDecisionService,
+      jevService as unknown as HitlJevService,
+    );
   });
 
   it('returns manual when the config mode is manual', async () => {
@@ -98,6 +111,41 @@ describe('HitlPolicyService', () => {
       status: 'manual',
       source: 'manual',
     });
+  });
+
+  it('applies hard rules before Manual, Auto, and Jev decisions, while Bypass skips them', async () => {
+    const request = { kind: 'tool' as const, sessionId: 'sess-1', name: 'terminal_spawn', args: {} };
+    const rules = [{ id: 'hard-deny', kind: 'tool' as const, name: 'terminal_spawn', decision: 'deny' as const }];
+    for (const mode of ['manual', 'auto', 'jev'] as const) {
+      configService.getConfig.mockResolvedValue(makeConfig({ mode, autoPersonaId: 'reviewer', rules }));
+      await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'rejected', source: 'rule' });
+    }
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'bypass', rules }));
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'approved', source: 'bypass' });
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
+    expect(jevService.evaluateApproval).not.toHaveBeenCalled();
+  });
+
+  it('allows and denies Jev decisions at the configured threshold boundaries', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevCredentialId: 'openrouter-key' }));
+    const request = { kind: 'tool' as const, sessionId: 'sess-1', name: 'destructive_tool', args: { action: 'delete' } };
+    jevService.evaluateApproval.mockResolvedValue({ probability: 0.9 });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'approved', source: 'jev' });
+    jevService.evaluateApproval.mockResolvedValue({ probability: 0.1 });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'rejected', source: 'jev' });
+  });
+
+  it('uses the optional persona for uncertain or failed Jev decisions and asks the human if it cannot decide', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', autoPersonaId: 'reviewer', jevCredentialId: 'openrouter-key' }));
+    const request = { kind: 'tool' as const, sessionId: 'sess-1', name: 'dangerous_tool', args: {} };
+    jevService.evaluateApproval.mockResolvedValue({ probability: 0.5 });
+    decisionService.evaluateApproval.mockResolvedValue({ agree: true, decision: 'ask_user', reason: 'Needs a person.' });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'manual', source: 'manual' });
+    expect(decisionService.evaluateApproval).toHaveBeenCalledWith(expect.objectContaining({ personaId: 'reviewer' }));
+
+    decisionService.evaluateApproval.mockRejectedValue(new Error('persona unavailable'));
+    jevService.evaluateApproval.mockRejectedValue(new Error('Jev offline'));
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'manual', source: 'manual' });
   });
 
   it('keeps unattended fallback paused by default', async () => {

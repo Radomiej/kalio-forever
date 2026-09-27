@@ -94,4 +94,33 @@ describe('buildArchitectureRuntimeChatProjection', () => {
 
     expect(projection.messages.map((message) => message.incompleteReason)).toEqual([undefined, undefined]);
   });
+
+  it('projects Jev route decisions as Auto-routing with durable choice metadata', () => {
+    const projection = buildArchitectureRuntimeChatProjection('run-jev', [
+      event({
+        id: 'jev-route',
+        type: 'router_decision',
+        message: 'Auto-routing selected Implementer.',
+        data: { autoRoutingVisit: 2, selectedEdgeId: 'choice-implementer' },
+        route: {
+          source: 'jev_choice',
+          fromNodeId: 'auto-route',
+          selectedNodeIds: ['implementer'],
+          nextNodeId: 'implementer',
+          selectedEdgeId: 'choice-implementer',
+          confidence: 0.93,
+          decisionReason: 'confidence_met',
+        },
+      }),
+    ]);
+
+    expect(projection.messages[0]).toMatchObject({
+      speaker: 'auto_router',
+      route: {
+        selectedEdgeId: 'choice-implementer',
+        confidence: 0.93,
+        decisionReason: 'confidence_met',
+      },
+    });
+  });
 });

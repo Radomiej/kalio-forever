@@ -88,6 +88,7 @@ export async function startArchitectureRun(
         maxToolAttempts: node.maxToolAttempts,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
         behavior: node.behavior ? { ...node.behavior } : undefined,
+        autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
         x: node.x,
         y: node.y,
       })),

@@ -20,9 +20,11 @@ interface ArchitectInspectorProps {
   onPersonaOverride: (nodeId: string, personaId: string) => void;
   onNodeKindOverride: (nodeId: string, kind: ArchitectureNodeKind) => void;
   onNodeBehaviorOverride: (nodeId: string, behavior: NonNullable<ArchitectureSchemaNode['behavior']>) => void;
+  onAutoRoutingOverride: (nodeId: string, autoRouting: NonNullable<ArchitectureSchemaNode['autoRouting']>) => void;
   onNodeMaxToolAttemptsOverride: (nodeId: string, maxToolAttempts?: number) => void;
   onNodeToolOverride: (nodeId: string, toolOverride?: NonNullable<ArchitectureSchemaNode['toolOverride']>) => void;
-  onEdgeSelectionOverride: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection) => void;
+  onEdgeSelectionOverride: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection, edgeId?: string) => void;
+  onEdgeLabelOverride?: (edgeId: string, label: string) => void;
   onContextPolicyOverride: (slotId: string, override: ArchitectureContextPolicyOverride) => void;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
@@ -32,11 +34,12 @@ const NODE_KIND_OPTIONS: ReadonlyArray<{ value: ArchitectureNodeKind; label: str
   { value: 'parallel', label: 'Parallel' },
   { value: 'role', label: 'Role' },
   { value: 'router', label: 'Router' },
+  { value: 'auto_router', label: 'Auto-routing' },
   { value: 'artifact', label: 'Artifact' },
 ];
 
 function edgeSelectionFromValue(value: string): ArchitectureSchemaEdgeSelection | undefined {
-  if (value === 'default' || value === 'converge' || value === 'continuation') {
+  if (value === 'default' || value === 'converge' || value === 'continuation' || value === 'choice') {
     return value;
   }
   return undefined;
@@ -66,9 +69,11 @@ export function ArchitectInspector({
   onPersonaOverride,
   onNodeKindOverride,
   onNodeBehaviorOverride,
+  onAutoRoutingOverride,
   onNodeMaxToolAttemptsOverride,
   onNodeToolOverride,
   onEdgeSelectionOverride,
+  onEdgeLabelOverride,
   onContextPolicyOverride,
   collapsed = false,
   onCollapsedChange,
@@ -102,7 +107,9 @@ export function ArchitectInspector({
   };
   const routingSummary = node?.behavior?.mode
     ? NODE_ROUTING_LABELS[node.behavior.mode] ?? node.behavior.mode
-    : selectedNodeKind === 'router'
+    : selectedNodeKind === 'auto_router'
+      ? 'Jev confidence route'
+      : selectedNodeKind === 'router'
       ? 'Rank then merge'
       : selectedNodeKind === 'artifact'
         ? 'Finalize'
@@ -274,6 +281,46 @@ export function ArchitectInspector({
                 />
               )}
 
+              {selectedNodeKind === 'auto_router' && (
+                <section className="mt-4 rounded-md border border-amber-400/25 bg-amber-400/5 p-3" data-testid="architect-auto-routing-config">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-amber-200">Jev routing</div>
+                  <label className="mt-3 form-control gap-1">
+                    <span className="label-text text-xs font-semibold text-base-content/70">Minimum confidence</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      className="input input-bordered input-sm h-9 min-h-9 w-full font-mono"
+                      value={node.autoRouting?.confidenceThreshold ?? 0.8}
+                      onChange={(event) => {
+                        const threshold = Number(event.target.value);
+                        if (Number.isFinite(threshold)) {
+                          onAutoRoutingOverride(node.id, {
+                            confidenceThreshold: Math.min(1, Math.max(0, threshold)),
+                            instructions: node.autoRouting?.instructions ?? '',
+                          });
+                        }
+                      }}
+                      data-testid="architect-auto-routing-confidence"
+                    />
+                  </label>
+                  <label className="mt-3 form-control gap-1">
+                    <span className="label-text text-xs font-semibold text-base-content/70">Routing instructions</span>
+                    <textarea
+                      className="textarea textarea-bordered min-h-20 w-full text-xs"
+                      value={node.autoRouting?.instructions ?? ''}
+                      onChange={(event) => onAutoRoutingOverride(node.id, {
+                        confidenceThreshold: node.autoRouting?.confidenceThreshold ?? 0.8,
+                        instructions: event.target.value,
+                      })}
+                      data-testid="architect-auto-routing-instructions"
+                    />
+                  </label>
+                  <p className="mt-2 text-[11px] leading-4 text-base-content/55">Jev chooses among choice edges. Low confidence or a provider error takes the single default edge.</p>
+                </section>
+              )}
+
               {outgoingEdges.length > 0 && (
                 <section className="mt-4 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-base-content/55">Outgoing edge roles</div>
@@ -293,14 +340,35 @@ export function ArchitectInspector({
                               edge.fromNodeId,
                               edge.toNodeId,
                               edgeSelectionFromValue(event.target.value),
+                              edge.id,
                             )}
                             data-testid={`architect-edge-selection-${edge.fromNodeId}-${edge.toNodeId}`}
                           >
-                            <option value="">Normal transition</option>
+                            {selectedNodeKind === 'auto_router' ? (
+                              <option value="" disabled>Select route type</option>
+                            ) : (
+                              <option value="">Normal transition</option>
+                            )}
                             <option value="default">Default route</option>
-                            <option value="converge">Converge route</option>
-                            <option value="continuation">Continuation route</option>
+                            {selectedNodeKind === 'auto_router' ? (
+                              <option value="choice">Jev choice</option>
+                            ) : (
+                              <>
+                                <option value="converge">Converge route</option>
+                                <option value="continuation">Continuation route</option>
+                              </>
+                            )}
                           </select>
+                          {selectedNodeKind === 'auto_router' && edge.selection === 'choice' && onEdgeLabelOverride && (
+                            <input
+                              aria-label={`Jev choice description for ${target?.label ?? edge.toNodeId}`}
+                              className="input input-bordered input-sm h-9 min-h-9 w-full"
+                              placeholder="Describe when Jev should choose this route"
+                              value={edge.label ?? ''}
+                              onChange={(event) => onEdgeLabelOverride(edge.id, event.target.value)}
+                              data-testid={`architect-edge-label-${edge.id}`}
+                            />
+                          )}
                         </label>
                       );
                     })}
@@ -406,6 +474,7 @@ const NODE_KIND_LABELS: Record<ArchitectureNodeKind, string> = {
   parallel: 'Parallel',
   role: 'Role',
   router: 'Router',
+  auto_router: 'Auto-routing',
 };
 
 const NODE_ROUTING_LABELS: Partial<Record<NonNullable<ArchitectureSchemaNode['behavior']>['mode'], string>> = {

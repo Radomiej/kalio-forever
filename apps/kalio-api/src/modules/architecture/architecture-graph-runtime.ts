@@ -45,6 +45,9 @@ import {
   selectedNodeIdsFromEvent,
 } from './architecture-graph-topology.utils';
 import { createArchitectureRouterOutput } from './architecture-router-output';
+import { executeAutoRoutingGraphNode } from './architecture-graph-auto-routing.utils';
+import type { ArchitectureRuntimeResumeCursor } from './architecture-runtime-auto-routing-recovery.utils';
+import type { ArchitectureAutoRoutingChoice, ArchitectureAutoRoutingInput } from './architecture-auto-routing.service';
 import { createWorkflowError, isWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 
 type GraphRuntimeOptions = {
@@ -54,9 +57,11 @@ type GraphRuntimeOptions = {
   roleExecutor: ArchitectureRoleExecutor;
   personaForSlot: (slot: ArchitectureRoleSlot) => string;
   priorEvents?: ArchitectureExecutionEvent[];
-  resumeFrom?: AgentFlowContinuationCursor;
+  resumeFrom?: AgentFlowContinuationCursor | ArchitectureRuntimeResumeCursor;
   emit?: ArchitectureRoleExecutionInput['emit'];
   onEvent?: (event: ArchitectureExecutionEvent) => void;
+  chooseAutoRoute?: (input: ArchitectureAutoRoutingInput) => Promise<ArchitectureAutoRoutingChoice>;
+  persistAutoRouteDecision?: (event: ArchitectureExecutionEvent, checkpointId: string) => Promise<void>;
 };
 
 type EventOptions = {
@@ -127,7 +132,7 @@ class ArchitectureGraphRuntime {
       const executableBatch = partition.executableNodes;
       steps += executableBatch.length;
 
-      const batchResults = await Promise.all(executableBatch.map(async (node) => {
+      const settledBatch = await Promise.allSettled(executableBatch.map(async (node) => {
         if (!this.resumesIncompleteNode(node.id)) {
           this.push('node_started', `${node.label} started.`, {
             actionSummary: architectureActionSummaryForEvent('node_started', node.kind),
@@ -176,6 +181,9 @@ class ArchitectureGraphRuntime {
         });
         return { node, selectedNodeIds };
       }));
+      const batchResults = settledBatch.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+      const failedResult = settledBatch.find((result) => result.status === 'rejected');
+      if (failedResult?.status === 'rejected') throw failedResult.reason;
 
       for (const { node, selectedNodeIds } of batchResults) {
         this.nodeVisitCounts.set(node.id, this.visitCount(node.id) + 1);
@@ -250,9 +258,12 @@ class ArchitectureGraphRuntime {
   }
 
   private resumesIncompleteNode(nodeId: string): boolean {
-    if (this.options.resumeFrom?.reason !== 'runtime_pause' || this.options.resumeFrom.waitingNodeId !== nodeId) {
-      return false;
-    }
+    const resumeFrom = this.options.resumeFrom;
+    const wasStartedBeforeRecovery = resumeFrom?.reason === 'runtime_recovery'
+      && resumeFrom.resumeStartedNodeIds?.includes(nodeId) === true;
+    if (resumeFrom?.reason !== 'runtime_pause'
+      && !wasStartedBeforeRecovery) return false;
+    if (resumeFrom?.reason === 'runtime_pause' && resumeFrom.waitingNodeId !== nodeId) return false;
     let lastStarted = -1;
     let lastCompleted = -1;
     for (let index = 0; index < this.events.length; index += 1) {
@@ -283,9 +294,13 @@ class ArchitectureGraphRuntime {
         this.activeNodeIds.add(selectedNodeId);
       }
     }
+    for (const event of this.options.priorEvents) {
+      if (event.type !== 'node_completed' || !event.nodeId) continue;
+      this.nodeVisitCounts.set(event.nodeId, (this.nodeVisitCounts.get(event.nodeId) ?? 0) + 1);
+    }
     for (const [nodeId, count] of Object.entries(this.options.resumeFrom?.visitCounts ?? {})) {
       if (Number.isFinite(count) && count > 0) {
-        this.nodeVisitCounts.set(nodeId, count);
+        this.nodeVisitCounts.set(nodeId, Math.max(this.nodeVisitCounts.get(nodeId) ?? 0, count));
       }
     }
   }
@@ -301,7 +316,9 @@ class ArchitectureGraphRuntime {
     const ready = pendingNodeIds
       .map((nodeId) => nodesById.get(nodeId))
       .filter((node): node is ArchitectureSchemaNode => node !== undefined);
-    return ready.length > 0 ? ready : null;
+    return this.options.resumeFrom?.reason === 'runtime_recovery'
+      ? ready
+      : ready.length > 0 ? ready : null;
   }
 
   private acceptanceResumeNode(
@@ -373,6 +390,31 @@ class ArchitectureGraphRuntime {
     outgoingNodeIds: string[],
     nodesById: Map<string, ArchitectureSchemaNode>,
   ): Promise<string[]> {
+    if (node.kind === 'auto_router') {
+      return executeAutoRoutingGraphNode({
+        schema: this.options.schema,
+        node,
+        run: this.options.run,
+        incomingNodeIds,
+        incomingEvents: this.events,
+        outgoingEdges: this.options.schema.edges.filter((edge) => edge.fromNodeId === node.id),
+        nodesById,
+        visit: this.visitCount(node.id) + 1,
+        visitCounts: {
+          ...Object.fromEntries(this.nodeVisitCounts.entries()),
+          [node.id]: this.visitCount(node.id) + 1,
+        },
+        choose: this.options.chooseAutoRoute,
+        createDecisionEvent: (projection) => this.createEvent('router_decision', projection.message, {
+          actionSummary: architectureActionSummaryForEvent('router_decision', 'auto_router'),
+          nodeId: node.id,
+          route: projection.route,
+          data: projection.data,
+        }),
+        persistDecision: this.options.persistAutoRouteDecision,
+        appendEvent: (event) => this.appendEvent(event),
+      });
+    }
     if (node.kind === 'role' && node.roleSlotId) {
       return this.executeRoleNode(node, outgoingNodeIds);
     }
@@ -862,6 +904,14 @@ class ArchitectureGraphRuntime {
     message: string,
     options: EventOptions = {},
   ): void {
+    this.appendEvent(this.createEvent(type, message, options));
+  }
+
+  private createEvent(
+    type: ArchitectureExecutionEvent['type'],
+    message: string,
+    options: EventOptions = {},
+  ): ArchitectureExecutionEvent {
     this.sequence += 1;
     const actionFields = architectureActionFieldsForEvent({
       type,
@@ -870,7 +920,7 @@ class ArchitectureGraphRuntime {
       routerOutput: options.routerOutput,
       data: options.data,
     });
-    const event = {
+    return {
       id: `${this.options.run.id}:event:${this.sequence}`,
       runId: this.options.run.id,
       sequence: this.sequence,
@@ -893,6 +943,9 @@ class ArchitectureGraphRuntime {
       data: options.data,
       createdAt: this.options.now + this.sequence,
     };
+  }
+
+  private appendEvent(event: ArchitectureExecutionEvent): void {
     this.events.push(event);
     this.options.onEvent?.(event);
   }

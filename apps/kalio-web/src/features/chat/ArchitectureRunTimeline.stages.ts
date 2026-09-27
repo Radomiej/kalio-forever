@@ -42,16 +42,22 @@ export function buildTimelineStages(run: ArchitectureChatRunSummary): TraceStage
   }
 
   const nodeById = new Map(graphNodes.map((node) => [node.id, node]));
+  const autoRoutingAlternatives = autoRoutingAlternativeNodeIds(run, graphRun, nodeById);
   const consumedNodeIds = new Set<string>();
   const stages: TraceStage[] = [];
 
   for (const node of graphNodes) {
-    if (consumedNodeIds.has(node.id)) {
+    if (consumedNodeIds.has(node.id) || autoRoutingAlternatives.has(node.id)) {
       continue;
     }
     consumedNodeIds.add(node.id);
 
     if (isUnevidencedArtifactNode(run, node)) {
+      continue;
+    }
+
+    if (node.kind === 'auto_router') {
+      stages.push({ kind: 'step', step: stepFromGraphNode(run, node, graphRun) });
       continue;
     }
 
@@ -201,6 +207,32 @@ function fanOutBranchNodes(
   return outgoingRoleNodes.length > 1 ? outgoingRoleNodes : [];
 }
 
+function autoRoutingAlternativeNodeIds(
+  run: ArchitectureChatRunSummary,
+  graphRun: ArchitectureRunSummaryWithGraph,
+  nodeById: Map<string, ArchitectureGraphNodeSummary>,
+): Set<string> {
+  const selectedEdgeByNode = new Map(
+    run.trace
+      .filter((step) => step.speaker === 'auto_router' && step.nodeId && step.selectedEdgeId)
+      .map((step) => [step.nodeId, step.selectedEdgeId] as const),
+  );
+  const alternativeNodeIds = new Set<string>();
+  const selectedNodeIds = new Set<string>();
+
+  for (const edge of graphRun.graphEdges ?? []) {
+    if (nodeById.get(edge.fromNodeId)?.kind !== 'auto_router') continue;
+    if (edge.id === selectedEdgeByNode.get(edge.fromNodeId)) {
+      selectedNodeIds.add(edge.toNodeId);
+    } else {
+      alternativeNodeIds.add(edge.toNodeId);
+    }
+  }
+
+  for (const nodeId of selectedNodeIds) alternativeNodeIds.delete(nodeId);
+  return alternativeNodeIds;
+}
+
 function stepFromGraphNode(
   run: ArchitectureChatRunSummary,
   node: ArchitectureGraphNodeSummary,
@@ -230,6 +262,9 @@ function stepFromGraphNode(
 function speakerForGraphNode(node: ArchitectureGraphNodeSummary): TraceStep['speaker'] {
   if (node.kind === 'role') {
     return 'participant';
+  }
+  if (node.kind === 'auto_router') {
+    return 'auto_router';
   }
   if (node.kind === 'artifact') {
     return 'finalizer';

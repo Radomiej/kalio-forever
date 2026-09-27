@@ -386,6 +386,9 @@ function toRouteHops(events: ArchitectureExecutionEvent[]): NonNullable<Architec
       source: route.source,
       fromNodeId: route.fromNodeId,
       toNodeId,
+      ...(route.selectedEdgeId ? { selectedEdgeId: route.selectedEdgeId } : {}),
+      ...(route.confidence !== undefined ? { confidence: route.confidence } : {}),
+      ...(route.decisionReason ? { decisionReason: route.decisionReason } : {}),
     })) ?? [];
   });
 }

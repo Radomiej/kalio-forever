@@ -5,7 +5,7 @@ import type {
   ArchitectureSchema,
   WorkflowFailure,
 } from '@kalio/types';
-import { AuditService } from '../chat/audit.service';
+import { AuditService, type AuditLogInput } from '../chat/audit.service';
 import { RuntimeAuditLogger } from '../chat/runtime-audit-logger.service';
 import type { ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 import { architectureActionFieldsForEvent } from './architecture-action-summary';
@@ -25,6 +25,7 @@ export interface ArchitectureRuntimeAuditWriter {
     auditEvents?: boolean,
   ): void;
   logEvent(schema: ArchitectureSchema, run: ArchitectureRun, event: ArchitectureExecutionEvent): void;
+  logRouteDecisionRequired(schema: ArchitectureSchema, run: ArchitectureRun, event: ArchitectureExecutionEvent, checkpointId: string): Promise<void>;
   logFailure(schema: ArchitectureSchema, run: ArchitectureRun, failure: WorkflowFailure): void;
   logHydration(run: ArchitectureRun, hydration: ArchitectureVfsHydrationResult | null): void;
 }
@@ -75,44 +76,101 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
     run: ArchitectureRun,
     event: ArchitectureExecutionEvent,
   ): void {
+    if (typeof event.data?.['autoRoutingVisit'] === 'number') return;
     const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
     if (this.audit) {
-      const actionFields = architectureActionFieldsForEvent(event);
-      void this.audit.log({
-        sessionId,
-        type: 'architecture_event',
-        label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
-        data: {
-          domain: 'architecture',
-          kind: 'architecture_event',
-          runId: run.id,
-          architectureRunId: run.id,
-          schemaId: schema.id,
-          executionMode: run.executionMode,
-          rootSessionId: run.rootSessionId,
-          eventId: event.id,
-          eventType: event.type,
-          sequence: event.sequence,
-          nodeId: event.nodeId,
-          roleSlotId: event.roleSlotId,
-          prompt: event.type === 'run_created' ? run.prompt : undefined,
-          reasonCode: event.reasonCode,
-          errorCode: event.errorCode,
-          failure: event.failure,
-          evidence: event.evidence,
-          runtimeDecision: event.runtimeDecision,
-          incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
-          runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
-          toolEvidence: this.toolEvidenceForAudit(event),
-          route: event.route,
-          routerOutput: event.routerOutput,
-          messagePreview: event.message.slice(0, 800),
-          actionSummary: actionFields.actionSummary,
-          action: actionFields.action,
-          detail: actionFields.detail,
-        },
-      });
+      void this.audit.log(this.eventAuditInput(schema, run, event, sessionId));
     }
+    this.logRuntimeEvent(schema, run, event, sessionId);
+  }
+
+  async logRouteDecisionRequired(
+    schema: ArchitectureSchema,
+    run: ArchitectureRun,
+    event: ArchitectureExecutionEvent,
+    checkpointId: string,
+  ): Promise<void> {
+    if (!this.audit) throw new Error('Durable audit storage is unavailable for Auto-routing.');
+    const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
+    await this.audit.logRequired(checkpointId, this.eventAuditInput(schema, run, event, sessionId));
+    this.logRuntimeEvent(schema, run, event, sessionId);
+  }
+
+  private eventAuditInput(
+    schema: ArchitectureSchema,
+    run: ArchitectureRun,
+    event: ArchitectureExecutionEvent,
+    sessionId: string,
+  ): AuditLogInput {
+    const actionFields = architectureActionFieldsForEvent(event);
+    const autoRoutingVisit = event.data?.['kind'] === 'auto_routing_decision'
+      && typeof event.data['autoRoutingVisit'] === 'number'
+      ? event.data['autoRoutingVisit']
+      : undefined;
+    const selectedEdgeId = event.data?.['kind'] === 'auto_routing_decision'
+      && typeof event.data['selectedEdgeId'] === 'string'
+      ? event.data['selectedEdgeId']
+      : undefined;
+    const pendingNodeIds = event.data?.['kind'] === 'auto_routing_decision'
+      && Array.isArray(event.data['pendingNodeIds'])
+      && event.data['pendingNodeIds'].every((nodeId) => typeof nodeId === 'string')
+      ? event.data['pendingNodeIds']
+      : undefined;
+    const visitCounts = event.data?.['kind'] === 'auto_routing_decision'
+      && isNumberRecord(event.data['visitCounts'])
+      ? event.data['visitCounts']
+      : undefined;
+    const selectedNodeIds = Array.isArray(event.data?.['selectedNodeIds'])
+      && event.data['selectedNodeIds'].every((nodeId) => typeof nodeId === 'string')
+      ? event.data['selectedNodeIds']
+      : undefined;
+    return {
+      sessionId,
+      type: 'architecture_event',
+      label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
+      data: {
+        domain: 'architecture',
+        kind: 'architecture_event',
+        runId: run.id,
+        architectureRunId: run.id,
+        schemaId: schema.id,
+        executionMode: run.executionMode,
+        rootSessionId: run.rootSessionId,
+        eventId: event.id,
+        eventType: event.type,
+        sequence: event.sequence,
+        nodeId: event.nodeId,
+        roleSlotId: event.roleSlotId,
+        prompt: event.type === 'run_created' ? run.prompt : undefined,
+        reasonCode: event.reasonCode,
+        errorCode: event.errorCode,
+        failure: event.failure,
+        evidence: event.evidence,
+        runtimeDecision: event.runtimeDecision,
+        incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
+        runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
+        ...(autoRoutingVisit !== undefined ? { autoRoutingVisit } : {}),
+        ...(selectedEdgeId !== undefined ? { selectedEdgeId } : {}),
+        ...(pendingNodeIds !== undefined ? { pendingNodeIds } : {}),
+        ...(visitCounts !== undefined ? { visitCounts } : {}),
+        ...(selectedNodeIds !== undefined ? { selectedNodeIds } : {}),
+        toolEvidence: this.toolEvidenceForAudit(event),
+        route: event.route,
+        routerOutput: event.routerOutput,
+        messagePreview: event.message.slice(0, 800),
+        actionSummary: actionFields.actionSummary,
+        action: actionFields.action,
+        detail: actionFields.detail,
+      },
+    };
+  }
+
+  private logRuntimeEvent(
+    schema: ArchitectureSchema,
+    run: ArchitectureRun,
+    event: ArchitectureExecutionEvent,
+    sessionId: string,
+  ): void {
     const runtimeEvent = architectureRuntimeAuditEventInput(schema, run, event, sessionId);
     if (runtimeEvent) {
       void this.runtimeAudit?.log(runtimeEvent);
@@ -178,4 +236,11 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
     const value = event.data?.['toolEvidence'];
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   }
+}
+
+function isNumberRecord(value: unknown): value is Record<string, number> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && Object.values(value).every((candidate) => typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0);
 }

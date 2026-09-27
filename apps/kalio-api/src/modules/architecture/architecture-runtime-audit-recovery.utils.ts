@@ -320,7 +320,7 @@ function isWorkflowEvidenceStatus(value: unknown): value is WorkflowEvidenceStat
 
 function isArchitectureRouteDecision(value: unknown): value is ArchitectureRouteDecision {
   return isPlainRecord(value)
-    && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback')
+    && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback' || value.source === 'jev_choice')
     && isNonEmptyString(value.fromNodeId)
     && Array.isArray(value.selectedNodeIds)
     && value.selectedNodeIds.every((nodeId) => typeof nodeId === 'string')
@@ -328,7 +328,10 @@ function isArchitectureRouteDecision(value: unknown): value is ArchitectureRoute
     && (value.nextNodeId === undefined || typeof value.nextNodeId === 'string')
     && (value.convergeToNodeId === undefined || typeof value.convergeToNodeId === 'string')
     && (value.mode === undefined || isNodeBehaviorMode(value.mode))
-    && (value.response === undefined || typeof value.response === 'string');
+    && (value.response === undefined || typeof value.response === 'string')
+    && (value.selectedEdgeId === undefined || typeof value.selectedEdgeId === 'string')
+    && (value.confidence === undefined || (typeof value.confidence === 'number' && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1))
+    && (value.decisionReason === undefined || typeof value.decisionReason === 'string');
 }
 
 function isArchitectureRouterOutput(value: unknown): value is ArchitectureRouterOutput {

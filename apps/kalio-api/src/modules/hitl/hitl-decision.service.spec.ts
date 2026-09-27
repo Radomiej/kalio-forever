@@ -93,6 +93,24 @@ describe('HitlDecisionService', () => {
     })).resolves.toEqual({ agree: false, decision: 'deny', risk: 'critical', reason: 'Destructive operation.' });
   });
 
+  it('rejects conflicting agree and decision fields instead of authorizing either one', async () => {
+    llmService.streamChat.mockImplementationOnce(async (_messages, _tools, options) => {
+      options.onChunk({
+        delta: '{"agree":false,"decision":"allow","reason":"Conflicting verdict."}',
+        done: false,
+        thinking: false,
+        sessionId: options.sessionId,
+        messageId: options.messageId,
+      } satisfies LLMStreamChunk);
+      return [];
+    });
+
+    await expect(service.evaluateApproval({
+      personaId: 'reviewer-persona',
+      request: { kind: 'tool', sessionId: 'sess-1', name: 'terminal_exec', args: {} } as never,
+    })).rejects.toThrow('conflicting agree and decision');
+  });
+
   it('uses the persona-bound Codex profile for a fresh no-tools security review', async () => {
     personaService.getSessionConfig.mockResolvedValueOnce({
       systemPrompt: 'Review approvals carefully.',

@@ -70,7 +70,7 @@ function readBoolean(record: Record<string, unknown>, key: string, fallback: boo
 }
 
 function readNodeKind(value: string | undefined): ArchitectureNodeKind {
-  if (value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact') {
+  if (value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router') {
     return value;
   }
   return 'role';
@@ -175,6 +175,18 @@ function readNodeToolOverride(raw: Record<string, unknown>): ArchitectNode['tool
   return allowedToolNames ? { allowedToolNames } : undefined;
 }
 
+function readNodeAutoRouting(raw: Record<string, unknown>): ArchitectNode['autoRouting'] | undefined {
+  const value = raw['autoRouting'];
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const threshold = readNumber(value, 'confidenceThreshold', 0.8);
+  return {
+    confidenceThreshold: threshold >= 0 && threshold <= 1 ? threshold : 0.8,
+    instructions: readString(value, ['instructions'], ''),
+  };
+}
+
 function readSlotType(value: string | undefined): ArchitectureRoleSlot['slotType'] | undefined {
   if (
     value === 'participant'
@@ -226,6 +238,7 @@ function normalizeNode(raw: unknown, index: number): ArchitectNode {
     maxToolAttempts: hasFiniteNumber(raw, 'maxToolAttempts') ? readNumber(raw, 'maxToolAttempts', 0) : undefined,
     toolOverride: readNodeToolOverride(raw),
     behavior: readNodeBehavior(raw),
+    autoRouting: readNodeAutoRouting(raw),
     personaId: readString(raw, ['personaId', 'persona', 'defaultPersonaId'], undefined),
     description: readString(raw, ['description', 'summary'], undefined),
     x: readNumber(raw, 'x', 120 + (index % 4) * 180),
@@ -273,7 +286,7 @@ function applyTopLevelEdges(schema: ArchitectSchema, raw: Record<string, unknown
 }
 
 function readEdgeSelection(value: string | undefined): ArchitectureSchemaEdge['selection'] | undefined {
-  if (value === 'default' || value === 'converge' || value === 'continuation') {
+  if (value === 'default' || value === 'converge' || value === 'continuation' || value === 'choice') {
     return value;
   }
   return undefined;

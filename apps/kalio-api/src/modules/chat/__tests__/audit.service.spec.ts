@@ -2,18 +2,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../audit.service';
 import type { DrizzleService } from '../../../database/drizzle.service';
 
-function makeDrizzle(opts: { fail?: boolean } = {}): { drizzle: DrizzleService; inserted: unknown[]; updated: unknown[]; deleted: unknown[]; runQueries: unknown[] } {
+function makeDrizzle(opts: { fail?: boolean; failSelect?: boolean } = {}): { drizzle: DrizzleService; inserted: unknown[]; updated: unknown[]; deleted: unknown[]; runQueries: unknown[] } {
   const inserted: unknown[] = [];
   const updated: unknown[] = [];
   const deleted: unknown[] = [];
   const runQueries: unknown[] = [];
-  const insert = () => ({
-    values: (row: unknown) => {
-      if (opts.fail) throw new Error('db unavailable');
-      inserted.push(row);
-      return Promise.resolve();
-    },
-  });
+  const insert = () => {
+    let row: unknown;
+    return {
+      values: (value: unknown) => {
+        row = value;
+        return {
+          onConflictDoNothing: async () => {
+            if (opts.fail) throw new Error('db unavailable');
+            const rowId = (row as Record<string, unknown>).id;
+            if (!inserted.some((entry) => (entry as Record<string, unknown>).id === rowId)) inserted.push(row);
+          },
+          then: (resolve: (value: void) => unknown, reject: (reason: unknown) => unknown) => {
+            if (opts.fail) return Promise.reject(new Error('db unavailable')).then(resolve, reject);
+            inserted.push(row);
+            return Promise.resolve().then(resolve, reject);
+          },
+        };
+      },
+    };
+  };
   const update = () => ({
     set: (patch: unknown) => ({
       where: () => {
@@ -35,7 +48,15 @@ function makeDrizzle(opts: { fail?: boolean } = {}): { drizzle: DrizzleService; 
     runQueries.push(query);
     return Promise.resolve();
   };
-  return { drizzle: { db: { insert, update, delete: deleteFn, run } } as unknown as DrizzleService, inserted, updated, deleted, runQueries };
+  const select = () => ({
+    from: () => ({
+      where: () => {
+        if (opts.failSelect) throw new Error('db unavailable');
+        return Promise.resolve(inserted);
+      },
+    }),
+  });
+  return { drizzle: { db: { insert, update, delete: deleteFn, run, select } } as unknown as DrizzleService, inserted, updated, deleted, runQueries };
 }
 
 describe('AuditService', () => {
@@ -95,6 +116,38 @@ describe('AuditService', () => {
     expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('writes a required checkpoint and treats an identical key as idempotent', async () => {
+    const entry = {
+      sessionId: 'sid',
+      type: 'architecture_event' as const,
+      label: 'architecture_event:router_decision:auto',
+      data: { runId: 'run-1', selectedEdgeId: 'edge-a' },
+    };
+
+    await service.logRequired('route-checkpoint-1', entry);
+    await service.logRequired('route-checkpoint-1', entry);
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({ id: 'route-checkpoint-1', data: entry.data });
+  });
+
+  it('rejects conflicting checkpoint reuse and database write or read failures', async () => {
+    const entry = {
+      sessionId: 'sid',
+      type: 'architecture_event' as const,
+      label: 'architecture_event:router_decision:auto',
+      data: { runId: 'run-1', selectedEdgeId: 'edge-a' },
+    };
+    await service.logRequired('route-checkpoint-1', entry);
+    await expect(service.logRequired('route-checkpoint-1', { ...entry, data: { ...entry.data, selectedEdgeId: 'edge-b' } }))
+      .rejects.toThrow('different decision');
+
+    const writeFailure = new AuditService(makeDrizzle({ fail: true }).drizzle);
+    await expect(writeFailure.logRequired('route-checkpoint-2', entry)).rejects.toThrow('db unavailable');
+    const readFailure = new AuditService(makeDrizzle({ failSelect: true }).drizzle);
+    await expect(readFailure.logRequired('route-checkpoint-3', entry)).rejects.toThrow('db unavailable');
   });
 
   it('periodically prunes old audit rows and caps hot storage rows', async () => {

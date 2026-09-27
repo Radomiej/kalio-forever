@@ -9,6 +9,13 @@ export function architectureTraceActivitySummary(
   streamStatus?: TraceStreamStatus,
   status?: TraceLifecycleStatus,
 ): string {
+  if (speaker === 'auto_router') {
+    if (status === 'cancelled') return 'Auto-routing was cancelled before choosing a route.';
+    if (status === 'failed' || streamStatus === 'failed') return 'Auto-routing could not choose a route.';
+    if (streamStatus === 'started' || streamStatus === 'streaming') return 'Auto-routing is choosing the next graph node.';
+    return 'Auto-routing selected the next graph node.';
+  }
+
   if (speaker === 'router') {
     if (status === 'cancelled') {
       return 'Router was cancelled before selecting the next graph node.';

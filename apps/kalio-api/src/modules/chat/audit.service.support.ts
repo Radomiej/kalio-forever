@@ -17,6 +17,7 @@ export type AuditLogSource = 'hot' | 'archive' | 'all';
 
 export interface AuditLogQuery {
   limit: number;
+  offset?: number;
   source: AuditLogSource;
   types?: AuditType[] | null;
   sessionId?: string;

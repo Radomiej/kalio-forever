@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { JevDecisionsClient } from '../../common/jev-decisions.client';
+import { CredentialsModule } from '../credentials/credentials.module';
+import { HitlModule } from '../hitl/hitl.module';
 import { ChatModule } from '../chat/chat.module';
 import { CLIAgentModule } from '../cli-agent/cli-agent.module';
 import { VFSModule } from '../vfs/vfs.module';
@@ -12,10 +15,11 @@ import { ArchitectureRuntimeAuditWriterService } from './architecture-runtime-au
 import { ArchitectureRuntimeAuditRecoveryService } from './architecture-runtime-audit-recovery.service';
 import { ArchitectureRuntimeChatProjectionService } from './architecture-runtime-chat-projection.service';
 import { ArchitectureRuntimeGraphProjectionService } from './architecture-runtime-graph-projection.service';
+import { ArchitectureAutoRoutingService } from './architecture-auto-routing.service';
 import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.port';
 
 @Module({
-  imports: [ChatModule, VFSModule, CLIAgentModule],
+  imports: [ChatModule, HitlModule, CredentialsModule, VFSModule, CLIAgentModule],
   controllers: [ArchitectureRegistryController, ArchitectureRunsController],
   providers: [
     ArchitectureRegistryService,
@@ -24,6 +28,8 @@ import { ARCHITECTURE_RUNTIME_STOP } from '../chat/architecture-runtime-stop.por
     ArchitectureRuntimeAuditRecoveryService,
     ArchitectureRuntimeChatProjectionService,
     ArchitectureRuntimeGraphProjectionService,
+    ArchitectureAutoRoutingService,
+    JevDecisionsClient,
     ArchitectureRuntimeService,
     {
       provide: ARCHITECTURE_RUNTIME_STOP,

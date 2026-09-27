@@ -10,9 +10,40 @@ import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { ArchitectureAutoRoutingService } from './architecture-auto-routing.service';
 import { createWorkflowError } from '../../common/utils/workflow-error.util';
 
 describe('ArchitectureRuntimeService', () => {
+  it('keeps a route checkpoint created while stop is draining and follows it without asking Jev again', async () => {
+    const choose = vi.fn(async ({ signal }: { signal?: AbortSignal }) => {
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+      return { edgeId: 'edge-default', source: 'runtime_fallback' as const, reason: 'provider_error' as const };
+    });
+    const autoRouting = {
+      choose,
+    } as unknown as ArchitectureAutoRoutingService;
+    const { service } = createService({ autoRouting });
+    const schema = autoRoutingSchema();
+    const run = await service.createRunAsync({
+      schemaId: schema.id,
+      prompt: 'Stop while Jev is deciding.',
+      schema,
+    });
+    await waitUntil(() => choose.mock.calls.length === 1);
+
+    await service.stopRun(run.id);
+    const resumed = await service.resumeRun(run.id, {});
+    const events = await service.getEventsDurable(run.id);
+    const route = events.find((event) => event.type === 'router_decision' && event.nodeId === 'auto');
+
+    expect(resumed.status).toBe('completed');
+    expect(choose).toHaveBeenCalledTimes(1);
+    expect(route?.route).toMatchObject({ source: 'runtime_fallback', selectedEdgeId: 'edge-default', nextNodeId: 'default' });
+    expect(events.filter((event) => event.type === 'run_stopped')).toHaveLength(1);
+    expect(new Set(events.map((event) => event.id)).size).toBe(events.length);
+    expect(events.filter((event) => event.type === 'node_started' && event.nodeId === 'default')).toHaveLength(1);
+  });
+
   it('creates a deterministic completed run with chat branches, router, and final artifact events', async () => {
     const { service, executor, sessions } = createService();
 
@@ -5544,6 +5575,7 @@ function auditRow(params: {
 function createService(options: {
   cliConfigs?: Record<string, { enabled: boolean; model?: string; architecturePreference?: string }>;
   sessionById?: Record<string, ChatSession>;
+  autoRouting?: ArchitectureAutoRoutingService;
 } = {}): {
   service: ArchitectureRuntimeService;
   executor: ArchitectureRoleExecutor;
@@ -5557,9 +5589,10 @@ function createService(options: {
   sessionManager: Pick<SessionManagerService, 'persistMessage'> & {
     persistMessage: ReturnType<typeof vi.fn>;
   };
-  audit: Pick<AuditService, 'log' | 'listEntries'> & {
+  audit: Pick<AuditService, 'log' | 'listEntries' | 'logRequired'> & {
     log: ReturnType<typeof vi.fn>;
     listEntries: ReturnType<typeof vi.fn>;
+    logRequired: ReturnType<typeof vi.fn>;
   };
   vfs: Pick<VFSService, 'copySessionFiles' | 'listFiles' | 'readBinary' | 'writeBinary'> & {
     copySessionFiles: ReturnType<typeof vi.fn>;
@@ -5632,6 +5665,7 @@ function createService(options: {
   const audit = {
     log: vi.fn().mockResolvedValue('audit-id'),
     listEntries: vi.fn().mockResolvedValue([]),
+    logRequired: vi.fn().mockResolvedValue('audit-id'),
   };
   const vfs = {
     copySessionFiles: vi.fn(() => []),
@@ -5673,12 +5707,41 @@ function createService(options: {
       vfs as unknown as VFSService,
       cliAgentConfig,
       new RuntimeAuditLogger(audit as unknown as AuditService),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      options.autoRouting,
     ),
     executor,
     sessions,
     sessionManager,
     audit,
     vfs,
+  };
+}
+
+function autoRoutingSchema(): ArchitectureSchema {
+  return {
+    id: 'strategic-decision-council',
+    name: 'Stop resume Auto-routing',
+    description: 'Stop and follow-up runtime fixture.',
+    version: '1.0.0',
+    roleSlots: [],
+    nodes: [
+      { id: 'auto', label: 'Auto-routing', kind: 'auto_router' },
+      { id: 'agent', label: 'Agent', kind: 'artifact' },
+      { id: 'default', label: 'Default', kind: 'artifact' },
+    ],
+    edges: [
+      { id: 'edge-agent', fromNodeId: 'auto', toNodeId: 'agent', selection: 'choice' },
+      { id: 'edge-default', fromNodeId: 'auto', toNodeId: 'default', selection: 'default' },
+    ],
+    routerPolicy: { mode: 'evidence_first', mustAddressCriticFindings: false, canReturnNeedsMoreResearch: false },
+    contextPolicy: { includeUserTask: true, includeProjectMemory: false, includeBrowserSession: false, includePriorDecisions: false },
+    memoryPolicy: { persistFinalArtifact: true, persistRouterDecision: true },
+    outputArtifactSchema: 'markdown',
   };
 }
 

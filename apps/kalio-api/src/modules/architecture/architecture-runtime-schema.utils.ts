@@ -58,7 +58,10 @@ export function cloneArchitectureRuntimeSchema(schema: ArchitectureSchema): Arch
   return {
     ...schema,
     roleSlots: schema.roleSlots.map((slot) => ({ ...slot })),
-    nodes: schema.nodes.map((node) => ({ ...node })),
+    nodes: schema.nodes.map((node) => ({
+      ...node,
+      ...(node.autoRouting ? { autoRouting: { ...node.autoRouting } } : {}),
+    })),
     edges: schema.edges.map((edge) => ({ ...edge })),
     routerPolicy: { ...schema.routerPolicy },
     contextPolicy: cloneArchitectureContextPolicy(schema.contextPolicy),
@@ -81,6 +84,7 @@ export function isArchitectureRuntimeSchema(value: unknown): value is Architectu
     && value.edges.every((edge) => isArchitectureSchemaEdge(edge))
     && hasValidRoleSlotReferences(value.roleSlots, value.nodes)
     && hasValidNodeBehaviorTopology(value.nodes)
+    && hasValidAutoRoutingTopology(value.nodes, value.edges)
     && hasValidGraphTopology(value.nodes, value.edges)
     && isRouterPolicy(value.routerPolicy)
     && isArchitectureContextPolicy(value.contextPolicy)
@@ -118,6 +122,8 @@ function isArchitectureSchemaNode(value: unknown): value is ArchitectureSchemaNo
     )
     && (value.toolOverride === undefined || isNodeToolOverride(value.toolOverride))
     && (value.behavior === undefined || isNodeBehavior(value.behavior))
+    && (value.autoRouting === undefined || isAutoRoutingConfig(value.autoRouting))
+    && (value.kind === 'auto_router' ? value.roleSlotId === undefined : value.autoRouting === undefined)
     && (value.x === undefined || typeof value.x === 'number')
     && (value.y === undefined || typeof value.y === 'number');
 }
@@ -149,6 +155,26 @@ function isNodeBehavior(value: unknown): value is NonNullable<ArchitectureSchema
       || value.scoringPolicy === 'custom'
     )
     && (value.description === undefined || typeof value.description === 'string');
+}
+
+function isAutoRoutingConfig(value: unknown): value is NonNullable<ArchitectureSchemaNode['autoRouting']> {
+  return isPlainRecord(value)
+    && typeof value.confidenceThreshold === 'number'
+    && Number.isFinite(value.confidenceThreshold)
+    && value.confidenceThreshold >= 0
+    && value.confidenceThreshold <= 1
+    && typeof value.instructions === 'string'
+    && value.instructions.length <= 2_000;
+}
+
+function hasValidAutoRoutingTopology(nodes: ArchitectureSchemaNode[], edges: ArchitectureSchemaEdge[]): boolean {
+  return nodes.every((node) => {
+    if (node.kind !== 'auto_router') return true;
+    const outgoing = edges.filter((edge) => edge.fromNodeId === node.id);
+    return outgoing.filter((edge) => edge.selection === 'default').length === 1
+      && outgoing.filter((edge) => edge.selection === 'choice').length >= 1
+      && outgoing.every((edge) => edge.selection === 'default' || edge.selection === 'choice');
+  });
 }
 
 function hasValidNodeBehaviorTopology(nodes: ArchitectureSchemaNode[]): boolean {
@@ -214,6 +240,7 @@ function isArchitectureSchemaEdge(value: unknown): value is ArchitectureSchemaEd
       || value.selection === 'default'
       || value.selection === 'converge'
       || value.selection === 'continuation'
+      || value.selection === 'choice'
     )
     && (value.returnToOrchestrator === undefined || typeof value.returnToOrchestrator === 'boolean');
 }
@@ -258,7 +285,7 @@ function isSlotType(value: unknown): value is ArchitectureRoleSlot['slotType'] {
 }
 
 function isNodeKind(value: unknown): value is ArchitectureSchemaNode['kind'] {
-  return value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact';
+  return value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router';
 }
 
 function isNodeBehaviorMode(value: unknown): value is NonNullable<ArchitectureSchemaNode['behavior']>['mode'] {

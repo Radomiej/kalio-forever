@@ -346,6 +346,11 @@ export function ExecutionGraphInspector({
                 {selectedNode.payload.route ? (
                   <>
                     <InspectorRow label="Flow" value={`${shortNodeLabel(selectedNode.payload.route.fromNodeId)} -> ${shortNodeLabel(selectedNode.payload.route.toNodeId)}`} />
+                    <InspectorRow label="Selected edge" value={selectedNode.payload.route.selectedEdgeId} />
+                    <InspectorRow label="Confidence" value={selectedNode.payload.route.confidence !== undefined
+                      ? `${Math.round(selectedNode.payload.route.confidence * 100)}%`
+                      : undefined} />
+                    <InspectorRow label="Decision reason" value={selectedNode.payload.route.decisionReason} />
                     <InspectorRow label="Incomplete" value={selectedNode.payload.route.incompleteReason} />
                     <InspectorRow label="Tool proof" value={selectedNode.payload.route.toolEvidence ? toolEvidenceLabel(selectedNode.payload.route.toolEvidence) : undefined} />
                     <InspectorTextRow label="Preview" value={selectedNode.payload.route.contentPreview} />

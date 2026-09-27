@@ -72,7 +72,7 @@ export function ArchitectRunConfig({
 }: ArchitectRunConfigProps) {
   const branchSlots = schema?.roleSlots.filter((slot) => slot.slotType === 'participant' || slot.slotType === 'critic') ?? [];
   const overrideCount = Object.keys(personaOverrides).length;
-  const routingNodes = schema?.nodes.filter((node) => node.kind === 'parallel' || node.kind === 'router').length ?? 0;
+  const routingNodes = schema?.nodes.filter((node) => node.kind === 'parallel' || node.kind === 'router' || node.kind === 'auto_router').length ?? 0;
   const credentialWarning = runtimeCredentialWarning(llmConfig, activeCredentialId);
   const budget = schema ? estimateArchitectureBudget(schema, maxSteps, maxNodeVisits, maxSubagentIterations) : null;
   const [showRunAudit, setShowRunAudit] = useState(false);
@@ -386,19 +386,20 @@ export function estimateArchitectureBudget(
     || slot.slotType === 'finalizer'
   )).length;
   const parallelNodes = schema.nodes.filter((node) => node.kind === 'parallel').length;
+  const autoRoutingNodes = schema.nodes.filter((node) => node.kind === 'auto_router').length;
   const loopEdges = schema.edges.filter((edge) => {
     const from = schema.nodes.find((node) => node.id === edge.fromNodeId);
     const to = schema.nodes.find((node) => node.id === edge.toNodeId);
     return from?.y !== undefined && to?.y !== undefined && to.y <= from.y;
   }).length;
-  const estimatedCalls = Math.min(maxSteps, Math.max(1, executableSlots + parallelNodes + loopEdges) * Math.max(1, maxNodeVisits));
+  const estimatedCalls = Math.min(maxSteps, Math.max(1, executableSlots + parallelNodes + autoRoutingNodes + loopEdges) * Math.max(1, maxNodeVisits));
   const estimatedLlmTurns = estimatedCalls * Math.max(1, maxSubagentIterations);
   if (estimatedLlmTurns >= 180 || executableSlots >= 16) {
     return {
       label: 'high',
       tone: 'danger',
       shortDescription: `high budget ~${estimatedLlmTurns} turns`,
-      description: `High-cost architecture: ${executableSlots} executable slots, ${parallelNodes} parallel nodes, ${loopEdges} loop edges, up to about ${estimatedCalls} node executions and ${estimatedLlmTurns} LLM/tool-loop turns from current guards.`,
+      description: `High-cost architecture: ${executableSlots} executable slots, ${parallelNodes} parallel nodes, ${autoRoutingNodes} Auto-routing nodes, ${loopEdges} loop edges, up to about ${estimatedCalls} node executions and ${estimatedLlmTurns} LLM/tool-loop turns from current guards.`,
       executableSlots,
       branchSlots,
       parallelNodes,
@@ -412,7 +413,7 @@ export function estimateArchitectureBudget(
       label: 'med',
       tone: 'warning',
       shortDescription: `medium budget ~${estimatedLlmTurns} turns`,
-      description: `Medium-cost architecture: ${executableSlots} executable slots, ${parallelNodes} parallel nodes, ${loopEdges} loop edges, up to about ${estimatedCalls} node executions and ${estimatedLlmTurns} LLM/tool-loop turns from current guards.`,
+      description: `Medium-cost architecture: ${executableSlots} executable slots, ${parallelNodes} parallel nodes, ${autoRoutingNodes} Auto-routing nodes, ${loopEdges} loop edges, up to about ${estimatedCalls} node executions and ${estimatedLlmTurns} LLM/tool-loop turns from current guards.`,
       executableSlots,
       branchSlots,
       parallelNodes,

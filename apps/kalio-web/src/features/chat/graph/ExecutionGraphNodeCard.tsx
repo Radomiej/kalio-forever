@@ -17,7 +17,10 @@ import {
 } from './ExecutionGraphBoard.presentation';
 
 function isRouterRouteNode(node: ExecutionGraphNode): boolean {
-  return node.payload.kind === 'architecture-run' && node.payload.route?.source === 'router';
+  return node.payload.kind === 'architecture-run'
+    && (node.payload.route?.source === 'router'
+      || node.payload.route?.source === 'jev_choice'
+      || node.payload.route?.source === 'runtime_fallback');
 }
 
 function statusDotClass(status: ExecutionGraphNode['status']): string {

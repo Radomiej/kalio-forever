@@ -273,7 +273,7 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
                 <div className="mt-0.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-base-content/60">
                   <span>{node.status}</span>
                   <span>/</span>
-                  <span>{node.kind}</span>
+                  <span>{node.kind === 'auto_router' ? 'Auto-routing' : node.kind}</span>
                   {node.behavior?.mode && (
                     <>
                       <span>/</span>
@@ -308,7 +308,7 @@ function GraphStatus({ run, schema }: Pick<ArchitectRunProjectionProps, 'run' | 
             <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-base-content/65">Executed route</div>
             <div className="space-y-1.5" data-testid="architect-executed-route">
               {run?.graph.routeHops?.map((hop, index) => (
-                <RouteLine key={`${hop.eventId}:${hop.toNodeId}:${index}`} source={hop.source} fromNodeId={hop.fromNodeId} toNodeId={hop.toNodeId} />
+                <RouteLine key={`${hop.eventId}:${hop.toNodeId}:${index}`} source={hop.source} fromNodeId={hop.fromNodeId} toNodeId={hop.toNodeId} selectedEdgeId={hop.selectedEdgeId} confidence={hop.confidence} decisionReason={hop.decisionReason} />
               ))}
             </div>
           </div>
@@ -324,15 +324,21 @@ function RouteHop({ route }: { route?: ArchitectureRouteDecision }) {
     <div className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-[10px] text-sky-100">
       <span className="shrink-0 font-semibold uppercase tracking-wide">{route.source}</span>
       <span className="min-w-0 truncate font-mono">{formatRoute(route)}</span>
+      {route.selectedEdgeId && <span className="font-mono">edge {route.selectedEdgeId}</span>}
+      {route.confidence !== undefined && <span className="font-mono">{Math.round(route.confidence * 100)}%</span>}
+      {route.decisionReason && <span>{route.decisionReason}</span>}
     </div>
   );
 }
 
-function RouteLine({ source, fromNodeId, toNodeId }: { source: ArchitectureRouteDecision['source']; fromNodeId: string; toNodeId: string }) {
+function RouteLine({ source, fromNodeId, toNodeId, selectedEdgeId, confidence, decisionReason }: { source: ArchitectureRouteDecision['source']; fromNodeId: string; toNodeId: string; selectedEdgeId?: string; confidence?: number; decisionReason?: string }) {
   return (
     <div className="flex min-w-0 items-center gap-2 text-[11px] text-base-content/65">
       <span className="badge badge-ghost badge-xs shrink-0">{source}</span>
       <span className="min-w-0 truncate font-mono">{fromNodeId} -&gt; {toNodeId}</span>
+      {selectedEdgeId && <span className="shrink-0 font-mono">edge {selectedEdgeId}</span>}
+      {confidence !== undefined && <span className="shrink-0 font-mono">{Math.round(confidence * 100)}%</span>}
+      {decisionReason && <span className="shrink-0">{decisionReason}</span>}
     </div>
   );
 }

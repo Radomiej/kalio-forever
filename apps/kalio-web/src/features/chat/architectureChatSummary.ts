@@ -40,7 +40,7 @@ export type ArchitectureRunTurnProjection = {
 };
 
 function isTraceSpeaker(value: string): value is TraceSpeaker {
-  return value === 'participant' || value === 'router' || value === 'finalizer';
+  return value === 'participant' || value === 'router' || value === 'auto_router' || value === 'finalizer';
 }
 
 function formatRouteLabel(source: string, fromNodeId: string, toNodeId: string): string {
@@ -62,9 +62,14 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
     .filter((message): message is typeof message & { speaker: TraceSpeaker } => isTraceSpeaker(message.speaker))
     .map((message) => {
       const event = message.eventId ? eventById.get(message.eventId) : undefined;
+      const node = graphNodes.find((candidate) => (
+        candidate.id === message.route?.fromNodeId
+        || (message.eventId !== undefined && candidate.eventIds.includes(message.eventId))
+      ));
+      const speaker = node?.kind === 'auto_router' ? 'auto_router' : message.speaker;
       return {
-        speaker: message.speaker,
-        content: compactArchitectureTraceContent(message.content, message.speaker),
+        speaker,
+        content: compactArchitectureTraceContent(message.content, speaker),
         actionSummary: message.actionSummary,
         action: message.action,
         detail: message.detail,
@@ -82,6 +87,9 @@ export function buildArchitectureRunMetadata(result: ArchitectRunResult): Archit
         ))?.sessionId,
         nodeId: message.route?.fromNodeId,
         nextNodeId: message.route?.nextNodeId,
+        selectedEdgeId: message.route?.selectedEdgeId,
+        confidence: message.route?.confidence,
+        decisionReason: message.route?.decisionReason,
         visitIndex: visitIndexByEventId.get(message.eventId),
         incompleteReason: message.incompleteReason ?? incompleteReasonByEventId.get(message.eventId),
         routerOutput: sanitizeRouterOutput(routerOutputByEventId.get(message.eventId)),
@@ -476,6 +484,7 @@ function speakerLabel(speaker: TraceSpeaker, roleSlotId: string | undefined): st
   }
   if (speaker === 'participant') return 'Agent';
   if (speaker === 'router') return 'Router';
+  if (speaker === 'auto_router') return 'Auto-routing';
   return 'Finalizer';
 }
 

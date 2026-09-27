@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-08-22
+Last updated: 2026-09-26
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -158,6 +158,56 @@ classDiagram
 - Tool budget exhaustion is a typed HITL request. It must appear from durable runtime evidence after reload/reconnect, not only from live socket timing.
 - Need Attention should prioritize active approvals before historical notices.
 - Live budget/HITL verification must use tools actually exposed to the tested node. A test must not prompt for hidden tools and then treat the model's refusal as a runtime failure.
+
+## Jev Decisions And Auto-routing
+
+- HITL may use Manual, Auto persona, or Jev (`typesafe/jev-1.13` through the OpenRouter Decisions API). The backend resolves the selected OpenRouter credential; the browser never receives the secret.
+- Earlier permission gates run before HITL policy. Bypass skips hard rules. Otherwise fixed rules match operation kind and tool name, with optional program and command arguments; precedence is `deny`, then `ask_user`, then `allow`. Rules apply to Manual, Auto persona, and Jev.
+- Jev approval defaults to a `0.90` threshold: approve at `p(allow) >= threshold`, deny at `p(allow) <= 1 - threshold`, and hand intermediate or failed decisions to the configured persona, then to a human if the persona is absent or unresolved. High-risk operations still require all earlier permission gates to pass.
+- `auto_router` is a graph node with Jev `choice` edges and exactly one required `default` edge. Choice edges require stable ids; their labels describe the route criteria. The node's default confidence threshold is `0.80`; missing credentials, invalid output, low confidence, timeout, or provider errors select `default`.
+- Before dispatching the next node, persist the selected edge and route metadata under `(runId, nodeId, visit)`. Recovery reads that checkpoint and must not ask Jev again or rerun a completed successor. If persistence fails, do not dispatch the successor.
+- These flows do not add an external security-policy endpoint. Production automatic approval stays disabled until P1 `RAD-15` closes the control-plane authentication gap.
+
+```mermaid
+flowchart TD
+    H0["Tool or RA-App request"] --> H1{"Earlier permissions"}
+    H1 -- "deny" --> HD["Deny"]
+    H1 -- "pass" --> H2{"Bypass?"}
+    H2 -- "yes" --> HA["Approve"]
+    H2 -- "no" --> H3{"Fixed rule"}
+    H3 -- "deny" --> HD
+    H3 -- "ask_user" --> HM["Human decision"]
+    H3 -- "allow" --> HA
+    H3 -- "none" --> H4{"HITL mode"}
+    H4 -- "Manual" --> HM
+    H4 -- "Auto persona" --> HP["Persona decision"]
+    H4 -- "Jev" --> HJ["Jev returns p(allow)"]
+    HJ --> H5{"p >= threshold?"}
+    H5 -- "yes" --> HA
+    H5 -- "no" --> H6{"p <= 1 - threshold?"}
+    H6 -- "yes" --> HD
+    H6 -- "no or error" --> H7{"Persona configured?"}
+    H7 -- "yes" --> HP
+    H7 -- "no" --> HM
+    HP -- "allow" --> HA
+    HP -- "deny" --> HD
+    HP -- "unresolved or error" --> HM
+```
+
+```mermaid
+flowchart TD
+    R0["Enter auto_router"] --> R1{"Checkpoint for this visit?"}
+    R1 -- "yes" --> R7["Read saved edge"]
+    R1 -- "no" --> R2["Jev selects choice edge"]
+    R2 --> R3{"Valid edge and confidence >= threshold?"}
+    R3 -- "yes" --> R4["Selected edge"]
+    R3 -- "no or error" --> R5["Default edge"]
+    R4 --> R6["Persist route decision"]
+    R5 --> R6
+    R6 -- "saved" --> R7
+    R6 -- "failed" --> RE["Pause run"]
+    R7 --> R8["Dispatch target node"]
+```
 
 ## QA And Release Boundaries
 

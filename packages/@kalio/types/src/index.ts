@@ -372,7 +372,7 @@ export interface ChatAttachment {
 }
 
 export interface ArchitectureChatTraceStep {
-  speaker: 'participant' | 'router' | 'finalizer';
+  speaker: 'participant' | 'router' | 'auto_router' | 'finalizer';
   content: string;
   actionSummary?: string;
   action?: ArchitectureEventAction;
@@ -388,6 +388,9 @@ export interface ArchitectureChatTraceStep {
   sessionId?: ID;
   nodeId?: string;
   nextNodeId?: string;
+  selectedEdgeId?: string;
+  confidence?: number;
+  decisionReason?: string;
   visitIndex?: number;
   incompleteReason?: string;
   routerOutput?: ArchitectureRouterOutput;
@@ -1100,6 +1103,43 @@ export interface Credential {
   baseUrl?: string;
   model?: string;
   createdAt: Timestamp;
+}
+
+export type HitlMode = 'manual' | 'auto' | 'bypass' | 'jev';
+export type HitlApprovalKind = 'tool' | 'raapp_native' | 'external_security';
+export type HitlRuleDecision = 'allow' | 'deny' | 'ask_user';
+
+export interface HitlHardRule {
+  id: string;
+  kind: HitlApprovalKind | '*';
+  name: string;
+  decision: HitlRuleDecision;
+  executable?: string;
+  argumentsContains?: string;
+}
+
+export interface HitlHardRuleInput extends Omit<HitlHardRule, 'id'> {
+  id?: string;
+}
+
+export interface HitlConfig {
+  mode: HitlMode;
+  autoPersonaId: string | null;
+  jevCredentialId: string | null;
+  jevInstructions: string;
+  jevApprovalThreshold: number;
+  rules: HitlHardRule[];
+  unattendedFallback: 'pause' | 'representative';
+  representativePersonaId: string | null;
+  notificationChannel: 'none' | 'telegram';
+  externalPolicyEnabled: boolean;
+  externalPolicyPersonaId: string | null;
+  raAppApprovalTimeoutMs: number;
+}
+
+export interface UpdateHitlConfigDto extends Omit<Partial<HitlConfig>, 'rules'> {
+  mode: HitlMode;
+  rules?: HitlHardRuleInput[];
 }
 
 export interface CreateCredentialDto {
@@ -1933,7 +1973,7 @@ export interface SecurityPolicyResponse {
 }
 
 // Architecture Orchestration
-export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact';
+export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
 export type ArchitectureNodeBehaviorMode =
   | 'fan_out_all'
   | 'choose_one'
@@ -1944,7 +1984,7 @@ export type ArchitectureNodeFanOutMode = 'parallel' | 'sequential';
 export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'custom';
 export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
-export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback';
+export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
 export type ArchitectureEventAction =
   | 'run_created'
   | 'run_stopped'
@@ -1997,6 +2037,10 @@ export interface ArchitectureSchemaNode {
     scoringPolicy?: ArchitectureNodeScoringPolicy;
     description?: string;
   };
+  autoRouting?: {
+    confidenceThreshold: number;
+    instructions: string;
+  };
   x?: number;
   y?: number;
 }
@@ -2010,7 +2054,7 @@ export interface ArchitectureSchemaEdge {
   returnToOrchestrator?: boolean;
 }
 
-export type ArchitectureSchemaEdgeSelection = 'default' | 'converge' | 'continuation';
+export type ArchitectureSchemaEdgeSelection = 'default' | 'converge' | 'continuation' | 'choice';
 
 export type ArchitectureContextCompression = 'none' | 'summary' | 'evidence_only';
 
@@ -2102,6 +2146,9 @@ export interface ArchitectureRouteDecision {
   convergeToNodeId?: string;
   mode?: ArchitectureNodeBehaviorMode;
   response?: string;
+  selectedEdgeId?: string;
+  confidence?: number;
+  decisionReason?: string;
 }
 
 export type ArchitectureRouterNextAction =
@@ -2142,6 +2189,9 @@ export interface ArchitectureRouteHop {
   source: ArchitectureRouteSource;
   fromNodeId: string;
   toNodeId: string;
+  selectedEdgeId?: string;
+  confidence?: number;
+  decisionReason?: string;
 }
 
 export interface ArchitectureExecutionEvent {
@@ -2216,7 +2266,7 @@ export interface ArchitectureChatProjection {
   messages: Array<{
     id: ID;
     eventId: ID;
-    speaker: 'system' | 'participant' | 'router' | 'finalizer';
+    speaker: 'system' | 'participant' | 'router' | 'auto_router' | 'finalizer';
     content: string;
     actionSummary?: string;
     action?: ArchitectureEventAction;

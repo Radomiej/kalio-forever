@@ -461,4 +461,72 @@ describe('renderArchitectureRunProjection', () => {
       'arch-pragmatist',
     );
   });
+
+  it('shows Auto-routing label and durable Jev decision details on route nodes', () => {
+    const nodes: ExecutionGraphNode[] = [];
+
+    renderArchitectureRunProjection({
+      addNode: (node) => {
+        const stored = { ...node, x: 0, y: 0, width: 240, height: 120 };
+        nodes.push(stored);
+        return stored;
+      },
+      addEdge: () => undefined,
+      architectureRun: null,
+      branchMaxColumn: 1,
+      finalMessage: makeMessage({
+        id: 'auto-routing-decision',
+        architectureRun: {
+          runId: 'run-auto-routing-decision',
+          schemaId: 'jev-routing',
+          status: 'completed',
+          trace: [{
+            speaker: 'auto_router',
+            content: 'Default used because no Jev credential is configured.',
+            eventId: 'event-auto-routing',
+            nodeId: 'auto-route',
+            nextNodeId: 'innovator',
+            selectedEdgeId: 'auto-route-default',
+            decisionReason: 'credential_missing',
+          }],
+          routeHops: [{
+            eventId: 'event-auto-routing',
+            source: 'runtime_fallback',
+            fromNodeId: 'auto-route',
+            toNodeId: 'innovator',
+            selectedEdgeId: 'auto-route-default',
+            confidence: 1,
+            decisionReason: 'credential_missing',
+          }],
+          graphNodes: [
+            { id: 'auto-route', label: 'Choose reviewer', kind: 'auto_router', status: 'completed', eventIds: ['event-auto-routing'] },
+            { id: 'innovator', label: 'Innovator', kind: 'role', status: 'completed', eventIds: [] },
+          ],
+        },
+      }),
+      startRow: 0,
+      turn: {
+        id: 'turn-auto-routing',
+        sessionId: 'session-1',
+        promptMessageId: 'prompt-1',
+        done: true,
+        items: [],
+      },
+      turnNodeId: 'turn:turn-auto-routing',
+    });
+
+    expect(nodes.find((node) => node.id === 'architecture-route:auto-routing-decision:0')).toMatchObject({
+      title: 'Auto-routing',
+      subtitle: 'Choose reviewer -> Innovator',
+      payload: {
+        kind: 'architecture-run',
+        route: {
+          source: 'runtime_fallback',
+          selectedEdgeId: 'auto-route-default',
+          confidence: 1,
+          decisionReason: 'credential_missing',
+        },
+      },
+    });
+  });
 });

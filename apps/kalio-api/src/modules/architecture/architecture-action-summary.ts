@@ -1,6 +1,9 @@
 import type { ArchitectureEventAction, ArchitectureExecutionEvent, ArchitectureNodeKind, ArchitectureRouterOutput } from '@kalio/types';
 
 export function architectureCompletedActionSummaryForNodeKind(nodeKind: ArchitectureNodeKind): string {
+  if (nodeKind === 'auto_router') {
+    return 'Auto-routing selected the next graph edge.';
+  }
   if (nodeKind === 'artifact') {
     return 'Final answer produced from the routed graph outputs.';
   }
@@ -11,6 +14,9 @@ export function architectureCompletedActionSummaryForNodeKind(nodeKind: Architec
 }
 
 export function architectureRunningActionSummaryForNodeKind(nodeKind: ArchitectureNodeKind): string {
+  if (nodeKind === 'auto_router') {
+    return 'Auto-routing is evaluating the next graph edge.';
+  }
   if (nodeKind === 'artifact') {
     return 'Finalizer is producing the final answer.';
   }
@@ -21,6 +27,9 @@ export function architectureRunningActionSummaryForNodeKind(nodeKind: Architectu
 }
 
 export function architectureFailedActionSummaryForNodeKind(nodeKind: ArchitectureNodeKind): string {
+  if (nodeKind === 'auto_router') {
+    return 'Auto-routing could not persist its route decision.';
+  }
   if (nodeKind === 'artifact') {
     return 'Finalizer failed to produce the final answer.';
   }
@@ -31,6 +40,9 @@ export function architectureFailedActionSummaryForNodeKind(nodeKind: Architectur
 }
 
 export function architectureCancelledActionSummaryForNodeKind(nodeKind: ArchitectureNodeKind): string {
+  if (nodeKind === 'auto_router') {
+    return 'Auto-routing was cancelled before choosing the next graph edge.';
+  }
   if (nodeKind === 'artifact') {
     return 'Finalizer was cancelled before producing the final answer.';
   }

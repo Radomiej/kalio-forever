@@ -1,6 +1,10 @@
 import type { ArchitectureGraphProjection, ChatSession } from '@kalio/types';
 import { describe, expect, it } from 'vitest';
-import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
+import {
+  architectureRunIdFromRootSession,
+  architectureRunIdFromSessionTree,
+  buildArchitectureRootGraphModel,
+} from './executionGraphArchitectureRoot';
 
 describe('buildArchitectureRootGraphModel', () => {
   it('derives architecture run ids from typed root session runtime context', () => {
@@ -392,6 +396,67 @@ describe('buildArchitectureRootGraphModel', () => {
       successfulToolNames: ['vfs_write'],
     });
     expect(routeNode?.payload.kind === 'architecture-run' ? routeNode.payload.route?.incompleteReason : null).toBe('Needs a final response.');
+  });
+
+  it('finds the architecture run on a descendant agent session when the host lacks runtime context', () => {
+    const host: ChatSession = {
+      id: 'host-session',
+      personaId: 'default',
+      title: 'Host conversation',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const child: ChatSession = {
+      id: 'architecture-agent-session',
+      personaId: 'jony',
+      title: 'Review: Innovator',
+      parentSessionId: host.id,
+      runtimeContext: {
+        runtimeKind: 'agent-flow-branch',
+        architectureContext: { architectureRunId: 'run-from-child' },
+      },
+      createdAt: 2,
+      updatedAt: 2,
+    };
+
+    expect(architectureRunIdFromSessionTree(host, [host, child])).toBe('run-from-child');
+  });
+
+  it('keeps Auto-routing separate from router personas and projects its selected edge', () => {
+    const graph: ArchitectureGraphProjection = {
+      runId: 'run-auto',
+      nodes: [
+        { id: 'auto-route', label: 'Auto-routing', kind: 'auto_router', status: 'completed', eventIds: ['jev-event'] },
+        { id: 'implementer', label: 'Implementer', kind: 'role', status: 'completed', eventIds: [] },
+      ],
+      edges: [{ id: 'choice-implementer', fromNodeId: 'auto-route', toNodeId: 'implementer', selection: 'choice' }],
+      routeHops: [{
+        eventId: 'jev-event',
+        source: 'jev_choice',
+        fromNodeId: 'auto-route',
+        toNodeId: 'implementer',
+        selectedEdgeId: 'choice-implementer',
+        confidence: 0.93,
+        decisionReason: 'confidence_met',
+      }],
+    };
+
+    const model = buildArchitectureRootGraphModel({
+      graph,
+      rootSessionId: 'arch-run-auto-root',
+      sessions: [],
+      sessionMessages: {},
+    });
+    const autoNode = model.nodes.find((node) => node.id === 'architecture-root:auto-route');
+
+    expect(autoNode?.sessionId).toBeUndefined();
+    expect(autoNode?.subtitle).toContain('Auto-routing');
+    expect(autoNode?.payload.kind === 'architecture-run' ? autoNode.payload.summary.trace[0]?.speaker : null).toBe('auto_router');
+    expect(autoNode?.payload.kind === 'architecture-run' ? autoNode.payload.route : null).toMatchObject({
+      selectedEdgeId: 'choice-implementer',
+      confidence: 0.93,
+      decisionReason: 'confidence_met',
+    });
   });
 
   it('stacks sibling architecture agents in the same stage', () => {

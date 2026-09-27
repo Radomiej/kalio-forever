@@ -20,6 +20,38 @@ export function architectureRunIdFromRootSession(session: ChatSession | null | u
   return session?.runtimeContext?.architectureContext?.architectureRunId ?? null;
 }
 
+export function architectureRunIdFromSessionTree(
+  rootSession: ChatSession | null | undefined,
+  sessions: ChatSession[],
+): string | null {
+  const rootRunId = architectureRunIdFromRootSession(rootSession);
+  if (rootRunId || !rootSession) return rootRunId;
+
+  const childrenByParentId = new Map<string, ChatSession[]>();
+  for (const session of sessions) {
+    if (!session.parentSessionId) continue;
+    childrenByParentId.set(session.parentSessionId, [
+      ...(childrenByParentId.get(session.parentSessionId) ?? []),
+      session,
+    ]);
+  }
+
+  const visited = new Set([rootSession.id]);
+  const queue = [rootSession.id];
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    if (!parentId) continue;
+    for (const child of childrenByParentId.get(parentId) ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      const runId = architectureRunIdFromRootSession(child);
+      if (runId) return runId;
+      queue.push(child.id);
+    }
+  }
+  return null;
+}
+
 export function buildArchitectureRootGraphModel(input: {
   graph: ArchitectureGraphProjection;
   rootSessionId: string;
@@ -92,7 +124,7 @@ function toExecutionNode(input: {
     schemaId: graph.schemaName ?? graph.schemaId ?? 'architecture-run',
     status: graph.status ?? graphStatus(graph.nodes),
     trace: node.eventIds.map((eventId) => ({
-      speaker: node.kind === 'artifact' ? 'finalizer' as const : node.kind === 'router' ? 'router' as const : 'participant' as const,
+      speaker: node.kind === 'artifact' ? 'finalizer' as const : node.kind === 'auto_router' ? 'auto_router' as const : node.kind === 'router' ? 'router' as const : 'participant' as const,
       content: branchMessages.map((message) => message.content).filter(Boolean).join('\n'),
       eventId,
       nodeId: node.id,
@@ -112,7 +144,7 @@ function toExecutionNode(input: {
     kind: node.kind === 'artifact' ? 'artifact' : 'architecture-run',
     title: node.label,
     subtitle: [
-      node.kind,
+      node.kind === 'auto_router' ? 'Auto-routing' : node.kind,
       node.status,
       budgetLabel,
       openableBranchSessionId ? 'branch session' : undefined,
@@ -141,6 +173,9 @@ function toExecutionNode(input: {
         source: matchingHops[0].source,
         fromNodeId: matchingHops[0].fromNodeId,
         toNodeId: matchingHops[0].toNodeId,
+        selectedEdgeId: matchingHops[0].selectedEdgeId,
+        confidence: matchingHops[0].confidence,
+        decisionReason: matchingHops[0].decisionReason,
         branchSessionOpenable: Boolean(openableBranchSessionId),
         branchSessionId: openableBranchSessionId,
         chunkCount: branchMessages.length,
@@ -305,7 +340,7 @@ function executionStatusFromArchitectureStatus(status: ArchitectureRunStatus | u
 function graphColumn(node: ArchitectureGraphProjectionNode, index: number): number {
   if (node.kind === 'parallel') return 0;
   if (node.kind === 'role') return 1;
-  if (node.kind === 'router') return 2;
+  if (node.kind === 'router' || node.kind === 'auto_router') return 2;
   if (node.kind === 'artifact') return 3;
   return Math.min(3, index);
 }

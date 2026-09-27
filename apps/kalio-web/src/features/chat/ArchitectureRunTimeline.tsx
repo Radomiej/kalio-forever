@@ -362,6 +362,37 @@ function TimelineStatusIcon({
   return <XCircle size={10} className="text-rose-300" />;
 }
 
+function AutoRoutingStep({ step, label, onOpenStep }: {
+  step: TraceStep;
+  label: string;
+  onOpenStep: (step: TraceStep) => void;
+}) {
+  const status = statusForStep(step);
+  return (
+    <button
+      type="button"
+      className="w-full rounded-lg border border-cyan-400/20 bg-cyan-400/5 px-2.5 py-2 text-left transition-colors hover:border-cyan-300/40 hover:bg-cyan-400/10"
+      data-testid="architecture-route-auto-routing"
+      data-status={status ?? undefined}
+      onClick={() => onOpenStep(step)}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Route size={12} className="text-cyan-300" />
+        <span className="text-xs font-medium text-base-content">{label}</span>
+        <span className="rounded bg-cyan-400/10 px-1.5 py-0.5 text-[10px] font-mono text-cyan-200">Auto-routing</span>
+        {step.nextNodeId && <span className="text-[10px] font-mono text-base-content/70">to {step.nextNodeId}</span>}
+        {step.selectedEdgeId && <span className="text-[10px] font-mono text-base-content/70">edge {step.selectedEdgeId}</span>}
+        {step.confidence !== undefined && <span className="text-[10px] font-mono text-base-content/70">{Math.round(step.confidence * 100)}%</span>}
+        {step.decisionReason && <span className="text-[10px] text-base-content/70">{step.decisionReason}</span>}
+        <StatusBadge status={status} />
+      </div>
+      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-base-content/55" title={compact(step)}>
+        {activitySummary(step)}
+      </p>
+    </button>
+  );
+}
+
 function FinalizerStep({
   step,
   openableSessionId,
@@ -455,6 +486,9 @@ export function ArchitectureRunTimeline({
     && (knownBranchSessionIds === undefined || knownBranchSessionIds.has(sessionId))
   );
   const displayLabelForStep = (step: TraceStep): string => {
+    if (step.speaker === 'auto_router') {
+      return nodeLabel(step);
+    }
     if (step.speaker === 'finalizer') {
       return 'Finalizer';
     }
@@ -473,7 +507,9 @@ export function ArchitectureRunTimeline({
     return routerNodeId.startsWith('router-') ? 'Router' : nodeLabel(step);
   };
   const openableSessionIdForStep = (step: TraceStep): string | undefined => (
-    resolveBranchSessionId(run.runId, step, canOpenBranchSession)
+    step.speaker === 'auto_router'
+      ? undefined
+      : resolveBranchSessionId(run.runId, step, canOpenBranchSession)
     ?? ((): string | undefined => {
       const routerSession = routerSessionForStep(step, runSessions);
       return canOpenBranchSession(routerSession?.id) ? routerSession?.id : undefined;
@@ -524,6 +560,16 @@ export function ArchitectureRunTimeline({
           }
 
           const { step } = stage;
+            if (step.speaker === 'auto_router') {
+              return (
+                <AutoRoutingStep
+                  key={step.eventId ?? `${step.nodeId}-${index}`}
+                  step={step}
+                  label={displayLabelForStep(step)}
+                  onOpenStep={openStep}
+                />
+              );
+            }
             if (step.speaker === 'participant') {
               return (
                 <AgentStep

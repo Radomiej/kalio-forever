@@ -135,6 +135,30 @@ describe('normalizeArchitectureSchema', () => {
     });
   });
 
+  it('preserves auto-routing node configuration and Jev choice/default edge roles', () => {
+    const schema = normalizeArchitectureSchema({
+      id: 'auto-route-schema',
+      name: 'Auto route schema',
+      roleSlots: [],
+      nodes: [{
+        id: 'auto-route',
+        label: 'Auto-route',
+        kind: 'auto_router',
+        autoRouting: { confidenceThreshold: 0.84, instructions: 'Choose the best next step.' },
+      }, { id: 'agent', label: 'Agent', kind: 'role' }],
+      edges: [
+        { id: 'agent-choice', fromNodeId: 'auto-route', toNodeId: 'agent', selection: 'choice' },
+        { id: 'agent-default', fromNodeId: 'auto-route', toNodeId: 'agent', selection: 'default' },
+      ],
+    });
+
+    expect(schema.nodes[0]).toMatchObject({
+      kind: 'auto_router',
+      autoRouting: { confidenceThreshold: 0.84, instructions: 'Choose the best next step.' },
+    });
+    expect(schema.edges.map((edge) => edge.selection)).toEqual(['choice', 'default']);
+  });
+
   it('returns safe defaults for malformed schema input and normalizes schema collections', () => {
     const fallback = normalizeArchitectureSchema(null, 2);
 

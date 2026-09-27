@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ExecutionProfile } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
@@ -59,7 +58,7 @@ export class DevinApiLLMSource implements ILLMSource {
     this.seenEvents.set(remoteSessionId, seen);
     const { intervalMs, timeoutMs } = this.client.getPollOptions();
     const startedAt = Date.now();
-    let finalSession = session;
+    let finalSession: DevinSession;
     try {
       for (;;) {
         if (params.abortSignal?.aborted) {

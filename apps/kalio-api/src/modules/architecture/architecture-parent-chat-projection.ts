@@ -177,6 +177,9 @@ function buildArchitectureChatRunSummary(
         eventId: event.id,
         nodeId: event.nodeId,
         nextNodeId: event.route?.nextNodeId,
+        selectedEdgeId: event.route?.selectedEdgeId,
+        confidence: event.route?.confidence,
+        decisionReason: event.route?.decisionReason,
         reasonCode: event.reasonCode,
         errorCode: event.errorCode,
         failure: event.failure,
@@ -194,6 +197,9 @@ function traceSpeakerForEvent(event: ArchitectureExecutionEvent): ArchitectureCh
   }
   if (event.type === 'final_artifact') {
     return 'finalizer';
+  }
+  if (event.route?.source === 'jev_choice' || event.data?.['autoRoutingVisit'] !== undefined) {
+    return 'auto_router';
   }
   return 'router';
 }
