@@ -12,6 +12,7 @@ import {
   StreamableFile,
   UnsupportedMediaTypeException,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -19,6 +20,7 @@ import { nanoid } from 'nanoid';
 import type { Request, Response } from 'express';
 import type { ChatAttachment, VFSListResult, VFSReadResult } from '@kalio/types';
 import { VFSService } from './vfs.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 const ALLOWED_UPLOAD_MIMES: Record<string, string> = {
   'image/png': 'png',
@@ -72,6 +74,7 @@ function resolveServePath(path: string | undefined, request?: Pick<Request, 'ori
  * Mounted at /api/sessions/:id/vfs/* (global prefix 'api' added in main.ts).
  */
 @Controller('sessions/:id/vfs')
+@UseGuards(ControlPlaneAuthGuard)
 export class SessionVfsController {
   constructor(private readonly vfs: VFSService) {}
 

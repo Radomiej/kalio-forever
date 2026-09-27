@@ -1,9 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { access, mkdtemp, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertControlPlaneAuthentication, assertLoopbackOnly } from './control-plane-package-smoke.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resourceRoot = join(repoRoot, 'src-tauri', 'resources');
@@ -124,7 +126,8 @@ async function waitForReady(child, port) {
         throw new Error(`runtime info endpoint returned HTTP ${runtimeResponse.status}`);
       }
       const runtimeInfo = await runtimeResponse.json();
-      if (runtimeInfo?.status !== 'ok' || runtimeInfo?.runtime !== 'kalio') {
+      if (runtimeInfo?.status !== 'ok' || runtimeInfo?.runtime !== 'kalio'
+        || runtimeInfo?.host !== '127.0.0.1') {
         throw new Error(`runtime info returned ${JSON.stringify(runtimeInfo)}`);
       }
       console.log(
@@ -150,6 +153,7 @@ async function main() {
   ]);
 
   const port = await findFreePort();
+  const controlPlaneToken = randomBytes(32).toString('hex');
   const smokeRoot = await mkdtemp(join(tmpdir(), 'kalio-desktop-package-smoke-'));
   const dataRoot = join(smokeRoot, 'data');
   const child = spawn(runtimePath, [bootstrapPath], {
@@ -171,7 +175,8 @@ async function main() {
       MEMORY_DB_PATH: join(dataRoot, 'memory'),
       EMBEDDING_CACHE_DIR: join(dataRoot, 'embeddings-cache'),
       CREDENTIALS_MASTER_KEY: 'kalio-desktop-smoke-master-key-32chars',
-      CORS_ORIGIN: `http://127.0.0.1:${port}`,
+      CORS_ORIGIN: 'http://tauri.localhost,tauri://localhost',
+      KALIO_CONTROL_PLANE_TOKEN: controlPlaneToken,
       LLM_PROVIDER: 'mock',
       LLM_API_KEY: 'mock',
       LLM_BASE_URL: 'mock',
@@ -193,6 +198,11 @@ async function main() {
       throw spawnError;
     }
     await waitForReady(child, port);
+    await assertControlPlaneAuthentication(`http://127.0.0.1:${port}`, controlPlaneToken, [
+      'http://tauri.localhost',
+      'tauri://localhost',
+    ]);
+    await assertLoopbackOnly(port);
     await access(join(dataRoot, 'kalio.db'));
     console.log(`[desktop-smoke] fresh SQLite database created in ${dataRoot}`);
   } finally {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { VfsHtmlRenderer } from './VfsHtmlRenderer';
 
 vi.mock('./HtmlIframeRenderer', () => ({
@@ -61,6 +61,7 @@ describe('VfsHtmlRenderer', () => {
     render(<VfsHtmlRenderer sessionId="session-1" vfsPath="drafts/loading/index.html" />);
 
     expect(screen.getByTestId('raapp-preview-loading')).toHaveTextContent('Preparing your app preview');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     await act(async () => {
       resolveFetch({ ok: true });

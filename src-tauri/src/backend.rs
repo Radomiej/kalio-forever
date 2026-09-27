@@ -12,15 +12,65 @@ use tauri::{App, AppHandle, Manager};
 
 const BACKEND_PORT: u16 = 4516;
 const TAURI_ORIGIN: &str = "http://tauri.localhost,tauri://localhost";
+const TAURI_DEV_ORIGIN: &str = "http://127.0.0.1:5188";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(45);
 
-#[derive(Clone, Default)]
+fn control_plane_cors_origins(include_dev_origin: bool) -> String {
+    if include_dev_origin {
+        format!("{TAURI_ORIGIN},{TAURI_DEV_ORIGIN}")
+    } else {
+        TAURI_ORIGIN.to_owned()
+    }
+}
+
+#[derive(Clone)]
 pub struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
     lock: Arc<Mutex<Option<(File, PathBuf)>>>,
+    control_plane_token: Arc<String>,
+}
+
+impl Default for BackendState {
+    fn default() -> Self {
+        let mut bytes = [0_u8; 32];
+        getrandom::fill(&mut bytes).expect("operating system random source unavailable");
+        let control_plane_token = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        Self {
+            child: Arc::new(Mutex::new(None)),
+            lock: Arc::new(Mutex::new(None)),
+            control_plane_token: Arc::new(control_plane_token),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_control_plane_token(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, BackendState>,
+) -> Result<String, String> {
+    if window.label() != "main" {
+        return Err("Control-plane token is unavailable to this window.".into());
+    }
+
+    let url = window
+        .url()
+        .map_err(|_| "Untrusted application window.".to_owned())?;
+    let trusted_origin = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+        || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"));
+    #[cfg(debug_assertions)]
+    let trusted_origin = trusted_origin
+        || (url.scheme() == "http"
+            && url.host_str() == Some("127.0.0.1")
+            && url.port() == Some(5188));
+    if !trusted_origin {
+        return Err("Untrusted application origin.".into());
+    }
+
+    Ok(state.control_plane_token.as_ref().clone())
 }
 
 pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
+    let state = app.state::<BackendState>();
     let kalio_home = resolve_kalio_home(app)?;
     let data_root = kalio_home.join("data");
     let resource_root = normalize_windows_path(app.path().resource_dir()?);
@@ -96,12 +146,19 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
         .arg(bootstrap_path)
         .env("NODE_ENV", "production")
         .env("PORT", BACKEND_PORT.to_string())
-        .env("CORS_ORIGIN", TAURI_ORIGIN)
+        .env(
+            "CORS_ORIGIN",
+            control_plane_cors_origins(cfg!(debug_assertions)),
+        )
         .env("KALIO_INSTALL_PROFILE", "desktop")
         .env("KALIO_ENABLE_TEST_SUPPORT", "false")
         .env("KALIO_HOME", &kalio_home)
         .env("KALIO_DATA_ROOT", &data_root)
         .env("KALIO_HOST", "127.0.0.1")
+        .env(
+            "KALIO_CONTROL_PLANE_TOKEN",
+            state.control_plane_token.as_str(),
+        )
         .env("KALIO_SERVE_UI", "false")
         .env("KALIO_RUNTIME_VERSION", env!("CARGO_PKG_VERSION"))
         .env("DATABASE_PATH", &database_path)
@@ -142,7 +199,6 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
     writeln!(startup_log, "[kalio] backend health check passed")?;
     drop(startup_log);
 
-    let state = app.state::<BackendState>();
     let mut state_child = state
         .child
         .lock()
@@ -262,4 +318,33 @@ fn health_check(address: SocketAddr) -> bool {
         return false;
     };
     String::from_utf8_lossy(&response[..read]).contains(" 200 ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{control_plane_cors_origins, BackendState, TAURI_DEV_ORIGIN, TAURI_ORIGIN};
+
+    #[test]
+    fn token_is_random_hex_and_stable_across_state_clones() {
+        let first = BackendState::default();
+        let clone = first.clone();
+        let second = BackendState::default();
+
+        assert_eq!(first.control_plane_token.len(), 64);
+        assert!(first
+            .control_plane_token
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(first.control_plane_token, clone.control_plane_token);
+        assert_ne!(first.control_plane_token, second.control_plane_token);
+    }
+
+    #[test]
+    fn development_origin_is_only_allowed_in_debug_builds() {
+        assert_eq!(control_plane_cors_origins(false), TAURI_ORIGIN);
+        assert_eq!(
+            control_plane_cors_origins(true),
+            format!("{TAURI_ORIGIN},{TAURI_DEV_ORIGIN}"),
+        );
+    }
 }

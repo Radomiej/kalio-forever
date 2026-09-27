@@ -1,11 +1,13 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, HttpCode, HttpStatus, Logger, BadRequestException, UseGuards } from '@nestjs/common';
 import type { Credential, CreateCredentialDto, ToolTimeoutSettings } from '@kalio/types';
 import { CredentialsService } from './credentials.service';
 import { TimeoutSettingsService } from './timeout-settings.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 import { buildProviderCompatHeaders, requiresExplicitLlmProviderBaseUrl, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('credentials')
+@UseGuards(ControlPlaneAuthGuard)
 export class CredentialsController {
   private readonly logger = new Logger(CredentialsController.name);
 

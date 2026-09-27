@@ -13,8 +13,10 @@ import type {
   RaAppPendingApprovalSnapshot,
   VFSListResult,
 } from '@kalio/types';
+import { isTauri } from '@tauri-apps/api/core';
 import { resolvePairedBackendOrigin } from './backendOrigin';
 import { readRuntimeConfig } from './runtimeConfig';
+import { getControlPlaneToken, isControlPlaneRequest } from './controlPlaneAuth';
 
 function resolveConfiguredApiUrl(): string {
   const pairedBackendOrigin = resolvePairedBackendOrigin(globalThis.location);
@@ -56,6 +58,18 @@ const apiUrl = resolveConfiguredApiUrl();
 export const apiClient = axios.create({
   baseURL: apiUrl,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: isTauri(),
+});
+
+apiClient.interceptors.request.use(async (config) => {
+  const apiBaseUrl = getApiBaseUrl();
+  const requestBase = new URL(config.baseURL ?? apiBaseUrl, apiBaseUrl);
+  const requestUrl = new URL(config.url ?? '', requestBase);
+  if (!isControlPlaneRequest(requestUrl, apiBaseUrl)) return config;
+
+  const token = await getControlPlaneToken();
+  if (token) config.headers.set('Authorization', `Bearer ${token}`);
+  return config;
 });
 
 export async function getProjects(): Promise<Project[]> {

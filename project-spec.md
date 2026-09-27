@@ -77,6 +77,15 @@ flowchart TD
 - `routerOutput.nextAction` is the control contract. Only `route_to` may become a downstream route call; `ask_human` and other pause actions may keep `targetNodeId` as context, but must not emit route hops or selected downstream nodes.
 - A visible handoff bubble is display-only. The actual route is selected from typed `routerOutput` and graph edges.
 
+## Local Control Plane Authentication
+
+- Packaged `desktop` and `runtime` profiles require a 32-byte hex bearer token at API startup and bind to a validated loopback host. Production and QA profiles also fail startup without a valid token. The API never creates a permissive default token.
+- Tauri creates one random token per desktop process, keeps it in memory, passes it to the API child, and exposes it only through the trusted `main` window command. REST comparisons use fixed-length timing-safe comparison.
+- Credentials, allowed paths, architecture registry/runs, AgentFlow runs, HITL policy, session metadata/messages, and session VFS controllers require the control-plane guard. Existing structured-LLM and MCP bridge routes keep their own endpoint authentication.
+- The desktop browser transport sends the bearer only to the configured API origin. A successful authenticated VFS request may set a session-scoped `HttpOnly; Secure; SameSite=None` cookie scoped to that session's VFS path so iframe and download navigation work; the cookie authorizes GET/HEAD only and expires with the desktop browser session.
+- Authenticated profiles require explicit CORS origins; wildcard CORS is rejected. Development may disable the guard only with `KALIO_CONTROL_PLANE_AUTH=disabled`, a non-production profile, and a loopback bind.
+- The standalone `runtime` profile has no browser pairing flow yet. Although its API fails closed without a token, its non-Tauri web UI cannot retrieve that token. Do not treat standalone browser use as supported until a pairing flow is implemented and verified. Production automatic approval remains blocked until P1 `RAD-15` is closed.
+
 ## External Structured LLM API
 
 - Kalio may serve product-specific local applications through `POST /api/v1/llm/structured`; Kalio remains the sole owner of provider credentials, active provider/model selection, generation limits, and provider error normalization.
@@ -237,7 +246,7 @@ flowchart TD
 - The API owns one SQLite runtime adapter. Node and Bun drivers share the adapter contract, while driver selection is process-wide and cannot change after initialization.
 - `KALIO_SQLITE_DRIVER=auto` is the default. `KALIO_SQLITE_DRIVER=bun` is an opt-in experimental path validated for source/runtime smoke tests; it is not yet the public compiled-executable release lane.
 - Bun is a candidate for a smaller executable and lower runtime overhead, but native `sharp`, `sqlite-vec`, and other platform modules require explicit sidecar/bundle validation before Bun becomes the release default.
-- The backend serves the built web UI and API from one HTTP port in the standalone runtime. Host-binding policy remains a separate verification gate because bootstrap metadata and the actual `listen` call must agree.
+- The backend serves the built web UI and API from one HTTP port in the standalone runtime. `main.ts` passes the validated runtime host to the listener; a random-port local smoke verifies the actual socket bind. A packaged artifact and authorized standalone browser flow still need proof before that profile is considered authenticated end to end.
 
 ## Agent Runtime And Codex Boundary
 

@@ -9,6 +9,12 @@ import { CredentialsRuntimeController } from '../llm/credentials-runtime.control
 import type { Credential, CreateCredentialDto } from '@kalio/types';
 import { buildProviderCompatHeaders, resolveLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
 
+const CONTROL_PLANE_TEST_TOKEN = 'f'.repeat(64);
+
+function withControlPlaneAuth(headers: Record<string, string> = {}): Record<string, string> {
+  return { ...headers, Authorization: `Bearer ${CONTROL_PLANE_TEST_TOKEN}` };
+}
+
 function makeCredential(overrides: Partial<Credential> = {}): Credential {
   return {
     id: 'cred-1',
@@ -54,6 +60,9 @@ describe('CredentialsController', () => {
   };
 
   beforeEach(async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('KALIO_INSTALL_PROFILE', 'desktop');
+    vi.stubEnv('KALIO_CONTROL_PLANE_TOKEN', CONTROL_PLANE_TEST_TOKEN);
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CredentialsController, CredentialsRuntimeController],
       providers: [
@@ -79,6 +88,7 @@ describe('CredentialsController', () => {
       await app.close();
       app = null;
     }
+    vi.unstubAllEnvs();
   });
 
   describe('findAll()', () => {
@@ -312,6 +322,7 @@ describe('CredentialsController', () => {
 
       const response = await fetch(`http://127.0.0.1:${port}/credentials/active`, {
         method: 'DELETE',
+        headers: withControlPlaneAuth(),
       });
 
       expect(response.status).toBe(204);
@@ -340,7 +351,7 @@ describe('CredentialsController', () => {
 
       const response = await fetch(`http://127.0.0.1:${port}/credentials/test`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: withControlPlaneAuth({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ provider: 'mock', apiKey: 'mock', model: 'mock' }),
       });
 
@@ -387,11 +398,11 @@ describe('CredentialsController', () => {
       const port = await startHttpApp();
 
       const [contextWindowRes, maxToolAttemptsRes, generationRes, conversationTitleRes, toolTimeoutsRes] = await Promise.all([
-        fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`),
-        fetch(`http://127.0.0.1:${port}/credentials/settings/max-tool-attempts`),
-        fetch(`http://127.0.0.1:${port}/credentials/settings/generation`),
-        fetch(`http://127.0.0.1:${port}/credentials/settings/conversation-title`),
-        fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`, { headers: withControlPlaneAuth() }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/max-tool-attempts`, { headers: withControlPlaneAuth() }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/generation`, { headers: withControlPlaneAuth() }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/conversation-title`, { headers: withControlPlaneAuth() }),
+        fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`, { headers: withControlPlaneAuth() }),
       ]);
 
       expect(contextWindowRes.status).toBe(200);
@@ -426,27 +437,27 @@ describe('CredentialsController', () => {
       const [contextWindowRes, maxToolAttemptsRes, generationRes, conversationTitleRes, toolTimeoutsRes] = await Promise.all([
         fetch(`http://127.0.0.1:${port}/credentials/settings/context-window`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withControlPlaneAuth({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ size: 64000 }),
         }),
         fetch(`http://127.0.0.1:${port}/credentials/settings/max-tool-attempts`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withControlPlaneAuth({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ size: 16 }),
         }),
         fetch(`http://127.0.0.1:${port}/credentials/settings/generation`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withControlPlaneAuth({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ temperature: 0.9, maxTokens: 1024 }),
         }),
         fetch(`http://127.0.0.1:${port}/credentials/settings/conversation-title`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withControlPlaneAuth({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ autoRenameEnabled: true, renameEveryReplies: 6 }),
         }),
         fetch(`http://127.0.0.1:${port}/credentials/settings/tool-timeouts`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: withControlPlaneAuth({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ providerRemoteTimeoutMs: 25000 }),
         }),
       ]);

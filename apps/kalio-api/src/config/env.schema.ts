@@ -4,6 +4,8 @@ export const envSchema = Joi.object({
   PORT:                Joi.number().default(3016),
   KALIO_HOST:          Joi.string().optional(),
   KALIO_INSTALL_PROFILE: Joi.string().optional(),
+  KALIO_CONTROL_PLANE_AUTH: Joi.string().valid('disabled', 'required').optional(),
+  KALIO_CONTROL_PLANE_TOKEN: Joi.string().pattern(/^[a-f0-9]{64}$/i).optional(),
   KALIO_SERVE_UI:      Joi.boolean().default(false),
   KALIO_WEB_ROOT:      Joi.string().optional(),
   KALIO_HOME:          Joi.string().optional(),

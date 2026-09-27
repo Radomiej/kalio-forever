@@ -72,7 +72,7 @@ await Promise.all([
 process.env.NODE_ENV = 'production';
 process.env.PORT = process.env.KALIO_PORT ?? process.env.PORT ?? '4016';
 process.env.KALIO_HOST = process.env.KALIO_HOST ?? '127.0.0.1';
-process.env.KALIO_INSTALL_PROFILE = 'runtime';
+process.env.KALIO_INSTALL_PROFILE = process.env.KALIO_INSTALL_PROFILE === 'desktop' ? 'desktop' : 'runtime';
 process.env.KALIO_SERVE_UI = 'true';
 process.env.KALIO_WEB_ROOT = process.env.KALIO_WEB_ROOT ?? join(runtimeRoot, 'web');
 process.env.KALIO_HOME = process.env.KALIO_HOME ?? resolve(runtimeRoot, '..', '..', '..');

@@ -5,6 +5,7 @@ import {
   PROVIDER_LABELS,
 } from './llm-provider-settings';
 import type { ActiveRuntimeConfig, AddForm, LLMConfigWithSource } from './llm-panel.types';
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 
 export async function readResponseErrorMessage(res: Response, context: string): Promise<string> {
   const body = await res.text();
@@ -39,7 +40,7 @@ export async function readResponseErrorMessage(res: Response, context: string): 
 
 export async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const method = opts?.method?.toUpperCase() ?? 'GET';
-  const res = await fetch(`/api${path}`, {
+  const res = await controlPlaneFetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     cache: method === 'GET' ? 'no-store' : undefined,
     ...opts,

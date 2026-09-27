@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query, UseGuards } from '@nestjs/common';
 import type {
   AgentFlowRunSnapshot,
   CreateAgentFlowRunDto,
@@ -6,6 +6,7 @@ import type {
   RunSubAgentFlowArgs,
 } from '@kalio/types';
 import { AgentFlowRuntimeService } from './agent-flow-runtime.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 function toRunArgs(dto: CreateAgentFlowRunDto): RunSubAgentFlowArgs {
   validateCreateDto(dto);
@@ -56,6 +57,7 @@ function normalizeResumeDto(dto: ResumeAgentFlowRunDto & { message?: unknown }):
 }
 
 @Controller('agent-flows/runs')
+@UseGuards(ControlPlaneAuthGuard)
 export class AgentFlowRunsController {
   constructor(private readonly runtime: AgentFlowRuntimeService) {}
 

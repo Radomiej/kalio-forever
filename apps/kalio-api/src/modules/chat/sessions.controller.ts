@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type {
   ChatMessage,
   ChatRunSnapshot,
@@ -18,6 +18,7 @@ import { RunJournalService } from './run-journal.service';
 import { ContextPreviewService } from './context-preview.service';
 import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'projectPath',
@@ -31,6 +32,7 @@ const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
 ]);
 
 @Controller('sessions')
+@UseGuards(ControlPlaneAuthGuard)
 export class SessionsController {
   constructor(
     private readonly sessions: SessionsService,

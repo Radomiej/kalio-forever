@@ -1,11 +1,13 @@
-import { Body, Controller, Get, NotFoundException, OnModuleInit, Optional, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, OnModuleInit, Optional, Param, Patch, UseGuards } from '@nestjs/common';
 import type { ToolMeta } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { toolOverrides } from '../../database/schema';
 import { ToolRegistryService } from './tool-registry.service';
 import { MCPService } from '../mcp/mcp.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('tools')
+@UseGuards(ControlPlaneAuthGuard)
 export class ToolController implements OnModuleInit {
   constructor(
     private readonly registry: ToolRegistryService,

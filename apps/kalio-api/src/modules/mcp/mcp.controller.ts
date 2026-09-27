@@ -1,13 +1,15 @@
-import { Controller, Get, Post, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { MCPService } from './mcp.service';
 import type { CreateMCPServerDto } from '@kalio/types';
 import { MCPExternalImportService } from './mcp-external-import.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 interface ApplyExternalConfigsDto {
   entryIds?: string[];
 }
 
 @Controller('mcp')
+@UseGuards(ControlPlaneAuthGuard)
 export class MCPController {
   constructor(
     private readonly mcpService: MCPService,

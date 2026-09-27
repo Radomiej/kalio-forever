@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Loader2, AlertCircle, Folder, Trash2 } from 'lucide-react';
 import type { AllowedPath, CreateAllowedPathDto } from '@kalio/types';
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await controlPlaneFetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });

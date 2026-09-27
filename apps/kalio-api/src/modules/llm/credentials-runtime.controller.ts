@@ -1,10 +1,12 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { CredentialsService } from '../credentials/credentials.service';
 import { isLocalLlmProvider } from '../../common/utils/local-llm-provider.util';
 import { requiresExplicitLlmProviderBaseUrl } from '../../common/utils/llm-provider-http.util';
 import { LLMService, type LLMToolDef } from './llm.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('credentials')
+@UseGuards(ControlPlaneAuthGuard)
 export class CredentialsRuntimeController {
   constructor(
     private readonly credentialsService: CredentialsService,

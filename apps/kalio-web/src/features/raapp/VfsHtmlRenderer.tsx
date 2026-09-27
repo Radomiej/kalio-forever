@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSessionVfsServeUrl } from '../../services/apiClient';
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 import { HtmlIframeRenderer } from './HtmlIframeRenderer';
 
 interface VfsHtmlRendererProps {
@@ -20,7 +21,7 @@ export function VfsHtmlRenderer({ sessionId, vfsPath, title = 'App', minHeight =
     const controller = new AbortController();
     setStatus('checking');
 
-    fetch(src, { signal: controller.signal })
+    controlPlaneFetch(src, { signal: controller.signal })
       .then((response) => {
         if (controller.signal.aborted) {
           return;

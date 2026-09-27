@@ -47,9 +47,13 @@ It creates `kalio.db`, `workspaces`, `memory`, `embeddings-cache`, and
 configures a real provider; provider settings can be entered through Kalio
 Settings. The generated `.env` file persists the credentials master key.
 
-The desktop API is bound to `127.0.0.1:4516` and accepts requests from the
-Tauri production origin `http://tauri.localhost`. If that port is occupied, the
-application stops with a startup error and leaves the existing listener alone.
+The desktop API is bound to `127.0.0.1:4516`, requires a random 32-byte bearer
+token held in Tauri memory, and accepts requests only from the Tauri production
+origins `http://tauri.localhost` and `tauri://localhost`. The trusted main window
+obtains the token through a Tauri command; the token is not stored in runtime
+config or a URL. A debug build also allows its configured Vite origin. If that
+port is occupied, the application stops with a startup error and leaves the
+existing listener alone.
 
 ## Release checks
 

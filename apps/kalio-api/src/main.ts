@@ -5,6 +5,8 @@ import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { SocketIoAdapter } from './adapters/socket-io.adapter';
 import { normalizeCorsOrigins } from './cors-origins';
+import { resolveControlPlaneAuthSettings } from './common/control-plane-auth';
+import { resolveRuntimeHost } from './runtime/runtime-host';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 
@@ -15,13 +17,19 @@ const projectRoot = resolve(__dirname, '..', '..', '..');
 config({ path: resolve(projectRoot, envFile) });
 
 async function bootstrap(): Promise<void> {
+  const controlPlaneAuth = resolveControlPlaneAuthSettings();
+  const host = resolveRuntimeHost();
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const logger = new Logger('Bootstrap');
   app.useWebSocketAdapter(new SocketIoAdapter(app));
 
   const corsOrigins = normalizeCorsOrigins(process.env['CORS_ORIGIN']);
+  if (controlPlaneAuth.enabled && corsOrigins === '*') {
+    throw new Error('Authenticated Kalio profiles require explicit CORS_ORIGIN values.');
+  }
   app.enableCors({
     origin: corsOrigins === '*' ? '*' : corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+    credentials: controlPlaneAuth.enabled,
     exposedHeaders: [
       'x-kalio-history-total-count',
       'x-kalio-history-has-more-before',
@@ -37,8 +45,8 @@ async function bootstrap(): Promise<void> {
   httpAdapter.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
 
   const port = parseInt(process.env['PORT'] ?? '3016', 10);
-  await app.listen(port);
-  logger.log(`kalio-api running on http://localhost:${port}`);
+  await app.listen(port, host);
+  logger.log(`kalio-api running on http://${host}:${port}`);
 }
 
 bootstrap().catch((err: unknown) => {

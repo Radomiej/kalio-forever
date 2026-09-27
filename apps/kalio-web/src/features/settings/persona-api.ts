@@ -1,5 +1,7 @@
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
+
 export async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await controlPlaneFetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });

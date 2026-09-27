@@ -1,9 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertControlPlaneAuthentication, assertLoopbackOnly } from './control-plane-package-smoke.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const archiveArgumentIndex = process.argv.indexOf('--archive');
@@ -171,7 +173,8 @@ async function waitForReady(child, port, output) {
       if (!uiResponse.ok) {
         throw new Error(`embedded UI returned HTTP ${uiResponse.status}`);
       }
-      if (health?.status !== 'ok' || runtimeInfo?.status !== 'ok' || runtimeInfo?.runtime !== 'kalio') {
+      if (health?.status !== 'ok' || runtimeInfo?.status !== 'ok' || runtimeInfo?.runtime !== 'kalio'
+        || runtimeInfo?.host !== '127.0.0.1') {
         throw new Error(`runtime endpoints returned ${JSON.stringify({ health, runtimeInfo })}`);
       }
       console.log(
@@ -229,6 +232,7 @@ async function main() {
     ]);
 
     const port = await findFreePort();
+    const controlPlaneToken = randomBytes(32).toString('hex');
     const databasePath = join(dataRoot, 'kalio.db');
     child = spawn(runtimePath, [bootstrapPath], {
       cwd: serverRoot,
@@ -250,6 +254,7 @@ async function main() {
         MEMORY_DB_PATH: join(dataRoot, 'memory'),
         EMBEDDING_CACHE_DIR: join(dataRoot, 'embeddings-cache'),
         CREDENTIALS_MASTER_KEY: 'kalio-runtime-smoke-master-key-32chars',
+        KALIO_CONTROL_PLANE_TOKEN: controlPlaneToken,
         CORS_ORIGIN: `http://127.0.0.1:${port}`,
         LLM_PROVIDER: 'mock',
         LLM_API_KEY: 'mock',
@@ -264,6 +269,10 @@ async function main() {
     const stderr = captureTail(child.stderr);
     const output = () => `stdout:\n${stdout()}\nstderr:\n${stderr()}`;
     const runtimeInfo = await waitForReady(child, port, output);
+    await assertControlPlaneAuthentication(`http://127.0.0.1:${port}`, controlPlaneToken, [
+      `http://127.0.0.1:${port}`,
+    ]);
+    await assertLoopbackOnly(port);
     await access(databasePath);
     console.log(
       `[runtime-smoke] fresh SQLite database created; runtime=${metadata.runtime} `

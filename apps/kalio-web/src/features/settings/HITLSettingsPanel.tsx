@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Loader2, Save, ShieldAlert } from 'lucide-react';
 import type { Credential, Persona } from '@kalio/types';
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 import { HITLUnattendedSection, MAX_RAAPP_APPROVAL_TIMEOUT_MINUTES } from './HITLSettingsPanel.Unattended';
 import { HITLJevSettings } from './HITLSettingsPanel.Jev';
 import { HITLHardRules } from './HITLSettingsPanel.Rules';
@@ -36,7 +37,7 @@ function normalizeConfig(config: Partial<HitlConfig>): HitlConfig {
 }
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await controlPlaneFetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });

@@ -6,6 +6,7 @@ import type { ActiveRuntimeConfig, LLMConfigWithSource } from './llm-panel.types
 import { PROVIDER_LABELS } from './llm-provider-settings';
 import { SettingsRangeField } from './SettingsRangeField';
 import { formatLargeTokenCount } from './settings-format';
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 
 interface Props {
   activeRuntimeConfig: ActiveRuntimeConfig | null;
@@ -46,7 +47,7 @@ function sanitizeGenSettings(value: unknown): GenSettings {
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
   const method = opts?.method?.toUpperCase() ?? 'GET';
-  const res = await fetch(`/api${path}`, {
+  const res = await controlPlaneFetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     cache: method === 'GET' ? 'no-store' : undefined,
     ...opts,

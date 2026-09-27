@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MCPController } from './mcp.controller';
 import { MCPService } from './mcp.service';
 import { MCPExternalImportService } from './mcp-external-import.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 
 describe('MCPController', () => {
   const serverDto: CreateMCPServerDto = {
@@ -46,6 +48,10 @@ describe('MCPController', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('requires the control-plane guard for server management and tool routes', () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, MCPController)).toContain(ControlPlaneAuthGuard);
   });
 
   it('delegates listing servers to the service', async () => {

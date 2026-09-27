@@ -6,6 +6,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(backend::BackendState::default())
+        .invoke_handler(tauri::generate_handler![backend::get_control_plane_token])
         .setup(|app| backend::start(app))
         .build(tauri::generate_context!())
         .expect("error while running Kalio");

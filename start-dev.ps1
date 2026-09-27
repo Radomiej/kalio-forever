@@ -142,6 +142,10 @@ $previousEnv = @{
     LLM_BASE_URL = $env:LLM_BASE_URL
     LLM_MODEL = $env:LLM_MODEL
     KALIO_FORCE_ENV_LLM = $env:KALIO_FORCE_ENV_LLM
+    KALIO_HOST = $env:KALIO_HOST
+    KALIO_INSTALL_PROFILE = $env:KALIO_INSTALL_PROFILE
+    KALIO_CONTROL_PLANE_AUTH = $env:KALIO_CONTROL_PLANE_AUTH
+    KALIO_CONTROL_PLANE_TOKEN = $env:KALIO_CONTROL_PLANE_TOKEN
     NODE_ENV = $env:NODE_ENV
     PORT = $env:PORT
     DATABASE_PATH = $env:DATABASE_PATH
@@ -180,6 +184,11 @@ function Import-EnvFileIfMissing {
 }
 
 Import-EnvFileIfMissing -Path (Join-Path $root ".env")
+
+$env:NODE_ENV = 'development'
+$env:KALIO_HOST = '127.0.0.1'
+$env:KALIO_INSTALL_PROFILE = 'development'
+$env:KALIO_CONTROL_PLANE_AUTH = 'disabled'
 
 function Restore-EnvVars {
     param([hashtable]$Values)

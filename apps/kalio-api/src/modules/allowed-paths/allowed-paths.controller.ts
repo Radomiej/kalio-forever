@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { AllowedPathsService } from './allowed-paths.service';
 import type { AllowedPath, CreateAllowedPathDto } from '@kalio/types';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('allowed-paths')
+@UseGuards(ControlPlaneAuthGuard)
 export class AllowedPathsController {
   constructor(private readonly service: AllowedPathsService) {}
 

@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Put } from '@nestjs/common';
+import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
 import { HitlConfigService } from './hitl-config.service';
 import type { HitlConfig, UpdateHitlConfigDto } from './hitl.types';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('hitl')
+@UseGuards(ControlPlaneAuthGuard)
 export class HitlConfigController {
   constructor(private readonly hitlConfig: HitlConfigService) {}
 

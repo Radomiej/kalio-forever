@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpException, HttpStatus, Logger, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Logger, Put, Query, UseGuards } from '@nestjs/common';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
@@ -8,6 +8,7 @@ import {
   buildProviderCompatHeaders,
   resolveLlmProviderBaseUrl,
 } from '../../common/utils/llm-provider-http.util';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 export interface LLMConfigResponse extends LLMConfig {
   contextWindowSize: number;
@@ -17,6 +18,7 @@ export interface LLMConfigResponse extends LLMConfig {
 }
 
 @Controller('llm')
+@UseGuards(ControlPlaneAuthGuard)
 export class LLMController {
   private readonly logger = new Logger(LLMController.name);
 

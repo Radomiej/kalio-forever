@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import type { ArchitectureSchema, CreateArchitectureSchemaVariantDto } from '@kalio/types';
 import { ArchitectureRegistryService } from './architecture-registry.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('architecture-registry')
+@UseGuards(ControlPlaneAuthGuard)
 export class ArchitectureRegistryController {
   constructor(private readonly registry: ArchitectureRegistryService) {}
 

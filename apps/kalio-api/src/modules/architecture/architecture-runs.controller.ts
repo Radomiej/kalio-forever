@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import type {
   ArchitectureChatProjection,
   ArchitectureExecutionEvent,
@@ -7,8 +7,10 @@ import type {
   CreateArchitectureRunDto,
 } from '@kalio/types';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { ControlPlaneAuthGuard } from '../../common/control-plane-auth';
 
 @Controller('architecture-runs')
+@UseGuards(ControlPlaneAuthGuard)
 export class ArchitectureRunsController {
   constructor(private readonly runtime: ArchitectureRuntimeService) {}
 

@@ -4,6 +4,7 @@ import {
   ChevronDown, ChevronUp, CheckCircle2, Circle, Loader2,
 } from 'lucide-react';
 import type { Credential } from '@kalio/types';
+import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 
 interface ProviderCardProps {
   credential: Credential;
@@ -29,7 +30,7 @@ export function ProviderCard({ credential, isActive, isSyncing, onActivate, onRe
     setTestSuccess(null);
 
     try {
-      const res = await fetch(`/api/credentials/${credential.id}/test`, { method: 'POST' });
+      const res = await controlPlaneFetch(`/api/credentials/${credential.id}/test`, { method: 'POST' });
       const json = await res.json() as { ok: boolean; modelCount?: number; error?: string };
 
       if (json.ok) {

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RAAppGroup, RAAppSummary } from '@kalio/types';
 
-const { axiosCreate, mockGet, mockPost, mockDelete } = vi.hoisted(() => ({
+const { axiosCreate, mockGet, mockPost, mockDelete, requestInterceptorUse } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockDelete: vi.fn(),
+  requestInterceptorUse: vi.fn(),
   axiosCreate: vi.fn(() => ({
     get: mockGet,
     post: mockPost,
@@ -13,6 +14,7 @@ const { axiosCreate, mockGet, mockPost, mockDelete } = vi.hoisted(() => ({
       baseURL: '',
       headers: { 'Content-Type': 'application/json' },
     },
+    interceptors: { request: { use: requestInterceptorUse } },
   })),
 }));
 
@@ -64,6 +66,7 @@ describe('apiClient helpers', () => {
     expect(axiosCreate).toHaveBeenCalledWith({
       baseURL: expect.any(String),
       headers: { 'Content-Type': 'application/json' },
+      withCredentials: false,
     });
     expect(module.apiClient).toBeDefined();
   });
@@ -84,6 +87,7 @@ describe('apiClient helpers', () => {
     expect(axiosCreate).toHaveBeenCalledWith({
       baseURL: 'http://127.0.0.1:3316',
       headers: { 'Content-Type': 'application/json' },
+      withCredentials: false,
     });
   });
 
@@ -103,6 +107,7 @@ describe('apiClient helpers', () => {
     expect(axiosCreate).toHaveBeenCalledWith({
       baseURL: 'http://127.0.0.1:59756',
       headers: { 'Content-Type': 'application/json' },
+      withCredentials: false,
     });
   });
 
