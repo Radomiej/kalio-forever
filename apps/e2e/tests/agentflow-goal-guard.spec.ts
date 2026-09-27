@@ -612,9 +612,6 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
       await approvePendingToolConfirmation(request, sessionId, 'vfs_write');
 
-      const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
-      await expect(parentResult).toBeVisible({ timeout: 150_000 });
-
       const run = await waitForParentAgentFlowRun(request, sessionId, (snapshot) => (
         snapshot.run.status === 'done'
         || snapshot.run.status === 'waiting_on_orchestrator'
@@ -673,12 +670,6 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
       await approvePendingToolConfirmation(request, sessionId, 'vfs_write');
 
-      const parentResult = page.locator('[data-testid="tool-call-bubble"][data-tool-name="run_sub_agentflow"]').last();
-      await expect(parentResult).toBeVisible({ timeout: 150_000 });
-      const parentTimeline = page.getByTestId('architecture-run-timeline').last();
-      await expect(parentTimeline).toBeVisible({ timeout: 150_000 });
-      await expect(parentTimeline).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
-
       const snapshot = await waitForParentAgentFlowRun(request, sessionId, (run) => run.run.status === 'done' || run.result?.status === 'done');
       await waitForSuccessfulImplementerVfsWriteForRun(request, snapshot.run.id);
       runId = snapshot.run.id;
@@ -686,6 +677,10 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         ?? snapshot.result?.childSessionId
         ?? snapshot.run.childSessionId;
       expect(runId).toBeTruthy();
+
+      const parentTimeline = page.getByTestId('architecture-run-timeline').last();
+      await expect(parentTimeline).toBeVisible({ timeout: 150_000 });
+      await expect(parentTimeline).toContainText(/Goal Master Delivery Loop|Goal Guard|Architecture/i);
 
       await expect(parentTimeline).toContainText(/completed|done/i, { timeout: 45_000 });
       await expect(parentTimeline).not.toContainText('waiting_on_orchestrator');

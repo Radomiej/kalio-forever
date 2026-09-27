@@ -58,13 +58,16 @@ export async function listConfiguredCodexMcpServers(
 ): Promise<CodexConfiguredMcpServer[]> {
   const spawnSpec = buildCodexSpawnSpec(command, ['mcp', 'list', '--json']);
   return new Promise((resolve, reject) => {
-    const child = spawn(spawnSpec.command, spawnSpec.args, {
+    const child = spawnCodexProcess(spawnSpec.command, spawnSpec.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
       windowsHide: true,
-      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
     });
     let stdout = '';
+    if (!child.stdout) {
+      reject(new Error('Codex MCP listing process did not expose stdout.'));
+      return;
+    }
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
     child.once('error', reject);
     child.once('close', (code) => {
