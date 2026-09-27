@@ -21,8 +21,14 @@ export function buildCodexSpawnSpec(
     if (hasLineBreakOrNul(command)) {
       throw new Error('Windows command paths cannot contain NUL or line breaks.');
     }
-    if (/\.(?:cmd|bat)$/i.test(command) && args.some(hasLineBreakOrNul)) {
-      throw new Error('Windows command shim arguments cannot contain NUL or line breaks.');
+    if (/\.(?:cmd|bat)$/i.test(command)) {
+      if (args.some(hasLineBreakOrNul)) {
+        throw new Error('Windows command shim arguments cannot contain NUL or line breaks.');
+      }
+      // Batch shims re-expand %*; reject ambiguous quoted operators before the second parse.
+      if (args.some((arg) => arg.includes('"') && /[&|<>^()%!]/.test(arg))) {
+        throw new Error('Windows command shim arguments cannot combine quotes with shell metacharacters.');
+      }
     }
   }
   return { command, args };

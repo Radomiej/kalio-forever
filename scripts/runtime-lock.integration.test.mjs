@@ -22,6 +22,7 @@ function startCliWorker(home) {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
+    detached: true,
   });
 
   let stdout = '';
@@ -154,14 +155,43 @@ function waitForExitCount(workers, target, timeoutMs) {
   return Promise.race([reached, deadline]).finally(() => clearTimeout(timer));
 }
 
+async function terminateWorkerTree(worker) {
+  const pid = worker.child.pid;
+  if (!pid || worker.isClosed()) return;
+
+  if (process.platform === 'win32') {
+    const code = await new Promise((resolve, reject) => {
+      const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      killer.once('error', reject);
+      killer.once('close', resolve);
+    });
+    if (code !== 0 && !worker.isClosed()) {
+      throw new Error('Unable to stop runtime-lock worker tree for PID ' + pid);
+    }
+    return;
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+}
+
 async function releaseAndStop(workers, releasePath) {
   await writeFile(releasePath, 'release', 'utf8');
   for (const worker of workers) worker.start();
-  await Promise.all(workers.map((worker) => waitForExitCount([worker], 1, 5000)));
-  for (const worker of workers) {
-    if (!worker.isClosed()) worker.child.kill();
+
+  if (await waitForExitCount(workers, workers.length, 1500)) return;
+
+  await Promise.all(workers.map(terminateWorkerTree));
+  const allWorkersStopped = await waitForExitCount(workers, workers.length, 3000);
+  if (!allWorkersStopped) {
+    throw new Error('Runtime-lock worker tree did not stop after cleanup.');
   }
-  await Promise.all(workers.map((worker) => worker.exit));
 }
 
 test('runtime launcher admits exactly one stale-lock recovery winner', {
@@ -184,13 +214,14 @@ test('runtime launcher admits exactly one stale-lock recovery winner', {
 
     const oneWorkerRemainedLive = await waitForExitCount(contenders, contenders.length - 1, 3500);
     await writeFile(fixture.releasePath, 'release', 'utf8');
-    await Promise.all(contenders.map((worker) => worker.exit));
+    const allWorkersExited = await waitForExitCount(contenders, contenders.length, 5000);
 
     const startedCount = existsSync(fixture.startedPath)
       ? (await readFile(fixture.startedPath, 'utf8')).split(/\r?\n/).filter(Boolean).length
       : 0;
 
     assert.equal(oneWorkerRemainedLive, true, 'all but the one runtime owner should reject the lock');
+    assert.equal(allWorkersExited, true, 'all launchers should exit after the runtime is released');
     assert.equal(startedCount, 1, 'only one launcher may start the runtime during stale-lock recovery');
     assert.equal(existsSync(fixture.lockPath), false, 'the winner should release its own primary lock');
     assert.equal(existsSync(fixture.reclaimPath), false, 'the reclaim mutex should be removed after recovery');
@@ -220,8 +251,10 @@ test('runtime launcher fails closed on an orphaned reclaim lock', {
 
     const rejectedWithoutRelease = await waitForExitCount([worker], 1, 1200);
     if (!rejectedWithoutRelease) await writeFile(fixture.releasePath, 'release', 'utf8');
-    const result = await worker.exit;
+    const workerExited = await waitForExitCount([worker], 1, 5000);
 
+    assert.equal(workerExited, true, 'the launcher should exit after rejection or runtime release');
+    const result = await worker.exit;
     assert.equal(result.code, 1, worker.output());
     assert.equal(existsSync(fixture.startedPath), false, 'an orphaned reclaim mutex must fail closed');
     assert.equal(existsSync(fixture.lockPath), true, 'the stale primary lock must remain untouched');

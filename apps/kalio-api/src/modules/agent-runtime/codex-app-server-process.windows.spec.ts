@@ -51,7 +51,6 @@ describe('Windows Codex command shims', () => {
         'percent %PATH%',
         'operators &|<>^()!',
         'trailing-backslashes ' + '\\\\\\\\',
-        'safe" & echo PWNED>canary.txt & rem "tail',
       ];
 
       for (const extension of ['cmd', 'bat']) {
@@ -72,6 +71,14 @@ describe('Windows Codex command shims', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  windowsTest('rejects ambiguous quotes with shell metacharacters for CMD shims', () => {
+    expect(() => buildCodexSpawnSpec(
+      'codex.cmd',
+      ['safe" & echo PWNED>canary.txt & rem "tail'],
+      'win32',
+    )).toThrow(/quotes with shell metacharacters/i);
   });
 
   windowsTest('rejects NUL and line breaks in CMD shim paths and arguments', () => {
