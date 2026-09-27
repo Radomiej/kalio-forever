@@ -1,10 +1,9 @@
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildCodexSpawnSpec } from './codex-app-server-process';
+import { buildCodexSpawnSpec, spawnCodexProcess } from './codex-app-server-process';
 
 type SpawnSpec = ReturnType<typeof buildCodexSpawnSpec>;
 
@@ -14,15 +13,18 @@ function runSpec(
   env: NodeJS.ProcessEnv,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(spec.command, spec.args, {
+    const child = spawnCodexProcess(spec.command, spec.args, {
       cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
     let stdout = '';
     let stderr = '';
+    if (!child.stdout || !child.stderr) {
+      reject(new Error('Codex command shim must expose stdout and stderr pipes.'));
+      return;
+    }
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
     child.once('error', reject);
@@ -72,8 +74,12 @@ describe('Windows Codex command shims', () => {
     }
   });
 
-  windowsTest('rejects CR/LF in arguments to CMD shims', async () => {
+  windowsTest('rejects NUL and line breaks in CMD shim paths and arguments', () => {
     expect(() => buildCodexSpawnSpec('codex.cmd', ['safe\r\nmalicious'], 'win32'))
       .toThrow(/line breaks/i);
+    expect(() => buildCodexSpawnSpec('codex.cmd\nmalicious', [], 'win32'))
+      .toThrow(/line breaks/i);
+    expect(() => buildCodexSpawnSpec('codex.cmd', ['safe\0malicious'], 'win32'))
+      .toThrow(/NUL/i);
   });
 });

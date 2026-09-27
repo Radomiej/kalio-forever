@@ -31,26 +31,10 @@ describe('CodexAppServerProtocolRouter', () => {
     ]);
   });
 
-  it('runs Windows command shims through ComSpec instead of spawning .cmd directly', () => {
-    expect(buildCodexSpawnSpec(
-      'C:\\Program Files\\Codex\\codex.cmd',
-      ['app-server', '--stdio', '-c', 'mcp_servers."tools"={command="node",enabled=false}'],
-      'win32',
-      'C:\\Windows\\System32\\cmd.exe',
-    )).toEqual({
-      command: 'C:\\Windows\\System32\\cmd.exe',
-      args: [
-        '/d',
-        '/s',
-        '/c',
-        '"C:\\Program Files\\Codex\\codex.cmd"',
-        'app-server',
-        '--stdio',
-        '-c',
-        '"mcp_servers.\\"tools\\"={command=\\"node\\",enabled=false}"',
-      ],
-      windowsVerbatimArguments: true,
-    });
+  it('keeps Windows command shim arguments structured for cross-spawn', () => {
+    const command = 'C:\\Program Files\\Codex\\codex.cmd';
+    const args = ['app-server', '--stdio', '-c', 'mcp_servers."tools"={command="node",enabled=false}'];
+    expect(buildCodexSpawnSpec(command, args, 'win32')).toEqual({ command, args });
   });
 
   it('resolves JSON-RPC responses and routes server requests', async () => {

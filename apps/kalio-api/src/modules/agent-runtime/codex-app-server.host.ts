@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -9,6 +9,7 @@ import {
   buildCodexAppServerArgs,
   buildCodexSpawnSpec,
   listConfiguredCodexMcpServers,
+  spawnCodexProcess,
 } from './codex-app-server-process';
 
 interface JsonRpcMessage {
@@ -178,12 +179,11 @@ class StdioCodexAppServerConnection implements CodexAppServerConnection {
     const disabledFeatures = options.disabledFeatures ?? ['multi_agent', 'plugins'];
     const args = buildCodexAppServerArgs(disabledFeatures, inheritConfiguredMcp, disabledMcpServers);
     const spawnSpec = buildCodexSpawnSpec(command, args);
-    const child = spawn(spawnSpec.command, spawnSpec.args, {
+    const child = spawnCodexProcess(spawnSpec.command, spawnSpec.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
       windowsHide: true,
-      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
-    });
+    }) as ChildProcessWithoutNullStreams;
     const connection = new StdioCodexAppServerConnection(child, logger);
     await connection.request('initialize', {
       clientInfo: { name: 'kalio', title: 'Kalio', version: '0.1.0' },

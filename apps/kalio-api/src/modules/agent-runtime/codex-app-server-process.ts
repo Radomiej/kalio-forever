@@ -1,4 +1,8 @@
-import { spawn } from 'node:child_process';
+import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+
+const crossSpawn = createRequire(resolve(process.cwd(), 'package.json'))('cross-spawn') as typeof nodeSpawn;
 
 export interface CodexConfiguredMcpServer {
   id: string;
@@ -11,19 +15,25 @@ export function buildCodexSpawnSpec(
   command: string,
   args: string[],
   platform: NodeJS.Platform = process.platform,
-  comSpec: string = process.env.ComSpec ?? 'cmd.exe',
-): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
-  if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(command)) {
-    return { command, args };
+): { command: string; args: string[] } {
+  if (platform === 'win32') {
+    const hasLineBreakOrNul = (value: string) => /[\0\r\n]/.test(value);
+    if (hasLineBreakOrNul(command)) {
+      throw new Error('Windows command paths cannot contain NUL or line breaks.');
+    }
+    if (/\.(?:cmd|bat)$/i.test(command) && args.some(hasLineBreakOrNul)) {
+      throw new Error('Windows command shim arguments cannot contain NUL or line breaks.');
+    }
   }
+  return { command, args };
+}
 
-  return {
-    command: comSpec,
-    args: ['/d', '/s', '/c', command, ...args].map((argument, index) => (
-      index < 3 ? argument : quoteWindowsCmdArgument(argument)
-    )),
-    windowsVerbatimArguments: true,
-  };
+export function spawnCodexProcess(
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+): ChildProcess {
+  return crossSpawn(command, args, options);
 }
 
 export function buildCodexAppServerArgs(
@@ -127,9 +137,3 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function quoteWindowsCmdArgument(value: string): string {
-  const escaped = value
-    .replace(/%/g, '%%')
-    .replace(/"/g, '\\"');
-  return /[\s"&|<>^()]/.test(value) ? `"${escaped}"` : escaped;
-}
