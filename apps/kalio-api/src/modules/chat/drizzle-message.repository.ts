@@ -57,6 +57,16 @@ export class DrizzleMessageRepository implements IMessageRepository {
     return rows.map((row) => this.toChatMessage(row));
   }
 
+  async loadMessagesForTurn(sessionId: string, turnId: string): Promise<ChatMessage[]> {
+    const rows = await this.drizzle.db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.turnId, turnId)))
+      .orderBy(asc(messages.createdAt), asc(messages.id));
+
+    return rows.map((row) => this.toChatMessage(row));
+  }
+
   async loadHistoryPage(sessionId: string, options: SessionMessagePageOptions = {}): Promise<SessionMessagePage> {
     const normalizedLimit = Number.isInteger(options.limit)
       ? Math.max(1, Math.min(100, options.limit as number))

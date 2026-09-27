@@ -61,6 +61,9 @@ jobs:
       - name: Build workspace
         run: pnpm build
 
+      - name: Test Windows Codex command-shim handling
+        run: pnpm --filter kalio-api test -- src/modules/agent-runtime/codex-app-server-process.windows.spec.ts
+
       - name: Build Windows runtime archive
         shell: pwsh
         env:

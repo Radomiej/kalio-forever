@@ -35,6 +35,7 @@ export type HitlApprovalSource = 'manual' | 'auto' | 'bypass' | 'representative'
 export interface HitlApprovalRequest {
   kind: HitlApprovalKind;
   sessionId: string;
+  vfsSessionId?: string;
   name: string;
   args: Record<string, unknown>;
   abortSignal?: AbortSignal;

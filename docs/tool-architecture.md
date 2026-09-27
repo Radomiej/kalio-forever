@@ -170,6 +170,7 @@ Current rules from the code:
   - `agentRun.agentType === 'subagent'`
   - `agentRun.vfsMode === 'isolated'`
   - `ctx.vfsSessionId === ctx.sessionId`
+- This backend-derived isolated-child rule runs before the global manual HITL mode; shared VFS, mismatched session ownership, and aborted runs do not qualify.
 - `run_subagent` can also pass an optional `autoApproveTools` allowlist for isolated child runs.
 - Only a narrow backend safelist is honored from that allowlist today: `image_generate`.
 - Unsupported tool names in `autoApproveTools` are ignored; shared-VFS child runs still require normal HITL confirmation.

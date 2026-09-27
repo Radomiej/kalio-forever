@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentFlowRunStatus, ArchitectureRunStatus } from '@kalio/types';
 import type { ArchitectRunResult, ExternalQualityGateInput } from './architect.types';
-import { resumeAgentFlowWithQualityGate } from './ArchitectPage.agentFlowResume';
+import { resumeAgentFlowWithQualityGate, shouldContinueAgentFlowRun } from './ArchitectPage.agentFlowResume';
 import {
   getArchitectureRunResult,
   getGoalGuardAgentFlowRunResult,
@@ -262,5 +262,15 @@ describe('resumeAgentFlowWithQualityGate', () => {
     expect(setRun).toHaveBeenNthCalledWith(2, done);
     expect(setError).toHaveBeenCalledWith(null);
     expect(setError).not.toHaveBeenCalledWith(expect.stringContaining('refresh failed'));
+  });
+});
+
+describe('shouldContinueAgentFlowRun', () => {
+  it('keeps a human-confirmation wait live and leaves external QA waits resumable', () => {
+    const waiting = result('running', 'waiting_on_orchestrator');
+
+    expect(shouldContinueAgentFlowRun({ ...waiting, agentFlowAwaitingHumanInput: true })).toBe(true);
+    expect(shouldContinueAgentFlowRun(waiting)).toBe(false);
+    expect(shouldContinueAgentFlowRun(result('completed', 'done'))).toBe(false);
   });
 });

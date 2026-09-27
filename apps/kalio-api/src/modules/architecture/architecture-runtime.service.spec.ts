@@ -717,6 +717,70 @@ describe('ArchitectureRuntimeService', () => {
     expect(service.getChat(run.id)?.messages.at(-1)?.speaker).toBe('finalizer');
   });
 
+  it('joins the active architecture execution when a child is resumed from a HITL pause', async () => {
+    const { service, executor } = createService();
+    const executeDefault = vi.mocked(executor.execute).getMockImplementation();
+    if (!executeDefault) throw new Error('Expected the default architecture executor implementation');
+
+    let releaseChild!: () => void;
+    const childGate = new Promise<void>((resolve) => { releaseChild = resolve; });
+    let signalGateReached!: () => void;
+    const gateReached = new Promise<void>((resolve) => { signalGateReached = resolve; });
+    let signalAllExecutorsStarted!: () => void;
+    const allExecutorsStarted = new Promise<void>((resolve) => { signalAllExecutorsStarted = resolve; });
+    let executorCalls = 0;
+    const callsBySlot = new Map<string, number>();
+    let heldChild = false;
+
+    vi.mocked(executor.execute).mockImplementation(async (input) => {
+      executorCalls += 1;
+      callsBySlot.set(input.slot.id, (callsBySlot.get(input.slot.id) ?? 0) + 1);
+      if (executorCalls === 5) signalAllExecutorsStarted();
+      if (input.slot.id === 'pragmatist' && !heldChild) {
+        heldChild = true;
+        input.emit?.('tool:confirmation_required', {
+          requestId: 'confirmation-1',
+          toolCallId: 'tool-call-1',
+          sessionId: input.branchSessionId,
+          turnId: 'child-turn-1',
+          toolName: 'vfs_write',
+          args: {},
+          timeoutMs: 0,
+        });
+        signalGateReached();
+        await childGate;
+      }
+      return executeDefault(input);
+    });
+
+    const run = await service.createRunAsync({
+      schemaId: 'strategic-decision-council',
+      prompt: 'Resume the same live execution after tool approval.',
+      executionMode: 'subagent_execution',
+    });
+    await Promise.all([gateReached, allExecutorsStarted]);
+
+    const resumedPromise = service.resumeRun(run.id, {
+      input: 'Approved the pending tool call.',
+      continuation: {
+        reason: 'runtime_pause',
+        waitingNodeId: 'pragmatist',
+        pendingNodeIds: ['pragmatist'],
+        visitCounts: {},
+      },
+    });
+    releaseChild();
+
+    const resumed = await resumedPromise;
+    await waitUntil(() => service.findRun(run.id)?.status === 'completed');
+
+    expect(callsBySlot.get('pragmatist')).toBe(1);
+    expect(service.getEvents(run.id).filter((event) => (
+      event.type === 'agent_started' && event.roleSlotId === 'pragmatist'
+    ))).toHaveLength(1);
+    expect(resumed.status).toBe('completed');
+  });
+
   it('keeps a stopped async run cancelled when a late role executor rejection arrives', async () => {
     const { service, executor } = createService();
     let rejectFirstBranch: ((error: Error) => void) | undefined;

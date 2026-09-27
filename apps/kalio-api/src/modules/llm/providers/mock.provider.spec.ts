@@ -267,6 +267,33 @@ describe('MockLLMProvider', () => {
     ]);
   });
 
+  it('returns a durable run_sub_agentflow tool call when the durable fixture is requested', async () => {
+    const provider = new MockLLMProvider();
+    const messages: ContextManagedLLMMessage[] = [
+      {
+        role: 'user',
+        content: 'Start a durable two-agent delivery loop [[mock:tool:run_sub_agentflow:durable]]',
+      },
+    ];
+
+    const toolCalls = await provider.streamChat(
+      messages,
+      [{ name: 'run_sub_agentflow', description: 'Run child flow', parameters: {} }],
+      { sessionId: 'session-1', messageId: 'message-1', onChunk: vi.fn() },
+    );
+
+    expect(toolCalls).toEqual([
+      expect.objectContaining({
+        name: 'run_sub_agentflow',
+        args: expect.objectContaining({
+          flowId: 'goal_guard_delivery_loop',
+          startMode: 'durable',
+          returnMode: 'summary',
+        }),
+      }),
+    ]);
+  });
+
   it('stops repeating run_sub_agentflow after a prior AgentFlow tool result exists', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

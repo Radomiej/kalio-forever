@@ -219,7 +219,13 @@ function directProfileId(credentialId: string, provider: string, model: string):
   return `direct-${createHash('sha256').update(identity).digest('hex').slice(0, 32)}`;
 }
 
-const DEVIN_CLI_MODELS = ['glm-5-2', 'swe-1-7'] as const;
+const DEVIN_CLI_MODELS = [
+  'glm-5-2',
+  'swe-1-7',
+  'swe-2-high',
+  'swe-2-medium',
+  'swe-2-max',
+] as const;
 
 function isDevinCliModel(value: string): value is (typeof DEVIN_CLI_MODELS)[number] {
   return (DEVIN_CLI_MODELS as readonly string[]).includes(value);

@@ -227,7 +227,7 @@ test.describe('Subconversation live HITL', () => {
     }
   });
 
-  test('auto-approved child tool completes without creating manual confirmation', async ({ page, request }) => {
+  test('isolated child VFS write auto-approves without manual HITL noise', async ({ page, request }) => {
     test.setTimeout(180_000);
     const previousHitlConfig = await getHitlConfig(request);
     const previousActiveCredentialId = await getActiveCredentialId(request);
@@ -250,8 +250,9 @@ test.describe('Subconversation live HITL', () => {
       childSessionId = await findChildSessionId(request, session.id);
       await openChildSession(page, session.id, childSessionId);
 
-      await expect(page.getByTestId('confirmation-confirm-btn')).toHaveCount(0, { timeout: 5_000 });
+      const confirmButton = page.locator('[data-testid="confirmation-confirm-btn"]:visible');
       await expectVfsContent(request, childSessionId, CHILD_VFS_PATH, CHILD_VFS_CONTENT);
+      await expect(confirmButton).toHaveCount(0);
     } finally {
       if (childSessionId) {
         await deleteSessionIfExists(request, childSessionId);

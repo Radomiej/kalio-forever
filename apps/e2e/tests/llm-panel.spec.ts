@@ -161,10 +161,13 @@ test.describe('LLMPanel E2E', () => {
     const slider = page.getByTestId('context-window-slider');
     await expect(slider).toBeVisible();
 
-    // Move slider to a specific value using fill
-    await slider.fill('64000');
-    await slider.dispatchEvent('change');
+    await slider.focus();
+    await slider.press('Home');
+    for (let step = 0; step < 15; step += 1) {
+      await slider.press('ArrowRight');
+    }
 
+    await expect(slider).toHaveValue('64000');
     await expect(page.getByTestId('context-window-value')).toHaveText(/64k/, { timeout: 3000 });
   });
 });

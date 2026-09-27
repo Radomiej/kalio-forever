@@ -9,6 +9,8 @@ param(
     [string]$Version = 'latest',
     [string]$InstallRoot = '',
     [switch]$NoLaunch,
+    [switch]$NoAutostart,
+    [switch]$EnableAutostart,
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string]$Repository = 'Radomiej/kalio-forever'
 )
@@ -43,7 +45,7 @@ try {
     $runtimeSuffix = if ($Runtime -eq 'bun') { '-bun' } else { '' }
     $assetName = 'kalio-runtime-{0}{1}-windows-x64.zip' -f $releaseVersion, $runtimeSuffix
     $baseUrl = "https://github.com/$Repository/releases/download/$tag"
-    $rawBaseUrl = "https://raw.githubusercontent.com/$Repository/$tag"
+    $installerBaseUrl = "https://raw.githubusercontent.com/$Repository/main"
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('kalio-release-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
@@ -84,7 +86,7 @@ try {
                 Write-Warning 'Runtime manifest is unsigned; archive integrity is protected by HTTPS and SHA-256 only'
             }
         }
-        Invoke-WebRequest -UseBasicParsing -Uri "$rawBaseUrl/scripts/install.ps1" -OutFile $installerPath
+        Invoke-WebRequest -UseBasicParsing -Uri "$installerBaseUrl/scripts/install.ps1" -OutFile $installerPath
 
         $installerArgs = @(
             '-NoProfile',
@@ -97,6 +99,12 @@ try {
         }
         if ($NoLaunch) {
             $installerArgs += '-NoLaunch'
+        }
+        if ($NoAutostart) {
+            $installerArgs += '-NoAutostart'
+        }
+        if ($EnableAutostart) {
+            $installerArgs += '-EnableAutostart'
         }
         & powershell.exe @installerArgs
         if ($LASTEXITCODE -ne 0) {

@@ -178,7 +178,7 @@ export class WaitForTool {
     let lastSnapshot: CLIAgentSessionSnapshot | undefined;
     let lastError: string | undefined;
 
-    while (Date.now() - startedAt <= timeoutMs) {
+    while (Date.now() - startedAt < timeoutMs) {
       try {
         const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
         lastSnapshot = await withTimeout(

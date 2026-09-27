@@ -200,6 +200,17 @@ function architectureStatusFromAgentFlow(status: AgentFlowRunSnapshot['run']['st
   return 'running';
 }
 
+function isAgentFlowAwaitingHumanInput(snapshot: AgentFlowRunSnapshot): boolean {
+  let awaitingHumanInput = false;
+  for (const event of snapshot.events ?? []) {
+    if (event.type === 'flow:resume_input') awaitingHumanInput = false;
+    if (event.status === 'waiting_on_orchestrator' && event.reasonCode === 'runtime_pause') {
+      awaitingHumanInput = true;
+    }
+  }
+  return awaitingHumanInput;
+}
+
 export async function startGoalGuardAgentFlowRun(
   prompt: string,
   context?: Record<string, unknown>,
@@ -261,6 +272,7 @@ export async function getGoalGuardAgentFlowRunResult(
     run,
     agentFlowRunId: snapshot.run.id,
     agentFlowStatus: snapshot.run.status,
+    agentFlowAwaitingHumanInput: isAgentFlowAwaitingHumanInput(snapshot),
     agentFlowSummary: snapshot.result?.summary,
   };
 }

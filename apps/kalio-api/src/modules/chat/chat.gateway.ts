@@ -42,8 +42,8 @@ import {
 import {
   cancelToolConfirmation,
   replayPendingToolConfirmations,
-  resolveToolConfirmation,
 } from './chat.runtime-hitl';
+import { resolveGatewayToolConfirmation } from './chat.gateway.tool-confirmation';
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -207,16 +207,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['tool:confirm'],
   ): Promise<void> {
-    const socketSessions = this.socketSessions.get(client.id);
-    if (!socketSessions?.has(payload.sessionId)) {
-      this.logger.warn(`tool:confirm rejected — sessionId=${payload.sessionId} not owned by socket ${client.id}`);
-      return;
-    }
-    await resolveToolConfirmation({
+    await resolveGatewayToolConfirmation({
+      clientId: client.id,
       payload,
+      socketSessions: this.socketSessions,
       toolDispatch: this.toolDispatch,
       chatService: this.chatService,
-      emit: ((event, data) => client.emit(event, data)) as EmitFn,
+      emit: ((event, data) => this.emitToInitiatorAndSessionSubscribers(client.id, payload.sessionId, event, data)) as EmitFn,
+      warn: (message) => this.logger.warn(message),
     });
   }
 

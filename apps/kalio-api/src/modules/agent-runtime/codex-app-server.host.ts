@@ -1,10 +1,16 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { nanoid } from 'nanoid';
 import { CodexMcpPolicyService } from './codex-mcp-policy.service';
+import {
+  buildCodexAppServerArgs,
+  buildCodexSpawnSpec,
+  listConfiguredCodexMcpServers,
+  spawnCodexProcess,
+} from './codex-app-server-process';
 
 interface JsonRpcMessage {
   id?: string | number;
@@ -63,47 +69,6 @@ export interface CodexAppServerHostStatus {
   openSessionCount: number;
   processEpoch?: string;
   lastError?: string;
-}
-
-export function buildCodexSpawnSpec(
-  command: string,
-  args: string[],
-  platform: NodeJS.Platform = process.platform,
-  comSpec: string = process.env.ComSpec ?? 'cmd.exe',
-): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
-  if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(command)) {
-    return { command, args };
-  }
-
-  return {
-    command: comSpec,
-    args: ['/d', '/s', '/c', command, ...args],
-    windowsVerbatimArguments: true,
-  };
-}
-
-/**
- * Keep Codex's user-configured MCP servers outside the Kalio tool boundary by
- * default. The connection startup resolves the configured ids and disables
- * each one explicitly because an empty mcp_servers table is merged, not cleared.
- */
-export function buildCodexAppServerArgs(
-  disabledFeatures: string[] = ['multi_agent'],
-  inheritConfiguredMcp = process.env['KALIO_CODEX_INHERIT_MCP']?.trim().toLowerCase() === 'true',
-  disabledMcpServers: string[] = [],
-): string[] {
-  const mcpOverrides = inheritConfiguredMcp
-    ? []
-    : disabledMcpServers.flatMap((serverId) => [
-      '-c',
-      `mcp_servers."${serverId}".enabled=false`,
-    ]);
-  return [
-    'app-server',
-    '--stdio',
-    ...mcpOverrides,
-    ...disabledFeatures.flatMap((feature) => ['--disable', feature]),
-  ];
 }
 
 interface PendingRequest {
@@ -214,12 +179,11 @@ class StdioCodexAppServerConnection implements CodexAppServerConnection {
     const disabledFeatures = options.disabledFeatures ?? ['multi_agent', 'plugins'];
     const args = buildCodexAppServerArgs(disabledFeatures, inheritConfiguredMcp, disabledMcpServers);
     const spawnSpec = buildCodexSpawnSpec(command, args);
-    const child = spawn(spawnSpec.command, spawnSpec.args, {
+    const child = spawnCodexProcess(spawnSpec.command, spawnSpec.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
       windowsHide: true,
-      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
-    });
+    }) as ChildProcessWithoutNullStreams;
     const connection = new StdioCodexAppServerConnection(child, logger);
     await connection.request('initialize', {
       clientInfo: { name: 'kalio', title: 'Kalio', version: '0.1.0' },
@@ -500,41 +464,6 @@ export class CodexAppServerHost implements OnModuleDestroy {
     this.connectionGenerations.set(authProfileId, generation);
     return generation;
   }
-}
-
-async function listConfiguredCodexMcpServers(command: string, env: NodeJS.ProcessEnv): Promise<string[]> {
-  const spawnSpec = buildCodexSpawnSpec(command, ['mcp', 'list']);
-  return new Promise((resolve, reject) => {
-    const child = spawn(spawnSpec.command, spawnSpec.args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env,
-      windowsHide: true,
-      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
-    });
-    let stdout = '';
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    child.once('error', reject);
-    child.once('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Unable to inspect Codex MCP configuration (exit ${code ?? 'null'}).`));
-        return;
-      }
-      if (/No MCP servers configured/i.test(stdout)) {
-        resolve([]);
-        return;
-      }
-      const serverIds = new Set<string>();
-      const matches = [...stdout.matchAll(/^\s*([A-Za-z0-9][A-Za-z0-9_-]*)\s{2,}/gm)];
-      for (const [index, match] of matches.entries()) {
-        const serverId = match[1];
-        if (serverId === 'Name') continue;
-        const blockEnd = matches[index + 1]?.index ?? stdout.length;
-        const block = stdout.slice(match.index ?? 0, blockEnd);
-        if (!/\bdisabled\b/i.test(block)) serverIds.add(serverId);
-      }
-      resolve([...serverIds]);
-    });
-  });
 }
 
 function codexAuthEnvironment(authProfileId: string): NodeJS.ProcessEnv | undefined {

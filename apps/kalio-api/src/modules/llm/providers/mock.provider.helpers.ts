@@ -12,6 +12,7 @@ export const MOCK_FS_WRITE_TRIGGER = '[[mock:tool:fs_write]]';
 export const MOCK_RUN_SUBAGENT_HITL_TRIGGER = '[[mock:tool:run_subagent:hitl]]';
 export const MOCK_RUN_SUBAGENT_AUTO_APPROVE_TRIGGER = '[[mock:tool:run_subagent:auto-approve]]';
 export const MOCK_RUN_SUB_AGENTFLOW_TRIGGER = '[[mock:tool:run_sub_agentflow]]';
+export const MOCK_RUN_SUB_AGENTFLOW_DURABLE_TRIGGER = '[[mock:tool:run_sub_agentflow:durable]]';
 export const MOCK_ARCHITECTURE_ROUTER_MALFORMED_OUTPUT_TRIGGER = '[[mock:architecture:router:malformed-output]]';
 export const MOCK_GOAL_GUARD_VFS_SUCCESS_TRIGGER = '[[mock:goal-guard-vfs-success]]';
 const MOCK_SCRIPT_START = '[[mock:script]]';
@@ -228,7 +229,7 @@ export function createRunSubagentToolCall(autoApproveChildTools = false): LLMToo
   };
 }
 
-export function createRunSubAgentFlowToolCall(): LLMToolCall {
+export function createRunSubAgentFlowToolCall(startMode: 'blocking' | 'durable' = 'blocking'): LLMToolCall {
   return {
     id: `mock_tool_${Date.now()}`,
     name: 'run_sub_agentflow',
@@ -249,7 +250,7 @@ export function createRunSubAgentFlowToolCall(): LLMToolCall {
         mockIntent: 'talk-started-agentflow',
         requireImplementerWriteProof: true,
       },
-      startMode: 'blocking',
+      startMode,
       returnMode: 'summary',
       maxSteps: 50,
     },

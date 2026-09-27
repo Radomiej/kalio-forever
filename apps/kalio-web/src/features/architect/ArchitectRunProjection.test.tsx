@@ -35,6 +35,21 @@ describe('ArchitectRunProjection', () => {
     });
   });
 
+  it('keeps external QA resumable while polling a human-input wait', () => {
+    render(
+      <ArchitectRunProjection
+        activeTab="events"
+        onTabChange={vi.fn()}
+        run={{ ...makeWaitingRun(), agentFlowAwaitingHumanInput: true }}
+        schema={baseSchema}
+        running
+        onResumeWithQualityGate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Resume with QA evidence/i })).toBeEnabled();
+  });
+
   it('renders completed run metadata without the QA resume affordance', () => {
     render(
       <ArchitectRunProjection
