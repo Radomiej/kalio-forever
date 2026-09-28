@@ -30,7 +30,12 @@ outputs/
 kalio-*.png
 .windsurf/
 tmp/runtime-report/
+apps/kalio-web/.stryker-tmp/
+apps/kalio-web/reports/mutation/
 docs/sessions/
+!docs/sessions/
+docs/sessions/*
+!docs/sessions/2026-09-28_kalio-qa-run24.md
 apps/output/
 src-tauri/resources/
 src-tauri/frontend-dist/
