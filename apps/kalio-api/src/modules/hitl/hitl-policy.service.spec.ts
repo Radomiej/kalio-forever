@@ -9,7 +9,6 @@ function makeConfig(overrides: Partial<HitlConfig> = {}): HitlConfig {
   return {
     mode: 'manual',
     autoPersonaId: null,
-    jevCredentialId: null,
     jevInstructions: '',
     jevApprovalThreshold: 0.9,
     rules: [],
@@ -53,6 +52,19 @@ describe('HitlPolicyService', () => {
       source: 'manual',
     });
 
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('propagates cancelled Jev evaluation without persona or manual fallback (persona=%s)', async (withPersona) => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', autoPersonaId: withPersona ? 'reviewer' : null }));
+    const controller = new AbortController();
+    const reason = new DOMException('Stopped by user', 'AbortError');
+    jevService.evaluateApproval.mockImplementation(async () => {
+      controller.abort(reason);
+      throw reason;
+    });
+
+    await expect(service.resolveApproval({ kind: 'tool', sessionId: 'sess-1', name: 'terminal_exec', args: {}, abortSignal: controller.signal })).rejects.toBe(reason);
     expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
   });
 
@@ -127,7 +139,7 @@ describe('HitlPolicyService', () => {
   });
 
   it('allows and denies Jev decisions at the configured threshold boundaries', async () => {
-    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevCredentialId: 'openrouter-key' }));
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev' }));
     const request = { kind: 'tool' as const, sessionId: 'sess-1', name: 'destructive_tool', args: { action: 'delete' } };
     jevService.evaluateApproval.mockResolvedValue({ probability: 0.9 });
     await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'approved', source: 'jev' });
@@ -136,7 +148,7 @@ describe('HitlPolicyService', () => {
   });
 
   it('uses the optional persona for uncertain or failed Jev decisions and asks the human if it cannot decide', async () => {
-    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', autoPersonaId: 'reviewer', jevCredentialId: 'openrouter-key' }));
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', autoPersonaId: 'reviewer' }));
     const request = { kind: 'tool' as const, sessionId: 'sess-1', name: 'dangerous_tool', args: {} };
     jevService.evaluateApproval.mockResolvedValue({ probability: 0.5 });
     decisionService.evaluateApproval.mockResolvedValue({ agree: true, decision: 'ask_user', reason: 'Needs a person.' });

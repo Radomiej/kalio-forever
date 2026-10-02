@@ -1125,7 +1125,6 @@ export interface HitlHardRuleInput extends Omit<HitlHardRule, 'id'> {
 export interface HitlConfig {
   mode: HitlMode;
   autoPersonaId: string | null;
-  jevCredentialId: string | null;
   jevInstructions: string;
   jevApprovalThreshold: number;
   rules: HitlHardRule[];
@@ -2279,3 +2278,5 @@ export interface ArchitectureChatProjection {
 }
 
 export type ArchitectureGraphNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export * from './decision-settings';

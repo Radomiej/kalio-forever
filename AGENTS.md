@@ -246,7 +246,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - On Windows, run `better-sqlite3`-backed Kalio API tests and rebuilds outside the sandbox with system Node on PATH; sandboxed or non-system Node runs are not valid evidence for SQLite failures.
 - On Windows, run Kalio Playwright/QA stack commands outside the sandbox with system Node on PATH; sandboxed runs can fail on pnpm junctions with `EPERM` or false `MODULE_NOT_FOUND` for declared deps such as `ajv`, and are not valid runtime evidence.
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
-- Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
+- Do not leave legacy configuration, duplicate contracts, or compatibility paths when replacing a feature; remove the superseded implementation and update every consumer and test in the same change.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
 - For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
 - Workspace package scripts invoked by root gates must call local tools directly and never invoke nested `pnpm`/`npm` orchestration; root workspace commands own package order and dependency resolution.

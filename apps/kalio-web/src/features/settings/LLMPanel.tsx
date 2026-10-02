@@ -41,7 +41,7 @@ function normalizeMaxToolAttempts(size: number): number {
   return Math.max(MIN_MAX_TOOL_ATTEMPTS, Math.min(MAX_MAX_TOOL_ATTEMPTS, Math.round(size)));
 }
 
-export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'runtime' } = {}) {
+export function LLMPanel({ mode }: { mode: 'providers' | 'runtime' }) {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [contextWindow, setContextWindow] = useState(32000);
@@ -133,7 +133,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
         apiFetch<LLMConfigWithSource>('/llm/config'),
       ]);
       const normalizedToolTimeouts = { ...DEFAULT_TOOL_TIMEOUT_SETTINGS, ...toolTimeouts };
-      setCredentials(creds);
+      setCredentials(creds.filter((credential) => credential.provider !== 'typesafe' && credential.provider !== 'decision'));
       setActiveId(active.credentialId);
       setContextWindow(cw.size);
       persistedContextWindow.current = cw.size;
@@ -412,18 +412,16 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
   return (
     <div className="flex flex-col gap-5" data-testid="llm-panel">
       <LLMPanelHeader
-        title={mode === 'runtime' ? 'Runtime Settings' : 'LLM Settings'}
+        title={mode === 'runtime' ? 'LLM Settings' : 'Providers'}
         description={
           mode === 'runtime'
             ? 'Adjust the active provider model and turn-level limits.'
-            : mode === 'providers'
-              ? 'Configure provider credentials and connection health. Active provider selection is stored in the database, and API keys remain write-only.'
-              : 'Configure model behavior, runtime limits, and provider credentials. Active provider selection is stored in the database, and API keys remain write-only.'
+            : 'Configure provider credentials and connection health. Active provider selection is stored in the database, and API keys remain write-only.'
         }
       />
       {error && <LLMPanelErrorAlert error={error} onClear={() => setError(null)} />}
 
-      {mode !== 'runtime' ? (
+      {mode === 'providers' ? (
         <LLMProviderHealthCard
           activeProviderLabel={derived.activeProviderLabel}
           activeProviderModel={derived.activeProviderModel}
@@ -434,7 +432,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
         />
       ) : null}
 
-      {mode !== 'runtime' ? (
+      {mode === 'providers' ? (
         <ProviderSettingsSection
           credentials={credentials}
           activeId={activeId}
@@ -468,7 +466,7 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
         />
       ) : null}
 
-      {mode !== 'providers' ? (
+      {mode === 'runtime' ? (
         <LLMRuntimeSettingsSection
           activeRuntimeConfig={activeRuntimeConfig}
           providers={credentials}

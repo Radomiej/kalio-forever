@@ -1,9 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import type { ArchitectureExecutionEvent, ArchitectureSchemaEdge, ArchitectureSchemaNode, ArchitectureSchema } from '@kalio/types';
+import { Inject, Injectable } from '@nestjs/common';
+import { DECISION_SETTINGS, type DecisionSettingsPort, type DecisionConnection, type ArchitectureExecutionEvent, type ArchitectureSchemaEdge, type ArchitectureSchemaNode, type ArchitectureSchema } from '@kalio/types';
 import { JevDecisionsClient } from '../../common/jev-decisions.client';
 import { sanitizeJevState } from '../../common/jev-state-sanitizer';
-import { CredentialsService } from '../credentials/credentials.service';
-import { HitlConfigService } from '../hitl/hitl-config.service';
 
 export type ArchitectureAutoRoutingChoice = {
   edgeId: string;
@@ -25,8 +23,7 @@ export type ArchitectureAutoRoutingInput = {
 @Injectable()
 export class ArchitectureAutoRoutingService {
   constructor(
-    private readonly hitlConfig: HitlConfigService,
-    private readonly credentials: CredentialsService,
+    @Inject(DECISION_SETTINGS) private readonly decisions: DecisionSettingsPort,
     private readonly jev: JevDecisionsClient,
   ) {}
 
@@ -44,13 +41,9 @@ export class ArchitectureAutoRoutingService {
       reason,
     });
     try {
-      const config = await this.hitlConfig.getConfig();
-      const credentialId = config.jevCredentialId;
-      if (!credentialId) return fallback('credential_missing');
-      const providerConfig = await this.credentials.getProviderConfigForCredential(credentialId);
-      if (!providerConfig || providerConfig.provider !== 'openrouter' || !providerConfig.apiKey.trim()) {
-        return fallback('credential_missing');
-      }
+      let connection: DecisionConnection;
+      try { connection = await this.decisions.resolve(); }
+      catch (error) { if (input.signal?.aborted) throw error; return fallback('credential_missing'); }
 
       const nodesById = new Map(input.schema.nodes.map((node) => [node.id, node]));
       const criteria = Object.fromEntries(choiceEdges.map((edge) => {
@@ -75,7 +68,7 @@ export class ArchitectureAutoRoutingService {
           } : undefined,
         }));
       const response = await this.jev.decideChoice({
-        apiKey: providerConfig.apiKey,
+        ...connection,
         questionId: 'next_edge',
         instructions: [
           'Choose the single best next edge for the workflow. Return only one exact edge ID from the choices.',

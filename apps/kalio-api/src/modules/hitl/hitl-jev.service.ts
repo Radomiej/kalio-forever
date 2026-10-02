@@ -1,30 +1,22 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import type { HitlConfig } from '@kalio/types';
+import { Inject, Injectable } from '@nestjs/common';
+import { DECISION_SETTINGS, type DecisionSettingsPort, type HitlConfig } from '@kalio/types';
 import { JevDecisionsClient, type JevNoulResult } from '../../common/jev-decisions.client';
 import { sanitizeJevState } from '../../common/jev-state-sanitizer';
-import { CredentialsService } from '../credentials/credentials.service';
+
 import type { HitlApprovalRequest } from './hitl.types';
 
 @Injectable()
 export class HitlJevService {
   constructor(
-    private readonly credentials: CredentialsService,
+    @Inject(DECISION_SETTINGS) private readonly decisions: DecisionSettingsPort,
     private readonly jev: JevDecisionsClient,
   ) {}
 
   async evaluateApproval(config: HitlConfig, request: HitlApprovalRequest): Promise<JevNoulResult> {
-    const credentialId = config.jevCredentialId;
-    if (!credentialId) {
-      throw new BadRequestException('No OpenRouter credential is configured for Jev.');
-    }
-
-    const providerConfig = await this.credentials.getProviderConfigForCredential(credentialId);
-    if (!providerConfig || providerConfig.provider !== 'openrouter' || !providerConfig.apiKey.trim()) {
-      throw new BadRequestException('The selected Jev credential is not a usable OpenRouter credential.');
-    }
+    const connection = await this.decisions.resolve();
 
     return this.jev.decideNoul({
-      apiKey: providerConfig.apiKey,
+      ...connection,
       questionId: 'approval',
       instructions: [
         'Should the requested operation be allowed? Return the probability that the answer is yes.',

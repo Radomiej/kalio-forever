@@ -1272,3 +1272,25 @@ Plan DR powinien definiować:
 ## Koniec dokumentu
 
 Dokument ten powinien być aktualizowany przy każdej większej zmianie architektury: dodaniu nowego modułu, zmianie modelu danych, zmianie izolacji sesji, zmianie polityki bezpieczeństwa albo modyfikacji procesu build/deploy.
+
+
+## Decision Settings i Auto-routing
+
+Providers przechowuje poświadczenia. Agent Settings rozdziela LLM Settings i Decision Settings. Globalny backendowy DecisionSettingsModule zapisuje pojedynczy kontrakt w app_settings pod kluczem decision.config; chronione GET/PUT /api/decision/config nie zwracają kluczy API. HITL i ArchitectureAutoRoutingService korzystają z portu DECISION_SETTINGS z @kalio/types.
+
+OpenRouter używa POST https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13), TypeSafe POST https://api.typesafe.ai/v1/systemone (domyślnie jev-1.13.0). Custom/local wymaga pełnego URL POST i modelu obsługującego questions/state/answers z noul albo choice/confidence. Sama zgodność chat completions jest niewystarczająca. Bez wskazanego poświadczenia wybierany jest pierwszy użyteczny zgodny klucz, z pierwszeństwem OpenRouter. Jawny usunięty klucz powoduje błąd zamiast podmiany. HTTP jest dopuszczone tylko na loopback, keyless tylko dla custom.
+
+Transport nie ma ukrytego domyślnego providera/modelu, odrzuca redirect i błędne/za duże odpowiedzi, ma timeout 8 s i obsługuje abort. Anulowane żądanie nie uruchamia fallbacku HITL. Polityka HITL zachowuje reguły deny > ask_user > allow, próg 0.90 oraz fallback persona → człowiek. Auto-routing zachowuje próg 0.80 i obowiązkową krawędź default. Zapis (runId, nodeId, visit) poprzedza następny węzeł; replay odczytuje zapis bez ponownego wywołania modelu. Szczegółowy diagram i granice znajdują się w project-spec.md.
+
+```mermaid
+flowchart TD
+    P[Providers: poświadczenia] --> D[Decision Settings: provider i model]
+    D --> B[Backend rozwiązuje połączenie]
+    B --> H[HITL: noul i próg zatwierdzenia]
+    B --> R[Auto-routing: choice i próg pewności]
+    H --> F[Decyzja lub fallback persona / człowiek]
+    R --> S[Zapis krawędzi wybranej albo default]
+    S --> N[Następny węzeł]
+    S --> O[Replay odczytuje zapis]
+    O --> N
+```

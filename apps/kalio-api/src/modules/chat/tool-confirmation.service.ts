@@ -137,6 +137,7 @@ export class ToolConfirmationService {
           return { approved: false };
         }
       } catch (err) {
+        ctx.abortSignal?.throwIfAborted();
         const error = err instanceof Error ? err : new Error(String(err));
         this.logger.error(
           `Global HITL policy failed for tool [${toolName}] session=${ctx.sessionId}`,

@@ -1,20 +1,15 @@
-import type { Credential } from '@kalio/types';
 import type { HitlConfig } from './hitl-settings.types';
+import { useState } from 'react';
+import { DecisionSettingsPanel } from './DecisionSettingsPanel';
 
 export function HITLJevSettings({
   config,
-  credentials,
-  credentialError,
-  onRetryCredentials,
   onChange,
 }: {
   config: HitlConfig;
-  credentials: Credential[];
-  credentialError: string | null;
-  onRetryCredentials: () => void;
   onChange: (next: HitlConfig) => void;
 }) {
-  const openRouterCredentials = credentials.filter((credential) => credential.provider.toLowerCase() === 'openrouter');
+  const [showDecisions, setShowDecisions] = useState(false);
 
   return (
     <section className="space-y-3 rounded-lg border border-base-300/50 bg-base-200/30 p-4" aria-label="Jev approval settings">
@@ -25,30 +20,9 @@ export function HITLJevSettings({
         </p>
       </div>
 
-      {credentialError && (
-        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-error/20 bg-error/10 p-3 text-xs text-error">
-          <span>OpenRouter credentials could not be loaded: {credentialError}</span>
-          <button type="button" className="btn btn-outline btn-xs shrink-0" onClick={onRetryCredentials}>Retry credentials</button>
-        </div>
-      )}
-
-      <label className="form-control gap-1">
-        <span className="text-xs font-semibold text-base-content/70">OpenRouter credential</span>
-        <select
-          aria-label="Jev OpenRouter credential"
-          className="select select-sm select-bordered w-full"
-          value={config.jevCredentialId ?? ''}
-          onChange={(event) => onChange({ ...config, jevCredentialId: event.target.value || null })}
-        >
-          <option value="">Select a credential…</option>
-          {openRouterCredentials.map((credential) => (
-            <option key={credential.id} value={credential.id}>{credential.name}</option>
-          ))}
-        </select>
-      </label>
-      <p className="text-xs text-warning">
-        Use an OpenRouter management key with Decisions API access. The key stays in backend credentials and is never shown here.
-      </p>
+      <p className="text-xs text-base-content/60">Provider and model come from Agent Settings → Decision Settings, shared with Architect Auto-routing.</p>
+      <button type="button" className="btn btn-outline btn-sm" onClick={() => setShowDecisions((value) => !value)}>{showDecisions ? 'Hide Decision Settings' : 'Configure Decision Settings'}</button>
+      {showDecisions && <DecisionSettingsPanel />}
 
       <label className="form-control gap-1">
         <span className="text-xs font-semibold text-base-content/70">Approval threshold</span>

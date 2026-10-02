@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Loader2, Save, ShieldAlert } from 'lucide-react';
-import type { Credential, Persona } from '@kalio/types';
+import type { Persona } from '@kalio/types';
 import { controlPlaneFetch } from '../../services/controlPlaneFetch';
 import { HITLUnattendedSection, MAX_RAAPP_APPROVAL_TIMEOUT_MINUTES } from './HITLSettingsPanel.Unattended';
 import { HITLJevSettings } from './HITLSettingsPanel.Jev';
@@ -10,7 +10,6 @@ import type { HitlConfig } from './hitl-settings.types';
 const DEFAULT_CONFIG: HitlConfig = {
   mode: 'manual',
   autoPersonaId: null,
-  jevCredentialId: null,
   jevInstructions: '',
   jevApprovalThreshold: 0.9,
   rules: [],
@@ -27,7 +26,6 @@ function normalizeConfig(config: Partial<HitlConfig>): HitlConfig {
     ...DEFAULT_CONFIG,
     ...config,
     autoPersonaId: config.autoPersonaId ?? null,
-    jevCredentialId: config.jevCredentialId ?? null,
     jevInstructions: config.jevInstructions ?? '',
     jevApprovalThreshold: config.jevApprovalThreshold ?? DEFAULT_CONFIG.jevApprovalThreshold,
     rules: config.rules ?? [],
@@ -57,28 +55,14 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
 export function HITLSettingsPanel() {
   const [config, setConfig] = useState<HitlConfig>(DEFAULT_CONFIG);
   const [personas, setPersonas] = useState<Persona[]>([]);
-  const [credentials, setCredentials] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
-  const [credentialError, setCredentialError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const loadCredentials = useCallback(async () => {
-    try {
-      const loadedCredentials = await apiFetch<Credential[]>('/credentials', { cache: 'no-store' });
-      setCredentials(loadedCredentials);
-      setCredentialError(null);
-    } catch (err) {
-      setCredentials([]);
-      setCredentialError(err instanceof Error ? err.message : 'Failed to load OpenRouter credentials');
-    }
-  }, []);
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    void loadCredentials();
     try {
       const [loadedConfig, loadedPersonas] = await Promise.all([
         apiFetch<HitlConfig>('/hitl/config', { cache: 'no-store' }),
@@ -91,7 +75,7 @@ export function HITLSettingsPanel() {
     } finally {
       setLoading(false);
     }
-  }, [loadCredentials]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -99,11 +83,6 @@ export function HITLSettingsPanel() {
 
   const personaValidationMessage = config.mode === 'auto' && !config.autoPersonaId
     ? 'Choose a persona for auto approvals.'
-    : null;
-  const jevCredentialValidationMessage = config.mode === 'jev'
-    ? credentialError ?? (!credentials.some((credential) => (
-      credential.id === config.jevCredentialId && credential.provider.toLowerCase() === 'openrouter'
-    )) ? 'Choose an OpenRouter credential for Jev approvals.' : null)
     : null;
   const jevThresholdValidationMessage = config.jevApprovalThreshold < 0.51
     || config.jevApprovalThreshold > 0.99
@@ -128,8 +107,8 @@ export function HITLSettingsPanel() {
     : null;
 
   const handleSave = async () => {
-    if (personaValidationMessage || jevCredentialValidationMessage || jevThresholdValidationMessage || ruleValidationMessage || externalPolicyValidationMessage || representativeValidationMessage || timeoutValidationMessage) {
-      setError(personaValidationMessage ?? jevCredentialValidationMessage ?? jevThresholdValidationMessage ?? ruleValidationMessage ?? externalPolicyValidationMessage ?? representativeValidationMessage ?? timeoutValidationMessage);
+    if (personaValidationMessage || jevThresholdValidationMessage || ruleValidationMessage || externalPolicyValidationMessage || representativeValidationMessage || timeoutValidationMessage) {
+      setError(personaValidationMessage ?? jevThresholdValidationMessage ?? ruleValidationMessage ?? externalPolicyValidationMessage ?? representativeValidationMessage ?? timeoutValidationMessage);
       return;
     }
 
@@ -140,7 +119,6 @@ export function HITLSettingsPanel() {
       const payload: HitlConfig = {
         mode: config.mode,
         autoPersonaId: config.mode === 'auto' || config.mode === 'jev' ? config.autoPersonaId : null,
-        jevCredentialId: config.jevCredentialId,
         jevInstructions: config.jevInstructions,
         jevApprovalThreshold: config.jevApprovalThreshold,
         rules: config.rules,
@@ -233,8 +211,8 @@ export function HITLSettingsPanel() {
             }}
           />
           <span>
-            <span className="block text-sm font-medium">Jev 1.13</span>
-            <span className="block text-xs text-base-content/50">OpenRouter evaluates eligible operations; uncertain results go to the fallback persona or user.</span>
+            <span className="block text-sm font-medium">Decision agent (Jev)</span>
+            <span className="block text-xs text-base-content/50">The configured Decision model evaluates eligible operations; uncertain results go to the fallback persona or user.</span>
           </span>
         </label>
 
@@ -315,9 +293,6 @@ export function HITLSettingsPanel() {
       {config.mode === 'jev' && (
         <HITLJevSettings
           config={config}
-          credentials={credentials}
-          credentialError={credentialError}
-          onRetryCredentials={() => { void loadCredentials(); }}
           onChange={(next) => {
             setConfig(next);
             setError(null);

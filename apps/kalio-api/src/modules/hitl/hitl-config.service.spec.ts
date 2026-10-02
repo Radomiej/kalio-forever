@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '../../database/schema';
 import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
+import { DecisionSettingsService } from '../../common/decision-settings.service';
 import { HitlConfigService } from './hitl-config.service';
 import type { HitlConfig } from './hitl.types';
 
@@ -17,7 +18,6 @@ const DEFAULT_CONFIG: HitlConfig = {
   externalPolicyEnabled: false,
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
-  jevCredentialId: null,
   jevInstructions: '',
   jevApprovalThreshold: 0.9,
   rules: [],
@@ -58,7 +58,9 @@ describe('HitlConfigService', () => {
         model: '',
       }),
     };
-    service = new HitlConfigService(appSettings, personaService as never, credentialsService as never);
+    const decisionCredentials = { ...credentialsService, findAll: vi.fn().mockResolvedValue([{id:'openrouter-management', provider:'openrouter', createdAt:1}]) };
+    const decisions = new DecisionSettingsService(appSettings, decisionCredentials as never);
+    service = new HitlConfigService(appSettings, personaService as never, decisions);
   });
 
   it('returns manual defaults when no HITL config is stored', async () => {
@@ -84,7 +86,6 @@ describe('HitlConfigService', () => {
     const rules = [{ id: 'deny-ansible', kind: 'tool' as const, name: 'terminal_spawn', executable: 'ansible-playbook', decision: 'deny' as const }];
     const result = await service.updateConfig({
       mode: 'jev',
-      jevCredentialId: 'openrouter-management',
       jevInstructions: 'Allow Docker Desktop operations.',
       jevApprovalThreshold: 0.92,
       rules,
@@ -92,7 +93,6 @@ describe('HitlConfigService', () => {
 
     expect(result).toMatchObject({
       mode: 'jev',
-      jevCredentialId: 'openrouter-management',
       jevInstructions: 'Allow Docker Desktop operations.',
       jevApprovalThreshold: 0.92,
       rules,
@@ -116,9 +116,10 @@ describe('HitlConfigService', () => {
   });
 
   it('requires an OpenRouter credential for Jev mode and rejects other providers', async () => {
+    credentialsService.getProviderConfigForCredential.mockResolvedValueOnce(null);
     await expect(service.updateConfig({ mode: 'jev' })).rejects.toThrow(BadRequestException);
     credentialsService.getProviderConfigForCredential.mockResolvedValue({ provider: 'openai', apiKey: 'key' });
-    await expect(service.updateConfig({ mode: 'jev', jevCredentialId: 'openai-key' })).rejects.toThrow(BadRequestException);
+    await expect(service.updateConfig({ mode: 'jev' })).rejects.toThrow(BadRequestException);
   });
 
   it('rejects unsafe Jev thresholds and malformed hard rules', async () => {

@@ -1,6 +1,7 @@
 import type { ReactNode, ComponentType } from 'react';
 import { Bot, Gauge, MessageSquareText, Plug, Folder, Database, Search, Wrench, Image, Send, ShieldAlert, DatabaseZap, ServerCog } from 'lucide-react';
-import { LLMPanel } from './LLMPanel';
+import { ProvidersPanel } from './ProvidersPanel';
+import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { MCPSettingsPanel } from './MCPSettingsPanel';
 import { AllowedPathsPanel } from './AllowedPathsPanel';
 import { EmbeddingsPanel } from './EmbeddingsPanel';
@@ -21,8 +22,8 @@ export interface SettingsBlock {
 }
 
 export const SETTINGS_BLOCKS: SettingsBlock[] = [
-  { id: 'llm',          label: 'LLM Settings',     icon: <Bot size={16} />,      component: () => <LLMPanel mode="providers" /> },
-  { id: 'runtime',      label: 'Runtime Settings', icon: <Gauge size={16} />,    component: () => <LLMPanel mode="runtime" /> },
+  { id: 'llm',          label: 'Providers',        icon: <Bot size={16} />,      component: ProvidersPanel },
+  { id: 'runtime',      label: 'Agent Settings',   icon: <Gauge size={16} />,    component: AgentSettingsPanel },
   { id: 'conversation', label: 'Conversation',     icon: <MessageSquareText size={16} />, component: ConversationSettingsPanel },
   { id: 'hitl',         label: 'HITL Approvals',   icon: <ShieldAlert size={16} />, component: HITLSettingsPanel },
   { id: 'audit-retention', label: 'Audit Retention', icon: <DatabaseZap size={16} />, component: AuditRetentionSettingsPanel },

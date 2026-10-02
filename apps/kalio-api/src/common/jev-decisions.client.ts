@@ -1,9 +1,10 @@
-const JEV_DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
-const JEV_MODEL = 'typesafe/jev-1.13';
 const JEV_TIMEOUT_MS = 8_000;
+const MAX_RESPONSE_BYTES = 65_536;
 
 export interface JevDecisionRequest {
   apiKey: string;
+  endpoint: string;
+  model: string;
   questionId: string;
   instructions: string;
   state: Record<string, unknown>;
@@ -81,14 +82,15 @@ export class JevDecisionsClient {
     const timeout = setTimeout(() => controller.abort(new Error('Jev request timed out.')), JEV_TIMEOUT_MS);
 
     try {
-      const response = await fetch(JEV_DECISIONS_URL, {
+      const response = await fetch(input.endpoint, {
         method: 'POST',
+        redirect: 'error',
         headers: {
-          Authorization: `Bearer ${input.apiKey}`,
+          ...(input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {}),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: JEV_MODEL,
+          model: input.model,
           questions: {
             [input.questionId]: {
               ...question,
@@ -106,7 +108,7 @@ export class JevDecisionsClient {
 
       let body: unknown;
       try {
-        body = await response.json();
+        body = JSON.parse(await readBoundedResponse(response)) as unknown;
       } catch {
         throw new Error('Jev Decisions API returned invalid JSON.');
       }
@@ -145,4 +147,25 @@ export class JevDecisionsClient {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function readBoundedResponse(response: Response): Promise<string> {
+  if (!response.body) throw new Error('Missing decision response body.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = '';
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error('Decision response exceeds the size limit.');
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally { reader.releaseLock(); }
 }

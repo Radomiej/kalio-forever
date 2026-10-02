@@ -41,7 +41,6 @@ function installFetchMock(initialConfig: Partial<HitlConfig> = {}) {
   const state: { config: HitlConfig } = { config: {
     mode: 'manual',
     autoPersonaId: null as string | null,
-    jevCredentialId: null,
     jevInstructions: '',
     jevApprovalThreshold: 0.9,
     rules: [],
@@ -121,7 +120,6 @@ describe('HITLSettingsPanel', () => {
       expect(getPutBody()).toEqual({
         mode: 'auto',
         autoPersonaId: 'ops-persona',
-        jevCredentialId: null,
         jevInstructions: '',
         jevApprovalThreshold: 0.9,
         rules: [],
@@ -172,7 +170,6 @@ describe('HITLSettingsPanel', () => {
       expect(getPutBody()).toEqual({
         mode: 'manual',
         autoPersonaId: null,
-        jevCredentialId: null,
         jevInstructions: '',
         jevApprovalThreshold: 0.9,
         rules: [],
@@ -193,7 +190,6 @@ describe('HITLSettingsPanel', () => {
 
     await user.click(screen.getByLabelText('Jev'));
     fireEvent.change(screen.getByLabelText('Approval persona'), { target: { value: 'ops-persona' } });
-    fireEvent.change(screen.getByLabelText('Jev OpenRouter credential'), { target: { value: 'openrouter-management' } });
     fireEvent.change(screen.getByLabelText('Jev approval threshold'), { target: { value: '0.85' } });
     fireEvent.change(screen.getByLabelText('Jev approval instructions'), { target: { value: 'Allow only bounded read operations.' } });
     await user.click(screen.getByRole('button', { name: 'Add hard rule' }));
@@ -208,7 +204,6 @@ describe('HITLSettingsPanel', () => {
       expect(getPutBody()).toMatchObject({
         mode: 'jev',
         autoPersonaId: 'ops-persona',
-        jevCredentialId: 'openrouter-management',
         jevInstructions: 'Allow only bounded read operations.',
         jevApprovalThreshold: 0.85,
         rules: [{ kind: 'raapp_native', name: 'terminal_spawn', decision: 'deny', executable: 'powershell.exe', argumentsContains: '--production' }],
@@ -219,12 +214,11 @@ describe('HITLSettingsPanel', () => {
     render(<HITLSettingsPanel />);
     await screen.findByText('HITL Approvals');
     expect(screen.getByLabelText('Jev')).toBeChecked();
-    expect(screen.getByLabelText('Jev OpenRouter credential')).toHaveValue('openrouter-management');
     expect(screen.getByLabelText('Jev approval threshold')).toHaveValue(0.85);
     expect(screen.getByLabelText('Rule 1 decision')).toHaveValue('deny');
   });
 
-  it('requires an OpenRouter credential before enabling Jev approval mode', async () => {
+  it('uses shared Decision Settings when enabling Jev approval mode', async () => {
     const user = userEvent.setup();
     render(<HITLSettingsPanel />);
     await screen.findByText('HITL Approvals');
@@ -232,8 +226,24 @@ describe('HITLSettingsPanel', () => {
     await user.click(screen.getByLabelText('Jev'));
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Choose an OpenRouter credential for Jev approvals.');
+    await waitFor(() => expect(getPutBody()).toMatchObject({ mode: 'jev' }));
+    expect(screen.getByRole('button', { name: 'Configure Decision Settings' })).toBeInTheDocument();
+  });
+
+  it('keeps unsaved approval policy while opening shared Decision Settings', async () => {
+    const user = userEvent.setup();
+    render(<HITLSettingsPanel />);
+    await screen.findByText('HITL Approvals');
+    await user.click(screen.getByLabelText('Jev'));
+    fireEvent.change(screen.getByLabelText('Jev approval threshold'), { target: { value: '0.86' } });
+    fireEvent.change(screen.getByLabelText('Jev approval instructions'), { target: { value: 'Unsaved policy' } });
+    await user.click(screen.getByRole('button', { name: 'Configure Decision Settings' }));
+    expect(screen.getByLabelText('Jev')).toBeChecked();
+    expect(screen.getByLabelText('Jev approval threshold')).toHaveValue(0.86);
+    expect(screen.getByLabelText('Jev approval instructions')).toHaveValue('Unsaved policy');
     expect(getPutBody()).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Hide Decision Settings' }));
+    expect(screen.getByLabelText('Jev approval instructions')).toHaveValue('Unsaved policy');
   });
 
   it('persists external HITL policy enablement with a persona', async () => {

@@ -1,8 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import type { HitlHardRule } from '@kalio/types';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { DECISION_SETTINGS, type DecisionSettingsPort, type HitlHardRule } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { PersonaService } from '../persona/persona.service';
-import { CredentialsService } from '../credentials/credentials.service';
 import {
   isHitlMode,
   isHitlNotificationChannel,
@@ -23,7 +22,6 @@ const DEFAULT_HITL_CONFIG: HitlConfig = {
   externalPolicyEnabled: false,
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
-  jevCredentialId: null,
   jevInstructions: '',
   jevApprovalThreshold: 0.9,
   rules: [],
@@ -38,7 +36,6 @@ const HITL_SETTING_KEYS = {
   externalPolicyEnabled: 'hitl.externalPolicyEnabled',
   externalPolicyPersonaId: 'hitl.externalPolicyPersonaId',
   raAppApprovalTimeoutMs: 'hitl.raAppApprovalTimeoutMs',
-  jevCredentialId: 'hitl.jevCredentialId',
   jevInstructions: 'hitl.jevInstructions',
   jevApprovalThreshold: 'hitl.jevApprovalThreshold',
   rules: 'hitl.rules',
@@ -54,7 +51,7 @@ export class HitlConfigService {
   constructor(
     private readonly appSettings: AppSettingsService,
     private readonly personaService: PersonaService,
-    private readonly credentials: CredentialsService,
+    @Inject(DECISION_SETTINGS) private readonly decisions: DecisionSettingsPort,
   ) {}
 
   async getConfig(): Promise<HitlConfig> {
@@ -67,7 +64,6 @@ export class HitlConfigService {
       storedExternalEnabled,
       storedExternalPersonaId,
       storedRaAppApprovalTimeoutMs,
-      storedJevCredentialId,
       storedJevInstructions,
       storedJevApprovalThreshold,
       storedRules,
@@ -80,7 +76,6 @@ export class HitlConfigService {
       this.appSettings.get(HITL_SETTING_KEYS.externalPolicyEnabled),
       this.appSettings.get(HITL_SETTING_KEYS.externalPolicyPersonaId),
       this.appSettings.get(HITL_SETTING_KEYS.raAppApprovalTimeoutMs),
-      this.appSettings.get(HITL_SETTING_KEYS.jevCredentialId),
       this.appSettings.get(HITL_SETTING_KEYS.jevInstructions),
       this.appSettings.get(HITL_SETTING_KEYS.jevApprovalThreshold),
       this.appSettings.get(HITL_SETTING_KEYS.rules),
@@ -99,7 +94,6 @@ export class HitlConfigService {
       externalPolicyEnabled: storedExternalEnabled === 'true',
       externalPolicyPersonaId: normalizePersonaId(storedExternalPersonaId),
       raAppApprovalTimeoutMs: this.parseStoredRaAppApprovalTimeout(storedRaAppApprovalTimeoutMs),
-      jevCredentialId: normalizePersonaId(storedJevCredentialId),
       jevInstructions: (storedJevInstructions ?? '').slice(0, 2_000),
       jevApprovalThreshold: this.parseStoredJevApprovalThreshold(storedJevApprovalThreshold),
       rules: this.parseStoredRules(storedRules),
@@ -128,9 +122,6 @@ export class HitlConfigService {
     const nextRaAppApprovalTimeoutMs = dto.raAppApprovalTimeoutMs !== undefined
       ? this.normalizeRaAppApprovalTimeoutMs(dto.raAppApprovalTimeoutMs)
       : current.raAppApprovalTimeoutMs;
-    const nextJevCredentialId = dto.jevCredentialId !== undefined
-      ? normalizePersonaId(dto.jevCredentialId)
-      : current.jevCredentialId;
     const nextJevInstructions = dto.jevInstructions !== undefined
       ? this.normalizeJevInstructions(dto.jevInstructions)
       : current.jevInstructions;
@@ -149,14 +140,7 @@ export class HitlConfigService {
       await this.ensurePersonaExists(nextAutoPersonaId);
     }
 
-    if (nextMode === 'jev' && nextJevCredentialId === null) {
-      throw new BadRequestException('Jev HITL mode requires an OpenRouter management credential.');
-    }
-
-    if (nextJevCredentialId !== null
-      && (dto.jevCredentialId !== undefined || nextMode === 'jev')) {
-      await this.ensureOpenRouterCredential(nextJevCredentialId);
-    }
+    if (nextMode === 'jev') await this.decisions.resolve();
 
     if (nextUnattendedFallback === 'representative' && nextRepresentativePersonaId === null) {
       throw new BadRequestException('Representative HITL fallback requires a configured persona.');
@@ -200,11 +184,6 @@ export class HitlConfigService {
       await this.appSettings.set(HITL_SETTING_KEYS.externalPolicyPersonaId, nextExternalPolicyPersonaId);
     }
     await this.appSettings.set(HITL_SETTING_KEYS.raAppApprovalTimeoutMs, String(nextRaAppApprovalTimeoutMs));
-    if (nextJevCredentialId === null) {
-      await this.appSettings.delete(HITL_SETTING_KEYS.jevCredentialId);
-    } else {
-      await this.appSettings.set(HITL_SETTING_KEYS.jevCredentialId, nextJevCredentialId);
-    }
     await this.appSettings.set(HITL_SETTING_KEYS.jevInstructions, nextJevInstructions);
     await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
     await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
@@ -218,7 +197,6 @@ export class HitlConfigService {
       externalPolicyEnabled: nextExternalPolicyEnabled,
       externalPolicyPersonaId: nextExternalPolicyPersonaId,
       raAppApprovalTimeoutMs: nextRaAppApprovalTimeoutMs,
-      jevCredentialId: nextJevCredentialId,
       jevInstructions: nextJevInstructions,
       jevApprovalThreshold: nextJevApprovalThreshold,
       rules: nextRules,
@@ -344,13 +322,6 @@ export class HitlConfigService {
         ...(argumentsContains ? { argumentsContains } : {}),
       };
     });
-  }
-
-  private async ensureOpenRouterCredential(credentialId: string): Promise<void> {
-    const config = await this.credentials.getProviderConfigForCredential(credentialId);
-    if (!config || config.provider !== 'openrouter' || config.apiKey.trim().length === 0) {
-      throw new BadRequestException('Jev requires a usable OpenRouter management credential.');
-    }
   }
 
   private async ensurePersonaExists(personaId: string): Promise<void> {

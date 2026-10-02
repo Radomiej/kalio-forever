@@ -112,7 +112,7 @@ beforeEach(() => {
 describe('LLMPanel', () => {
   it('renders a generic LLM settings heading', async () => {
     mockFetch(defaultMap());
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'LLM Settings' })).toBeInTheDocument(),
     );
@@ -121,13 +121,13 @@ describe('LLMPanel', () => {
   it('shows loading spinner initially', () => {
     // Never resolves so loading stays visible
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     expect(screen.getByText(/loading credentials/i)).toBeInTheDocument();
   });
 
   it('renders empty state when no credentials', async () => {
     mockFetch(defaultMap());
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() =>
       expect(screen.getByText(/no credentials configured/i)).toBeInTheDocument(),
     );
@@ -135,7 +135,7 @@ describe('LLMPanel', () => {
 
   it('renders credential rows after load', async () => {
     mockFetch(defaultMap({ credentials: [CRED] }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() =>
       expect(screen.getByTestId(`provider-row-${CRED.id}`)).toBeInTheDocument(),
     );
@@ -144,7 +144,7 @@ describe('LLMPanel', () => {
 
   it('exposes accessible names for runtime controls and provider activation', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() => expect(screen.getByLabelText('Active model')).toBeInTheDocument());
 
@@ -157,12 +157,12 @@ describe('LLMPanel', () => {
     expect(screen.getByLabelText('Web search timeout')).toBeInTheDocument();
     expect(screen.getByLabelText('Local provider probe timeout')).toBeInTheDocument();
     expect(screen.getByLabelText('Remote provider probe timeout')).toBeInTheDocument();
-    expect(screen.getByLabelText('My OpenAI provider active')).toBeInTheDocument();
+    expect(screen.queryByTestId('provider-row-c1')).not.toBeInTheDocument();
   });
 
   it('renders compact provider health from the active runtime config', async () => {
     mockFetch(defaultMap({ activeId: CRED.id, credentials: [CRED] }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
 
@@ -174,7 +174,7 @@ describe('LLMPanel', () => {
   it('shows the Windows local provider hint when a local provider is selected', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -194,7 +194,7 @@ describe('LLMPanel', () => {
     };
 
     mockFetch(defaultMap({ credentials: [localCredential], activeId: localCredential.id }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
     expect(screen.getByTestId('provider-health-local-hint')).toHaveTextContent(/windows local provider hint/i);
@@ -202,20 +202,20 @@ describe('LLMPanel', () => {
 
   it('shows active badge on the active credential', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
   });
 
   it('requests the runtime settings tab and model focus when edit is clicked on the active provider', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     const editButton = await screen.findByTestId(`provider-edit-${CRED.id}`);
     await user.click(editButton);
 
     expect(useSettingsStore.getState().requestedSettingsTab).toBe('runtime');
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveFocus());
+    expect(useSettingsStore.getState().runtimeModelFocusRequest).toBeGreaterThan(0);
   });
 
   it('switches SettingsModal to runtime mode and focuses the model selector from provider edit', async () => {
@@ -226,7 +226,7 @@ describe('LLMPanel', () => {
     const editButton = await screen.findByTestId(`provider-edit-${CRED.id}`);
     await user.click(editButton);
 
-    expect(await screen.findByRole('heading', { name: 'Runtime Settings', level: 2 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'LLM Settings', level: 2 })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveFocus());
   });
 
@@ -245,7 +245,7 @@ describe('LLMPanel', () => {
     render(<LLMPanel mode="runtime" />);
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Runtime Settings' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'LLM Settings' })).toBeInTheDocument(),
     );
 
     expect(screen.getByText('Runtime provider').parentElement).toHaveTextContent(/xiaomi mimo/i);
@@ -258,7 +258,7 @@ describe('LLMPanel', () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
     render(<LLMPanel mode="providers" />);
 
-    await screen.findByRole('heading', { name: 'LLM Settings', level: 2 });
+    await screen.findByRole('heading', { name: 'Providers', level: 2 });
 
     expect(screen.queryByRole('heading', { name: 'Runtime Settings', level: 3 })).not.toBeInTheDocument();
     expect(screen.queryByTestId('model-selector')).not.toBeInTheDocument();
@@ -269,13 +269,13 @@ describe('LLMPanel', () => {
     render(<LLMPanel mode="runtime" />);
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Runtime Settings', level: 2 })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'LLM Settings', level: 2 })).toBeInTheDocument(),
     );
 
     expect(screen.queryByTestId('add-provider-btn')).not.toBeInTheDocument();
     expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument();
     expect(screen.getByTestId('runtime-provider-selector')).toBeInTheDocument();
-    expect(screen.getAllByRole('heading', { name: 'Runtime Settings' })).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { name: 'LLM Settings' })).toHaveLength(1);
   });
 
   it('saves the active model through the runtime endpoint when the env provider is active', async () => {
@@ -299,7 +299,7 @@ describe('LLMPanel', () => {
     });
     const user = userEvent.setup();
 
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     const modelInput = await screen.findByTestId('model-selector');
     await user.clear(modelInput);
@@ -313,7 +313,7 @@ describe('LLMPanel', () => {
   it('opens add-provider form on button click', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
     expect(screen.getByTestId('add-provider-form')).toBeInTheDocument();
@@ -322,7 +322,7 @@ describe('LLMPanel', () => {
   it('changing provider type pre-fills base URL and model', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
 
@@ -334,7 +334,7 @@ describe('LLMPanel', () => {
 
   it('pre-fills name with provider label and updates on provider change', async () => {
     mockFetch(defaultMap());
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     fireEvent.click(screen.getByTestId('add-provider-btn'));
 
@@ -353,7 +353,7 @@ describe('LLMPanel', () => {
   it('supports bitnet in the add-provider form', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -371,7 +371,7 @@ describe('LLMPanel', () => {
   it('test button is disabled when API key is empty', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
     expect(screen.getByTestId('add-provider-test')).toBeDisabled();
@@ -384,7 +384,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -413,7 +413,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -433,7 +433,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -463,7 +463,7 @@ describe('LLMPanel', () => {
       'POST /api/credentials/test': { ok: true, latencyMs: 18 },
     };
     mockFetch(map);
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     fireEvent.click(screen.getByTestId('add-provider-btn'));
     fireEvent.change(screen.getByTestId('add-provider-apikey'), { target: { value: 'sk-test-key' } });
@@ -475,7 +475,7 @@ describe('LLMPanel', () => {
     // No mock for /api/llm/models → 404 response → test fails
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
     await user.type(screen.getByTestId('add-provider-apikey'), 'bad-key');
@@ -493,7 +493,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -512,7 +512,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
     const nameInput = screen.getByRole('textbox', { name: /name/i });
@@ -532,7 +532,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId(`provider-activate-${CRED.id}`));
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
     await waitFor(() => expect(screen.getByText('active')).toBeInTheDocument());
@@ -553,16 +553,15 @@ describe('LLMPanel', () => {
     });
 
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
-    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
+    expect(useSettingsStore.getState().getEffectiveModel()).toBe('env-gpt-4');
 
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
 
     await waitFor(() => expect(screen.getByTestId(`provider-row-${CRED.id}`)).toHaveTextContent('active'));
-    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('gpt-4o-mini'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini'));
   });
 
   it('bypasses browser cache when reading runtime config so provider switches reflect fresh backend state (REGRESSION)', async () => {
@@ -640,15 +639,15 @@ describe('LLMPanel', () => {
     );
 
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
 
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini'));
 
     await user.click(screen.getByTestId('provider-activate-env'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
   });
 
   it('renders env fallback like a provider row and switches the current model when activated (REGRESSION)', async () => {
@@ -720,17 +719,16 @@ describe('LLMPanel', () => {
     );
 
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => expect(screen.getByTestId('provider-row-env')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('gpt-4o-mini'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini'));
 
     await user.click(screen.getByTestId('provider-activate-env'));
 
     await waitFor(() => expect(screen.getByTestId('provider-row-env')).toHaveTextContent('active'));
-    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
+    expect(useSettingsStore.getState().getEffectiveModel()).toBe('env-gpt-4');
     const fetchCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as Array<[string, RequestInit | undefined]>;
     expect(fetchCalls.some(
       ([url, opts]) =>
@@ -822,18 +820,18 @@ describe('LLMPanel', () => {
     );
 
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
 
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini'));
 
     await user.click(screen.getByTestId('provider-activate-env'));
 
     await waitFor(() => expect(screen.getByTestId('provider-row-env')).toHaveTextContent('active'));
-    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
+    expect(useSettingsStore.getState().getEffectiveModel()).toBe('env-gpt-4');
   });
 
   it('logs a non-fatal error when backend config refresh fails after activation', async () => {
@@ -890,7 +888,7 @@ describe('LLMPanel', () => {
     );
 
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId(`provider-activate-${CRED.id}`));
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
@@ -909,7 +907,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() => screen.getByTestId(`provider-remove-${CRED.id}`));
     await user.click(screen.getByTestId(`provider-remove-${CRED.id}`));
     await waitFor(() =>
@@ -1001,24 +999,24 @@ describe('LLMPanel', () => {
     );
 
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
 
     await user.click(screen.getByTestId(`provider-activate-${CRED.id}`));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini'));
 
     await user.click(screen.getByTestId(`provider-remove-${CRED.id}`));
     await user.click(screen.getByRole('button', { name: 'Yes' }));
 
     await waitFor(() => expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText(/current model:/i)).toHaveTextContent('env-gpt-4'));
-    await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('env-gpt-4'));
+    await waitFor(() => expect(screen.getByTestId('provider-health-card')).toHaveTextContent('env-gpt-4'));
+    expect(useSettingsStore.getState().getEffectiveModel()).toBe('env-gpt-4');
   });
 
   it('context window slider is rendered with correct initial value', async () => {
     mockFetch(defaultMap({ contextWindow: 64000 }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
     await waitFor(() =>
       expect(screen.getByTestId('context-window-slider')).toBeInTheDocument(),
     );
@@ -1033,7 +1031,7 @@ describe('LLMPanel', () => {
       'PUT /api/credentials/settings/context-window': 204 as const,
     };
     mockFetch(map);
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
     await waitFor(() => screen.getByTestId('context-window-slider'));
     const slider = screen.getByTestId('context-window-slider') as HTMLInputElement;
     slider.value = '128000';
@@ -1050,7 +1048,7 @@ describe('LLMPanel', () => {
       'PUT /api/credentials/settings/max-tool-attempts': 204 as const,
     };
     mockFetch(map);
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
     await waitFor(() => screen.getByTestId('max-tool-attempts-slider'));
     const slider = screen.getByTestId('max-tool-attempts-slider') as HTMLInputElement;
     slider.value = '25';
@@ -1067,7 +1065,7 @@ describe('LLMPanel', () => {
       'PUT /api/credentials/settings/max-tool-attempts': 204 as const,
     };
     mockFetch(map);
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
     await waitFor(() => screen.getByTestId('max-tool-attempts-slider'));
     const slider = screen.getByTestId('max-tool-attempts-slider') as HTMLInputElement;
 
@@ -1091,7 +1089,7 @@ describe('LLMPanel', () => {
     delete (config as { maxToolAttempts?: number }).maxToolAttempts;
     mockFetch(map);
 
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() =>
       expect(screen.getByTestId('max-tool-attempts-value')).toHaveTextContent('30'),
@@ -1105,7 +1103,7 @@ describe('LLMPanel', () => {
       providerRemoteTimeoutMs: 45000,
       providerMaxConcurrentStreams: 4,
     }));
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() => expect(screen.getByTestId('provider-max-streams-slider')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId('web-search-timeout-slider')).toBeInTheDocument());
@@ -1126,7 +1124,7 @@ describe('LLMPanel', () => {
       'PUT /api/credentials/settings/tool-timeouts': 204 as const,
     };
     mockFetch(map);
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() => screen.getByTestId('web-search-timeout-slider'));
     fireEvent.change(screen.getByTestId('web-search-timeout-slider'), { target: { value: '180000' } });
@@ -1140,7 +1138,7 @@ describe('LLMPanel', () => {
       'PUT /api/credentials/settings/tool-timeouts': 204 as const,
     };
     mockFetch(map);
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() => screen.getByTestId('web-search-timeout-slider'));
     const slider = screen.getByTestId('web-search-timeout-slider');
@@ -1164,7 +1162,7 @@ describe('LLMPanel', () => {
 
   it('shows an error and restores the previous timeout when save fails', async () => {
     mockFetch(defaultMap());
-    render(<LLMPanel />);
+    render(<LLMPanel mode="runtime" />);
 
     await waitFor(() => screen.getByTestId('web-search-timeout-slider'));
     const slider = screen.getByTestId('web-search-timeout-slider');
@@ -1182,7 +1180,7 @@ describe('LLMPanel', () => {
       'fetch',
       vi.fn(() => Promise.resolve(new Response('Server error', { status: 500 }))),
     );
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
     await waitFor(() =>
       expect(screen.getByText(/500: Server error/i)).toBeInTheDocument(),
     );
@@ -1191,7 +1189,7 @@ describe('LLMPanel', () => {
   it('keeps provider test disabled when API key contains only whitespace (REGRESSION)', async () => {
     mockFetch(defaultMap());
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -1208,7 +1206,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -1226,7 +1224,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -1245,7 +1243,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));
@@ -1264,7 +1262,7 @@ describe('LLMPanel', () => {
     };
     mockFetch(map);
     const user = userEvent.setup();
-    render(<LLMPanel />);
+    render(<LLMPanel mode="providers" />);
 
     await waitFor(() => screen.getByTestId('add-provider-btn'));
     await user.click(screen.getByTestId('add-provider-btn'));

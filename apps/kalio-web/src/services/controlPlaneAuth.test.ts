@@ -27,6 +27,8 @@ describe('control-plane browser authentication', () => {
     const { isControlPlaneRequest } = await import('./controlPlaneAuth');
 
     expect(isControlPlaneRequest(new URL(`${API_BASE}/api/credentials`), API_BASE)).toBe(true);
+    expect(isControlPlaneRequest(new URL(`${API_BASE}/api/decision/config`), API_BASE)).toBe(true);
+    expect(isControlPlaneRequest(new URL('https://untrusted.example/api/decision/config'), API_BASE)).toBe(false);
     expect(isControlPlaneRequest(new URL(`${API_BASE}/api/credentials-evil`), API_BASE)).toBe(false);
     expect(isControlPlaneRequest(new URL('https://untrusted.example/api/credentials'), API_BASE)).toBe(false);
     expect(isControlPlaneRequest(new URL(`${API_BASE}/api/mcp/servers`), API_BASE)).toBe(true);

@@ -1,17 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CredentialsService } from '../credentials/credentials.service';
+import type { DecisionSettingsPort } from '@kalio/types';
 import { JevDecisionsClient } from '../../common/jev-decisions.client';
 import type { HitlConfig, HitlApprovalRequest } from './hitl.types';
 import { HitlJevService } from './hitl-jev.service';
 
 describe('HitlJevService', () => {
   let service: HitlJevService;
-  let credentials: { getProviderConfigForCredential: ReturnType<typeof vi.fn> };
+  let decisions: { resolve: ReturnType<typeof vi.fn> };
   let client: { decideNoul: ReturnType<typeof vi.fn> };
   const config: HitlConfig = {
     mode: 'jev',
     autoPersonaId: null,
-    jevCredentialId: 'credential-1',
     jevInstructions: 'Allow Docker operations.',
     jevApprovalThreshold: 0.9,
     rules: [],
@@ -31,16 +30,16 @@ describe('HitlJevService', () => {
   };
 
   beforeEach(() => {
-    credentials = {
-      getProviderConfigForCredential: vi.fn().mockResolvedValue({ provider: 'openrouter', apiKey: 'management-key' }),
+    decisions = {
+      resolve: vi.fn().mockResolvedValue({ endpoint: 'https://api.typesafe.ai/v1/systemone', model: 'jev-1.13.0', apiKey: 'management-key' }),
     };
     client = {
       decideNoul: vi.fn().mockResolvedValue({ probability: 0.92, model: 'typesafe/jev-1.13' }),
     };
-    service = new HitlJevService(credentials as unknown as CredentialsService, client as unknown as JevDecisionsClient);
+    service = new HitlJevService(decisions as unknown as DecisionSettingsPort, client as unknown as JevDecisionsClient);
   });
 
-  it('sends bounded redacted operation state to the configured Jev credential', async () => {
+  it('sends redacted operation state with the shared native provider and model', async () => {
     await expect(service.evaluateApproval(config, request)).resolves.toMatchObject({ probability: 0.92 });
     expect(client.decideNoul).toHaveBeenCalledWith(expect.objectContaining({
       apiKey: 'management-key',
@@ -51,7 +50,7 @@ describe('HitlJevService', () => {
     }));
   });
 
-  it('redacts credentials embedded in command text before sending state', async () => {
+  it('redacts decisions embedded in command text before sending state', async () => {
     await service.evaluateApproval(config, {
       ...request,
       args: { command: 'curl -H "Authorization: Bearer secret-token-123" https://user:password@example.test' },
@@ -63,9 +62,9 @@ describe('HitlJevService', () => {
     expect(sentState).toContain('[REDACTED]');
   });
 
-  it('rejects missing or non-OpenRouter credentials without exposing keys', async () => {
-    credentials.getProviderConfigForCredential.mockResolvedValue({ provider: 'openai', apiKey: 'secret' });
-    await expect(service.evaluateApproval(config, request)).rejects.toThrow('usable OpenRouter credential');
+  it('rejects unavailable Decision connections without exposing keys', async () => {
+    decisions.resolve.mockRejectedValue(new Error('Decision credential unavailable'));
+    await expect(service.evaluateApproval(config, request)).rejects.toThrow('Decision credential unavailable');
     expect(client.decideNoul).not.toHaveBeenCalled();
   });
 });

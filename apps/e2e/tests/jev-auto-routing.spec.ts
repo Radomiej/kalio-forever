@@ -1,4 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { startDecisionFixture } from './helpers/decision-fixture';
+import type { DecisionSettings } from '@kalio/types';
 import {
   API_BASE,
   deleteSessionIfExists,
@@ -111,7 +113,7 @@ async function getSessionDescendants(request: APIRequestContext, rootId: string)
   return result;
 }
 
-test('Jev Auto-routing falls back durably and stays visible across Architect, Talk, Canvas, graph, and F5', async ({ page, request }, testInfo) => {
+for (const useLocalDecision of [false, true]) test(`Decision Auto-routing ${useLocalDecision ? 'selects via local API' : 'falls back'} durably across Architect, Talk, Canvas, graph, and F5`, async ({ page, request }, testInfo) => {
   test.setTimeout(300_000);
   const title = `Jev Auto-routing E2E ${Date.now()}`;
   const variantName = `Jev Auto-routing E2E ${Date.now()}`;
@@ -120,14 +122,24 @@ test('Jev Auto-routing falls back durably and stays visible across Architect, Ta
   let sessionId: string | null = null;
   let originalHitlConfig: HitlConfig | null = null;
   const activeCredentialId = await getActiveCredentialId(request);
+  let fixture: Awaited<ReturnType<typeof startDecisionFixture>> | null = null;
+  let originalDecision: DecisionSettings | null = null;
+  const expectedEdge = useLocalDecision ? 'auto-route-choice' : 'auto-route-default';
+  const expectedReason = useLocalDecision ? 'confidence_met' : 'credential_missing';
+  const expectedTarget = useLocalDecision ? 'pragmatist' : 'innovator';
 
   try {
     await ensureEnvMockProvider(request);
     originalHitlConfig = await getHitlConfig(request);
+    const decisionResponse = await request.get(`${API_BASE}/decision/config`);
+    expect(decisionResponse.ok()).toBeTruthy();
+    originalDecision = await decisionResponse.json() as DecisionSettings;
+    if (useLocalDecision) fixture = await startDecisionFixture();
+    const configureDecision = await request.put(`${API_BASE}/decision/config`, { data: fixture ? { provider: 'custom', model: 'local-decision-fixture', credentialId: null, endpoint: fixture.endpoint } : { provider: 'openrouter', model: 'typesafe/jev-1.13', credentialId: null, endpoint: '' } });
+    expect(configureDecision.ok()).toBeTruthy();
     await putHitlConfig(request, {
       ...originalHitlConfig,
       mode: 'manual',
-      jevCredentialId: null,
       jevApprovalThreshold: 0.9,
     });
 
@@ -137,7 +149,7 @@ test('Jev Auto-routing falls back durably and stays visible across Architect, Ta
     await page.getByTestId('settings-tab-hitl').click();
     await expect(page.getByTestId('hitl-settings-panel')).toBeVisible();
     await page.getByRole('radio', { name: 'Jev' }).check();
-    await expect(page.getByLabel('Jev OpenRouter credential')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Configure Decision Settings' })).toBeVisible();
     await expect(page.getByLabel('Jev approval threshold')).toHaveValue('0.9');
     await expect(page.getByLabel('Jev approval instructions')).toBeVisible();
     await page.getByTestId('settings-close').click();
@@ -228,22 +240,22 @@ test('Jev Auto-routing falls back durably and stays visible across Architect, Ta
     const runId = await findRunId(request, session.id);
     const graph = await getCompletedGraph(request, runId);
     const autoRoute = graph.nodes?.find((node) => node.id === 'auto-route');
-    const fallbackAgent = graph.nodes?.find((node) => node.id === 'innovator');
+    const fallbackAgent = graph.nodes?.find((node) => node.id === expectedTarget);
     const autoRouteHop = graph.routeHops?.find((hop) => hop.fromNodeId === 'auto-route');
     expect(autoRoute?.kind).toBe('auto_router');
     expect(autoRouteHop).toMatchObject({
-      toNodeId: 'innovator',
-      selectedEdgeId: 'auto-route-default',
-      source: 'runtime_fallback',
-      decisionReason: 'credential_missing',
+      toNodeId: expectedTarget,
+      selectedEdgeId: expectedEdge,
+      source: useLocalDecision ? 'jev_choice' : 'runtime_fallback',
+      decisionReason: expectedReason,
     });
     expect(fallbackAgent?.status).toBe('completed');
     expect(fallbackAgent?.sessionId).toBeTruthy();
 
     const routeCard = page.getByTestId('architecture-route-auto-routing');
     await expect(routeCard).toContainText('Choose reviewer');
-    await expect(routeCard).toContainText('auto-route-default');
-    await expect(routeCard).toContainText('credential_missing');
+    await expect(routeCard).toContainText(expectedEdge);
+    await expect(routeCard).toContainText(expectedReason);
 
     await selectSessionOriginFilter(page, 'agent');
     await expect(page.locator(`[data-testid="session-item"][data-session-id="${fallbackAgent?.sessionId}"]`)).toBeVisible({ timeout: 30_000 });
@@ -253,7 +265,7 @@ test('Jev Auto-routing falls back durably and stays visible across Architect, Ta
     const canvas = page.getByTestId('architecture-run-canvas-section');
     await expect(canvas).toBeVisible();
     await expect(canvas).toContainText('Auto-routing');
-    await expect(canvas).toContainText('auto-route-default');
+    await expect(canvas).toContainText(expectedEdge);
 
     await page.getByTestId('talk-graph-switcher').click();
     const routerGraphNode = page.locator('[data-testid^="graph-node-architecture-route:"]').first();
@@ -261,28 +273,31 @@ test('Jev Auto-routing falls back durably and stays visible across Architect, Ta
     await expect(routerGraphNode).toContainText('Auto-routing');
     await routerGraphNode.click();
     const graphInspector = page.getByTestId('execution-graph-inspector');
-    await expect(graphInspector).toContainText('auto-route-default');
-    await expect(graphInspector).toContainText('credential_missing');
+    await expect(graphInspector).toContainText(expectedEdge);
+    await expect(graphInspector).toContainText(expectedReason);
 
+    const decisionsBeforeReload = fixture?.requestCount ?? 0;
+    if (fixture) expect(decisionsBeforeReload).toBe(1);
     await page.reload();
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
     await page.getByTestId('execution-graph-view').getByTestId('talk-conversation-switcher').click();
     await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId('architecture-route-auto-routing')).toContainText('auto-route-default');
+    if (fixture) expect(fixture.requestCount).toBe(decisionsBeforeReload);
+    await expect(page.getByTestId('architecture-route-auto-routing')).toContainText(expectedEdge);
 
     await selectSessionOriginFilter(page, 'agent');
     await expect(page.locator(`[data-testid="session-item"][data-session-id="${fallbackAgent?.sessionId}"]`)).toBeVisible({ timeout: 30_000 });
     await selectSession(page, session.id, title);
     await page.getByTestId('open-architecture-run-canvas').click();
-    await expect(page.getByTestId('architecture-run-canvas-section')).toContainText('auto-route-default');
+    await expect(page.getByTestId('architecture-run-canvas-section')).toContainText(expectedEdge);
 
     await page.getByTestId('chat-interface').getByTestId('talk-graph-switcher').click();
     const replayedRouterNode = page.locator('[data-testid^="graph-node-architecture-route:"]').first();
     await expect(replayedRouterNode).toContainText('Auto-routing');
     await replayedRouterNode.click();
-    await expect(page.getByTestId('execution-graph-inspector')).toContainText('auto-route-default');
-    await expect(page.getByTestId('execution-graph-inspector')).toContainText('credential_missing');
+    await expect(page.getByTestId('execution-graph-inspector')).toContainText(expectedEdge);
+    await expect(page.getByTestId('execution-graph-inspector')).toContainText(expectedReason);
 
     const replayedGraph = await getCompletedGraph(request, runId);
     expect(replayedGraph.routeHops?.filter((hop) => hop.fromNodeId === 'auto-route')).toHaveLength(1);
@@ -297,6 +312,8 @@ test('Jev Auto-routing falls back durably and stays visible across Architect, Ta
       expect([200, 204, 404]).toContain(response.status());
     }
     if (originalHitlConfig) await putHitlConfig(request, originalHitlConfig);
+    if (originalDecision) { const restored = await request.put(`${API_BASE}/decision/config`, { data: originalDecision }); expect(restored.ok()).toBeTruthy(); }
+    await fixture?.close();
     await restoreActiveCredential(request, activeCredentialId);
   }
 });

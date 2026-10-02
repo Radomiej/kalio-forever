@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArchitectureSchema, ArchitectureSchemaNode } from '@kalio/types';
 import type { JevDecisionsClient } from '../../common/jev-decisions.client';
-import type { CredentialsService } from '../credentials/credentials.service';
-import type { HitlConfigService } from '../hitl/hitl-config.service';
+import type { DecisionSettingsPort } from '@kalio/types';
+
 import { ArchitectureAutoRoutingService } from './architecture-auto-routing.service';
 
 describe('ArchitectureAutoRoutingService', () => {
   let service: ArchitectureAutoRoutingService;
-  let hitlConfig: { getConfig: ReturnType<typeof vi.fn> };
-  let credentials: { getProviderConfigForCredential: ReturnType<typeof vi.fn> };
+  let decisions: { resolve: ReturnType<typeof vi.fn> };
   let jev: { decideChoice: ReturnType<typeof vi.fn> };
   const node: ArchitectureSchemaNode = {
     id: 'auto',
@@ -46,12 +45,10 @@ describe('ArchitectureAutoRoutingService', () => {
   };
 
   beforeEach(() => {
-    hitlConfig = { getConfig: vi.fn().mockResolvedValue({ jevCredentialId: 'openrouter-management' }) };
-    credentials = { getProviderConfigForCredential: vi.fn().mockResolvedValue({ provider: 'openrouter', apiKey: 'management-key' }) };
+    decisions = { resolve: vi.fn().mockResolvedValue({ endpoint: 'http://127.0.0.1:9090/decide', model: 'local-decision', apiKey: '' }) };
     jev = { decideChoice: vi.fn().mockResolvedValue({ choice: 'edge-agent', confidence: 0.91 }) };
     service = new ArchitectureAutoRoutingService(
-      hitlConfig as unknown as HitlConfigService,
-      credentials as unknown as CredentialsService,
+      decisions as unknown as DecisionSettingsPort,
       jev as unknown as JevDecisionsClient,
     );
   });
@@ -87,8 +84,8 @@ describe('ArchitectureAutoRoutingService', () => {
     });
   });
 
-  it('uses the explicit default for missing credentials, low confidence, and provider failures', async () => {
-    hitlConfig.getConfig.mockResolvedValueOnce({ jevCredentialId: null });
+  it('uses the explicit default for missing decisions, low confidence, and provider failures', async () => {
+    decisions.resolve.mockRejectedValueOnce(new Error('Missing credential'));
     await expect(service.choose(input)).resolves.toMatchObject({ edgeId: 'edge-default', source: 'runtime_fallback', reason: 'credential_missing' });
     expect(jev.decideChoice).not.toHaveBeenCalled();
 
@@ -100,7 +97,7 @@ describe('ArchitectureAutoRoutingService', () => {
   });
 
   it('falls back when the selected credential is not OpenRouter or Jev returns an invalid choice', async () => {
-    credentials.getProviderConfigForCredential.mockResolvedValueOnce({ provider: 'openai', apiKey: 'secret' });
+    decisions.resolve.mockRejectedValueOnce(new Error('Incompatible credential'));
     await expect(service.choose(input)).resolves.toMatchObject({ edgeId: 'edge-default', reason: 'credential_missing' });
     expect(jev.decideChoice).not.toHaveBeenCalled();
 

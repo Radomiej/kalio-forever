@@ -6,6 +6,7 @@ const CONTROL_PLANE_PREFIXES = [
   '/api/architecture-registry',
   '/api/architecture-runs',
   '/api/credentials',
+  '/api/decision',
   '/api/hitl',
   '/api/llm',
   '/api/mcp/servers',

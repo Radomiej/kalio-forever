@@ -1,8 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JevDecisionsClient } from './jev-decisions.client';
 
+const connection = { endpoint: 'https://openrouter.ai/api/alpha/decisions', model: 'typesafe/jev-1.13' };
+
 describe('JevDecisionsClient', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('calls a local Decisions endpoint with its model without an Authorization header or redirects', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ answers: { approval: { type: 'noul', noul: 0.95 } } })));
+    vi.stubGlobal('fetch', fetchMock);
+    await new JevDecisionsClient().decideNoul({ ...connection, apiKey: '', endpoint: 'http://127.0.0.1:9090/decide', model: 'local-decision', questionId: 'approval', instructions: 'Allow?', state: {} });
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:9090/decide', expect.objectContaining({ redirect: 'error', headers: { 'Content-Type': 'application/json' } }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ model: 'local-decision' });
+  });
 
   it('submits a pinned Jev decision and returns a validated noul probability', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -12,7 +22,7 @@ describe('JevDecisionsClient', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await new JevDecisionsClient().decideNoul({
+    const result = await new JevDecisionsClient().decideNoul({ ...connection,
       apiKey: 'management-secret',
       questionId: 'approval',
       instructions: 'Should this operation be allowed?',
@@ -40,7 +50,7 @@ describe('JevDecisionsClient', () => {
       model: 'typesafe/jev-1.13',
     }), { status: 200 })));
 
-    await expect(new JevDecisionsClient().decideChoice({
+    await expect(new JevDecisionsClient().decideChoice({ ...connection,
       apiKey: 'management-secret',
       questionId: 'route',
       instructions: 'Choose the next edge.',
@@ -54,7 +64,7 @@ describe('JevDecisionsClient', () => {
       answers: { approval: { noul: 2, type: 'noul' } },
     }), { status: 200 })));
 
-    await expect(new JevDecisionsClient().decideNoul({
+    await expect(new JevDecisionsClient().decideNoul({ ...connection,
       apiKey: 'management-secret',
       questionId: 'approval',
       instructions: 'Should this operation be allowed?',
@@ -64,13 +74,13 @@ describe('JevDecisionsClient', () => {
 
   it('rejects answers with a missing or mismatched decision type', async () => {
     const client = new JevDecisionsClient();
-    const approvalInput = {
+    const approvalInput = { ...connection,
       apiKey: 'management-secret',
       questionId: 'approval',
       instructions: 'Should this operation be allowed?',
       state: {},
     };
-    const routeInput = {
+    const routeInput = { ...connection,
       apiKey: 'management-secret',
       questionId: 'route',
       instructions: 'Choose the next edge.',
@@ -100,7 +110,7 @@ describe('JevDecisionsClient', () => {
   });
 
   it('rejects HTTP errors, malformed JSON, missing answers, unknown choices, and invalid confidence', async () => {
-    const input = {
+    const input = { ...connection,
       apiKey: 'management-secret',
       questionId: 'route',
       instructions: 'Choose the next edge.',
@@ -129,6 +139,11 @@ describe('JevDecisionsClient', () => {
     await expect(client.decideChoice(input)).rejects.toThrow('invalid probability or confidence');
   });
 
+  it('rejects oversized provider bodies without exposing them', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('secret'.repeat(12_000))));
+    await expect(new JevDecisionsClient().decideNoul({ ...connection, apiKey: 'key', questionId: 'approval', instructions: 'Allow?', state: {} })).rejects.toThrow('invalid JSON');
+  });
+
   it('aborts a request after the fixed timeout', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn((_url: string, options: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -137,7 +152,7 @@ describe('JevDecisionsClient', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     try {
-      const pending = new JevDecisionsClient().decideNoul({
+      const pending = new JevDecisionsClient().decideNoul({ ...connection,
         apiKey: 'management-secret',
         questionId: 'approval',
         instructions: 'Should this operation be allowed?',
@@ -159,7 +174,7 @@ describe('JevDecisionsClient', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const pending = new JevDecisionsClient().decideNoul({
+    const pending = new JevDecisionsClient().decideNoul({ ...connection,
       apiKey: 'management-secret',
       questionId: 'approval',
       instructions: 'Should this operation be allowed?',

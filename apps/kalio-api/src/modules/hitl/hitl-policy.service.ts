@@ -20,6 +20,7 @@ export class HitlPolicyService {
 
     try {
       const config = await this.hitlConfig.getConfig();
+      request.abortSignal?.throwIfAborted();
 
       if (config.mode === 'bypass') {
         return { status: 'approved', source: 'bypass' };
@@ -43,6 +44,7 @@ export class HitlPolicyService {
 
       return this.resolveWithJev(config, request);
     } catch (err) {
+      request.abortSignal?.throwIfAborted();
       const error = err instanceof Error ? err : new Error(String(err));
       this.logger.error('Auto HITL policy failed; falling back to manual review', error);
       return { status: 'manual', source: 'manual' };
@@ -103,6 +105,7 @@ export class HitlPolicyService {
     try {
       if (!this.jevService) throw new Error('Jev HITL evaluator is not configured.');
       const result = await this.jevService.evaluateApproval(config, request);
+      request.abortSignal?.throwIfAborted();
       const reason = `Jev p(allow)=${result.probability.toFixed(2)}; threshold=${config.jevApprovalThreshold.toFixed(2)}.`;
       const boundaryTolerance = 1e-9;
       if (result.probability + boundaryTolerance >= config.jevApprovalThreshold) {
@@ -113,6 +116,7 @@ export class HitlPolicyService {
       }
       return this.resolveWithPersona(config.autoPersonaId, request, 'jev');
     } catch (err) {
+      request.abortSignal?.throwIfAborted();
       const error = err instanceof Error ? err : new Error(String(err));
       this.logger.error('Jev HITL evaluation failed; falling back to the configured persona or manual review', error);
       return this.resolveWithPersona(config.autoPersonaId, request, 'jev');
