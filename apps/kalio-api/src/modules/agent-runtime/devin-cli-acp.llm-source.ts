@@ -4,8 +4,8 @@ import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { buildKalioMcpBridgeHttpConfig } from '../../common/kalio-mcp-bridge-config';
-import { DevinAcpHostRegistry, isDevinCliModel, type DevinAcpHost, type DevinAcpSession, type DevinAcpPromptInput, type DevinAcpToolActivity } from './devin-cli-acp.host';
-import { classifyDevinNativeTool, isKalioMcpToolCall, type DevinNativeToolsPolicy } from './devin-native-tools';
+import { DevinAcpHostRegistry, type DevinAcpHost, type DevinAcpSession, type DevinAcpPromptInput, type DevinAcpToolActivity } from './devin-cli-acp.host';
+import { classifyDevinNativeTool, getKalioMcpToolName, type DevinNativeToolsPolicy } from './devin-native-tools';
 import { DevinNativeToolsPolicyService } from './devin-native-tools-policy.service';
 import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-token.service';
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
@@ -28,7 +28,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       throw new Error('Devin ACP source requires a devin-cli-acp execution profile.');
     }
     const model = profile.model.trim() || params.model?.trim() || '';
-    if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model || '(empty)'}.`);
+    if (!model) throw new Error('Devin CLI model is required.');
     const cwd = params.cwd?.trim() || process.env['WORKSPACE_ROOT']?.trim() || process.cwd();
     const nativeToolsPolicy = await this.nativeToolsPolicy.get();
     const bridgeToken = await this.mcpBridgeToken.getToken();
@@ -76,6 +76,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           nativeToolsPolicy,
         },
       });
+      const mcpBridgeEnabled = mcpServers.length > 0;
       session = await host.ensureSession(cwd, params.externalThreadId, mcpServers);
       if (!params.externalThreadId) {
         await params.onExternalThreadBound?.(session.sessionId, { processEpoch: session.processEpoch });
@@ -111,7 +112,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         onText: (text) => enqueue({ type: 'text_delta', delta: text }),
         onThought: (text) => enqueue({ type: 'thinking_delta', delta: text }),
         onToolActivity: (activity) => {
-          toolActivities.set(activity.toolCallId, { ...toolActivities.get(activity.toolCallId), ...activity });
+          toolActivities.set(activity.toolCallId, mergeToolActivity(toolActivities.get(activity.toolCallId), activity));
           void this.audit(params, {
             eventName: 'devin-cli-acp.tool',
             status: activity.status === 'completed' ? 'completed' : activity.status === 'failed' ? 'failed' : 'running',
@@ -130,6 +131,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           params,
           profile,
           nativeToolsPolicy,
+          mcpBridgeEnabled,
           session!,
           mergePermissionToolCall(request, toolActivities.get(request.toolCall.toolCallId)),
         ),
@@ -139,7 +141,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         status: 'started',
         data: { model, sessionId: session.sessionId, processEpoch: session.processEpoch, messageId: params.messageId },
       });
-      void this.runPrompt(host, session, params, nativeToolsPolicy, promptInput, enqueue, finish);
+      void this.runPrompt(host, session, params, nativeToolsPolicy, mcpBridgeEnabled, promptInput, enqueue, finish);
 
       while (!finished || queue.length > 0) {
         while (queue.length > 0) yield queue.shift()!;
@@ -174,12 +176,19 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     session: DevinAcpSession,
     params: LLMSourceParams,
     nativeToolsPolicy: DevinNativeToolsPolicy,
+    mcpBridgeEnabled: boolean,
     promptInput: DevinAcpPromptInput,
     _enqueue: (chunk: InternalLLMChunk) => void,
     finish: (error?: Error) => void,
   ): Promise<void> {
     try {
-      const stopReason = await host.prompt(session.sessionId, buildPrompt(params.messages, Boolean(params.externalThreadId), nativeToolsPolicy, DEVIN_KALIO_MCP_SERVER_NAME), promptInput);
+      const stopReason = await host.prompt(session.sessionId, buildPrompt(
+        params.messages,
+        Boolean(params.externalThreadId),
+        nativeToolsPolicy,
+        DEVIN_KALIO_MCP_SERVER_NAME,
+        mcpBridgeEnabled,
+      ), promptInput);
       await this.audit(params, {
         eventName: 'devin-cli-acp.turn.completed',
         status: stopReason === 'cancelled' ? 'cancelled' : 'completed',
@@ -202,10 +211,14 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     params: LLMSourceParams,
     profile: ExecutionProfile,
     nativeToolsPolicy: DevinNativeToolsPolicy,
+    mcpBridgeEnabled: boolean,
     session: DevinAcpSession,
     request: Parameters<DevinAcpPromptInput['onPermission']>[0],
   ): Promise<'accept' | 'decline' | 'cancel'> {
-    if (isKalioMcpToolCall(request.toolCall, DEVIN_KALIO_MCP_SERVER_NAME)) {
+    const toolName = mcpBridgeEnabled
+      ? getKalioMcpToolName(request.toolCall, DEVIN_KALIO_MCP_SERVER_NAME, params.tools.map((tool) => tool.name))
+      : undefined;
+    if (toolName) {
       await this.audit(params, {
         eventName: 'devin-cli-acp.mcp_approval',
         status: 'completed',
@@ -214,7 +227,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           processEpoch: session.processEpoch,
           decision: 'accept',
           server: DEVIN_KALIO_MCP_SERVER_NAME,
-          toolName: request.toolCall.name ?? null,
+          toolName,
         },
       });
       return 'accept';
@@ -261,7 +274,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
   }
 }
 
-function buildPrompt(messages: ContextManagedLLMMessage[], resumed: boolean, nativeToolsPolicy: DevinNativeToolsPolicy, serverName: string): string {
+function buildPrompt(
+  messages: ContextManagedLLMMessage[],
+  resumed: boolean,
+  nativeToolsPolicy: DevinNativeToolsPolicy,
+  serverName: string,
+  mcpBridgeEnabled: boolean,
+): string {
   const enabledNativeCategories = [
     nativeToolsPolicy.filesystem ? 'filesystem' : null,
     nativeToolsPolicy.web ? 'web' : null,
@@ -272,10 +291,15 @@ function buildPrompt(messages: ContextManagedLLMMessage[], resumed: boolean, nat
     : 'All provider-native filesystem, web, browser, terminal, shell, and exec tools are disabled by Kalio Settings.';
   const bridgePolicy = [
     'KALIO SYSTEM POLICY:',
-    `This ACP session has a Kalio MCP server named \`${serverName}\`.`,
+    mcpBridgeEnabled
+      ? `This ACP session has a Kalio MCP server named \`${serverName}\`.`
+      : 'Kalio MCP bridge is disabled because no local bridge token is configured. Do not call mcp_list_tools, mcp_call_tool, or direct Kalio tool names. Explain that the local bridge must be configured in Settings > Integrations.',
     nativePolicy,
-    'Devin exposes MCP through the wrappers `mcp_list_tools` and `mcp_call_tool`.',
-    `Use \`mcp_call_tool\` with server \`${serverName}\` and the exact tool name returned by its listing; do not call Kalio tools such as \`fs_list\` as direct ACP functions.`,
+    ...(mcpBridgeEnabled ? [
+      'Devin exposes MCP through the wrappers `mcp_list_tools` and `mcp_call_tool`.',
+      `Use \`mcp_call_tool\` with server \`${serverName}\` and the exact tool name returned by its listing; do not call Kalio tools such as \`fs_list\` as direct ACP functions.`,
+      'If the MCP server or requested tool is unavailable, report the issue and do not fall back to provider-native tools.',
+    ] : []),
     'Kalio owns authorization and HITL. Do not ask the user to approve a tool in natural language.',
   ].join('\n');
   if (resumed) return `${bridgePolicy}\n\nUSER:\n${latestUserMessage(messages) || 'Continue the current task.'}`;
@@ -306,15 +330,22 @@ function mergePermissionToolCall(request: DevinPermissionRequest, activity: Devi
     toolCall: {
       ...request.toolCall,
       kind: request.toolCall.kind ?? asPermissionToolKind(activity.kind),
-      name: request.toolCall.name ?? activity.name ?? inferPermissionToolName(activity.title),
+      name: request.toolCall.name ?? activity.name,
       title: request.toolCall.title ?? activity.title,
+      rawInput: request.toolCall.rawInput === undefined ? activity.rawInput : request.toolCall.rawInput,
     },
   };
 }
 
-function inferPermissionToolName(title: string | null | undefined): string | undefined {
-  const match = title?.match(/^(?:calling|called)\s+(.+?)\s+from\s+/i);
-  return match?.[1]?.trim() || undefined;
+function mergeToolActivity(previous: DevinAcpToolActivity | undefined, update: DevinAcpToolActivity): DevinAcpToolActivity {
+  return {
+    toolCallId: update.toolCallId,
+    kind: update.kind === undefined ? previous?.kind : update.kind,
+    name: update.name === undefined ? previous?.name : update.name,
+    title: update.title === undefined ? previous?.title : update.title,
+    status: update.status === undefined ? previous?.status : update.status,
+    rawInput: update.rawInput === undefined ? previous?.rawInput : update.rawInput,
+  };
 }
 
 function asPermissionToolKind(value: string | null | undefined): DevinPermissionToolKind | undefined {

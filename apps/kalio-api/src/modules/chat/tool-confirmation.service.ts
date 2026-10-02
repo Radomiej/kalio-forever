@@ -111,8 +111,9 @@ export class ToolConfirmationService {
     toolName: string,
     args: Record<string, unknown>,
     ctx: StreamContext,
+    humanOnly = false,
   ): Promise<ToolApprovalOutcome> {
-    if (this.hitlPolicy) {
+    if (this.hitlPolicy && !humanOnly) {
       try {
         const resolution = await this.hitlPolicy.resolveApproval({
           kind: 'tool',
@@ -150,7 +151,7 @@ export class ToolConfirmationService {
       return { approved: true };
     }
 
-    if (waitResult.status === 'rejected' || !this.hitlPolicy) {
+    if (waitResult.status === 'rejected' || humanOnly || !this.hitlPolicy) {
       return {
         approved: false,
         ...(waitResult.message ? { rejectionMessage: waitResult.message } : {}),

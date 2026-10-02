@@ -14,20 +14,32 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 
 ## Required Setup
 
-1. Read `kalio-forever`, `C:\Projekty\kalio-forever\AGENTS.md`, and `docs/local-dev-guide.md`.
-2. Use dev-servers MCP for Kalio lifecycle; managed service id is `kalio-955d95b1`.
+1. Read the current checkout's `AGENTS.md` and `docs/local-dev-guide.md`; do not assume the main checkout path when using a worktree.
+2. Inspect dev-servers MCP read-only inventory (`mcp_stack_health`, `managed_service_list`, `dev_session_list`) when available. Never invent or hard-code a service id. The repository's stable QA launcher is not automatically a Windows service or a registered dev-servers managed service; use the documented QA launcher when inventory shows no owned service.
 3. Pick the right stack:
    - **Dev (hot reload):** `pnpm dev` → UI http://localhost:5188, API http://localhost:3016
-   - **QA (stable dist):** `pnpm qa` or `pnpm qa:rebuild` → UI http://localhost:5288, API http://localhost:3316
-   - **Managed QA (random ports):** `pnpm stack:start` → URLs from `pnpm stack:status`
-4. Use Playwright Orchestrator for UI flows/screenshots.
+   - **QA (stable dist):** `pnpm qa` or `pnpm qa:rebuild` → UI http://localhost:5288, API http://localhost:3316, isolated data under `%LOCALAPPDATA%\kalio-forever-qa`. Use this when the user requests the persistent QA profile.
+   - **Managed QA (random ports):** `pnpm stack:start` → URLs from `pnpm stack:status`; use this when a disposable isolated profile is required.
+4. Use `cua_repl` with Chrome or the in-app browser for manual UI flows. Inspect the live accessibility tree before choosing controls. Use repository Playwright tests for repeatable assertions or screenshot files; ensure browser teardown with `finally`. Do not assume a heading/control exists or leave a timed-out browser process running.
+   - For responsive navigation, test both opening and closing via the same menu toggle, then test a navigation link separately. A link closing an overlay does not prove the close toggle is usable; report pointer interception or an obscured toggle as a defect.
 5. Use API calls only as supporting evidence: health, run status, sessions, graph, chat.
-6. Before a mock/local AgentFlow run, verify `/api/llm/config` shows the intended provider. Do not proceed if `.env` or a saved DB credential silently switches the stack to a live provider.
+6. Verify `/api/llm/config` and Settings → LLM Settings show the intended provider and source. Do not proceed if `.env` or a saved DB credential silently switches the stack to a live provider. The repo's paid/live readiness checklist also gates CLI-agent runs; a Devin model marked `[Free]` does not waive its hard gates. If static readiness fails, do not submit a live CLI/ACP prompt or silently change providers.
+   - Exception only for a user-authorized single local free Devin ACP canary: keep Kalio's provider unchanged, record the failed gate and exact model/project/tool scope, and do not repeat or broaden access without fresh authorization. This does not waive paid-provider readiness.
+   - For Kalio MCP HITL in a CLI/ACP run, keep the exact conversation open in Talk before starting the tool call. The inline Talk confirmation may fail to render even when Home → Ongoing actions has the pending card; if so, use a fresh QA tab on the same origin and review the exact path plus the audited payload before approving from Home. Observability is audit evidence, not the approval surface; ACP-level `mcp_approval: accept` is not the user's Kalio tool approval. In QA, stale requests were cancelled after about 60 seconds and the agent retried the same write: treat that cancellation as a timeout unless audit proves a user rejection, do not approve stale/duplicate cards, and do not repeat the write blindly. If AX click fails on the card, inspect the current screenshot before using coordinates.
 7. Manual QA must allow both `localhost` and `127.0.0.1` origins so browser evidence is not invalidated by CORS. Use `localhost` for ordinary manual browser QA; prefer `127.0.0.1` for browser MCP automation if localhost bootstrap requests fail.
 8. If the QA MCP tools are missing in Kalio, first copy `docs/examples/kalio-agent-qa-mcp.config.toml` into a real `.kalio/config.toml` and restart the Kalio API or wait for config cache refresh.
 9. Treat `.vscode/mcp.json` import as legacy/manual fallback only. For repo/dev-managed QA MCP, start from `.kalio/config.toml`. If you use Settings -> MCP Servers -> Import Existing MCP Configs for debugging, remember that imported entries land in SQLite; equivalent TOML and SQLite rows may both stay visible, with TOML active and SQLite shadowed.
 10. Do not use `~/.codex/config.toml` to diagnose Kalio MCP state; that file is Codex-only.
 11. On Windows, Playwright/QA stack verification must use system Node outside the sandbox. If a run fails with `EPERM` on pnpm junctions or false `MODULE_NOT_FOUND` for installed dependencies such as `ajv`, rerun with system Node before treating it as a Kalio regression.
+
+## QA Reports and Process Diagnostics
+
+- Create one folder per attempt at `docs/raports/qa-run-N/`, using the next unused number. Put `report.md` and screenshots in `assets/` under that folder; never overwrite an earlier run.
+- Record checkout and pre-existing dirty state, exact UI/API URL and ports, QA data root/mode, effective provider/model and source, exact target project path, browser/viewport, tested steps, console/network evidence when collected, PASS/FAIL/BLOCKED rows, and unresolved findings.
+- Save real browser screenshots as files and link them from the report. If capture fails, state which screenshots are missing; do not describe tool-output images as saved artifacts.
+- Treat agent prose such as “the user rejected the tool” as unverified. Reconcile the exact session's graph/tool count with `devin-cli-acp.mcp_bridge`, `devin-cli-acp.mcp_approval`, `devin-cli-acp.native_approval`, and HITL events; a native/policy `decline` alone does not prove a user rejected a request.
+- Treat Settings → MCP Servers as global Kalio connectivity, not proof that a persona or Devin can call those tools. Keep raw browser-session, arbitrary navigation, and page-evaluation tools out of Devin; require an owner/project/origin-scoped facade plus direct-denial and audit tests before exposing browser capabilities.
+- For a growing `cmd.exe` count, take only a bounded read-only before/after sample for the exact task-owned action, including parent and command line with secrets redacted. Correlation with Codex/MCP launchers does not identify a specific task or prove a leak. Stop repeated diagnostics when counts continue rising; do not terminate shared or unknown processes.
 
 ## Architecture QA
 

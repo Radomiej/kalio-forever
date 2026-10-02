@@ -133,4 +133,21 @@ describe('ExecutionProfileService', () => {
     await expect(service.resolveDirect({ credentialId: 'credential-1', model: 'openrouter/missing' }))
       .rejects.toThrow('not available');
   });
+
+  it('resolves a dynamically discovered Devin model to an idempotent strict profile', async () => {
+    const { service, rows, insert } = makeService();
+
+    const first = await service.resolveDevinCli('swe-2-high');
+    const second = await service.resolveDevinCli('swe-2-high');
+
+    expect(first).toEqual(expect.objectContaining({
+      kind: 'devin-cli-acp',
+      model: 'swe-2-high',
+      approvalMode: 'kalio_strict',
+      enabled: true,
+    }));
+    expect(second.id).toBe(first.id);
+    expect(rows).toHaveLength(1);
+    expect(insert).toHaveBeenCalledOnce();
+  });
 });

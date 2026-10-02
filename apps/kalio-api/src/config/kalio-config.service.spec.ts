@@ -96,6 +96,7 @@ describe('KalioConfigService', () => {
         '',
         '[mcp_servers.docs]',
         'enabled = false',
+        'enabled_tools = ["search", "read"]',
         'disabled_tools = ["delete"]',
       ].join('\n'),
     );
@@ -118,6 +119,7 @@ describe('KalioConfigService', () => {
     expect(result.config.features?.mcp).toBe(true);
     expect(result.config.mcp_servers?.docs?.command).toBe('npx');
     expect(result.config.mcp_servers?.docs?.enabled).toBe(false);
+    expect(result.config.mcp_servers?.docs?.enabled_tools).toStrictEqual(['search', 'read']);
     expect(result.config.mcp_servers?.docs?.disabled_tools).toStrictEqual(['delete']);
   });
 

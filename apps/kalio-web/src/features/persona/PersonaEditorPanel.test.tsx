@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Credential, ExecutionProfile, Persona } from '@kalio/types';
@@ -8,12 +9,16 @@ const getExecutionProfilesMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 const getCredentialsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 const getCredentialModelsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 const resolveDirectExecutionProfileMock = vi.hoisted(() => vi.fn());
+const getDevinCliStatusMock = vi.hoisted(() => vi.fn());
+const resolveDevinCliExecutionProfileMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../services/apiClient', () => ({
   getExecutionProfiles: getExecutionProfilesMock,
   getCredentials: getCredentialsMock,
   getCredentialModels: getCredentialModelsMock,
   resolveDirectExecutionProfile: resolveDirectExecutionProfileMock,
+  getDevinCliStatus: getDevinCliStatusMock,
+  resolveDevinCliExecutionProfile: resolveDevinCliExecutionProfileMock,
 }));
 
 vi.mock('./PersonaToolPicker', () => ({
@@ -77,6 +82,23 @@ describe('PersonaEditorPanel', () => {
     getExecutionProfilesMock.mockResolvedValue([]);
     getCredentialsMock.mockResolvedValue([]);
     getCredentialModelsMock.mockResolvedValue([]);
+    getDevinCliStatusMock.mockResolvedValue({
+      models: ['swe-2-high'],
+      modelCatalogStatus: 'ready',
+      modelCatalogStale: false,
+      modelCatalogDiscoveredAt: 10,
+    });
+    resolveDevinCliExecutionProfileMock.mockResolvedValue({
+      id: 'devin-local-swe-2-high',
+      name: 'Devin · swe-2-high',
+      kind: 'devin-cli-acp',
+      model: 'swe-2-high',
+      approvalMode: 'kalio_strict',
+      enabled: true,
+      capabilitiesVersion: '1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
   });
 
   it('saves edited persona from the main panel with avatar token', async () => {
@@ -186,5 +208,65 @@ describe('PersonaEditorPanel', () => {
         executionProfileId: DIRECT_PROFILE.id,
       }));
     });
+  });
+
+  it('resolves and saves a dynamically discovered Devin model', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(<PersonaEditorPanel mode="create" persona={null} onSave={onSave} onCancel={vi.fn()} />);
+
+    const runtimeSelect = await screen.findByTestId('persona-runtime-kind-select');
+    await waitFor(() => expect(runtimeSelect).toBeEnabled());
+    await user.selectOptions(runtimeSelect, 'devin-cli-acp');
+    await user.selectOptions(await screen.findByTestId('persona-model-input'), 'swe-2-high');
+    fireEvent.change(screen.getByTestId('persona-name-input'), { target: { value: 'Devin SWE' } });
+    fireEvent.change(screen.getByTestId('persona-prompt-textarea'), { target: { value: 'Use Devin.' } });
+    await user.click(screen.getByTestId('persona-save-btn'));
+
+    await waitFor(() => {
+      expect(resolveDevinCliExecutionProfileMock).toHaveBeenCalledWith('swe-2-high');
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Devin SWE',
+        model: 'swe-2-high',
+        executionProfileId: 'devin-local-swe-2-high',
+      }));
+    });
+  });
+
+  it('keeps the newly resolved Devin profile selected after create switches to edit', async () => {
+    const user = userEvent.setup();
+    const createdPersona: Persona = {
+      ...PERSONA,
+      name: 'Devin SWE',
+      model: 'swe-2-high',
+      executionProfileId: 'devin-local-swe-2-high',
+    };
+    const onEditSave = vi.fn().mockResolvedValue(undefined);
+
+    function EditorHarness() {
+      const [savedPersona, setSavedPersona] = useState<Persona | null>(null);
+      return savedPersona
+        ? <PersonaEditorPanel mode="edit" persona={savedPersona} onSave={onEditSave} onDelete={vi.fn()} />
+        : <PersonaEditorPanel
+            mode="create"
+            persona={null}
+            onSave={async () => { setSavedPersona(createdPersona); }}
+            onCancel={vi.fn()}
+          />;
+    }
+
+    render(<EditorHarness />);
+    const runtimeSelect = await screen.findByTestId('persona-runtime-kind-select');
+    await waitFor(() => expect(runtimeSelect).toBeEnabled());
+    await user.selectOptions(runtimeSelect, 'devin-cli-acp');
+    await user.selectOptions(await screen.findByTestId('persona-model-input'), 'swe-2-high');
+    fireEvent.change(screen.getByTestId('persona-name-input'), { target: { value: 'Devin SWE' } });
+    fireEvent.change(screen.getByTestId('persona-prompt-textarea'), { target: { value: 'Use Devin.' } });
+    await user.click(screen.getByTestId('persona-save-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('persona-runtime-kind-select')).toHaveValue('devin-cli-acp'));
+    expect(screen.queryByTestId('persona-missing-profile-warning')).not.toBeInTheDocument();
+    expect(onEditSave).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeCliIntegrationsPanel } from './NativeCliIntegrationsPanel';
 
@@ -22,7 +22,11 @@ const DEVIN_STATUS = {
   version: '3000.2.17',
   authenticated: true,
   acp: true,
+  probeChecked: true,
   models: ['glm-5-2', 'swe-1-7'],
+  modelCatalogStatus: 'ready',
+  modelCatalogStale: false,
+  modelCatalogDiscoveredAt: 1,
   hostCount: 0,
   hosts: [],
 };
@@ -39,7 +43,7 @@ describe('NativeCliIntegrationsPanel', () => {
       if (url === '/api/runtime/native-cli-integrations' && !init?.method) {
         return new Response(JSON.stringify([STATUS]), { status: 200 });
       }
-      if (url === '/api/runtime/devin-cli/status' && !init?.method) {
+      if ((url === '/api/runtime/devin-cli/status' || url === '/api/runtime/devin-cli/status?refresh=true') && !init?.method) {
         return new Response(JSON.stringify(DEVIN_STATUS), { status: 200 });
       }
       if (url === '/api/runtime/devin-cli/settings' && !init?.method) {
@@ -69,6 +73,7 @@ describe('NativeCliIntegrationsPanel', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -76,16 +81,82 @@ describe('NativeCliIntegrationsPanel', () => {
     render(<NativeCliIntegrationsPanel />);
 
     expect(await screen.findByText('Codex')).toBeInTheDocument();
-    expect(screen.getByTestId('devin-cli-integration-card')).toHaveTextContent('glm-5-2');
+    fireEvent.click(screen.getByText('Codex', { exact: true }).closest('summary')!);
+    expect(within(screen.getByTestId('devin-cli-integration-card')).getByRole('button', { name: 'Browse 2 models' })).toBeInTheDocument();
     expect(screen.getAllByText('Online')).toHaveLength(2);
     expect(screen.getByText('2 open sessions')).toBeInTheDocument();
-    expect(screen.getByText(/gpt-5\.6-luna/)).toBeInTheDocument();
+    expect(screen.getAllByText(/gpt-5\.6-luna/).length).toBeGreaterThan(0);
   });
 
-  it('checks the integration automatically when the page opens', async () => {
+  it('keeps the discovered model catalog collapsed until the user opens it', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    const card = await screen.findByTestId('devin-cli-integration-card');
+    expect(within(card).getByRole('button', { name: 'Browse 2 models' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Devin models' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Browse 2 models' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Devin models' });
+    expect(within(dialog).getByText('glm-5-2')).toBeInTheDocument();
+    expect(within(dialog).getByText('swe-1-7')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByRole('searchbox', { name: 'Search Devin models' }), { target: { value: 'swe' } });
+    expect(within(dialog).getByText('swe-1-7')).toBeInTheDocument();
+    expect(within(dialog).queryByText('glm-5-2')).not.toBeInTheDocument();
+  });
+
+  it('loads status without launching native CLI checks when the panel opens', async () => {
     render(<NativeCliIntegrationsPanel />);
     await screen.findByText('Codex');
+    await screen.findByTestId('devin-cli-integration-card');
 
+    const calls = vi.mocked(global.fetch).mock.calls;
+    expect(calls.some(([input, init]) => String(input).endsWith('/check') && init?.method === 'POST')).toBe(false);
+    expect(calls.some(([input]) => String(input) === '/api/runtime/devin-cli/status?refresh=true')).toBe(false);
+  });
+
+  it('keeps the 30-second status poll free of CLI checks and forced discovery', async () => {
+    const intervalCallbacks = new Map<ReturnType<typeof window.setInterval>, () => void>();
+    let nextIntervalId = 1;
+    vi.spyOn(window, 'setInterval').mockImplementation((handler, timeout) => {
+      const intervalId = { id: nextIntervalId++ } as unknown as ReturnType<typeof window.setInterval>;
+      if (timeout === 30_000 && typeof handler === 'function') intervalCallbacks.set(intervalId, handler as () => void);
+      return intervalId;
+    });
+    vi.spyOn(window, 'clearInterval').mockImplementation((intervalId) => { intervalCallbacks.delete(intervalId as ReturnType<typeof window.setInterval>); });
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+    await screen.findByTestId('devin-cli-integration-card');
+    expect(intervalCallbacks.size).toBe(1);
+
+    await act(async () => {
+      intervalCallbacks.values().next().value?.();
+    });
+
+    const calls = vi.mocked(global.fetch).mock.calls;
+    expect(calls.some(([input, init]) => String(input).endsWith('/check') && init?.method === 'POST')).toBe(false);
+    expect(calls.some(([input]) => String(input) === '/api/runtime/devin-cli/status?refresh=true')).toBe(false);
+  });
+
+  it('refreshes Devin CLI probes only when its Recheck button is pressed', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    const card = await screen.findByTestId('devin-cli-integration-card');
+    const recheckButton = within(card).getByRole('button', { name: 'Recheck' });
+    await waitFor(() => expect(recheckButton).toBeEnabled());
+
+    fireEvent.click(recheckButton);
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/runtime/devin-cli/status?refresh=true'));
+  });
+
+  it('runs all integration checks only when Recheck all is pressed', async () => {
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+    const recheckAllButton = screen.getByTitle('Recheck all native integrations');
+    await waitFor(() => expect(recheckAllButton).toBeEnabled());
+
+    fireEvent.click(recheckAllButton);
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/runtime/devin-cli/status?refresh=true'));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/check',
       expect.objectContaining({ method: 'POST' }),
@@ -95,14 +166,19 @@ describe('NativeCliIntegrationsPanel', () => {
   it('checks and resets an integration from the panel', async () => {
     render(<NativeCliIntegrationsPanel />);
     await screen.findByText('Codex');
+    fireEvent.click(screen.getByText('Codex', { exact: true }).closest('summary')!);
+    const codexTitle = (await screen.findAllByText('gpt-5.4, gpt-5.6-luna', { exact: true }))[0];
+    const codexCard = codexTitle.closest('article');
+    if (!codexCard) throw new Error('Codex integration card was not rendered.');
+    const codexControls = within(codexCard);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Recheck' })[1]!);
+    fireEvent.click(codexControls.getByRole('button', { name: 'Recheck' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/check',
       expect.objectContaining({ method: 'POST' }),
     ));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    fireEvent.click(codexControls.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/reset',
       expect.objectContaining({ method: 'POST' }),
@@ -137,6 +213,7 @@ describe('NativeCliIntegrationsPanel', () => {
         body: JSON.stringify({ filesystem: true }),
       }),
     ));
+    expect(await screen.findByRole('status')).toHaveTextContent('Devin filesystem tools enabled and saved.');
   });
 
   it('generates a local Devin bridge token from Settings', async () => {
@@ -152,6 +229,7 @@ describe('NativeCliIntegrationsPanel', () => {
         body: JSON.stringify({ generateMcpBridgeToken: true }),
       }),
     ));
+    expect(await screen.findByRole('status')).toHaveTextContent('Local bridge token generated and saved. Its value is intentionally hidden.');
   });
 
   it('saves a manual Devin bridge token override from Settings', async () => {

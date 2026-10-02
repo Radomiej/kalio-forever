@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import type { McpServer } from '@agentclientprotocol/sdk';
-import type { DevinCliModel } from '@kalio/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,7 +20,7 @@ export interface DevinCliConfigHandle {
  * need to mutate the user's or target project's Devin configuration.
  */
 export async function createDevinCliConfig(
-  model: DevinCliModel,
+  model: string,
   mcpServers: readonly McpServer[],
 ): Promise<DevinCliConfigHandle> {
   const directory = await mkdtemp(join(tmpdir(), 'kalio-devin-acp-'));

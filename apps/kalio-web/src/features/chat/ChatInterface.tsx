@@ -5,8 +5,7 @@ import { useAgentStore } from '../../store/agentStore';
 import { useSettingsStore } from '../settings/settingsStore';
 import { eventBus } from '../../services/eventBus';
 import { identifyWatchedSession } from '../../services/sessionWatchRegistry';
-import { MessageBubble } from './MessageBubble';
-import { AgentTurnBubble } from './AgentTurnBubble';
+import { ConversationTimeline } from './ConversationTimeline';
 import { ChatInput } from './ChatInput';
 import { useContextUsage } from './hooks/useContextUsage';
 import { useContextPreview } from './hooks/useContextPreview';
@@ -21,7 +20,7 @@ import type { TalkView } from '../../App.types';
 import { getArchitectureSchemas } from '../architect/architect.api';
 import { ARCHITECTURE_REGISTRY_CHANGED_EVENT } from '../architect/architectureRegistryEvents';
 import type { ArchitectSchema } from '../architect/architect.types';
-import { persistSessionLaunchPersona } from './launch/launchContext';
+import { persistSessionLaunchSelection } from './launch/launchContext';
 import { useLaunchPersonas } from './launch/useLaunchPersonas';
 import {
   buildCopiedChatText,
@@ -186,9 +185,12 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
   const [vfsRefreshSignal, setVfsRefreshSignal] = useState(0);
   const {
     personas,
+    executionProfiles,
     selectedPersonaId,
-    setSelectedPersonaId,
-  } = useLaunchPersonas(activeSession?.personaId);
+    selectPersona,
+    selectedExecutionProfileId,
+    setSelectedExecutionProfileId,
+  } = useLaunchPersonas(activeSession?.personaId, activeSession?.executionProfileId);
   const activePersona = personas.find((persona) => persona.id === activeSession?.personaId);
   const runtimeProfileLabel = useRuntimeProfileLabel({
     executionProfileId: activeSession?.executionProfileId ?? activePersona?.executionProfileId,
@@ -422,16 +424,17 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     });
   };
 
-  const handleLaunchSend = useCallback(async (content: string, personaId: string) => {
+  const handleLaunchSend = useCallback(async (content: string, personaId: string, executionProfileId?: string) => {
     if (!activeSession) {
       return;
     }
 
     try {
-      await persistSessionLaunchPersona(activeSession, personaId, updateSession);
+      if (!executionProfileId) throw new Error('Choose a connected provider and model before starting this chat.');
+      await persistSessionLaunchSelection(activeSession, personaId, executionProfileId, updateSession);
     } catch (err: unknown) {
       console.error('[ChatInterface] launch persona update failed', err instanceof Error ? err : new Error(String(err)));
-      setError('Failed to save selected persona for this chat.');
+      setError(err instanceof Error ? err.message : 'Failed to save this chat selection.');
       return;
     }
 
@@ -550,15 +553,18 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
               architectures={architectures}
               isStreaming={composerBusy}
               onArchitectureChange={setSelectedArchitectureId}
-              onArchitectureRun={(content) => void handleComposerSend(content, selectedPersonaId)}
+              onArchitectureRun={(content, _schemaId, profileId) => void handleLaunchSend(content, selectedPersonaId, profileId)}
               onDraftChange={setDraftUserMessage}
-              onPersonaChange={setSelectedPersonaId}
+              onPersonaChange={selectPersona}
               onProjectPathChange={setProjectPath}
               onProjectChange={handleProjectChange}
-              onSend={(content, personaId) => {
-                void handleLaunchSend(content, personaId);
+              onSend={(content, personaId, profileId) => {
+                void handleLaunchSend(content, personaId, profileId);
               }}
               personas={personas}
+              executionProfiles={executionProfiles}
+              selectedExecutionProfileId={selectedExecutionProfileId}
+              onExecutionProfileChange={setSelectedExecutionProfileId}
               projectPath={projectPath}
               projectId={projectId}
               selectedPersonaId={selectedPersonaId}
@@ -566,19 +572,12 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
             />
           )}
 
-          {conversationTimeline.map((entry) => (
-            entry.kind === 'user_message'
-              ? <MessageBubble key={entry.message.id} message={entry.message} />
-              : (
-                <AgentTurnBubble
-                  key={entry.turn.id}
-                  turn={entry.turn}
-                  toolActivities={activeToolActivities}
-                  answeredCallIds={answeredCallIds}
-                  renderedMessages={renderableConversationProjection.messages}
-                />
-              )
-          ))}
+          <ConversationTimeline
+            entries={conversationTimeline}
+            toolActivities={activeToolActivities}
+            answeredCallIds={answeredCallIds}
+            renderedMessages={renderableConversationProjection.messages}
+          />
 
           {conversationShellState.mode !== 'pending-child-session' && liveTurnState.showPlaceholderBubble && (
             <>

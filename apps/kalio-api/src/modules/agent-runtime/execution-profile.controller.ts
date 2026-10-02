@@ -1,13 +1,15 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import type { CreateExecutionProfileDto, ResolveDirectExecutionProfileDto, UpdateExecutionProfileDto } from '@kalio/types';
 import { ExecutionProfileService } from './execution-profile.service';
 import { CodexAppServerHost } from './codex-app-server.host';
+import { DevinCliModelCatalogService } from './devin-cli-model-catalog.service';
 
 @Controller('runtime/profiles')
 export class ExecutionProfileController {
   constructor(
     private readonly profiles: ExecutionProfileService,
     private readonly codexHost: CodexAppServerHost,
+    private readonly devinModelCatalog: DevinCliModelCatalogService,
   ) {}
 
   @Get()
@@ -21,8 +23,19 @@ export class ExecutionProfileController {
   }
 
   @Post()
-  create(@Body() dto: CreateExecutionProfileDto) {
+  async create(@Body() dto: CreateExecutionProfileDto) {
+    if (dto.kind === 'devin-cli-acp') await this.assertDevinModelAvailable(dto.model);
     return this.profiles.create(dto);
+  }
+
+  @Post('devin-cli/resolve')
+  async resolveDevinCli(@Body() dto: { model?: unknown }) {
+    if (typeof dto?.model !== 'string' || !dto.model.trim()) {
+      throw new BadRequestException('A Devin CLI model is required.');
+    }
+    const model = dto.model.trim();
+    await this.assertDevinModelAvailable(model);
+    return this.profiles.resolveDevinCli(model);
   }
 
   @Post('direct/resolve')
@@ -31,8 +44,22 @@ export class ExecutionProfileController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateExecutionProfileDto) {
+  async update(@Param('id') id: string, @Body() dto: UpdateExecutionProfileDto) {
+    if (dto.model !== undefined) {
+      const existing = await this.profiles.get(id);
+      if (existing.kind === 'devin-cli-acp') await this.assertDevinModelAvailable(dto.model);
+    }
     return this.profiles.update(id, dto);
+  }
+
+  private async assertDevinModelAvailable(model: string): Promise<void> {
+    const catalog = await this.devinModelCatalog.getCatalog();
+    if (catalog.status !== 'ready' || catalog.stale) {
+      throw new ConflictException('Devin CLI model catalog is unavailable; refresh Devin CLI status and retry.');
+    }
+    if (!catalog.models.includes(model)) {
+      throw new ConflictException(`Devin CLI model is not currently available: ${model}`);
+    }
   }
 
   @Post(':id/login')

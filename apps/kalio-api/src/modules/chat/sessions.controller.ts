@@ -143,7 +143,7 @@ export class SessionsController {
   @Patch(':id')
   async update(
     @Param('id') id: string,
-    @Body() body: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
+    @Body() body: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext },
   ): Promise<void> {
     await this.sessions.update(id, {
       ...body,

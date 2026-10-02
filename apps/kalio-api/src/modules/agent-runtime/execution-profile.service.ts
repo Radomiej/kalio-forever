@@ -122,6 +122,40 @@ export class ExecutionProfileService {
     return this.get(id);
   }
 
+  async resolveDevinCli(model: string): Promise<ExecutionProfile> {
+    const normalizedModel = model.trim();
+    if (!normalizedModel) throw new ConflictException('A Devin CLI model is required.');
+
+    const matches = await this.drizzle.db
+      .select()
+      .from(executionProfiles)
+      .where(eq(executionProfiles.model, normalizedModel));
+    const existingProfiles = matches.filter((row) => row.kind === 'devin-cli-acp');
+    const existing = existingProfiles.find((row) => row.enabled);
+    if (existing) return this.toProfile(existing);
+    if (existingProfiles.length > 0) {
+      throw new ConflictException(`Devin CLI execution profile is disabled for model: ${normalizedModel}`);
+    }
+
+    const id = `devin-local-${createHash('sha256').update(normalizedModel).digest('hex').slice(0, 32)}`;
+    const now = new Date();
+    await this.drizzle.db.insert(executionProfiles).values({
+      id,
+      name: `Devin · ${normalizedModel}`,
+      kind: 'devin-cli-acp',
+      provider: null,
+      model: normalizedModel,
+      authProfileId: null,
+      reasoningEffort: null,
+      approvalMode: 'kalio_strict',
+      enabled: true,
+      capabilitiesVersion: CAPABILITIES_VERSION,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return this.get(id);
+  }
+
   async update(id: string, dto: UpdateExecutionProfileDto): Promise<ExecutionProfile> {
     const existing = await this.get(id);
     const set: {
@@ -140,9 +174,7 @@ export class ExecutionProfileService {
     }
     if (dto.model !== undefined) {
       const model = dto.model.trim();
-      if (existing.kind === 'devin-cli-acp' && !isDevinCliModel(model)) {
-        throw new ConflictException(`Devin CLI ACP supports only: ${DEVIN_CLI_MODELS.join(', ')}.`);
-      }
+      if (existing.kind === 'devin-cli-acp' && !model) throw new ConflictException('Devin CLI ACP profiles require a model.');
       set.model = model;
     }
     if (dto.authProfileId !== undefined) set.authProfileId = normalizeOptional(dto.authProfileId);
@@ -190,9 +222,6 @@ function normalizeCreateProfile(dto: CreateExecutionProfileDto): {
   if (dto.kind === 'direct-llm' && !dto.provider) {
     throw new ConflictException('Direct LLM profiles require a provider.');
   }
-  if (dto.kind === 'devin-cli-acp' && !isDevinCliModel(model)) {
-    throw new ConflictException(`Devin CLI ACP supports only: ${DEVIN_CLI_MODELS.join(', ')}.`);
-  }
   return {
     name,
     kind: dto.kind,
@@ -200,7 +229,7 @@ function normalizeCreateProfile(dto: CreateExecutionProfileDto): {
     model,
     authProfileId: normalizeOptional(dto.authProfileId),
     reasoningEffort: normalizeOptional(dto.reasoningEffort),
-    approvalMode: dto.approvalMode ?? DEFAULT_APPROVAL_MODE,
+    approvalMode: dto.approvalMode ?? (dto.kind === 'devin-cli-acp' ? 'kalio_strict' : DEFAULT_APPROVAL_MODE),
     enabled: dto.enabled ?? true,
   };
 }
@@ -217,10 +246,4 @@ function toMs(value: number | Date): number {
 function directProfileId(credentialId: string, provider: string, model: string): string {
   const identity = `${credentialId}\u0000${provider}\u0000${model}`;
   return `direct-${createHash('sha256').update(identity).digest('hex').slice(0, 32)}`;
-}
-
-const DEVIN_CLI_MODELS = ['glm-5-2', 'swe-1-7'] as const;
-
-function isDevinCliModel(value: string): value is (typeof DEVIN_CLI_MODELS)[number] {
-  return (DEVIN_CLI_MODELS as readonly string[]).includes(value);
 }

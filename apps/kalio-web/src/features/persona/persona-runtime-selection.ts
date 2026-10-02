@@ -8,11 +8,11 @@ export interface NativeModelOption {
 }
 
 export const RUNTIME_KIND_LABELS: Record<PersonaRuntimeKind, string> = {
-  'direct-llm': 'Direct LLM',
+  'devin-cli-acp': 'Devin CLI (host)',
   'codex-app-server': 'ChatGPT / Codex',
+  'direct-llm': 'Direct LLM',
   'claude-agent-sdk': 'Claude Code',
   'devin-api': 'Devin Cloud',
-  'devin-cli-acp': 'Devin CLI (host)',
 };
 
 const PROVIDER_LABELS: Record<string, string> = {

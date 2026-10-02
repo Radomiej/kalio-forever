@@ -17,35 +17,79 @@ describe('Devin native tool classification', () => {
     expect(classifyDevinNativeTool({ kind: 'other', title: 'Unknown operation' })).toBeUndefined();
   });
 
-  it('recognizes only the Kalio MCP wrapper as a bridge call', () => {
-    expect(isKalioMcpToolCall({
+  it('auto-approves only structured Kalio MCP wrappers for allowlisted tools', () => {
+    const server = 'kalio-runtime';
+    const allowedTools = ['fs_list'];
+    const structuredCall = {
       name: 'mcp_call_tool',
-      title: 'Calling fs_list from kalio',
-      kind: 'execute',
-      rawInput: { server: 'kalio', tool: 'fs_list' },
-    })).toBe(true);
+      rawInput: { server, tool: 'fs_list' },
+    };
+
+    expect(isKalioMcpToolCall(structuredCall, server, allowedTools)).toBe(true);
     expect(isKalioMcpToolCall({
-      name: 'mcp_call_tool',
-      title: 'Calling list_issues from github',
-      rawInput: { server: 'github', tool: 'list_issues' },
-    })).toBe(false);
-    expect(isKalioMcpToolCall({
-      title: 'Calling fs_list from kalio',
-      kind: 'execute',
       toolCallId: 'functions.mcp_call_tool:1',
-    })).toBe(true);
+      rawInput: { server, tool: 'fs_list' },
+    }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({
+      toolCallId: 'functions.mcp_call_tool:1',
+      name: 'native_shell',
+      rawInput: { server, tool: 'fs_list' },
+    }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({
+      toolCallId: 'ordinary-tool-1',
+      name: 'fs_list',
+      title: 'Calling mcp_call_tool from kalio-runtime',
+      rawInput: { server, tool: 'fs_list' },
+    }, server, allowedTools)).toBe(false);
     expect(isKalioMcpToolCall({
       name: 'mcp_call_tool',
       title: 'Calling fs_list from kalio-runtime',
+    }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({ name: 'mcp_call_tool', rawInput: { tool: 'fs_list' } }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({ name: 'mcp_call_tool', rawInput: { server, tool: ' fs_list ' } }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({ name: 'mcp_call_tool', rawInput: { server: 'github', tool: 'fs_list' } }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({ name: 'mcp_call_tool', rawInput: { server: ' KALIO-RUNTIME ', tool: 'fs_list' } }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({ name: 'mcp_call_tool', rawInput: { server, tool: 'fs_write' } }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({ name: 'fs_list', rawInput: { server, tool: 'fs_list' } }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall(structuredCall, server, [])).toBe(false);
+  });
+
+  it('recognizes a structured allowlisted Kalio MCP call when ACP omits the wrapper name', () => {
+    expect(isKalioMcpToolCall({
+      title: 'Calling fs_list from kalio-runtime',
       rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
-    }, 'kalio-runtime')).toBe(true);
+    }, 'kalio-runtime', ['fs_list'])).toBe(true);
+  });
+
+  it('recognizes exact allowlisted titles while treating raw input as tool arguments', () => {
+    const server = 'kalio-runtime';
+    const allowedTools = ['fs_list'];
+
     expect(isKalioMcpToolCall({
-      name: 'vfs_list',
-      title: 'Calling vfs_list from kalio-runtime',
-    }, 'kalio-runtime')).toBe(true);
+      name: null,
+      title: 'Calling fs_list from kalio-runtime',
+    }, server, allowedTools)).toBe(true);
     expect(isKalioMcpToolCall({
-      name: 'vfs_list',
-      title: 'Calling vfs_list from github',
-    }, 'kalio-runtime')).toBe(false);
+      name: null,
+      title: 'Calling fs_list from kalio-runtime',
+      rawInput: { path: 'E:/Projekty/home-site' },
+    }, server, allowedTools)).toBe(true);
+    expect(isKalioMcpToolCall({
+      name: null,
+      title: 'Calling fs_write from kalio-runtime',
+    }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({
+      name: null,
+      title: 'Calling fs_list from github',
+    }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({
+      name: null,
+      title: 'Calling fs_list from kalio-runtime',
+      rawInput: { server: 'github', path: 'E:/Projekty/home-site' },
+    }, server, allowedTools)).toBe(false);
+    expect(isKalioMcpToolCall({
+      name: 'native_shell',
+      title: 'Calling fs_list from kalio-runtime',
+    }, server, allowedTools)).toBe(false);
   });
 });

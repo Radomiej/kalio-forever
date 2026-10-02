@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
+    "test:mutation": "stryker run stryker.config.mjs",
     "clean": "node ../../scripts/clean-paths.mjs dist"
   },
   "dependencies": {
@@ -39,6 +40,8 @@
     "@eslint/js": "^10.0.1",
     "@storybook/addon-docs": "^10.4.1",
     "@storybook/react-vite": "^10.4.1",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@tailwindcss/vite": "^4.1.8",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

@@ -146,6 +146,19 @@ export async function persistSessionLaunchPersona(
   };
 }
 
+export async function persistSessionLaunchSelection(
+  session: ChatSession,
+  personaId: string,
+  executionProfileId: string,
+  updateSession: (sessionId: string, patch: Partial<ChatSession>) => void,
+): Promise<ChatSession> {
+  if (session.personaId === personaId && session.executionProfileId === executionProfileId) return session;
+  await apiClient.patch(`/api/sessions/${session.id}`, { personaId, executionProfileId });
+  const updated = { ...session, personaId, executionProfileId };
+  updateSession(session.id, { personaId, executionProfileId });
+  return updated;
+}
+
 export function buildArchitectureRunContext(
   sessionId: string,
   files: VFSFile[],

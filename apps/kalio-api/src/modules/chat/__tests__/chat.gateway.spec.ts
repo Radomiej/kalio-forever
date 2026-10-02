@@ -178,6 +178,23 @@ describe('ChatGateway', () => {
     expect(observer.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
   });
 
+  it('broadcasts external MCP confirmation requests to sockets subscribed to the session', async () => {
+    await gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
+    const request = {
+      requestId: 'approval-1',
+      toolCallId: 'mcp-call-1',
+      sessionId: 'session-1',
+      toolName: 'fs_write',
+      args: { path: 'new-file.txt', content: 'safe test' },
+      timeoutMs: 0,
+    } as ToolConfirmationRequest;
+
+    gateway.emitSessionEvent('session-1', 'tool:confirmation_required', request);
+
+    expect(observer.emit).toHaveBeenCalledWith('tool:confirmation_required', request);
+    expect(client.emit).not.toHaveBeenCalledWith('tool:confirmation_required', request);
+  });
+
   it('REGRESSION: allows the initiator to stop a child session after child events were streamed to that socket', async () => {
     (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
       emit('chat:chunk', {

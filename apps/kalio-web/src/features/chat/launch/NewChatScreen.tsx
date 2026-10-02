@@ -1,10 +1,11 @@
 import { Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { Persona, Project } from '@kalio/types';
+import type { ExecutionProfile, Persona, Project } from '@kalio/types';
 import type { ArchitectSchema } from '../../architect/architect.types';
 import { PersonaCombobox } from './PersonaCombobox';
 import { ProjectPicker } from '../../projects/ProjectPicker';
 import { CodeIntelligenceQuickTrust } from './CodeIntelligenceQuickTrust';
+import { ExecutionProfileCombobox } from './ExecutionProfileCombobox';
 
 const WELCOME_PROMPTS = [
   'What can you do?',
@@ -23,8 +24,11 @@ export interface NewChatScreenProps {
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
   onProjectChange?: (project: Project) => void;
-  onRunPrompt: (content: string) => void;
+  onRunPrompt: (content: string, executionProfileId?: string) => void;
   personas: Persona[];
+  executionProfiles?: ExecutionProfile[];
+  selectedExecutionProfileId?: string;
+  onExecutionProfileChange?: (profileId: string) => void;
   projectPath: string;
   projectId?: string;
   selectedPersonaId: string;
@@ -38,6 +42,7 @@ type LaunchMode = 'chat' | 'workflow';
 type LaunchOption = {
   id: string;
   label: string;
+  executionProfileId?: string;
 };
 
 function resolveWorkflowSelection(
@@ -66,6 +71,9 @@ export function NewChatScreen({
   onProjectChange,
   onRunPrompt,
   personas,
+  executionProfiles,
+  selectedExecutionProfileId,
+  onExecutionProfileChange,
   projectPath,
   projectId = 'system:none',
   selectedPersonaId,
@@ -80,12 +88,14 @@ export function NewChatScreen({
   ));
   const didInitializeModeRef = useRef(false);
   const personaOptions: LaunchOption[] = personas.length > 0
-    ? personas.map((persona) => ({ id: persona.id, label: persona.name }))
+    ? personas.map((persona) => ({ id: persona.id, label: persona.name, executionProfileId: persona.executionProfileId }))
     : [{ id: 'default', label: 'Default' }];
   const workflowOptions: LaunchOption[] = architectures.map((schema) => ({ id: schema.id, label: schema.name }));
   const activeWorkflowId = resolveWorkflowSelection(selectedArchitectureId, lastWorkflowId, workflowOptions);
   const activeArchitecture = workflowOptions.find((schema) => schema.id === activeWorkflowId) ?? null;
   const activePersona = personaOptions.find((persona) => persona.id === selectedPersonaId) ?? personaOptions[0] ?? null;
+  const recommendedProfile = executionProfiles?.find((profile) => profile.id === activePersona?.executionProfileId);
+  const canRun = executionProfiles === undefined || Boolean(selectedExecutionProfileId);
 
   useEffect(() => {
     if (selectedArchitectureId !== 'single-chat') {
@@ -118,7 +128,7 @@ export function NewChatScreen({
     if (!trimmed || isBusy) {
       return;
     }
-    onRunPrompt(trimmed);
+    onRunPrompt(trimmed, selectedExecutionProfileId);
     setPrompt('');
     onDraftChange('');
   };
@@ -257,6 +267,26 @@ export function NewChatScreen({
           </div>
         </div>
 
+        {executionProfiles !== undefined && onExecutionProfileChange && (
+          <div className="mt-4">
+            <div className="mb-1.5 block pl-1 text-[11px] uppercase tracking-wider text-base-content/65">
+              Provider and model
+            </div>
+            <ExecutionProfileCombobox
+              profiles={executionProfiles}
+              value={selectedExecutionProfileId ?? ''}
+              onChange={onExecutionProfileChange}
+              disabled={isBusy}
+              testId={`${testIdPrefix}-execution-profile`}
+            />
+            <p className="mt-1 pl-1 text-xs text-base-content/50">
+              {recommendedProfile
+                ? `${recommendedProfile.name} is recommended for this persona. Change it here for this conversation.`
+                : 'Choose a connected runtime/provider and model for this conversation.'}
+            </p>
+          </div>
+        )}
+
         <div className="mt-4 rounded-xl border border-base-300/70 bg-base-200/45 p-2.5">
           <label htmlFor={`${testIdPrefix}-prompt-input`} className="sr-only">
             Prompt
@@ -287,7 +317,7 @@ export function NewChatScreen({
               type="button"
               className="btn btn-primary btn-sm gap-2"
               onClick={() => submitPrompt(prompt)}
-              disabled={isBusy || prompt.trim().length === 0}
+              disabled={isBusy || prompt.trim().length === 0 || !canRun}
               data-testid={`${testIdPrefix}-run-prompt`}
             >
               <Play size={14} />
@@ -295,6 +325,11 @@ export function NewChatScreen({
             </button>
           </div>
         </div>
+        {executionProfiles !== undefined && executionProfiles.length === 0 && (
+          <p className="mt-3 text-xs text-warning" role="status">
+            No execution provider is available. Connect Devin/Codex or add a provider in Settings before starting a chat.
+          </p>
+        )}
 
         <div className="mt-3 flex flex-wrap gap-2">
           {WELCOME_PROMPTS.map((quickPrompt) => (

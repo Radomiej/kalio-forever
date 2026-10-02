@@ -22,6 +22,7 @@ import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
 import { ActiveSessionRegistry } from './active-session-registry.service';
 import { PersonaService } from '../persona/persona.service';
+import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
 import { resolveExecutionProfileId } from '../agent-runtime/execution-profile.utils';
 import { resolvePersonaExecutionProfileChange } from './session-profile-binding.utils';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
@@ -59,6 +60,7 @@ export class SessionsService {
     @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly personas?: PersonaService,
+    @Optional() private readonly executionProfiles?: ExecutionProfileService,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -159,7 +161,7 @@ export class SessionsService {
     await this.update(id, { title });
   }
 
-  async update(id: string, patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
+  async update(id: string, patch: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
     return this.updateWithOptions(id, patch);
   }
 
@@ -232,13 +234,28 @@ export class SessionsService {
 
   async updateWithOptions(
     id: string,
-    patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
+    patch: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext },
     options: SessionRuntimeScopeOptions = {},
   ): Promise<void> {
     await this.assertExists(id);
     const current = await this.get(id);
     let nextExecutionProfileId: string | undefined;
-    if (patch.personaId !== undefined && patch.personaId !== current.personaId) {
+    if (patch.executionProfileId !== undefined && patch.executionProfileId !== current.executionProfileId) {
+      if (current.parentSessionId) throw new ConflictException('A child session must use its host execution profile.');
+      if (this.activeSessionRegistry?.isActive(id)) {
+        throw new ConflictException('Execution profile cannot change while this conversation is generating.');
+      }
+      if ((await this.repo.loadHistory(id)).length > 0) {
+        throw new ConflictException('Execution profile cannot change after a conversation has started. Create a new chat to choose another provider/model.');
+      }
+      if (!this.executionProfiles) throw new ConflictException('Execution profile selection is unavailable.');
+      const selectedProfile = await this.executionProfiles.assertEnabled(patch.executionProfileId);
+      if (selectedProfile.kind === 'direct-llm' && selectedProfile.provider === 'mock') {
+        throw new ConflictException('Mock execution profiles are not available for user conversations.');
+      }
+      nextExecutionProfileId = selectedProfile.id;
+    }
+    if (patch.executionProfileId === undefined && patch.personaId !== undefined && patch.personaId !== current.personaId) {
       const personaConfig = await this.personas?.getSessionConfig(patch.personaId);
       const nextProfileId = personaConfig?.executionProfileId;
       nextExecutionProfileId = await resolvePersonaExecutionProfileChange(
@@ -248,7 +265,7 @@ export class SessionsService {
         nextProfileId,
       );
     }
-    const hasPatch = patch.title !== undefined || patch.personaId !== undefined || patch.runtimeContext !== undefined;
+    const hasPatch = patch.title !== undefined || patch.personaId !== undefined || nextExecutionProfileId !== undefined || patch.runtimeContext !== undefined;
     if (hasPatch) {
       await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
       const set: Record<string, unknown> = { updatedAt: new Date() };

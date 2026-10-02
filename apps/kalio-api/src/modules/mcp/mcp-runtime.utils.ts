@@ -32,6 +32,8 @@ export interface ServerHandle {
   rawTransport: Transport | null;
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
   tools: MCPTool[];
+  enabledTools?: string[];
+  disabledTools?: string[];
   restartCount: number;
   createdAt: number;
   enabled: boolean;
@@ -64,6 +66,8 @@ export function configToMcpHandle(
     rawTransport: null,
     status: 'disconnected',
     tools: [],
+    enabledTools: server.enabled_tools,
+    disabledTools: server.disabled_tools,
     restartCount: 0,
     createdAt: 0,
     enabled: server.enabled !== false,

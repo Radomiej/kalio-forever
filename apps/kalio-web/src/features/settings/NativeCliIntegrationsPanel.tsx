@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, Loader2, RefreshCw, RotateCcw, ServerCog, XCircle } from 'lucide-react';
+import type { DevinCliStatus } from '../../services/apiClient';
+import { DevinCliIntegrationCard, type DevinCliSettings, type DevinNativeToolsPolicy } from './DevinCliIntegrationCard';
 
 type NativeCliIntegrationStatus = {
   id: string;
@@ -8,6 +10,7 @@ type NativeCliIntegrationStatus = {
   kind: string;
   authProfileId: string;
   status: 'offline' | 'starting' | 'online' | 'error';
+  probeChecked?: boolean;
   connected: boolean;
   openSessionCount: number;
   processEpoch?: string;
@@ -22,36 +25,17 @@ type NativeCliIntegrationStatus = {
 
 type IntegrationAction = `${string}:check` | `${string}:reset` | `${string}:mcp` | `${string}:devin-tools` | `${string}:mcp-bridge`;
 
-type DevinCliStatus = {
-  executable: string;
-  version: string | null;
-  authenticated: boolean;
-  acp: boolean;
-  models: string[];
-  hostCount: number;
-  hosts: Array<{ model: string; status: 'starting' | 'online' | 'error' | 'offline'; processEpoch?: string }>;
-};
-
-type DevinNativeToolsPolicy = {
-  filesystem: boolean;
-  web: boolean;
-  terminal: boolean;
-  source: 'settings' | 'default';
-};
-
-type DevinCliSettings = {
-  mcpBridge: { enabled: boolean; configuredBy: 'settings' | 'environment' | 'none'; transport: 'streamable-http'; url: string };
-  nativeTools: DevinNativeToolsPolicy;
-};
-
 export function NativeCliIntegrationsPanel() {
   const [integrations, setIntegrations] = useState<NativeCliIntegrationStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<IntegrationAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [devinCli, setDevinCli] = useState<DevinCliStatus | null>(null);
   const [devinSettings, setDevinSettings] = useState<DevinCliSettings | null>(null);
   const [devinTokenOverride, setDevinTokenOverride] = useState('');
+  const [devinStatusLoading, setDevinStatusLoading] = useState(false);
+  const [recheckingAll, setRecheckingAll] = useState(false);
 
   const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
     setLoading(true);
@@ -70,9 +54,11 @@ export function NativeCliIntegrationsPanel() {
     }
   }, []);
 
-  const loadDevinCliStatus = useCallback(async (): Promise<DevinCliStatus | null> => {
+  const loadDevinCliStatus = useCallback(async (refresh = false): Promise<DevinCliStatus | null> => {
+    setDevinStatusLoading(true);
     try {
-      const response = await fetch('/api/runtime/devin-cli/status');
+      const url = refresh ? '/api/runtime/devin-cli/status?refresh=true' : '/api/runtime/devin-cli/status';
+      const response = await fetch(url);
       if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
       const loaded = await response.json() as DevinCliStatus;
       setDevinCli(loaded);
@@ -80,6 +66,8 @@ export function NativeCliIntegrationsPanel() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load Devin CLI status.');
       return null;
+    } finally {
+      setDevinStatusLoading(false);
     }
   }, []);
 
@@ -140,9 +128,18 @@ export function NativeCliIntegrationsPanel() {
   }, []);
 
   const refreshStatus = useCallback(async () => {
-    const [loaded] = await Promise.all([loadIntegrations(), loadDevinCliStatus(), loadDevinCliSettings()]);
-    for (const integration of loaded) {
-      await runAction(integration, 'check');
+    await Promise.all([loadIntegrations(), loadDevinCliStatus(), loadDevinCliSettings()]);
+  }, [loadDevinCliSettings, loadDevinCliStatus, loadIntegrations]);
+
+  const recheckAll = useCallback(async () => {
+    setRecheckingAll(true);
+    try {
+      const [loaded] = await Promise.all([loadIntegrations(), loadDevinCliStatus(true), loadDevinCliSettings()]);
+      for (const integration of loaded) {
+        await runAction(integration, 'check');
+      }
+    } finally {
+      setRecheckingAll(false);
     }
   }, [loadDevinCliSettings, loadDevinCliStatus, loadIntegrations, runAction]);
 
@@ -181,6 +178,7 @@ export function NativeCliIntegrationsPanel() {
     const actionId = `devin:${category}:devin-tools` as IntegrationAction;
     setAction(actionId);
     setError(null);
+    setNotice(null);
     try {
       const response = await fetch('/api/runtime/devin-cli/settings', {
         method: 'PATCH',
@@ -195,6 +193,7 @@ export function NativeCliIntegrationsPanel() {
         throw new Error(body?.message ?? `${response.status}: ${response.statusText}`);
       }
       setDevinSettings(await response.json() as DevinCliSettings);
+      setNotice(`Devin ${category} tools ${enabled ? 'enabled' : 'disabled'} and saved.`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update Devin native tool policy.');
     } finally {
@@ -206,6 +205,7 @@ export function NativeCliIntegrationsPanel() {
     const actionId = 'devin:mcp-bridge' as IntegrationAction;
     setAction(actionId);
     setError(null);
+    setNotice(null);
     try {
       const response = await fetch('/api/runtime/devin-cli/settings', {
         method: 'PATCH',
@@ -221,6 +221,11 @@ export function NativeCliIntegrationsPanel() {
       }
       setDevinSettings(await response.json() as DevinCliSettings);
       setDevinTokenOverride('');
+      setNotice(payload.generateMcpBridgeToken
+        ? 'Local bridge token generated and saved. Its value is intentionally hidden.'
+        : payload.clearMcpBridgeToken
+          ? 'Local token override cleared. Environment fallback will be used only if configured.'
+          : 'Local bridge token override saved. Its value is intentionally hidden.');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update the Devin MCP bridge token.');
     } finally {
@@ -228,29 +233,36 @@ export function NativeCliIntegrationsPanel() {
     }
   };
 
+  const integrationGroups = [...new Set(integrations.map((integration) => integration.provider.toLowerCase()))]
+    .map((provider) => ({
+      provider,
+      items: integrations.filter((integration) => integration.provider.toLowerCase() === provider),
+    }));
+
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="native-app-servers-title">
+    <section className="flex flex-col gap-4" aria-labelledby="agent-runtimes-title">
       <div className="flex items-center justify-between gap-4">
-        <h3 id="native-app-servers-title" className="text-base font-semibold">Native runtimes</h3>
+        <h3 id="agent-runtimes-title" className="text-base font-semibold">Agent runtimes</h3>
         <button
           type="button"
           className="btn btn-xs btn-ghost gap-1"
-          disabled={loading}
-          onClick={() => void refreshStatus()}
-          title="Refresh integration status"
+          disabled={loading || devinStatusLoading || recheckingAll || action !== null}
+          onClick={() => void recheckAll()}
+          title="Recheck all native integrations"
         >
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          Refresh
+          <RefreshCw size={12} className={loading || recheckingAll ? 'animate-spin' : ''} />
+          Recheck
         </button>
       </div>
 
       {error && <div className="alert alert-error text-sm" role="alert">{error}</div>}
+      {notice && <div className="alert alert-success py-2 text-sm" role="status" data-testid="native-integration-notice">{notice}</div>}
 
-      <DevinCliCard
+      <DevinCliIntegrationCard
         status={devinCli}
         settings={devinSettings}
-        loading={loading && devinCli === null}
-        onRefresh={() => { void loadDevinCliStatus(); void loadDevinCliSettings(); }}
+        loading={devinStatusLoading || recheckingAll}
+        onRefresh={() => { void loadDevinCliStatus(true); void loadDevinCliSettings(); }}
         onUpdateNativeTool={(category, enabled) => void updateDevinNativeTool(category, enabled)}
         tokenOverride={devinTokenOverride}
         onTokenOverrideChange={setDevinTokenOverride}
@@ -270,7 +282,15 @@ export function NativeCliIntegrationsPanel() {
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {integrations.map((integration) => {
+          {integrationGroups.map((group) => (
+            <details key={group.provider} className="rounded-xl border border-base-300 bg-base-200/10">
+              <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
+                <ServerCog size={17} className="shrink-0 text-base-content/55" />
+                <span className="flex-1 text-sm font-semibold">{friendlyProviderName(group.provider)}</span>
+                <span className="badge badge-sm badge-outline">{group.items.length} {group.items.length === 1 ? 'profile' : 'profiles'}</span>
+              </summary>
+              <div className="flex flex-col gap-2 border-t border-base-300 p-3">
+          {group.items.map((integration) => {
             const checkAction = `${integration.authProfileId}:check` as IntegrationAction;
             const resetAction = `${integration.authProfileId}:reset` as IntegrationAction;
             return (
@@ -278,12 +298,12 @@ export function NativeCliIntegrationsPanel() {
                 <div className="flex items-center gap-3 bg-base-200/40 px-4 py-3">
                   <ServerCog size={17} className="shrink-0 text-base-content/55" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold">{friendlyIntegrationName(integration)}</div>
+                    <div className="truncate text-sm font-semibold">{integration.models.join(', ') || integration.displayName}</div>
                     <div className="mt-0.5 text-[11px] text-base-content/45">
-                      {integration.openSessionCount} {integration.openSessionCount === 1 ? 'session' : 'sessions'} · {integration.connected ? 'Connected' : 'Disconnected'}
+                      {integration.openSessionCount} {integration.openSessionCount === 1 ? 'session' : 'sessions'} · {integration.probeChecked === false ? 'Status not checked' : integration.connected ? 'Connected' : 'Disconnected'}
                     </div>
                   </div>
-                  <StatusBadge status={integration.status} />
+                  <StatusBadge status={integration.status} probeChecked={integration.probeChecked} />
                 </div>
 
                 <div className="flex flex-col gap-3 px-4 py-3">
@@ -292,7 +312,7 @@ export function NativeCliIntegrationsPanel() {
                       {integration.openSessionCount} {integration.openSessionCount === 1 ? 'open session' : 'open sessions'}
                     </span>
                     <span className={`rounded-md px-2 py-1 ${integration.connected ? 'bg-success/10 text-success' : 'bg-base-200/70'}`}>
-                      {integration.connected ? 'Connected' : 'Not connected'}
+                      {integration.probeChecked === false ? 'Not checked' : integration.connected ? 'Connected' : 'Not connected'}
                     </span>
                     <details className="ml-auto">
                       <summary className="flex cursor-pointer list-none items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-base-content/50 hover:bg-base-200/70 hover:text-base-content/80">
@@ -322,7 +342,7 @@ export function NativeCliIntegrationsPanel() {
                         type="checkbox"
                         className="toggle toggle-sm"
                         checked={integration.mcp.inheritConfiguredMcp}
-                        disabled={action !== null}
+                        disabled={action !== null || recheckingAll}
                         onChange={(event) => void updateMcpPolicy(integration, event.target.checked)}
                         aria-label="Allow Codex profile MCP servers"
                       />
@@ -333,7 +353,7 @@ export function NativeCliIntegrationsPanel() {
                     <button
                       type="button"
                       className="btn btn-xs btn-primary gap-1"
-                      disabled={action !== null}
+                      disabled={action !== null || recheckingAll}
                       onClick={() => void runAction(integration, 'check')}
                     >
                       {action === checkAction ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
@@ -343,7 +363,7 @@ export function NativeCliIntegrationsPanel() {
                       <button
                         type="button"
                         className="btn btn-xs btn-ghost gap-1 text-warning"
-                        disabled={action !== null}
+                        disabled={action !== null || recheckingAll}
                         onClick={() => void runAction(integration, 'reset')}
                       >
                         {action === resetAction ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
@@ -355,172 +375,28 @@ export function NativeCliIntegrationsPanel() {
               </article>
             );
           })}
+              </div>
+            </details>
+          ))}
         </div>
       )}
     </section>
   );
 }
 
-function DevinCliCard({
-  status,
-  settings,
-  loading,
-  onRefresh,
-  onUpdateNativeTool,
-  tokenOverride,
-  onTokenOverrideChange,
-  onUpdateBridgeToken,
-  updating,
-  bridgeUpdating,
-}: {
-  status: DevinCliStatus | null;
-  settings: DevinCliSettings | null;
-  loading: boolean;
-  onRefresh: () => void;
-  onUpdateNativeTool: (category: keyof DevinNativeToolsPolicy, enabled: boolean) => void;
-  tokenOverride: string;
-  onTokenOverrideChange: (value: string) => void;
-  onUpdateBridgeToken: (payload: { mcpBridgeToken?: string; generateMcpBridgeToken?: boolean; clearMcpBridgeToken?: boolean }) => void;
-  updating: boolean;
-  bridgeUpdating: boolean;
-}) {
-  const online = status?.authenticated === true && status.acp === true;
-  return (
-    <article className="overflow-hidden rounded-xl border border-base-300" data-testid="devin-cli-integration-card">
-      <div className="flex items-center gap-3 bg-base-200/40 px-4 py-3">
-        <ServerCog size={17} className="shrink-0 text-base-content/55" />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">Devin CLI (host)</div>
-          <div className="mt-0.5 text-[11px] text-base-content/45">
-            {status ? `${status.hostCount} ${status.hostCount === 1 ? 'model host' : 'model hosts'} · ${status.executable}` : 'Local executable and ACP status'}
-          </div>
-        </div>
-        <span className={`inline-flex items-center gap-1 text-xs ${loading ? 'text-warning' : online ? 'text-success' : 'text-error'}`}>
-          {loading ? <Loader2 size={12} className="animate-spin" /> : online ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-          {loading ? 'Checking' : online ? 'Online' : 'Unavailable'}
-        </span>
-      </div>
-      <div className="flex flex-col gap-3 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
-          <span className={`rounded-md px-2 py-1 ${online ? 'bg-success/10 text-success' : 'bg-base-200/70'}`}>
-            {status?.authenticated ? 'Logged in' : 'Login unavailable'}
-          </span>
-          <span className={`rounded-md px-2 py-1 ${status?.acp ? 'bg-success/10 text-success' : 'bg-base-200/70'}`}>
-            {status?.acp ? 'ACP available' : 'ACP unavailable'}
-          </span>
-          <span className="rounded-md bg-base-200/70 px-2 py-1">
-            {status?.models.join(', ') || 'No configured free model lanes'}
-          </span>
-          <span className={`rounded-md px-2 py-1 ${settings?.mcpBridge.enabled ? 'bg-success/10 text-success' : 'bg-base-200/70'}`}>
-            {settings?.mcpBridge.enabled ? 'Kalio MCP bridge enabled' : 'Kalio MCP bridge disabled'}
-          </span>
-          <span className="rounded-md bg-base-200/70 px-2 py-1">
-            Token: {settings?.mcpBridge.configuredBy === 'settings' ? 'Settings' : settings?.mcpBridge.configuredBy === 'environment' ? 'environment fallback' : 'not configured'}
-          </span>
-        </div>
-        <p className="text-xs text-base-content/50">
-          Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Token actions and switches reset active Devin hosts.
-        </p>
-        <div className="rounded-lg border border-base-300 bg-base-200/20 p-3">
-          <div className="mb-2 text-sm font-medium">Kalio MCP bridge token</div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="password"
-              className="input input-bordered input-sm min-w-0 flex-1 font-mono"
-              value={tokenOverride}
-              onChange={(event) => onTokenOverrideChange(event.target.value)}
-              placeholder="Override token (16+ characters)"
-              aria-label="Kalio MCP bridge token override"
-              disabled={bridgeUpdating}
-            />
-            <button
-              type="button"
-              className="btn btn-sm btn-outline"
-              disabled={bridgeUpdating || tokenOverride.trim().length < 16}
-              onClick={() => onUpdateBridgeToken({ mcpBridgeToken: tokenOverride })}
-            >
-              Save override
-            </button>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="btn btn-xs btn-primary"
-              disabled={bridgeUpdating}
-              onClick={() => onUpdateBridgeToken({ generateMcpBridgeToken: true })}
-            >
-              Generate local token
-            </button>
-            <button
-              type="button"
-              className="btn btn-xs btn-ghost"
-              disabled={bridgeUpdating || settings?.mcpBridge.configuredBy !== 'settings'}
-              onClick={() => onUpdateBridgeToken({ clearMcpBridgeToken: true })}
-            >
-              Use environment fallback
-            </button>
-          </div>
-          <p className="mt-2 text-[11px] text-base-content/45">
-            The token is stored locally and never returned by the status endpoint. Clearing the override reveals the environment value, if configured.
-          </p>
-        </div>
-        {settings && (
-          <div className="grid gap-2 sm:grid-cols-3" aria-label="Devin native tools">
-            {(['filesystem', 'web', 'terminal'] as const).map((category) => (
-              <label key={category} className="flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-base-300 bg-base-200/20 px-3 py-2" title={`Allow Devin ${category} tools.`}>
-                <span className="text-sm font-medium capitalize">{category}</span>
-                <input
-                  type="checkbox"
-                  className="toggle toggle-sm"
-                  checked={settings.nativeTools[category]}
-                  disabled={updating}
-                  onChange={(event) => onUpdateNativeTool(category, event.target.checked)}
-                  aria-label={`Allow Devin ${category} tools`}
-                />
-              </label>
-            ))}
-          </div>
-        )}
-        <details>
-          <summary className="flex cursor-pointer list-none items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-base-content/50 hover:bg-base-200/70 hover:text-base-content/80">
-            Details <ChevronDown size={12} />
-          </summary>
-          <div className="mt-2 rounded-lg border border-base-300/70 bg-base-200/25 p-3 text-[11px] text-base-content/60">
-            <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
-              <div><dt className="text-base-content/40">Version</dt><dd>{status?.version ?? 'Unknown'}</dd></div>
-              <div><dt className="text-base-content/40">Executable</dt><dd className="break-all font-mono">{status?.executable ?? 'Unknown'}</dd></div>
-              <div><dt className="text-base-content/40">Active hosts</dt><dd>{status?.hosts.map((host) => `${host.model}: ${host.status}`).join(', ') || 'None'}</dd></div>
-            </dl>
-          </div>
-        </details>
-        <div>
-          <button type="button" className="btn btn-xs btn-primary gap-1" disabled={loading} onClick={onRefresh}>
-            {loading ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-            Recheck
-          </button>
-        </div>
-      </div>
-    </article>
-  );
+function friendlyProviderName(provider: string): string {
+  if (provider === 'codex') return 'Codex';
+  if (provider === 'claude') return 'Claude Code';
+  return provider.replace(/(^|-)(\w)/g, (_match, separator: string, letter: string) => `${separator}${letter.toUpperCase()}`);
 }
 
-function friendlyIntegrationName(integration: NativeCliIntegrationStatus): string {
-  if (integration.provider.toLowerCase() === 'codex') {
-    return 'Codex';
-  }
-  if (integration.provider.toLowerCase() === 'claude') {
-    return 'Claude';
-  }
-  return integration.displayName.replace(/\s*\([^)]*\)\s*$/, '') || integration.provider;
-}
-
-function StatusBadge({ status }: { status: NativeCliIntegrationStatus['status'] }) {
+function StatusBadge({ status, probeChecked = true }: { status: NativeCliIntegrationStatus['status']; probeChecked?: boolean }) {
   const online = status === 'online';
   const starting = status === 'starting';
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${online ? 'text-success' : starting ? 'text-warning' : 'text-error'}`}>
-      {online ? <CheckCircle2 size={12} /> : starting ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
-       {online ? 'Online' : starting ? 'Checking' : status === 'error' ? 'Error' : 'Not started'}
+    <span className={`inline-flex items-center gap-1 text-xs ${probeChecked ? online ? 'text-success' : starting ? 'text-warning' : 'text-error' : 'text-base-content/50'}`}>
+      {!probeChecked ? <ServerCog size={12} /> : online ? <CheckCircle2 size={12} /> : starting ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
+      {!probeChecked ? 'Not checked' : online ? 'Online' : starting ? 'Checking' : status === 'error' ? 'Error' : 'Not started'}
     </span>
   );
 }

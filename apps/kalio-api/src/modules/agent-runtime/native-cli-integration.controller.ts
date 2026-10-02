@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Optional, Param, Patch, Post } from '@nestjs/common';
-import type { ExecutionProfile } from '@kalio/types';
+import type { CLIAgentAdapterInfo, ExecutionProfile } from '@kalio/types';
 import { CLIAgentService } from '../cli-agent/cli-agent.service';
 import { CodexAppServerHost, type CodexAppServerHostStatus } from './codex-app-server.host';
 import { CodexMcpPolicyService, type CodexMcpPolicySettings } from './codex-mcp-policy.service';
@@ -10,6 +10,7 @@ export interface NativeCliIntegrationStatus extends CodexAppServerHostStatus {
   provider: 'codex' | 'claude';
   displayName: string;
   kind: 'codex-app-server' | 'claude-agent-sdk';
+  probeChecked?: boolean;
   profileIds: string[];
   models: string[];
   mcp: CodexMcpPolicySettings;
@@ -21,6 +22,8 @@ interface UpdateCodexMcpSettingsDto {
 
 @Controller('runtime/native-cli-integrations')
 export class NativeCliIntegrationController {
+  private claudeProbe?: CLIAgentAdapterInfo;
+
   constructor(
     private readonly profiles: ExecutionProfileService,
     private readonly codexHost: CodexAppServerHost,
@@ -38,7 +41,10 @@ export class NativeCliIntegrationController {
   async check(@Param('authProfileId') authProfileId: string): Promise<NativeCliIntegrationStatus> {
     const status = await this.findStatus(authProfileId);
     if (status.provider === 'codex') await this.codexHost.getConnection(authProfileId, 'settings-check');
-    else await this.cliAgents?.probe('claude');
+    else {
+      const probe = await this.cliAgents?.refreshProbe('claude');
+      if (probe) this.claudeProbe = probe;
+    }
     return (await this.list()).find((item) => item.authProfileId === authProfileId) ?? status;
   }
 
@@ -101,18 +107,19 @@ export class NativeCliIntegrationController {
       ...this.codexHost.getStatus(authProfileId),
     })));
     const claudeStatuses = await Promise.all([...claudeGroups.entries()].map(async ([authProfileId, group]) => {
-      const probe = await this.cliAgents?.probe('claude') ?? { available: false, version: null };
+      const probe = this.claudeProbe ?? null;
       return {
         id: `claude:${authProfileId}`,
         provider: 'claude' as const,
         displayName: 'Claude — local login',
         kind: 'claude-agent-sdk' as const,
         authProfileId,
-        status: probe.available ? 'online' as const : 'error' as const,
-        connected: probe.available,
+        status: probe?.available ? 'online' as const : probe ? 'error' as const : 'offline' as const,
+        connected: probe?.available ?? false,
         openSessionCount: 0,
-        ...(probe.version ? { processEpoch: probe.version } : {}),
-        ...(probe.available ? {} : { lastError: 'Claude Code CLI is not available on this workstation.' }),
+        probeChecked: probe !== null,
+        ...(probe?.version ? { processEpoch: probe.version } : {}),
+        ...(probe && !probe.available ? { lastError: 'Claude Code CLI is not available on this workstation.' } : {}),
         profileIds: group.map((profile) => profile.id),
         models: [...new Set(group.map((profile) => profile.model).filter(Boolean))],
         mcp: { inheritConfiguredMcp: false, source: 'default' as const },

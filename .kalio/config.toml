@@ -3,3 +3,51 @@ enabled = true
 required = false
 url = "http://127.0.0.1:3000/mcp"
 bearer_token_env_var = "DA_MCP_TOKEN"
+
+[mcp_servers.playwright-orchestrator]
+enabled = true
+required = false
+url = "http://127.0.0.1:3333/mcp"
+enabled_tools = [
+  "browser_session_create",
+  "browser_session_list",
+  "browser_session_resume",
+  "browser_session_close",
+  "browser_page_new",
+  "browser_page_navigate",
+  "browser_page_list",
+  "browser_page_close",
+  "browser_click",
+  "browser_type",
+  "browser_press_key",
+  "browser_select_option",
+  "browser_wait_for",
+  "browser_snapshot",
+  "browser_console_messages",
+  "browser_network_requests",
+  "inspect_view_manifest",
+  "audit_visual_layout",
+  "audit_wcag21",
+  "audit_focus_order",
+  "audit_ui_consistency",
+  "audit_full_page_quality",
+  "collect_runtime_signals",
+  "create_evidence_bundle",
+  "take_snapshot",
+  "take_diff",
+]
+disabled_tools = [
+  "browser_cookie_list",
+  "browser_cookie_set",
+  "browser_cookie_delete",
+  "browser_local_storage_list",
+  "browser_local_storage_get",
+  "browser_local_storage_set",
+  "browser_local_storage_delete",
+  "browser_local_storage_clear",
+  "browser_run_code_unsafe",
+  "browser_unsafe_run_code_with_approval",
+  "browser_evaluate",
+  "browser_upload_file",
+  "browser_downloads_clear",
+]

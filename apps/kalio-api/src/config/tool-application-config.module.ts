@@ -4,6 +4,7 @@ import type { ToolMeta } from '@kalio/types';
 import { TOOL_METADATA, type ToolOptions } from '../common/decorators/tool.decorator';
 import { VFSModule } from '../modules/vfs/vfs.module';
 import { DatabaseModule } from '../database/database.module';
+import { AuditModule } from '../modules/chat/audit.module';
 import { LLMModule } from '../modules/llm/llm.module';
 import { RAAppModule } from '../modules/raapp/raapp.module';
 import { MemoryModule } from '../modules/memory/memory.module';
@@ -52,7 +53,7 @@ function buildToolCatalog(reflector: Reflector): ToolCatalogPort {
 }
 
 @Module({
-  imports: [DatabaseModule, VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule, RelayModule, CodeIntelligenceModule],
+  imports: [DatabaseModule, AuditModule, VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule, RelayModule, CodeIntelligenceModule],
   providers: [
     ...TOOL_CONFIGURATION_PROVIDERS,
     {

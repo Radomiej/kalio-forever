@@ -94,6 +94,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  emitSessionEvent<K extends keyof SocketEvents>(sessionId: string, event: K, data: SocketEvents[K]): void {
+    const targetSessionId = getSocketEventSessionId(data) ?? sessionId;
+    const subscribers = this.sessionSubscribers.get(targetSessionId);
+    if (!subscribers) return;
+
+    subscribers.forEach((socketId) => {
+      this.clients.get(socketId)?.emit(event, data);
+    });
+  }
+
   @SubscribeMessage('session:identify')
   async handleSessionIdentify(
     @ConnectedSocket() client: Socket,

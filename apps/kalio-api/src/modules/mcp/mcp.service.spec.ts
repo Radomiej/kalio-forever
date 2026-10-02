@@ -210,6 +210,24 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
         'MCP server non-existent not connected',
       );
     });
+
+    it('rejects direct calls to tools excluded by the server allowlist', async () => {
+      const callTool = vi.fn(async () => ({ content: [] }));
+      const internals = service as unknown as ServiceInternals;
+      internals.handles.set('toml::playwright', {
+        id: 'playwright',
+        tools: [],
+        status: 'connected',
+        enabledTools: ['browser_snapshot'],
+        disabledTools: [],
+        client: { callTool },
+      });
+
+      await expect(
+        service.callTool('toml::playwright', 'browser_cookie_list', {}),
+      ).rejects.toThrow('not enabled');
+      expect(callTool).not.toHaveBeenCalled();
+    });
   });
 
   describe('removeServer()', () => {
@@ -523,7 +541,14 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
   // --- Internal state helpers (accessed via unknown cast, no `any`) ---
   type ServiceInternals = {
     toolNameMap: Map<string, { serverKey: string; originalName: string }>;
-    handles: Map<string, { id: string; tools: MCPTool[]; status: string }>;
+    handles: Map<string, {
+      id: string;
+      tools: MCPTool[];
+      status: string;
+      enabledTools?: string[];
+      disabledTools?: string[];
+      client?: { callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<unknown> };
+    }>;
     discoverTools(serverKey: string, client: unknown): Promise<MCPTool[]>;
   };
 
@@ -585,6 +610,51 @@ describe('MCPService — pure logic (no real MCP connections)', () => {
   });
 
   describe('discoverTools() — pagination safety cap', () => {
+    it('discovers only tools included in the server allowlist', async () => {
+      const fakeClient = {
+        listTools: vi.fn(async () => ({
+          tools: [
+            { name: 'browser_snapshot', description: 'inspect page', inputSchema: {} },
+            { name: 'browser_cookie_list', description: 'read cookies', inputSchema: {} },
+          ],
+          nextCursor: undefined,
+        })),
+      };
+      const internals = service as unknown as ServiceInternals;
+      internals.handles.set('toml::playwright', {
+        id: 'playwright',
+        tools: [],
+        status: 'connected',
+        enabledTools: ['browser_snapshot'],
+      });
+
+      const tools = await internals.discoverTools('toml::playwright', fakeClient);
+
+      expect(tools.map((tool) => internals.toolNameMap.get(tool.name)?.originalName))
+        .toStrictEqual(['browser_snapshot']);
+      expect(internals.toolNameMap.has('mcp_browser_cookie_list')).toBe(false);
+    });
+
+    it('lets disabled_tools override enabled_tools', async () => {
+      const fakeClient = {
+        listTools: vi.fn(async () => ({
+          tools: [{ name: 'browser_snapshot', description: 'inspect page', inputSchema: {} }],
+          nextCursor: undefined,
+        })),
+      };
+      const internals = service as unknown as ServiceInternals;
+      internals.handles.set('toml::playwright', {
+        id: 'playwright',
+        tools: [],
+        status: 'connected',
+        enabledTools: ['browser_snapshot'],
+        disabledTools: ['browser_snapshot'],
+      });
+
+      await expect(internals.discoverTools('toml::playwright', fakeClient)).resolves.toStrictEqual([]);
+      expect(internals.toolNameMap.has(buildMcpToolName('toml::playwright', 'browser_snapshot'))).toBe(false);
+    });
+
     it('stops after 100 iterations when server always returns a nextCursor', async () => {
       let callCount = 0;
       const fakeClient = {

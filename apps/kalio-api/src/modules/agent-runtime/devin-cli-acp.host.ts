@@ -1,11 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import type { DevinCliModel } from '@kalio/types';
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Readable, Transform, Writable } from 'node:stream';
 import { isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
 import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-config';
+import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
+import { DevinCliProbeService, type DevinCliProbeStatus } from './devin-cli-probe.service';
 import {
   client,
   methods,
@@ -19,38 +19,19 @@ import {
   type StopReason,
 } from '@agentclientprotocol/sdk';
 
-export const DEVIN_CLI_MODELS = ['glm-5-2', 'swe-1-7'] as const satisfies readonly DevinCliModel[];
 const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
-const PROBE_TIMEOUT_MS = 10_000;
+
+export { parseDevinCliProbe } from './devin-cli-probe.service';
+export type { DevinCliProbe, DevinCliProbeCommand, DevinCliProbeOutput } from './devin-cli-probe.service';
 
 export interface DevinCliLaunchSpec {
   command: string;
   args: string[];
 }
 
-export interface DevinCliProbeCommand {
-  text: string;
-  exitCode: number;
-}
-
-export interface DevinCliProbeOutput {
-  version: DevinCliProbeCommand;
-  authStatus: DevinCliProbeCommand;
-  acpHelp: DevinCliProbeCommand;
-  models: DevinCliProbeCommand;
-}
-
-export interface DevinCliProbe {
-  executable: string;
-  version: string | null;
-  authenticated: boolean;
-  acp: boolean;
-  models: DevinCliModel[];
-}
-
-export interface DevinCliIntegrationStatus extends DevinCliProbe {
+export interface DevinCliIntegrationStatus extends DevinCliProbeStatus {
   hostCount: number;
-  hosts: Array<{ model: DevinCliModel; status: 'starting' | 'online' | 'error' | 'offline'; processEpoch?: string }>;
+  hosts: Array<{ model: string; status: 'starting' | 'online' | 'error' | 'offline'; processEpoch?: string }>;
 }
 
 export interface DevinAcpSession {
@@ -75,6 +56,7 @@ export interface DevinAcpToolActivity {
   name?: string | null;
   title?: string | null;
   status?: string | null;
+  rawInput?: unknown;
 }
 
 interface SessionState {
@@ -94,38 +76,10 @@ interface ActiveTurn extends DevinAcpPromptInput {
   rejectConnection: (error: Error) => void;
 }
 
-export function isDevinCliModel(value: string): value is DevinCliModel {
-  return (DEVIN_CLI_MODELS as readonly string[]).includes(value);
-}
-
-export function buildDevinCliLaunchSpec(model: DevinCliModel, executable = resolveDevinCliPath()): DevinCliLaunchSpec {
-  if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model}`);
-  return { command: executable, args: ['--model', model, 'acp'] };
-}
-
-export function resolveDevinCliPath(): string {
-  return process.env['DEVIN_CLI_PATH']?.trim() || (process.platform === 'win32' ? 'devin.exe' : 'devin');
-}
-
-export function parseDevinCliProbe(executable: string, output: DevinCliProbeOutput): DevinCliProbe {
-  // Text alone is not trustworthy when the CLI has crashed after writing partial output.
-  const versionMatch = output.version.exitCode === 0 ? output.version.text.match(/devin\s+([^\s]+)/i) : null;
-  const authenticated = output.authStatus.exitCode === 0
-    && /logged\s+in|authenticated/i.test(output.authStatus.text)
-    && !/not\s+logged\s+in|unauthenticated|login required/i.test(output.authStatus.text);
-  const acp = output.acpHelp.exitCode === 0
-    && /\bacp\b/i.test(output.acpHelp.text)
-    && /usage|run|mode|agent/i.test(output.acpHelp.text);
-  const models = output.models.exitCode === 0
-    ? DEVIN_CLI_MODELS.filter((model) => output.models.text.toLowerCase().includes(model))
-    : [];
-  return {
-    executable,
-    version: versionMatch?.[1] ?? null,
-    authenticated,
-    acp,
-    models,
-  };
+export function buildDevinCliLaunchSpec(model: string, executable = resolveDevinCliPath()): DevinCliLaunchSpec {
+  const normalizedModel = model.trim();
+  if (!normalizedModel) throw new Error('Devin CLI model is required.');
+  return { command: executable, args: ['--model', normalizedModel, 'acp'] };
 }
 
 export class DevinAcpHost {
@@ -140,9 +94,9 @@ export class DevinAcpHost {
   private config?: DevinCliConfigHandle;
   private closing = false;
 
-  constructor(readonly model: DevinCliModel) {}
+  constructor(readonly model: string) {}
 
-  getStatus(): { model: DevinCliModel; status: DevinAcpIntegrationStatus; processEpoch?: string } {
+  getStatus(): { model: string; status: DevinAcpIntegrationStatus; processEpoch?: string } {
     return {
       model: this.model,
       status: this.status,
@@ -365,6 +319,7 @@ export class DevinAcpHost {
         name: update.name,
         title: update.title,
         status: update.status,
+        rawInput: update.rawInput,
       });
     }
   }
@@ -393,12 +348,15 @@ export class DevinAcpHost {
 export class DevinAcpHostRegistry implements OnModuleDestroy {
   private readonly hosts = new Map<string, DevinAcpHost>();
 
+  constructor(private readonly probes: DevinCliProbeService) {}
+
   async get(model: string, scopeKey?: string): Promise<DevinAcpHost> {
-    if (!isDevinCliModel(model)) throw new Error(`Unsupported Devin CLI model: ${model}.`);
-    const key = scopeKey?.trim() ? `${model}\u0000${scopeKey.trim()}` : model;
+    const normalizedModel = model.trim();
+    if (!normalizedModel) throw new Error('Devin CLI model is required.');
+    const key = scopeKey?.trim() ? `${normalizedModel}\u0000${scopeKey.trim()}` : normalizedModel;
     const existing = this.hosts.get(key);
     if (existing) return existing;
-    const host = new DevinAcpHost(model);
+    const host = new DevinAcpHost(normalizedModel);
     this.hosts.set(key, host);
     return host;
   }
@@ -409,15 +367,8 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
     await Promise.all(hosts.map((host) => host.close()));
   }
 
-  async getStatus(): Promise<DevinCliIntegrationStatus> {
-    const executable = resolveDevinCliPath();
-    const output = await Promise.all([
-      this.probeCommand(executable, ['--version']),
-      this.probeCommand(executable, ['auth', 'status']),
-      this.probeCommand(executable, ['acp', '--help']),
-      this.probeCommand(executable, ['models', 'list']),
-    ]);
-    const probe = parseDevinCliProbe(executable, { version: output[0], authStatus: output[1], acpHelp: output[2], models: output[3] });
+  async getStatus(refresh = false): Promise<DevinCliIntegrationStatus> {
+    const probe = await this.probes.getStatus(refresh);
     return {
       ...probe,
       hostCount: this.hosts.size,
@@ -427,21 +378,6 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await Promise.all([...this.hosts.values()].map((host) => host.close()));
-  }
-
-  private async probeCommand(executable: string, args: string[]): Promise<DevinCliProbeCommand> {
-    const run = promisify(execFile);
-    try {
-      const result = await run(executable, args, { timeout: PROBE_TIMEOUT_MS, windowsHide: true, maxBuffer: 256 * 1024 });
-      return { text: `${result.stdout}\n${result.stderr}`, exitCode: 0 };
-    } catch (error) {
-      const result = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
-      const exitCode = typeof result.code === 'number' ? result.code : 1;
-      return {
-        text: `${typeof result.stdout === 'string' ? result.stdout : ''}\n${typeof result.stderr === 'string' ? result.stderr : ''}`,
-        exitCode,
-      };
-    }
   }
 }
 

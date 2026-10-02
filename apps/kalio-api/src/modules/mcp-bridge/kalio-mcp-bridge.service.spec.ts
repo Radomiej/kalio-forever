@@ -26,6 +26,13 @@ const tools: ToolMeta[] = [
     parameters: { type: 'object', properties: { filePath: { type: 'string' } } },
     requiresConfirmation: true,
   },
+  {
+    name: 'mcp_playwright_browser_click',
+    description: 'External MCP tools must not be exposed through the Devin native bridge.',
+    domain: 'mcp',
+    parameters: { type: 'object', properties: { selector: { type: 'string' } } },
+    requiresConfirmation: true,
+  },
 ];
 
 describe('KalioMcpBridgeService', () => {
@@ -33,21 +40,47 @@ describe('KalioMcpBridgeService', () => {
   let httpServer: ReturnType<typeof createServer>;
   let baseUrl: string;
   let contextRegistry: KalioMcpBridgeContextRegistry;
+  let emitSessionEvent: ReturnType<typeof vi.fn>;
+  let dispatchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     process.env['KALIO_MCP_BRIDGE_TOKEN'] = 'test-bridge-token';
-    const dispatch = {
-      getToolMetas: vi.fn(() => tools),
-      dispatch: vi.fn(async (callId: string, _name: string, args: Record<string, unknown>, ctx: { sessionId: string; turnId?: string; promptMessageId?: string }) => ({
+    emitSessionEvent = vi.fn();
+    dispatchSpy = vi.fn(async (
+      callId: string,
+      toolName: string,
+      args: Record<string, unknown>,
+      ctx: {
+        sessionId: string;
+        turnId?: string;
+        promptMessageId?: string;
+        emit: (event: string, data: unknown) => void;
+      },
+    ) => {
+      if (toolName === 'vfs_write') {
+        ctx.emit('tool:confirmation_required', {
+          requestId: 'approval-1',
+          toolCallId: callId,
+          sessionId: ctx.sessionId,
+          toolName,
+          args,
+          timeoutMs: 0,
+        });
+      }
+      return {
         callId,
         status: 'success' as const,
         data: { args, sessionId: ctx.sessionId, turnId: ctx.turnId, promptMessageId: ctx.promptMessageId },
-      })),
+      };
+    });
+    const dispatch = {
+      getToolMetas: vi.fn(() => tools),
+      dispatch: dispatchSpy,
     } as unknown as ToolDispatchService;
     contextRegistry = new KalioMcpBridgeContextRegistry();
     bridge = new KalioMcpBridgeService(dispatch, {
       getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null),
-    } as never, contextRegistry);
+    } as never, contextRegistry, { emitSessionEvent } as never);
     httpServer = createServer((request, response) => {
       void bridge.handleRequest(request, response).catch((error) => {
         const status = error instanceof KalioMcpBridgeHttpError ? error.statusCode : 500;
@@ -95,13 +128,16 @@ describe('KalioMcpBridgeService', () => {
         headers: {
           Authorization: 'Bearer test-bridge-token',
           'x-kalio-session-id': 'session-2',
-          'x-kalio-tool-names': 'vfs_read,run_cli_agent',
+          'x-kalio-tool-names': 'vfs_read,run_cli_agent,mcp_playwright_browser_click',
         },
       },
     });
     await client.connect(transport);
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toEqual(['vfs_read']);
+    const result = await client.callTool({ name: 'mcp_playwright_browser_click', arguments: { selector: 'button' } });
+    expect(result).toMatchObject({ isError: true, content: [{ type: 'text' }] });
+    expect(dispatchSpy).not.toHaveBeenCalled();
     await client.close();
   });
 
@@ -119,6 +155,34 @@ describe('KalioMcpBridgeService', () => {
     await client.connect(transport);
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toEqual(['vfs_read', 'vfs_write']);
+    await client.close();
+  });
+
+  it('routes a confirmation request from an MCP tool call to the active Kalio session', async () => {
+    const client = new Client({ name: 'kalio-bridge-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: {
+        headers: {
+          Authorization: 'Bearer test-bridge-token',
+          'x-kalio-session-id': 'session-hitl',
+          'x-kalio-tool-names': 'vfs_write',
+        },
+      },
+    });
+    await client.connect(transport);
+
+    await client.callTool({ name: 'vfs_write', arguments: { filePath: 'qa.txt', content: 'safe test' } });
+
+    expect(emitSessionEvent).toHaveBeenCalledWith(
+      'session-hitl',
+      'tool:confirmation_required',
+      expect.objectContaining({ requestId: 'approval-1', toolName: 'vfs_write' }),
+    );
+    expect(emitSessionEvent).toHaveBeenCalledWith(
+      'session-hitl',
+      'tool:result',
+      expect.objectContaining({ callId: expect.any(String), status: 'success' }),
+    );
     await client.close();
   });
 
@@ -191,7 +255,7 @@ describe('KalioMcpBridgeService', () => {
     const dispatch = { getToolMetas: vi.fn() } as unknown as ToolDispatchService;
     const unconfigured = new KalioMcpBridgeService(dispatch, {
       getToken: vi.fn(async () => null),
-    } as never, new KalioMcpBridgeContextRegistry());
+    } as never, new KalioMcpBridgeContextRegistry(), { emitSessionEvent: vi.fn() } as never);
     await expect(unconfigured.authorize({})).rejects.toThrowError(
       expect.objectContaining({ statusCode: 503 }),
     );

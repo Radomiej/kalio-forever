@@ -72,17 +72,25 @@ for day-to-day graph editing.
 
 ### Install Kalio on Windows
 
-The fastest first run uses the local production profile and the mock provider;
-no API key is required.
+Open **Command Prompt (`cmd.exe`)** and run this one line. The installer uses the
+local production profile and the mock provider, so no API key is required:
+
+~~~bat
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
+~~~
+
+Autostart after Windows sign-in is enabled by default. To install without it,
+pass `-NoAutostart` to the downloaded CMD wrapper. To use Bun instead of the
+default Node runtime, pass `-Runtime bun`.
+
+~~~bat
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -Runtime bun && del "%TEMP%\kalio-install.cmd"
+~~~
+
+PowerShell remains available as an alternative:
 
 ~~~powershell
 irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
-~~~
-
-To use the Bun runtime instead of the default Node runtime:
-
-~~~powershell
-$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
 ~~~
 
 
@@ -97,7 +105,6 @@ Open **http://127.0.0.1:4016**. The API health endpoint is
 See the [Windows user guide](docs/quickstart-user.md) for upgrades,
 uninstall, data locations, and troubleshooting.
 
-### Standalone desktop build
 ### Install Kalio on Linux
 
 The command-line installer downloads the latest published runtime archive and keeps
@@ -122,11 +129,15 @@ On Windows, an installed runtime can update itself through a separate helper pro
 The safe command defers while Kalio is running. An explicit `--force` request stops
 only this installation's recorded process tree, downloads the matching Node or Bun
 archive, verifies the runtime manifest and SHA-256, switches versions atomically,
-health-checks the new process, and rolls back on failure. The Scheduled Task performs
-the same check without force at user sign-in. User data is preserved.
+health-checks the new process, and rolls back on failure. User data is preserved.
 
-For an older installation or a repair, run the release installer again. It refuses
+For an older installation or a repair, run the CMD installer again. It refuses
 to replace a runtime while it is running and preserves the data directory.
+
+### Optional Tauri/NSIS desktop installer
+
+The Tauri/NSIS desktop installer is optional. Use it when you specifically want
+the native desktop shell; the CMD installation above is the primary Windows path.
 
 The Windows desktop build packages the web client, the production API, and a
 Node.js runtime into a per-user Tauri installer. The backend starts on loopback

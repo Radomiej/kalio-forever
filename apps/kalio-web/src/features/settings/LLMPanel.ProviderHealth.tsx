@@ -2,16 +2,10 @@ import { CheckCircle2, Loader2, Server, XCircle } from 'lucide-react';
 import type { ProviderTestState } from './llm-panel.types';
 
 export function LLMProviderHealthCard({
-  activeProviderLabel,
-  activeProviderModel,
-  activeProviderSource,
   testState,
   testError,
   showWindowsLocalHint,
 }: {
-  activeProviderLabel: string;
-  activeProviderModel: string;
-  activeProviderSource: string;
   testState: ProviderTestState;
   testError: string | null;
   showWindowsLocalHint: boolean;
@@ -35,12 +29,8 @@ export function LLMProviderHealthCard({
     <section className="border border-base-300 rounded-xl p-4 bg-base-200/10" data-testid="provider-health-card">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold mb-1">Provider Health</h3>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/60">
-            <span className="badge badge-sm badge-outline font-mono">{activeProviderLabel}</span>
-            <span className="font-mono truncate max-w-full">{activeProviderModel}</span>
-            <span className="badge badge-xs badge-neutral">{activeProviderSource}</span>
-          </div>
+          <h3 className="text-sm font-semibold mb-1">Connection check</h3>
+          <p className="text-xs text-base-content/55">Selected as active and successfully tested are separate states.</p>
         </div>
         <div className="flex items-center gap-2 text-xs">
           <TestStateIcon

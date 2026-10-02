@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleDestroy, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, ForbiddenException, Optional } from '@nestjs/common';
 import { spawn, ChildProcess } from 'node:child_process';
 import { nanoid } from 'nanoid';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
+import { CmdInvocationAuditService } from '../chat/cmd-invocation-audit.service';
 
 export interface TerminalSession {
   id: string;
@@ -19,13 +20,17 @@ export class TerminalService implements OnModuleDestroy {
   private readonly sessions = new Map<string, { meta: TerminalSession; proc: ChildProcess }>();
   private readonly MAX_OUTPUT = 64 * 1024; // 64 KB per session
 
-  constructor(private readonly allowedPaths: AllowedPathsService) {}
+  constructor(
+    private readonly allowedPaths: AllowedPathsService,
+    @Optional() private readonly cmdAudit?: CmdInvocationAuditService,
+  ) {}
 
   async spawn(
     command: string,
     args: string[],
     cwd?: string,
     closeStdin = false,
+    auditContext?: { sessionId: string; turnId?: string; callId?: string },
   ): Promise<TerminalSession> {
     const id = nanoid();
     const safeCwd = cwd ?? process.cwd();
@@ -35,11 +40,20 @@ export class TerminalService implements OnModuleDestroy {
       throw new ForbiddenException(`ACCESS_DENIED: cwd is outside allowed roots: ${safeCwd}`);
     }
 
+    const useShell = process.platform === 'win32';
+    await this.cmdAudit?.recordInvocation({
+      command,
+      shell: useShell,
+      source: 'terminal.spawn',
+      launcher: 'spawn',
+      ...auditContext,
+    });
+
     // On Windows most CLI tools are .cmd shims and won't resolve without a shell.
     // shell:true is acceptable here — terminal_spawn already requires user confirmation.
     const proc = spawn(command, args, {
       cwd: safeCwd,
-      shell: process.platform === 'win32',
+      shell: useShell,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

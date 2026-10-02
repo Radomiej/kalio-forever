@@ -82,7 +82,11 @@ export class TerminalSpawnTool {
     const command = getCommandArg(request.args);
     const args = getArgsArg(request.args);
     const cwd = getCwdArg(request.args);
-    const session = await this.terminals.spawn(command, args, cwd);
+    const session = await this.terminals.spawn(command, args, cwd, false, {
+      sessionId: request.sessionId,
+      turnId: request.turnId,
+      callId: request.callId,
+    });
     return { id: session.id, pid: session.pid, command: session.command };
   }
 }

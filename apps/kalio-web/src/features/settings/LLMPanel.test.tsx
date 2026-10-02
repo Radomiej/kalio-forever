@@ -160,15 +160,15 @@ describe('LLMPanel', () => {
     expect(screen.getByLabelText('My OpenAI provider active')).toBeInTheDocument();
   });
 
-  it('renders compact provider health from the active runtime config', async () => {
+  it('explains that selected provider and connection verification are separate states', async () => {
     mockFetch(defaultMap({ activeId: CRED.id, credentials: [CRED] }));
     render(<LLMPanel />);
 
     await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
 
-    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('OpenAI');
-    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini');
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('Selected as active and successfully tested are separate states.');
     expect(screen.getByTestId('provider-health-card')).toHaveTextContent('Not tested');
+    expect(screen.getByTestId('provider-health-card')).not.toHaveTextContent('gpt-4o-mini');
   });
 
   it('shows the Windows local provider hint when a local provider is selected', async () => {

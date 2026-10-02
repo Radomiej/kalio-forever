@@ -27,29 +27,49 @@ export interface DevinNativeToolCall {
 /**
  * Devin ACP exposes MCP calls through a provider wrapper instead of exposing
  * each server tool as a first-class ACP tool. Keep that wrapper outside the
- * native filesystem/web/terminal policy; Kalio enforces the actual tool scope
- * and HITL decision after the MCP call reaches the bridge.
+ * native filesystem/web/terminal policy; the caller separately gates it on
+ * the configured bridge and the effective Kalio tool allowlist.
  */
-export function isKalioMcpToolCall(toolCall: DevinNativeToolCall, serverName = 'kalio'): boolean {
-  const name = toolCall.name?.trim().toLowerCase() ?? '';
-  const toolCallId = toolCall.toolCallId?.trim().toLowerCase() ?? '';
-  const wrapperName = name === 'mcp_call_tool' || toolCallId.includes('mcp_call_tool');
-  const normalizedServerName = serverName.trim().toLowerCase();
+export function isKalioMcpToolCall(toolCall: DevinNativeToolCall, serverName: string, allowedToolNames: readonly string[]): boolean {
+  return getKalioMcpToolName(toolCall, serverName, allowedToolNames) !== undefined;
+}
+
+export function getKalioMcpToolName(
+  toolCall: DevinNativeToolCall,
+  serverName: string,
+  allowedToolNames: readonly string[],
+): string | undefined {
   const input = isRecord(toolCall.rawInput) ? toolCall.rawInput : undefined;
-  const server = readString(input?.server) ?? readString(input?.serverName);
-  if (server && server.toLowerCase() === normalizedServerName) return true;
-  if (server) return false;
+  if (toolCall.rawInput !== undefined && toolCall.rawInput !== null && !input) return undefined;
+  if (toolCall.name !== undefined && toolCall.name !== null && toolCall.name !== 'mcp_call_tool') return undefined;
 
-  const titleMatch = toolCall.title?.trim().match(/^(?:calling|called)\s+(.+?)\s+from\s+(.+?)\s*$/i);
-  const titleServer = titleMatch?.[2]?.trim().toLowerCase();
-  if (titleServer !== normalizedServerName) return false;
-  if (wrapperName || toolCallId.includes('mcp')) return true;
+  const titleToolName = allowedToolNames.find((toolName) => toolCall.title === `Calling ${toolName} from ${serverName}`);
+  if (input) {
+    if ('server' in input && input.server !== serverName) return undefined;
+    if (
+      'tool' in input
+      && (
+        typeof input.tool !== 'string'
+        || !allowedToolNames.includes(input.tool)
+        || (titleToolName !== undefined && input.tool !== titleToolName)
+      )
+    ) {
+      return undefined;
+    }
+    if (
+      toolCall.name === 'mcp_call_tool'
+      && input.server === serverName
+      && typeof input.tool === 'string'
+      && allowedToolNames.includes(input.tool)
+    ) {
+      return input.tool;
+    }
+  } else if (toolCall.name === 'mcp_call_tool') {
+    return undefined;
+  }
 
-  // Devin 3000.5 reports a permission request for an MCP tool by its real
-  // name, while the title carries the server identity (for example,
-  // "Calling vfs_list from kalio-runtime").
-  const titleTool = titleMatch?.[1]?.trim().toLowerCase();
-  return Boolean(titleTool && (!name || name === titleTool));
+  // TODO: legacy fallback: Devin ACP may omit the wrapper name and supplies `rawInput` as tool arguments; require an exact allowlisted title and reject conflicting server/tool fields.
+  return titleToolName;
 }
 
 export function classifyDevinNativeTool(toolCall: DevinNativeToolCall): DevinNativeToolCategory | undefined {
@@ -71,10 +91,6 @@ function isWebLabel(value: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function escapeRegExp(value: string): string {

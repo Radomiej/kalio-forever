@@ -229,7 +229,9 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Architecture finalization must treat missing or unknown CLI child status as unresolved; only completed/success/exited child statuses can count as CLI implementation proof.
 - Goal Master judge slots should use bounded synchronous review tools (`run_subagent`, reads, CLI status) rather than spawning durable background review agents.
 - Full-stack architecture validation must start the task from Kalio FE and verify Conversations/Execution Graph with Playwright; API polling is supporting evidence only.
-- For manual Kalio QA, load the `kalio-manual-qa` skill with `kalio-forever`; two-agent loop requests mean `Dev/Implementer <-> Goal Guard`, not Five Minds.
+- For manual Kalio QA, load the `kalio-manual-qa` skill with `kalio-forever`; drive web flows through Chrome or the in-app browser, not native Windows UI automation when a browser surface is available. Two-agent loop requests mean `Dev/Implementer <-> Goal Guard`, not Five Minds.
+- Before Playwright screenshot capture, inspect the live browser accessibility tree and derive selectors from observed controls; close the browser in `finally` so a failed locator cannot leave capture processes running.
+- When the user asks to test Devin through Kalio, acceptance requires a real Devin CLI/ACP run driven through Kalio's UI against the exact approved project; mock E2E validates Kalio only and cannot close Devin QA.
 - For important architecture/runtime changes, write or update a `docs/sessions/YYYY-MM-DD-*.md` note with what changed, verification evidence, live-readiness status, and remaining blockers before ending the work slice.
 - For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.
 - Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/sub-agentflow-target-architecture.md before implementing it.
@@ -252,6 +254,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
 - For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
+- For Devin ACP runs through Kalio, reconcile agent prose with `devin-cli-acp.mcp_bridge`, `mcp_approval`, `native_approval`, HITL, and runtime tool counts; `native_approval.decision=decline` alone does not prove a user rejected a tool.
 - Workspace package scripts invoked by root gates must call local tools directly and never invoke nested `pnpm`/`npm` orchestration; root workspace commands own package order and dependency resolution.
 - Runtime E2E for one workflow must use scoped session/children endpoints for that host session instead of fetching global `/api/sessions` and filtering the entire QA database.
 - Persisted chat-history fixtures must seed assistant messages with durable `turn_id` and `prompt_message_id`; chronological reconstruction is only a legacy fallback, not an E2E contract.

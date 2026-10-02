@@ -12,7 +12,7 @@ describe('mcp-projections', () => {
     expect(tool).toMatchObject({
       description: 'Search docs',
       parameters: { type: 'object' },
-      requiresConfirmation: false,
+      requiresConfirmation: true,
       serverKey: 'toml::docs',
       serverId: 'toml::docs',
       aliases: ['mcp_toml::docs_search', 'mcp_search'],

@@ -212,9 +212,13 @@ const agentStoreState = {
 };
 
 vi.mock('../../store/agentStore', () => ({
-  useAgentStore: Object.assign(() => agentStoreState, {
-    getState: () => agentStoreState,
-  }),
+  useAgentStore: Object.assign(
+    <T,>(selector?: (state: typeof agentStoreState) => T) => {
+      const state = agentStoreState;
+      return typeof selector === 'function' ? selector(state) : state;
+    },
+    { getState: () => agentStoreState },
+  ),
 }));
 
 // ── sessionStore mock ─────────────────────────────────────────────────────────
@@ -493,6 +497,7 @@ vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
   };
   agentStoreState.isStreaming = false;
   agentStoreState.streamingSessionId = null;
+  agentStoreState.pendingConfirmations = {};
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   agentStoreState.sessionStatusSnapshots = {};
@@ -1441,6 +1446,42 @@ describe('ChatInterface event wiring', () => {
         status: 'awaiting_confirmation',
       }),
     );
+  });
+
+  it('renders an ACP confirmation inline when its tool activity has no timeline tool item', async () => {
+    mockMessages = [makeMsg({
+      id: 'prompt-mcp',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'Write the App component',
+      createdAt: 1,
+    })];
+    getSessionMessages.mockReturnValue(mockMessages);
+    const view = await renderChatInterface();
+
+    agentStoreState.pendingConfirmations = {
+      'session-1': [{
+        requestId: 'req-mcp',
+        toolCallId: 'call-mcp',
+        sessionId: 'session-1',
+        toolName: 'fs_write',
+        args: { path: 'E:/Projekty/home-site/src/App.jsx' },
+        timeoutMs: 30000,
+      }],
+    };
+    agentStoreState.toolActivities = [{
+      callId: 'call-mcp',
+      requestId: 'req-mcp',
+      toolName: 'fs_write',
+      args: { path: 'E:/Projekty/home-site/src/App.jsx' },
+      sessionId: 'session-1',
+      status: 'awaiting_confirmation',
+      startedAt: 1,
+    }];
+    await rerenderChatInterface(view.rerender);
+
+    expect(screen.getByTestId('confirmation-confirm-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('confirmation-cancel-btn')).toBeInTheDocument();
   });
 
   it('REGRESSION: tool:arg_progress updates toolArgProgress in agentStore for the active session', async () => {

@@ -12,6 +12,7 @@ import {
 } from '../persona/persona-runtime-selection';
 import { apiFetch } from './persona-api';
 import { PersonaToolRow } from './PersonaToolRow';
+import { resolveDevinCliExecutionProfile } from '../../services/apiClient';
 
 const SYSTEM_PERSONA_IDS = new Set(['default', 'ra-apps']);
 
@@ -160,11 +161,21 @@ export function PersonaEditPanel({
         resolvedExecutionProfileId = profile.id;
       } else if (runtimeKind !== 'direct-llm') {
         const selected = findProfile(executionProfiles, form.executionProfileId);
-        const profile = selected && selected.kind === runtimeKind && selected.model === form.model
-          && (selected.reasoningEffort ?? '') === reasoningEffort
-          ? selected
-          : preferredProfile(executionProfiles, runtimeKind, form.model, reasoningEffort);
+        const profile = runtimeKind === 'devin-cli-acp'
+          ? selected?.kind === runtimeKind && selected.model === form.model
+            ? selected
+            : await resolveDevinCliExecutionProfile(form.model)
+          : selected && selected.kind === runtimeKind && selected.model === form.model
+            && (selected.reasoningEffort ?? '') === reasoningEffort
+            ? selected
+            : preferredProfile(executionProfiles, runtimeKind, form.model, reasoningEffort);
         resolvedExecutionProfileId = profile.id;
+        if (runtimeKind === 'devin-cli-acp') {
+          setExecutionProfiles((current) => current.some((candidate) => candidate.id === profile.id)
+            ? current
+            : [...current, profile]);
+          setField('executionProfileId', profile.id);
+        }
       } else if (resolvedExecutionProfileId && !findProfile(executionProfiles, resolvedExecutionProfileId)) {
         resolvedExecutionProfileId = undefined;
       }
@@ -279,10 +290,16 @@ export function PersonaEditPanel({
         }}
         onNativeModelChange={(nextModel) => {
           if (runtimeKind === 'direct-llm') return;
-          const profile = preferredProfile(executionProfiles, runtimeKind, nextModel);
           setField('model', nextModel);
-          setField('executionProfileId', profile.id);
-          setReasoningEffort(profile.reasoningEffort ?? '');
+          const profile = nativeModelOptions(executionProfiles, runtimeKind)
+            .find((option) => option.model === nextModel)?.profile;
+          if (profile) {
+            setField('executionProfileId', profile.id);
+            setReasoningEffort(profile.reasoningEffort ?? '');
+          } else {
+            setField('executionProfileId', undefined);
+            setReasoningEffort('');
+          }
         }}
         onReasoningChange={(nextReasoning) => {
           if (runtimeKind === 'direct-llm') return;

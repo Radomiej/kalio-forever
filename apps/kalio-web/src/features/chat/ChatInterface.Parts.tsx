@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSession, Persona, Project } from '@kalio/types';
+import type { ChatMessage, ChatSession, ExecutionProfile, Persona, Project } from '@kalio/types';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { mergeRuntimeSessionStatusSnapshots } from '../../store/agentRuntimeSelectors';
@@ -224,13 +224,16 @@ interface ChatWelcomeScreenProps {
   architectures: ArchitectSchema[];
   isStreaming: boolean;
   onArchitectureChange: (schemaId: string) => void;
-  onArchitectureRun: (content: string, schemaId: string) => void;
+  onArchitectureRun: (content: string, schemaId: string, executionProfileId?: string) => void;
   onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
   onProjectChange?: (project: Project) => void;
-  onSend: (content: string, personaId: string) => void;
+  onSend: (content: string, personaId: string, executionProfileId?: string) => void;
   personas: Persona[];
+  executionProfiles?: ExecutionProfile[];
+  selectedExecutionProfileId?: string;
+  onExecutionProfileChange?: (profileId: string) => void;
   projectPath: string;
   projectId?: string;
   selectedPersonaId: string;
@@ -250,6 +253,9 @@ export function ChatWelcomeScreen({
   onProjectChange,
   onSend,
   personas,
+  executionProfiles,
+  selectedExecutionProfileId,
+  onExecutionProfileChange,
   projectPath,
   projectId,
   selectedPersonaId,
@@ -272,15 +278,20 @@ export function ChatWelcomeScreen({
       onPersonaChange={onPersonaChange}
       onProjectPathChange={onProjectPathChange}
       onProjectChange={onProjectChange}
-      onRunPrompt={(content) => {
+      onRunPrompt={(content, executionProfileId) => {
         onDraftChange('');
         if (selectedArchitectureId === 'single-chat') {
-          onSend(content, selectedPersonaId);
+          if (executionProfileId === undefined) onSend(content, selectedPersonaId);
+          else onSend(content, selectedPersonaId, executionProfileId);
           return;
         }
-        onArchitectureRun(content, selectedArchitectureId);
+        if (executionProfileId === undefined) onArchitectureRun(content, selectedArchitectureId);
+        else onArchitectureRun(content, selectedArchitectureId, executionProfileId);
       }}
       personas={personas}
+      executionProfiles={executionProfiles}
+      selectedExecutionProfileId={selectedExecutionProfileId}
+      onExecutionProfileChange={onExecutionProfileChange}
       projectPath={projectPath}
       projectId={projectId}
       selectedPersonaId={selectedPersonaId}

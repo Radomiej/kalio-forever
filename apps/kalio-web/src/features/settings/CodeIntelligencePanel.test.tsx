@@ -28,8 +28,8 @@ describe('CodeIntelligencePanel', () => {
   it('shows detected Bridge and disabled sandbox state', async () => {
     render(<CodeIntelligencePanel />);
     expect(await screen.findByText('VS Code')).toBeInTheDocument();
-    expect(screen.getByText('0.4.7')).toBeInTheDocument();
-    expect(screen.getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Compatible · v0.4.7')).toBeInTheDocument();
+    expect(screen.getByText('Unsupported')).toBeInTheDocument();
     expect(screen.getByText('Kalio')).toBeInTheDocument();
   });
 

@@ -5,6 +5,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolMeta, ToolResult } from '@kalio/types';
 import { ToolDispatchService } from '../chat/tool-dispatch.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import { TurnState } from '../chat/turn-state';
 import type { StreamContext } from '../chat/interfaces/stream-context.interface';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -65,6 +66,7 @@ export class KalioMcpBridgeService {
     private readonly toolDispatch: ToolDispatchService,
     private readonly tokenService: KalioMcpBridgeTokenService,
     private readonly contextRegistry: KalioMcpBridgeContextRegistry,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   async handleRequest(
@@ -186,6 +188,9 @@ export class KalioMcpBridgeService {
       const callId = `mcp-${connection.sessionId ?? connection.id}-${String(extra.requestId)}`;
       const args = isRecord(request.params.arguments) ? request.params.arguments : {};
       const context = this.activeContext(connection);
+      const emit: StreamContext['emit'] = (event, data) => {
+        this.chatGateway.emitSessionEvent(context.sessionId, event, data);
+      };
       const streamContext: StreamContext = {
         sessionId: context.sessionId,
         turnId: context.turnId,
@@ -194,11 +199,12 @@ export class KalioMcpBridgeService {
         messageId: callId,
         abortSignal: extra.signal,
         state: new TurnState(),
-        emit: (() => undefined) as StreamContext['emit'],
+        emit,
         runtimeKind: 'chat',
       };
 
       const result = await this.toolDispatch.dispatch(callId, toolName, args, streamContext, visible);
+      emit('tool:result', result);
       return toMcpResult(result);
     });
 

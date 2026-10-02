@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { AddForm } from './llm-panel.types';
 import { ProviderSettingsSection } from './ProviderSettingsSection';
 
@@ -13,7 +13,7 @@ const EMPTY_FORM: AddForm = {
 };
 
 describe('ProviderSettingsSection', () => {
-  it('shows the env fallback provider and default model in the visible provider list', () => {
+  it('keeps the QA mock fallback out of the selectable provider list', () => {
     const onUseEnvFallback = vi.fn();
 
     render(
@@ -24,9 +24,9 @@ describe('ProviderSettingsSection', () => {
         loading={false}
         showEnvFallback={true}
         envFallbackActive={true}
-        envFallbackProviderId="env"
-        envFallbackProviderLabel="OpenAI"
-        envFallbackModel="gpt-4o-mini"
+        envFallbackProviderId="mock"
+        envFallbackProviderLabel="Mock"
+        envFallbackModel="mock"
         showForm={false}
         form={EMPTY_FORM}
         allowsKeylessAuth={false}
@@ -49,14 +49,45 @@ describe('ProviderSettingsSection', () => {
       />,
     );
 
-    expect(screen.getByTestId('provider-row-env')).toHaveTextContent('Environment fallback');
-    expect(screen.getByTestId('provider-row-env')).toHaveTextContent('env');
-    expect(screen.getByTestId('provider-row-env')).toHaveTextContent('OpenAI');
-    expect(screen.getByTestId('provider-row-env')).toHaveTextContent(/Default model:\s*gpt-4o-mini/);
-    expect(screen.getByText(/Runtime falls back to the backend environment/i)).toBeInTheDocument();
+    expect(screen.getByTestId('provider-env-mock')).toHaveTextContent(/test-only fallback/i);
+    expect(screen.queryByTestId('provider-row-env')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('provider-activate-env')).not.toBeInTheDocument();
+    expect(onUseEnvFallback).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(screen.getByTestId('provider-activate-env'));
+  it('uses clear primary and cancel button hierarchy for adding a provider', () => {
+    render(
+      <ProviderSettingsSection
+        credentials={[]}
+        activeId={null}
+        syncing={null}
+        loading={false}
+        showEnvFallback={false}
+        envFallbackActive={false}
+        envFallbackProviderId="env"
+        showForm={true}
+        form={EMPTY_FORM}
+        allowsKeylessAuth={false}
+        normalizedApiKey={undefined}
+        testState="idle"
+        testError={null}
+        emptyStateMessage="No providers configured."
+        onActivate={vi.fn()}
+        onRemove={vi.fn()}
+        onUseEnvFallback={vi.fn()}
+        onShowAdd={vi.fn()}
+        onCancelAdd={vi.fn()}
+        onSubmit={vi.fn()}
+        onProviderTypeChange={vi.fn()}
+        onNameChange={vi.fn()}
+        onApiKeyChange={vi.fn()}
+        onBaseUrlChange={vi.fn()}
+        onModelChange={vi.fn()}
+        onTest={vi.fn()}
+      />,
+    );
 
-    expect(onUseEnvFallback).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Add Provider' })).toHaveClass('btn-primary');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('btn-error');
   });
 });

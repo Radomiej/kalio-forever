@@ -31,6 +31,16 @@ describe('DevinCliIntegrationController', () => {
     expect(result.mcpBridge).not.toHaveProperty('token');
   });
 
+  it('uses cached status by default and probes Devin only for refresh=true', async () => {
+    const { controller, registry } = createController();
+
+    await controller.status();
+    expect(registry.getStatus).toHaveBeenLastCalledWith(false);
+
+    await controller.status('true');
+    expect(registry.getStatus).toHaveBeenLastCalledWith(true);
+  });
+
   it('generates a Settings token and resets active Devin hosts', async () => {
     const { controller, tokenService, registry } = createController();
     await controller.updateSettings({ generateMcpBridgeToken: true });

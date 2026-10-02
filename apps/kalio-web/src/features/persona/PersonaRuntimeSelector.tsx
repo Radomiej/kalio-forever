@@ -1,4 +1,5 @@
 import type { Credential, ExecutionProfile } from '@kalio/types';
+import { DevinCliModelSelector } from './DevinCliModelSelector';
 import {
   formatCredentialOption,
   nativeModelOptions,
@@ -56,7 +57,7 @@ export function PersonaRuntimeSelector({
   return (
     <div className="form-control gap-2 md:col-span-2" data-testid="persona-runtime-selector">
       <label className="label py-0" htmlFor="persona-runtime-kind-select">
-        <span className="label-text text-xs">Execution source</span>
+        <span className="label-text text-xs">Recommended provider and model</span>
       </label>
       <select
         id="persona-runtime-kind-select"
@@ -116,7 +117,7 @@ export function PersonaRuntimeSelector({
           <p className="text-xs text-base-content/45">
             {selectedCredential
               ? `${providerLabel(selectedCredential.provider)} is selected. Model discovery is scoped to this connection.`
-              : 'Uses the active provider from Settings. Choose a saved connection to bind this persona to one provider.'}
+              : 'This is the persona recommendation. The user can choose another provider and model when starting a chat.'}
           </p>
         </>
       ) : runtimeKind === 'devin-api' ? (
@@ -125,23 +126,7 @@ export function PersonaRuntimeSelector({
         </p>
       ) : runtimeKind === 'devin-cli-acp' ? (
         <>
-          <label className="label py-0" htmlFor="persona-model-input">
-            <span className="label-text text-xs">Model</span>
-          </label>
-          <select
-            id="persona-model-input"
-            data-testid="persona-model-input"
-            className="select select-bordered select-sm w-full font-mono"
-            value={model}
-            disabled={profilesLoading || nativeOptions.length === 0}
-            onChange={(event) => onNativeModelChange(event.target.value)}
-          >
-            {nativeOptions.length === 0 ? (
-              <option value="">No enabled model profiles</option>
-            ) : nativeOptions.map((option) => (
-              <option key={option.model} value={option.model}>{option.model}</option>
-            ))}
-          </select>
+          <DevinCliModelSelector profiles={profiles} model={model} onChange={onNativeModelChange} />
           <p className="text-xs text-base-content/45" data-testid="persona-devin-cli-runtime-summary">
             Devin runs on this host through ACP. Kalio tools stay separate; host-native actions remain behind Devin permission requests.
           </p>
@@ -181,7 +166,7 @@ export function PersonaRuntimeSelector({
               : reasoningOptions.map((effort) => <option key={effort} value={effort}>{effort || 'default'}</option>)}
           </select>
           <p className="text-xs text-base-content/45">
-            Model and reasoning are backed by an enabled {RUNTIME_KIND_LABELS[runtimeKind]} execution profile.
+            Recommended model and reasoning use an enabled {RUNTIME_KIND_LABELS[runtimeKind]} execution profile. The user can override the provider/model in a new chat.
           </p>
         </>
       )}

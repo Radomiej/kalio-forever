@@ -16,6 +16,18 @@ const profile = (id: string, model: string, authProfileId = 'chatgpt-default'): 
   updatedAt: 1,
 });
 
+const claudeProfile = (id: string): ExecutionProfile => ({
+  id,
+  name: id,
+  kind: 'claude-agent-sdk',
+  model: 'claude-sonnet-4',
+  approvalMode: 'kalio_strict',
+  enabled: true,
+  capabilitiesVersion: '1',
+  createdAt: 1,
+  updatedAt: 1,
+});
+
 const status = (authProfileId: string): CodexAppServerHostStatus => ({
   authProfileId,
   status: 'offline',
@@ -78,6 +90,36 @@ describe('NativeCliIntegrationController', () => {
     });
     expect(host.getConnection).toHaveBeenCalledWith('chatgpt-default', 'settings-check');
     expect(host.reset).toHaveBeenCalledWith('chatgpt-default');
+  });
+
+  it('uses cached Claude status for list polling and refreshes it once on explicit check', async () => {
+    const policy = { get: vi.fn(async () => ({ inheritConfiguredMcp: false, source: 'default' as const })) };
+    const host = { getStatus: vi.fn(() => status('claude-login')) };
+    const profiles = { list: vi.fn(async () => [claudeProfile('claude-login')]) };
+    const freshProbe = {
+      id: 'claude',
+      displayName: 'Claude Code',
+      installUrl: 'https://example.invalid/claude',
+      available: true,
+      version: '1.0.0',
+      supportsModelSelection: true,
+    };
+    const cliAgents = {
+      probe: vi.fn(async () => ({ available: true, version: '1.0.0' })),
+      refreshProbe: vi.fn(async () => freshProbe),
+    };
+    const controller = new NativeCliIntegrationController(profiles as never, host as never, policy as never, cliAgents as never);
+
+    await expect(controller.list()).resolves.toMatchObject([
+      { status: 'offline', connected: false, probeChecked: false },
+    ]);
+    expect(cliAgents.probe).not.toHaveBeenCalled();
+
+    await expect(controller.check('claude-login')).resolves.toMatchObject({
+      status: 'online', connected: true, probeChecked: true, processEpoch: '1.0.0',
+    });
+    expect(cliAgents.refreshProbe).toHaveBeenCalledOnce();
+    expect(cliAgents.probe).not.toHaveBeenCalled();
   });
 
   it('rejects malformed settings and unknown integrations', async () => {

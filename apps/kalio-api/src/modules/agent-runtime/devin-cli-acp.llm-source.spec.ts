@@ -40,7 +40,7 @@ describe('DevinCliAcpLLMSource', () => {
     const source = new DevinCliAcpLLMSource(
       registry as never,
       { get: vi.fn(async () => nativeToolsPolicy) } as never,
-      { getToken: vi.fn(async () => process.env['KALIO_MCP_BRIDGE_TOKEN'] ?? null) } as never,
+      { getToken: vi.fn(async () => 'test-token') } as never,
       bridgeContext as never,
     );
     const profile: ExecutionProfile = {
@@ -107,6 +107,49 @@ describe('DevinCliAcpLLMSource', () => {
     expect(receivedPrompt).toContain('USER:\nnew');
   });
 
+  it('does not advertise or accept a Kalio MCP bridge when its token is missing', async () => {
+    let receivedPrompt = '';
+    let decision: string | undefined;
+    const host = {
+      ensureSession: vi.fn(async () => ({ sessionId: 'acp-session-no-bridge', cwd: 'C:\\fixture', processEpoch: 'epoch-no-bridge', resumed: false })),
+      supportsHttpMcp: vi.fn(async () => true),
+      prompt: vi.fn(async (_id: string, text: string, input: DevinAcpPromptInput) => {
+        receivedPrompt = text;
+        decision = await input.onPermission({
+          sessionId: 'acp-session-no-bridge',
+          toolCall: {
+            toolCallId: 'functions.mcp_call_tool:1',
+            name: 'mcp_call_tool',
+            rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
+          },
+          options: [],
+        });
+        return 'end_turn' as const;
+      }),
+    };
+    const source = new DevinCliAcpLLMSource(
+      { get: vi.fn(async () => host) } as never,
+      { get: vi.fn(async () => nativeToolsPolicy) } as never,
+      { getToken: vi.fn(async () => null) } as never,
+      { set: vi.fn(), clear: vi.fn() } as never,
+    );
+
+    await collect(source.stream({
+      messages: [{ role: 'user', content: 'Create a site.' }],
+      tools: [{ name: 'fs_list', description: 'list files', parameters: { type: 'object' }, requiresConfirmation: false }],
+      sessionId: 'session-no-bridge', messageId: 'message-no-bridge',
+      executionProfile: {
+        id: 'devin-local-swe-2-high', name: 'Devin SWE-2 High', kind: 'devin-cli-acp', model: 'swe-2-high',
+        approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
+      },
+      cwd: 'C:\\fixture',
+    } as unknown as LLMSourceParams));
+
+    expect(receivedPrompt).toContain('Kalio MCP bridge is disabled');
+    expect(receivedPrompt).not.toContain('server `kalio-runtime`');
+    expect(decision).toBe('decline');
+  });
+
   it('accepts the Kalio MCP wrapper without enabling native tools', async () => {
     let decision: string | undefined;
     const audits: AuditEvent[] = [];
@@ -121,29 +164,61 @@ describe('DevinCliAcpLLMSource', () => {
         input.onToolActivity?.({
           toolCallId: 'functions.mcp_call_tool:1',
           title: 'Calling fs_list from kalio-runtime',
+          rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
+          status: 'in_progress',
+        });
+        input.onToolActivity?.({
+          toolCallId: 'functions.mcp_call_tool:1',
+          kind: undefined,
+          name: undefined,
+          title: undefined,
+          rawInput: undefined,
           status: 'in_progress',
         });
         const request = {
           sessionId: 'acp-session-mcp',
           toolCall: {
             toolCallId: 'functions.mcp_call_tool:1',
+            name: null,
+            title: 'Calling fs_list from kalio-runtime',
           },
           options: [{ optionId: 'allow_once', kind: 'allow_once', name: 'Allow once' }],
         } as Parameters<DevinAcpPromptInput['onPermission']>[0];
         decision = await input.onPermission(request);
+        const nullInputDecision = await input.onPermission({
+          ...request,
+          toolCall: { ...request.toolCall, rawInput: null },
+        });
+        expect(nullInputDecision).toBe('accept');
+        const toolArgumentsDecision = await input.onPermission({
+          ...request,
+          toolCall: { ...request.toolCall, rawInput: { path: 'E:/Projekty/home-site' } },
+        });
+        expect(toolArgumentsDecision).toBe('accept');
+        input.onToolActivity?.({
+          toolCallId: 'ordinary-tool-2',
+          title: 'Calling mcp_call_tool from kalio-runtime',
+          rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
+        });
+        const titleSpoofDecision = await input.onPermission({
+          ...request,
+          toolCall: { toolCallId: 'ordinary-tool-2' },
+        });
+        expect(titleSpoofDecision).toBe('decline');
         return 'end_turn' as const;
       }),
     };
     const source = new DevinCliAcpLLMSource(
       { get: vi.fn(async () => host) } as never,
       { get: vi.fn(async () => nativeToolsPolicy) } as never,
-      { getToken: vi.fn(async () => null) } as never,
+      { getToken: vi.fn(async () => 'test-token') } as never,
       { set: vi.fn(), clear: vi.fn() } as never,
     );
 
     await collect(source.stream({
       messages: [{ role: 'user', content: 'Use Kalio.' }],
-      tools: [], sessionId: 'session-mcp', messageId: 'message-mcp', executionProfile: profile, cwd: 'C:\\fixture',
+      tools: [{ name: 'fs_list', description: 'list files', parameters: { type: 'object' }, requiresConfirmation: false }],
+      sessionId: 'session-mcp', messageId: 'message-mcp', executionProfile: profile, cwd: 'C:\\fixture',
       onExternalAudit: vi.fn(async (event) => { audits.push(event); }),
     } as unknown as LLMSourceParams));
 

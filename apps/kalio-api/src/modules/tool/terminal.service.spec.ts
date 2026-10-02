@@ -50,11 +50,13 @@ function makeAllowed(allowed = true): AllowedPathsService {
 describe('TerminalService', () => {
   let service: TerminalService;
   let proc: MockProc;
+  let cmdAudit: { recordInvocation: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     proc = makeProc();
     mockSpawnFn.mockReturnValue(proc);
-    service = new TerminalService(makeAllowed());
+    cmdAudit = { recordInvocation: vi.fn().mockResolvedValue(undefined) };
+    service = Reflect.construct(TerminalService, [makeAllowed(), cmdAudit]) as TerminalService;
   });
 
   afterEach(() => {
@@ -65,6 +67,20 @@ describe('TerminalService', () => {
   // ── spawn() ──────────────────────────────────────────────────────────────
 
   describe('spawn()', () => {
+    it('audits the shell-backed terminal invocation with the originating tool IDs', async () => {
+      const auditContext = { sessionId: 'session-1', turnId: 'turn-1', callId: 'call-1' };
+
+      await service.spawn('npm', ['run', 'dev'], '/project', false, auditContext);
+
+      expect(cmdAudit.recordInvocation).toHaveBeenCalledExactlyOnceWith({
+        command: 'npm',
+        shell: process.platform === 'win32',
+        source: 'terminal.spawn',
+        launcher: 'spawn',
+        ...auditContext,
+      });
+    });
+
     it('returns a running session with the correct pid and id', async () => {
       const session = await service.spawn('node', ['app.js'], '/project');
       expect(session.status).toBe('running');

@@ -104,10 +104,9 @@ export class ToolDispatchService {
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {
-          // Check requiresConfirmation for MCP tools the same way native tools do
-          const mcpMeta = this.mcpService.getToolByName(toolName);
-          if (requestConfirmation && mcpMeta?.requiresConfirmation) {
-            const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
+          // External MCP calls always require a human, regardless of global policy or tool metadata.
+          if (requestConfirmation) {
+            const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx, true);
             if (!approval.approved) {
               return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
             }

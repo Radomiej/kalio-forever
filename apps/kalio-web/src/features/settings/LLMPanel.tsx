@@ -425,9 +425,6 @@ export function LLMPanel({ mode = 'full' }: { mode?: 'full' | 'providers' | 'run
 
       {mode !== 'runtime' ? (
         <LLMProviderHealthCard
-          activeProviderLabel={derived.activeProviderLabel}
-          activeProviderModel={derived.activeProviderModel}
-          activeProviderSource={derived.activeProviderSource}
           testState={testState}
           testError={testError}
           showWindowsLocalHint={derived.showWindowsLocalHint}
