@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { SessionRuntimeContext, SubagentCopiedFile } from '@kalio/types';
+import type { SubagentCopiedFile } from '@kalio/types';
 import type { SubagentRuntimePort, RunSubagentRequest, RunSubagentResult } from '../tool/subagent-runtime.port';
 import { SessionManagerService } from './session-manager.service';
 import { SessionsService } from './sessions.service';
@@ -166,7 +166,13 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     const objectiveWithAttachmentHint = `${buildAttachmentHint(effectiveAttachmentPaths)}${request.objective}`;
 
     const emit = request.emit;
-    let promptMessageId: string | undefined;
+    const promptMessage = await this.sessionManager.persistUserMessage(
+      childSessionId,
+      objectiveWithAttachmentHint,
+      undefined,
+      { turnId },
+    );
+    const promptMessageId = promptMessage?.id;
     let hadContent = false;
     let streamedText = '';
     const trackingEmit = createSubagentTrackingEmit({
@@ -177,13 +183,6 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       promptMessageId: () => promptMessageId,
       onChunk: (delta) => { hadContent = true; streamedText += delta; },
     });
-    const promptMessage = await this.sessionManager.persistUserMessage(
-      childSessionId,
-      objectiveWithAttachmentHint,
-      undefined,
-      { turnId },
-    );
-    promptMessageId = promptMessage?.id;
     trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, promptMessageId, agentRun });
     if (!requestedChildSessionId) {
       trackingEmit?.('session:created', childSession);

@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createSdkMcpServer, query, tool, type AnyZodRawShape, type SDKMessage, type SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkMcpServer, query, tool, type AnyZodRawShape, type SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import type { ExecutionProfile, ToolMeta, ToolResult } from '@kalio/types';
+import type { ToolMeta, ToolResult } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
