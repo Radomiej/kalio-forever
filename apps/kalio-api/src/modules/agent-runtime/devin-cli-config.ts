@@ -34,8 +34,14 @@ export async function createDevinCliConfig(
   const mcpConfig = Object.fromEntries(mcpServers.map((server) => [server.name, serializeMcpServer(server)]));
   const path = join(configDirectory, 'config.local.json');
   const dedicatedMcpPath = join(configDirectory, 'mcp_config.local.json');
+  // The Kalio host must not import another client's MCP/rules/skills by default.
+  // Native user-wide Devin MCP entries are a separate inheritance boundary.
+  const read_config_from = {
+    cursor: false, windsurf: false, claude: false,
+    copilot: false, opencode: false, zed: false,
+  };
   await Promise.all([
-    writeFile(path, JSON.stringify({ version: 1, agent: { model }, mcpServers: mcpConfig }, null, 2), { encoding: 'utf8', mode: 0o600 }),
+    writeFile(path, JSON.stringify({ version: 1, agent: { model }, read_config_from, mcpServers: mcpConfig }, null, 2), { encoding: 'utf8', mode: 0o600 }),
     writeFile(dedicatedMcpPath, JSON.stringify({ mcpServers: mcpConfig }, null, 2), { encoding: 'utf8', mode: 0o600 }),
   ]);
   return {

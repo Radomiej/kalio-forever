@@ -17,9 +17,14 @@ describe('Devin CLI ephemeral config', () => {
     try {
       const parsed = JSON.parse(await readFile(config.path, 'utf8')) as {
         agent?: { model?: string };
+        read_config_from?: Record<string, boolean>;
         mcpServers?: Record<string, { transport?: string; command?: string; args?: string[]; env?: Record<string, string> }>;
       };
       expect(parsed.agent?.model).toBe('glm-5-2');
+      expect(parsed.read_config_from).toEqual({
+        cursor: false, windsurf: false, claude: false,
+        copilot: false, opencode: false, zed: false,
+      });
       expect(parsed.mcpServers?.['kalio-runtime']).toEqual({
         command: process.execPath,
         args: ['kalio-mcp-bridge-stdio.js'],
