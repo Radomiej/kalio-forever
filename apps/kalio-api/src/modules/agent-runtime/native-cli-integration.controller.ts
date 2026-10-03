@@ -4,6 +4,7 @@ import { CLIAgentService } from '../cli-agent/cli-agent.service';
 import { CodexAppServerHost, type CodexAppServerHostStatus } from './codex-app-server.host';
 import { CodexMcpPolicyService, type CodexMcpPolicySettings } from './codex-mcp-policy.service';
 import { ExecutionProfileService } from './execution-profile.service';
+import { readCodexModels } from './codex-model-catalog';
 
 export interface NativeCliIntegrationStatus extends CodexAppServerHostStatus {
   id: string;
@@ -23,6 +24,8 @@ interface UpdateCodexMcpSettingsDto {
 @Controller('runtime/native-cli-integrations')
 export class NativeCliIntegrationController {
   private claudeProbe?: CLIAgentAdapterInfo;
+  private readonly modelCatalogs = new Map<string, { processEpoch: string; models: string[]; checkedAt: number }>();
+  private readonly modelChecks = new Map<string, { processEpoch: string; promise: Promise<string[]> }>();
 
   constructor(
     private readonly profiles: ExecutionProfileService,
@@ -53,6 +56,39 @@ export class NativeCliIntegrationController {
     const status = await this.findStatus(authProfileId);
     if (status.provider === 'codex') await this.codexHost.reset(authProfileId);
     return this.findStatus(authProfileId);
+  }
+
+  @Get(':authProfileId/models')
+  async getModels(@Param('authProfileId') authProfileId: string) {
+    const status = await this.findStatus(authProfileId);
+    const catalog = this.modelCatalogs.get(authProfileId);
+    // Polling must never start a CLI process, and a restarted host invalidates its catalog.
+    return status.connected && catalog?.processEpoch === status.processEpoch ? catalog : null;
+  }
+
+  @Post(':authProfileId/models/check')
+  async checkModels(@Param('authProfileId') authProfileId: string) {
+    const status = await this.findStatus(authProfileId);
+    if (status.provider !== 'codex') throw new BadRequestException('Model discovery requires a Codex integration.');
+    const connection = await this.codexHost.getConnection(authProfileId, 'model-catalog');
+    let check = this.modelChecks.get(authProfileId);
+    if (check?.processEpoch !== connection.processEpoch) {
+      this.modelCatalogs.delete(authProfileId);
+      check = { processEpoch: connection.processEpoch, promise: readCodexModels(connection) };
+      this.modelChecks.set(authProfileId, check);
+    }
+    try {
+      const models = await check.promise;
+      const current = this.codexHost.getStatus(authProfileId);
+      if (!current.connected || current.processEpoch !== connection.processEpoch) {
+        throw new BadRequestException('Codex host changed during model discovery; recheck the integration.');
+      }
+      const catalog = { processEpoch: connection.processEpoch, models, checkedAt: Date.now() };
+      this.modelCatalogs.set(authProfileId, catalog);
+      return catalog;
+    } finally {
+      if (this.modelChecks.get(authProfileId) === check) this.modelChecks.delete(authProfileId);
+    }
   }
 
   @Get(':authProfileId/settings')
