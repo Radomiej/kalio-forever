@@ -41,7 +41,8 @@ export async function createDevinCliConfig(
   return {
     path,
     cwd,
-    cleanup: () => rm(directory, { recursive: true, force: true }),
+    // Windows can briefly retain cwd/file handles even after the child closes.
+    cleanup: () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
   };
 }
 

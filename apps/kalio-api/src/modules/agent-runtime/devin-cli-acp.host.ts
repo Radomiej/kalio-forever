@@ -4,6 +4,7 @@ import { Readable, Transform, Writable } from 'node:stream';
 import { isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
 import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-config';
+import { stopDevinChild } from './devin-cli-process-shutdown';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
 import { DevinCliProbeService, type DevinCliProbeStatus } from './devin-cli-probe.service';
 import {
@@ -93,6 +94,7 @@ export class DevinAcpHost {
   private starting?: Promise<void>;
   private config?: DevinCliConfigHandle;
   private closing = false;
+  private closePromise?: Promise<void>;
 
   constructor(readonly model: string) {}
 
@@ -151,21 +153,40 @@ export class DevinAcpHost {
     return run;
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (!this.closePromise) {
+      this.closePromise = this.closeNow().finally(() => { this.closePromise = undefined; });
+    }
+    return this.closePromise;
+  }
+
+  private async closeNow(): Promise<void> {
     this.closing = true;
     this.status = 'offline';
+    const child = this.child;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      await stopDevinChild(child);
+    }
     this.connection?.close();
-    this.child?.kill();
+    if (this.starting) {
+      try {
+        await this.starting;
+      } catch (error) {
+        this.logger.debug(`Devin ACP startup stopped during shutdown: ${asError(error, 'Startup interrupted.').message}`);
+      }
+    }
+    this.status = 'offline';
     this.connection = undefined;
     this.child = undefined;
     this.starting = undefined;
     this.sessions.clear();
     const config = this.config;
-    this.config = undefined;
     await config?.cleanup();
+    this.config = undefined;
   }
 
   private async ensureConnection(mcpServers: readonly McpServer[] = []): Promise<ClientConnection> {
+    if (this.closing) throw new Error('Devin ACP host is closing; acquire a new host after reset.');
     if (this.connection && !this.connection.signal.aborted) return this.connection;
     if (this.starting) {
       await this.starting;
@@ -185,6 +206,9 @@ export class DevinAcpHost {
   private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
     const config = mcpServers.length > 0 ? await createDevinCliConfig(this.model, mcpServers) : undefined;
     this.config = config;
+    if (this.closing) {
+      throw new Error('Devin ACP host was closed during startup.');
+    }
     // Devin 3000.3+ loads project MCP servers from the dedicated
     // `.devin/mcp_config.local.json`; passing the legacy `--config` file
     // bypasses that loader, so keep the ephemeral project overlay discoverable
@@ -347,10 +371,12 @@ export class DevinAcpHost {
 @Injectable()
 export class DevinAcpHostRegistry implements OnModuleDestroy {
   private readonly hosts = new Map<string, DevinAcpHost>();
+  private resetPromise?: Promise<void>;
 
   constructor(private readonly probes: DevinCliProbeService) {}
 
   async get(model: string, scopeKey?: string): Promise<DevinAcpHost> {
+    if (this.resetPromise) await this.resetPromise;
     const normalizedModel = model.trim();
     if (!normalizedModel) throw new Error('Devin CLI model is required.');
     const key = scopeKey?.trim() ? `${normalizedModel}\u0000${scopeKey.trim()}` : normalizedModel;
@@ -361,10 +387,20 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
     return host;
   }
 
-  async reset(): Promise<void> {
-    const hosts = [...this.hosts.values()];
-    this.hosts.clear();
-    await Promise.all(hosts.map((host) => host.close()));
+  reset(): Promise<void> {
+    if (!this.resetPromise) {
+      this.resetPromise = this.resetNow().finally(() => { this.resetPromise = undefined; });
+    }
+    return this.resetPromise;
+  }
+
+  private async resetNow(): Promise<void> {
+    const results = await Promise.allSettled([...this.hosts.entries()].map(async ([key, host]) => {
+      await host.close();
+      if (this.hosts.get(key) === host) this.hosts.delete(key);
+    }));
+    const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (errors.length) throw new AggregateError(errors.map((result) => result.reason), 'Devin ACP reset failed.');
   }
 
   async getStatus(refresh = false): Promise<DevinCliIntegrationStatus> {
@@ -386,6 +422,7 @@ function normalizeCwd(cwd: string): string {
   if (!value || !isAbsolute(value)) throw new Error('Devin ACP requires an absolute working directory.');
   return value;
 }
+
 
 function createNdjsonFrameGuard(): Transform {
   let lineBytes = 0;
