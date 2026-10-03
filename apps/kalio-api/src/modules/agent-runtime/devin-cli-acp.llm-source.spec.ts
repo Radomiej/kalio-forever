@@ -5,6 +5,7 @@ import type { LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import { DevinCliAcpLLMSource } from './devin-cli-acp.llm-source';
 import type { DevinAcpPromptInput } from './devin-cli-acp.host';
 import type { DevinNativeToolsPolicy } from './devin-native-tools';
+import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 
 async function collect(stream: AsyncIterable<InternalLLMChunk>): Promise<InternalLLMChunk[]> {
   const chunks: InternalLLMChunk[] = [];
@@ -15,6 +16,38 @@ async function collect(stream: AsyncIterable<InternalLLMChunk>): Promise<Interna
 describe('DevinCliAcpLLMSource', () => {
   const nativeToolsPolicy: DevinNativeToolsPolicy = { filesystem: false, web: false, terminal: false, source: 'default' };
   type AuditEvent = { eventName?: string; data?: Record<string, unknown> };
+
+  it.each([
+    { tool: true, before: ['Checking output.'], after: ['## Preview', ' ready'], expected: 'Checking output.\n\n## Preview ready' },
+    { tool: true, before: ['Checking output.\n\n'], after: ['## Preview'], expected: 'Checking output.\n\n## Preview' },
+    { tool: true, before: ['Checking output.\n'], after: ['\n## Preview'], expected: 'Checking output.\n\n## Preview' },
+    { tool: true, before: [], after: ['## Preview'], expected: '## Preview' },
+    { tool: false, before: ['```ts\nconst ', 'value = '], after: ['1;\n', '```'], expected: '```ts\nconst value = 1;\n```' },
+  ])('preserves Markdown boundaries without splitting token chunks: $expected', async ({ tool, before, after, expected }) => {
+    const host = {
+      ensureSession: async () => ({ sessionId: 'acp', cwd: 'C:\\fixture', processEpoch: 'epoch', resumed: false }),
+      prompt: async (_id: string, _text: string, input: DevinAcpPromptInput) => {
+        before.forEach(input.onText);
+        if (tool) input.onToolActivity?.({ toolCallId: 'output', kind: 'execute', title: 'Read output', status: 'completed' });
+        after.forEach((text, index) => {
+          input.onText(text);
+          if (tool && index === 0) input.onToolActivity?.({ toolCallId: 'output', kind: 'execute', title: 'Read output', status: 'completed' });
+        });
+        return 'end_turn' as const;
+      },
+    };
+    const source = new DevinCliAcpLLMSource(
+      { get: async () => host } as never,
+      { get: async () => nativeToolsPolicy } as never,
+      { getToken: async () => null } as never,
+      new KalioMcpBridgeContextRegistry(),
+    );
+    const chunks = await collect(source.stream({
+      messages: [{ role: 'user', content: 'Read output' }], tools: [], sessionId: 'chat', messageId: 'answer',
+      executionProfile: { id: 'devin', name: 'Devin', kind: 'devin-cli-acp', model: 'swe-2', approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0 },
+    }));
+    expect(chunks.filter((chunk) => chunk.type === 'text_delta').map((chunk) => chunk.delta).join('')).toBe(expected);
+  });
 
   it('binds a new ACP session, streams text/thoughts, and scopes Kalio tools through MCP', async () => {
     const prompt = vi.fn(async (_sessionId: string, text: string, input: { onText: (text: string) => void; onThought: (text: string) => void; onToolActivity?: (activity: { toolCallId: string; kind: string; title: string; status: string }) => void }) => {

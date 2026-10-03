@@ -90,6 +90,8 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       const queue: InternalLLMChunk[] = [];
       const waiters: Array<() => void> = [];
       const toolActivities = new Map<string, DevinAcpToolActivity>();
+      let textTail = '';
+      let textAfterTool = false;
       let finished = false;
       let streamError: Error | undefined;
       const enqueue = (chunk: InternalLLMChunk): void => {
@@ -109,9 +111,21 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           turnId: params.runId,
           promptMessageId: params.messageId,
         }),
-        onText: (text) => enqueue({ type: 'text_delta', delta: text }),
+        onText: (text) => {
+          if (!text) return;
+          if (textAfterTool && textTail) {
+            const trailing = textTail.match(/\n*$/)?.[0].length ?? 0;
+            const leading = text.match(/^\n*/)?.[0].length ?? 0;
+            const separator = '\n'.repeat(Math.max(0, 2 - trailing - leading));
+            if (separator) enqueue({ type: 'text_delta', delta: separator });
+          }
+          textAfterTool = false;
+          textTail = (textTail + text).slice(-2);
+          enqueue({ type: 'text_delta', delta: text });
+        },
         onThought: (text) => enqueue({ type: 'thinking_delta', delta: text }),
         onToolActivity: (activity) => {
+          if (!toolActivities.has(activity.toolCallId)) textAfterTool = true;
           toolActivities.set(activity.toolCallId, mergeToolActivity(toolActivities.get(activity.toolCallId), activity));
           void this.audit(params, {
             eventName: 'devin-cli-acp.tool',
