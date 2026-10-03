@@ -115,6 +115,29 @@ export class TerminalService implements OnModuleDestroy {
     return true;
   }
 
+  /** Observe completion without starting, terminating or otherwise changing the process. */
+  observeUntilExit(id: string, waitMs: number): Promise<TerminalSession | null> {
+    const session = this.sessions.get(id);
+    if (!session || session.meta.status !== 'running' || waitMs === 0) {
+      return Promise.resolve(this.get(id));
+    }
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        session.proc.off('close', finish);
+        session.proc.off('error', finish);
+        resolve(this.get(id));
+      };
+      const timer = setTimeout(finish, waitMs);
+      session.proc.on('close', finish);
+      session.proc.on('error', finish);
+      if (session.meta.status !== 'running') {
+        finish();
+        return;
+      }
+    });
+  }
+
   /**
    * Wait for a terminal session to exit (or timeout).
    * Returns the final output and exit code.

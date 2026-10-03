@@ -66,6 +66,43 @@ describe('TerminalService', () => {
 
   // ── spawn() ──────────────────────────────────────────────────────────────
 
+  describe('observeUntilExit()', () => {
+    it('observes close and cleans listeners without spawning another process', async () => {
+      vi.useFakeTimers();
+      const session = await service.spawn('npm', ['run', 'build'], '/project');
+      const result = service.observeUntilExit(session.id, 30000);
+      proc.stdout.emit('data', Buffer.from('built\n'));
+      proc.emit('close', 0);
+      expect(await result).toMatchObject({ status: 'exited', exitCode: 0, output: 'built\n' });
+      expect(proc.listenerCount('close')).toBe(1);
+      expect(proc.listenerCount('error')).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(mockSpawnFn).toHaveBeenCalledOnce();
+    });
+
+    it('returns a running snapshot on timeout without killing the terminal', async () => {
+      vi.useFakeTimers();
+      const session = await service.spawn('npm', ['run', 'preview'], '/project');
+      const result = service.observeUntilExit(session.id, 1000);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await result).toMatchObject({ status: 'running', exitCode: null });
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(proc.listenerCount('close')).toBe(1);
+      expect(proc.listenerCount('error')).toBe(1);
+    });
+
+    it('returns the error snapshot and removes its timer', async () => {
+      vi.useFakeTimers();
+      const session = await service.spawn('missing', [], '/project');
+      const result = service.observeUntilExit(session.id, 30000);
+      proc.emit('error', new Error('ENOENT'));
+      expect(await result).toMatchObject({ status: 'exited', exitCode: -1 });
+      expect(vi.getTimerCount()).toBe(0);
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+  });
+
   describe('spawn()', () => {
     it('audits the shell-backed terminal invocation with the originating tool IDs', async () => {
       const auditContext = { sessionId: 'session-1', turnId: 'turn-1', callId: 'call-1' };
