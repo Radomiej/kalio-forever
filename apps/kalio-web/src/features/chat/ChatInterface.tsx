@@ -38,7 +38,7 @@ import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sess
 import { useChatAutoScroll } from './useChatAutoScroll';
 import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
 import { useChatProjectSelection } from './useChatProjectSelection';
-import { useRuntimeProfileLabel } from './useRuntimeProfileLabel';
+import { useConversationRuntimeLabel } from './useConversationRuntimeLabel';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -191,15 +191,9 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     selectedExecutionProfileId,
     setSelectedExecutionProfileId,
   } = useLaunchPersonas(activeSession?.personaId, activeSession?.executionProfileId);
-  const activePersona = personas.find((persona) => persona.id === activeSession?.personaId);
-  const runtimeProfileLabel = useRuntimeProfileLabel({
-    executionProfileId: activeSession?.executionProfileId ?? activePersona?.executionProfileId,
-    provider: backendProvider,
-    personaModel: activePersona?.model,
-    backendModel,
-  });
-  const activeModel = runtimeProfileLabel.model;
-  const activeProvider = runtimeProfileLabel.provider;
+  const { model: activeModel, provider: activeProvider } = useConversationRuntimeLabel(
+    activeSession, personas, messages.length > 0, selectedExecutionProfileId, backendProvider, backendModel,
+  );
 
   const renderableConversationProjection = resolveRenderableConversationProjection({
     session: activeSession,
