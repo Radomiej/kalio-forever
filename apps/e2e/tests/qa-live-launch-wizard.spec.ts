@@ -15,6 +15,14 @@ test('live launch wizard keeps SWE-2 selection, header and unsent prompt consist
   await page.getByText('New Chat', { exact: true }).first().click();
   await expect(page.getByRole('combobox', { name: 'Provider and model', exact: true })).toBeVisible();
 
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Provider and model', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Prompt', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Next — write prompt', exact: true })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back — configuration', exact: true })).not.toBeVisible();
+  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/launch-desktop-1440.png`), animations: 'disabled' });
+
   for (const width of [320, 390, 820]) {
     await page.setViewportSize({ width, height: 900 });
     const hideConversations = page.getByRole('button', { name: 'Hide conversations', exact: true });
