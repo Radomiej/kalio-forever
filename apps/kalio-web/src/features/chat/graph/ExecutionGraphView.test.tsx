@@ -357,6 +357,25 @@ describe('ExecutionGraphView empty-session state', () => {
     sendMessageMock.mockReturnValue(true);
   });
 
+  it('renders the recorded runtime model instead of the persona recommendation', async () => {
+    sessionState.activeSessionId = 'session-1';
+    sessionState.sessions[0] = { ...sessionState.sessions[0], executionProfileId: 'swe-profile' };
+    sessionState.sessionMessages['session-1'] = [
+      makeMessage({ id: 'prompt', role: 'user', content: 'Read package', turnId: 'real-turn' }),
+      makeMessage({ id: 'answer', role: 'assistant', content: 'Done', turnId: 'real-turn', createdAt: 2 }),
+    ];
+    sessionState.sessionAgentTurns['session-1'] = [{ id: 'real-turn', sessionId: 'session-1', promptMessageId: 'prompt',
+      done: true, items: [{ kind: 'text', messageId: 'answer' }] }];
+    const defaultGet = apiGetMock.getMockImplementation()!;
+    apiGetMock.mockImplementation((url: string) => url.startsWith('/api/audit-log?')
+      ? Promise.resolve({ data: [{ id: 'model-audit', sessionId: 'session-1', type: 'runtime_event', label: 'llm.turn.started',
+        data: { turnId: 'real-turn', model: 'swe-2' }, createdAt: 1, durationMs: null, chunkCount: null }] })
+      : defaultGet(url));
+    await renderExecutionGraphView();
+    await waitFor(() => expect(screen.getAllByText('RaBuilder - swe-2').length).toBeGreaterThan(0));
+    expect(screen.queryByText('RaBuilder - gpt-4.1')).not.toBeInTheDocument();
+  });
+
   it('shows the shared launch screen when no session is selected', async () => {
     await renderExecutionGraphView();
 

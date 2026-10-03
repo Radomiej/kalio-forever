@@ -103,6 +103,34 @@ describe('executionGraphModel.helpers', () => {
     });
   });
 
+  it('does not present a persona recommendation as the actual explicitly selected runtime model', () => {
+    const turn = makeTurn({ done: true });
+    const session = {
+      id: turn.sessionId,
+      personaId: 'devin-persona',
+      executionProfileId: 'explicit-swe-2-profile',
+      title: 'HomeSite',
+      createdAt: 1,
+      updatedAt: 1,
+    } satisfies ChatSession;
+    const persona = { id: session.personaId, name: 'Devin SWE-2 QA', model: 'swe-2-medium' } as Persona;
+
+    const identity = buildTurnIdentity(turn, new Map([[session.id, session]]), new Map([[persona.id, persona]]));
+
+    expect(identity.actorLabel).toBe('Devin SWE-2 QA');
+    expect(identity.modelLabel).not.toBe('swe-2-medium');
+    expect(identity.subtitle).not.toContain('swe-2-medium');
+  });
+
+  it('uses recorded turn model rather than a changed persona recommendation', () => {
+    const turn = makeTurn({ done: true });
+    const session = { id: turn.sessionId, personaId: 'devin-persona', title: 'HomeSite', createdAt: 1, updatedAt: 2 } satisfies ChatSession;
+    const persona = { id: session.personaId, name: 'Devin SWE-2 QA', model: 'changed-model' } as Persona;
+    expect(buildTurnIdentity(turn, new Map([[session.id, session]]), new Map([[persona.id, persona]]), 'swe-2')).toMatchObject({
+      modelLabel: 'swe-2', subtitle: 'Devin SWE-2 QA - swe-2', detail: 'Turn completed',
+    });
+  });
+
   it('marks cancelled and expired tool states as errors', () => {
     const cancelled = { status: 'cancelled' } as ToolActivity;
     const expired = { status: 'expired' } as ToolActivity;

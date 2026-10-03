@@ -390,11 +390,13 @@ export function buildTurnIdentity(
   turn: AgentTurn,
   sessionById: Map<string, ChatSession>,
   personaById: Map<string, Persona>,
+  recordedModel?: string | null,
 ): { subtitle: string; detail?: string; actorLabel: string | null; modelLabel: string | null } {
   const session = sessionById.get(turn.sessionId) ?? null;
   const persona = session ? personaById.get(session.personaId) ?? null : null;
   const actorLabel = turn.agentRun?.label ?? persona?.name ?? session?.personaId ?? null;
-  const modelLabel = persona?.model ?? null;
+  // TODO: legacy fallback — sessions without an explicit runtime retain the old persona-based label until audited identity is hydrated.
+  const modelLabel = recordedModel !== undefined ? recordedModel : session?.executionProfileId ? null : persona?.model ?? null;
 
   if (actorLabel && modelLabel) {
     return {
