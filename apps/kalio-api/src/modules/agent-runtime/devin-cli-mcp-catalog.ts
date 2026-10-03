@@ -15,7 +15,7 @@ export function parseDevinMcpCatalog(output: string): DevinMcpCatalogEntry[] {
   const names = new Set<string>();
   let hasEndpoint = false;
   for (const line of lines) {
-    const row = /^  ([•✗]) ([A-Za-z0-9][A-Za-z0-9._-]{0,127})(  \(disabled\))?$/.exec(line);
+    const row = /^ {2}([•✗]) ([A-Za-z0-9][A-Za-z0-9._-]{0,127})( {2}\(disabled\))?$/.exec(line);
     if (row) {
       if (entries.length && !hasEndpoint) throw failure();
       const name = row[2]!;
@@ -23,7 +23,7 @@ export function parseDevinMcpCatalog(output: string): DevinMcpCatalogEntry[] {
       names.add(name);
       entries.push({ name, disabled: row[1] === '✗' });
       hasEndpoint = false;
-    } else if (/^    (Command|URL): \S.*$/.test(line) && entries.length && !hasEndpoint) {
+    } else if (/^ {4}(Command|URL): \S.*$/.test(line) && entries.length && !hasEndpoint) {
       hasEndpoint = true;
     } else {
       throw failure();
