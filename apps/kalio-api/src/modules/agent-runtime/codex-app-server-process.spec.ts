@@ -55,17 +55,23 @@ describe('Codex App Server process configuration', () => {
     );
   });
 
-  it('escapes transport identities without forwarding args, environment, or headers', () => {
+  it('disables the actual server key rather than creating a key with literal quotes', () => {
     expect(buildCodexAppServerArgs([], false, [
       {
-        id: 'quoted"server',
+        id: 'local-tools',
         transport: { type: 'stdio', command: 'C:\\Tools\\codex helper.cmd' },
       },
     ])).toEqual([
       'app-server',
       '--stdio',
       '-c',
-      'mcp_servers."quoted\\"server"={command="C:\\\\Tools\\\\codex helper.cmd",enabled=false}',
+      'mcp_servers.local-tools={command="C:\\\\Tools\\\\codex helper.cmd",enabled=false}',
     ]);
+  });
+
+  it('fails closed when a server ID cannot be addressed by a CLI dotted path', () => {
+    expect(() => buildCodexAppServerArgs([], false, [
+      { id: 'quoted"server', transport: { type: 'stdio', command: 'node' } },
+    ])).toThrow('cannot safely disable');
   });
 });

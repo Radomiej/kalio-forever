@@ -132,10 +132,15 @@ export function parseConfiguredCodexMcpServers(output: string): CodexConfiguredM
 }
 
 function buildDisabledMcpOverride(server: CodexConfiguredMcpServer): string {
+  // Codex splits CLI key paths on dots; TOML quoting here creates a different literal key.
+  if (!/^[A-Za-z0-9_-]+$/.test(server.id)) {
+    throw new Error('Codex MCP isolation cannot safely disable a server with a non-addressable ID.');
+  }
+  // Overrides replace this table, so retain its transport identity for schema validation.
   const identity = server.transport.type === 'stdio'
     ? `command=${JSON.stringify(server.transport.command)}`
     : `url=${JSON.stringify(server.transport.url)}`;
-  return `mcp_servers.${JSON.stringify(server.id)}={${identity},enabled=false}`;
+  return `mcp_servers.${server.id}={${identity},enabled=false}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

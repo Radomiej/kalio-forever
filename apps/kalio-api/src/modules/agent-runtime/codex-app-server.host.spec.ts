@@ -17,9 +17,9 @@ describe('CodexAppServerProtocolRouter', () => {
       'app-server',
       '--stdio',
       '-c',
-      'mcp_servers."vscode_lsp"={url="http://127.0.0.1:36521/mcp",enabled=false}',
+      'mcp_servers.vscode_lsp={url="http://127.0.0.1:36521/mcp",enabled=false}',
       '-c',
-      'mcp_servers."mcp-playwright-orchestrator"={command="node",enabled=false}',
+      'mcp_servers.mcp-playwright-orchestrator={command="node",enabled=false}',
       '--disable',
       'multi_agent',
     ]);
