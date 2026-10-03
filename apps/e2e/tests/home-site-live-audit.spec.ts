@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 
 const preview = process.env['KALIO_HOME_SITE_PREVIEW_URL'];
 const reportRun = process.env['KALIO_HOME_SITE_REPORT_RUN'] ?? '61';
+const expectedScript = process.env['KALIO_HOME_SITE_EXPECTED_SCRIPT'] ?? 'index-DsbKbAs0.js';
+if (!/^index-[\w-]+\.js$/.test(expectedScript)) throw new Error('Expected an explicit built script filename');
 if (!/^\d+$/.test(reportRun)) throw new Error('Report run must be a numeric QA run');
 test.skip(!preview, 'Requires an explicitly approved Home Site preview started through Kalio HITL.');
 
@@ -11,7 +13,7 @@ test('actual Home Site preview supports responsive keyboard and demo-form flows'
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1') throw new Error('Only the approved local preview is allowed');
   await page.goto(url.href);
   await expect(page).toHaveTitle('NEXORA — Nowoczesne rozwiązania IT');
-  await expect(page.locator('script[src*="index-DsbKbAs0.js"]')).toHaveCount(1);
+  await expect(page.locator(`script[src*="${expectedScript}"]`)).toHaveCount(1);
   for (const width of [320, 390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     if (width < 768) await expect(page.locator('#menu-glowne')).not.toBeInViewport();
