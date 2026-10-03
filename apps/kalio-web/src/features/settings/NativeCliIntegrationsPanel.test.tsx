@@ -249,4 +249,61 @@ describe('NativeCliIntegrationsPanel', () => {
       }),
     ));
   });
+
+  it.each(['native policy', 'bridge token'])('reloads persisted settings after a failed %s reset without retrying the write', async (kind) => {
+    let poll: (() => void) | undefined;
+    const realSetInterval = window.setInterval.bind(window);
+    vi.spyOn(window, 'setInterval').mockImplementation((handler, timeout) => {
+      if (timeout === 30_000 && typeof handler === 'function') poll = handler as () => void;
+      return realSetInterval(handler, timeout) as unknown as ReturnType<typeof window.setInterval>;
+    });
+    const originalFetch = global.fetch;
+    let saved = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/runtime/devin-cli/settings' && init?.method === 'PATCH') {
+        saved = true;
+        return new Response(JSON.stringify({ message: 'Host reset failed' }), { status: 500 });
+      }
+      if (String(input) === '/api/runtime/devin-cli/settings' && !init?.method && saved) {
+        return new Response(JSON.stringify({
+          ...DEVIN_SETTINGS,
+          nativeTools: { ...DEVIN_SETTINGS.nativeTools, filesystem: true, source: 'settings' },
+        }), { status: 200 });
+      }
+      return originalFetch(input, init);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+    if (kind === 'native policy') fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Devin filesystem tools' }));
+    else fireEvent.click(screen.getByRole('button', { name: 'Generate local token' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Allow Devin filesystem tools' })).toBeChecked());
+    expect(screen.getByRole('alert')).toHaveTextContent('Host reset failed');
+    expect(screen.queryByTestId('native-integration-notice')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+    await act(async () => { poll?.(); });
+    expect(screen.getByRole('alert')).toHaveTextContent('Host reset failed');
+  });
+
+  it('reports unknown persisted state when recovery read also fails', async () => {
+    const originalFetch = global.fetch;
+    let failed = false;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/runtime/devin-cli/settings' && init?.method === 'PATCH') {
+        failed = true;
+        return new Response(JSON.stringify({ message: 'Host reset failed' }), { status: 500 });
+      }
+      if (String(input) === '/api/runtime/devin-cli/settings' && !init?.method && failed) {
+        return new Response(null, { status: 503 });
+      }
+      return originalFetch(input, init);
+    }));
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Devin filesystem tools' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('current state is unknown'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Host reset failed');
+    expect(screen.getByRole('checkbox', { name: 'Allow Devin filesystem tools' })).not.toBeChecked();
+    expect(screen.queryByTestId('native-integration-notice')).not.toBeInTheDocument();
+  });
 });

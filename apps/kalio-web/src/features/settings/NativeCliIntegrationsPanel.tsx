@@ -39,7 +39,6 @@ export function NativeCliIntegrationsPanel() {
 
   const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
     setLoading(true);
-    setError(null);
     try {
       const response = await fetch('/api/runtime/native-cli-integrations');
       if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
@@ -133,6 +132,7 @@ export function NativeCliIntegrationsPanel() {
 
   const recheckAll = useCallback(async () => {
     setRecheckingAll(true);
+    setError(null);
     try {
       const [loaded] = await Promise.all([loadIntegrations(), loadDevinCliStatus(true), loadDevinCliSettings()]);
       for (const integration of loaded) {
@@ -195,7 +195,9 @@ export function NativeCliIntegrationsPanel() {
       setDevinSettings(await response.json() as DevinCliSettings);
       setNotice(`Devin ${category} tools ${enabled ? 'enabled' : 'disabled'} and saved.`);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to update Devin native tool policy.');
+      const message = err instanceof Error ? err.message : 'Failed to update Devin native tool policy.';
+      const persisted = await loadDevinCliSettings();
+      setError(`${message} ${persisted ? 'Persisted settings reloaded; the action did not complete successfully.' : 'Could not reload persisted settings; their current state is unknown.'}`);
     } finally {
       setAction(null);
     }
@@ -227,7 +229,9 @@ export function NativeCliIntegrationsPanel() {
           ? 'Local token override cleared. Environment fallback will be used only if configured.'
           : 'Local bridge token override saved. Its value is intentionally hidden.');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to update the Devin MCP bridge token.');
+      const message = err instanceof Error ? err.message : 'Failed to update the Devin MCP bridge token.';
+      const persisted = await loadDevinCliSettings();
+      setError(`${message} ${persisted ? 'Persisted settings reloaded; the action did not complete successfully.' : 'Could not reload persisted settings; their current state is unknown.'}`);
     } finally {
       setAction(null);
     }
@@ -262,7 +266,7 @@ export function NativeCliIntegrationsPanel() {
         status={devinCli}
         settings={devinSettings}
         loading={devinStatusLoading || recheckingAll}
-        onRefresh={() => { void loadDevinCliStatus(true); void loadDevinCliSettings(); }}
+        onRefresh={() => { setError(null); void loadDevinCliStatus(true); void loadDevinCliSettings(); }}
         onUpdateNativeTool={(category, enabled) => void updateDevinNativeTool(category, enabled)}
         tokenOverride={devinTokenOverride}
         onTokenOverrideChange={setDevinTokenOverride}
