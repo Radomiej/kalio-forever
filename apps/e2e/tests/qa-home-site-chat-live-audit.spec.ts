@@ -3,10 +3,12 @@ import { resolve } from 'node:path';
 import { selectSession } from './helpers/test-config';
 
 const qa = process.env['KALIO_FIXED_QA_READONLY_AUDIT_URL'];
+const reportRun = process.env['KALIO_FIXED_QA_REPORT_RUN'] ?? '67';
 test.skip(!qa, 'Explicit read-only audit of the existing fixed QA is required.');
 
 test('completed real Home Site conversation hydrates without stale thinking on mobile and tablet', async ({ page }) => {
   const url = new URL(qa!);
+  if (!/^[1-9]\d*$/.test(reportRun)) throw new Error('A numeric QA report run is required');
   if (url.protocol !== 'http:' || url.hostname !== 'localhost' || url.port !== '5288') {
     throw new Error('Only the explicitly approved fixed local QA is supported');
   }
@@ -24,6 +26,6 @@ test('completed real Home Site conversation hydrates without stale thinking on m
     const thinking = page.getByRole('button', { name: 'Thinking', exact: true });
     expect(await thinking.locator('.animate-pulse, .loading').count()).toBe(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-67/assets/completed-real-chat-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/completed-real-chat-${width}.png`) });
   }
 });
