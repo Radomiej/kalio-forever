@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,8 +8,6 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
 const apiDir = resolve(repoRoot, 'apps/kalio-api');
-const webDir = resolve(repoRoot, 'apps/kalio-web');
-const webDistDir = resolve(webDir, 'dist');
 const e2eStateDir = process.env.KALIO_PLAYWRIGHT_STATE_DIR ?? resolve(repoRoot, 'data/playwright-stack');
 const envFilePath = resolve(repoRoot, '.env.test');
 const legacyPlaywrightPorts = new Set(['3016', '5188', '3316', '5288']);
@@ -159,16 +157,6 @@ let shuttingDown = false;
 let backendChild = null;
 let controlServer = null;
 let backendRestart = null;
-
-function writeFrontendRuntimeConfig(apiOriginUrl) {
-  const runtimeConfigPath = resolve(webDistDir, 'runtime-config.js');
-  mkdirSync(dirname(runtimeConfigPath), { recursive: true });
-  writeFileSync(
-    runtimeConfigPath,
-    `window.__KALIO_RUNTIME_CONFIG__ = ${JSON.stringify({ apiUrl: apiOriginUrl, wsUrl: apiOriginUrl })};\n`,
-    'utf8',
-  );
-}
 
 function renderExit(code, signal) {
   return signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
@@ -443,7 +431,7 @@ async function main() {
   await waitForUrl(`${apiUrl.origin}/api/health`, 60_000);
 
   console.log(`[playwright-stack] starting frontend preview on ${webUrl.origin}`);
-  writeFrontendRuntimeConfig(apiUrl.origin);
+  // Vite's runtime-config middleware uses frontendEnv; never rewrite shared dist for an isolated run.
   spawnManaged(
     'frontend',
     selectedPnpm.command,

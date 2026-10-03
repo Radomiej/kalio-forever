@@ -21,6 +21,8 @@ Sesja `W4fggLSunrJB41C24MV7C`, projekt **E:\Projekty\home-site**, exact Devin AC
 
 ## Wykryty defekt infrastruktury
 
+Korekta po inspekcji w QA76: klasyfikacja P1 i sugestia awarii HTTP stałego QA były zbyt mocne. `vite.config.ts` ma `configurePreviewServer` middleware, które serwuje runtime-config z env danego procesu i przesłania plik dist. W QA75 udowodniono nadpisanie wspólnego pliku, nie zmianę odpowiedzi HTTP stałego procesu przed recovery. Rzeczywiste naruszenie izolacji artefaktu klasyfikujemy P2; usunięcie zbędnego zapisu i niezależne HTTP origins potwierdzono w QA76. Poniższy akapit pozostawiono jako historyczną diagnozę, nie aktualny werdykt.
+
 [P1] Izolowany Playwright stack zapisuje wspólny `apps/kalio-web/dist/runtime-config.js`, pozostawiając po zakończeniu API58773 w pliku wykorzystywanym przez stałe QA5288. Odczyt pliku po zakończeniu testów potwierdził zły origin. To realny konflikt artefaktu/odbiorców: zielony browser test nie zamyka trwałości stałego QA. Przywrócono wygenerowany plik do3316 przez apply_patch, bez restartu i zmian źródeł; GET przez stały serwer potwierdził poprawę, CUA F5 odtworzyło rzeczywistą rozmowę i historię. Nie commitowano dist. Trwała izolacja runnera/config należy do następnego kroku, nie jest zamknięta tym hot recovery.
 
 Runner: `node apps/e2e/scripts/run-playwright-with-stack.mjs qa-home-site-chat-live-audit.spec.ts home-site-live-audit.spec.ts --workers=1`, SKIP_BUILD1, fixedQA URL5288/report75, HomeSite URL57868/report75; pomocniczy isolated API58773/UI58772. Runner exit0. Wynik testów zapisano jako obserwację w trakcie runnera, nie dowód finalnego runtime-config. Finalny fixed-origin proof wykonano osobno CUA/HTTP po recovery.

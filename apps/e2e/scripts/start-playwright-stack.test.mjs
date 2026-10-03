@@ -1,7 +1,7 @@
 ﻿import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
@@ -577,6 +577,11 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
 
   try {
     const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const sharedDist = resolve(sandboxRoot, 'apps/kalio-web/dist');
+    const sharedRuntimeConfig = resolve(sharedDist, 'runtime-config.js');
+    const fixedQaConfig = 'window.__KALIO_RUNTIME_CONFIG__ = {"apiUrl":"http://127.0.0.1:3316","wsUrl":"http://127.0.0.1:3316"};\n';
+    await mkdir(sharedDist, { recursive: true });
+    await writeFile(sharedRuntimeConfig, fixedQaConfig);
     const frontendPort = await getFreePort();
     const backendPort = await getFreePort();
     const child = spawn(process.execPath, [launcherPath], {
@@ -600,6 +605,8 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
       assert.match(fullOutput, /skipping builds because KALIO_PLAYWRIGHT_SKIP_BUILD=1/);
       assert.doesNotMatch(fullOutput, /\[fake-pnpm\] build/);
       assert.match(fullOutput, /backend and frontend are ready/);
+      assert.equal(await readFile(sharedRuntimeConfig, 'utf8'), fixedQaConfig,
+        'isolated preview must not overwrite the shared fixed-QA artifact');
     } finally {
       stopCollecting();
       await terminateProcess(child);
