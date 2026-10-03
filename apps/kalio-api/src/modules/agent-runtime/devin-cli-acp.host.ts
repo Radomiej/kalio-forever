@@ -4,6 +4,7 @@ import { Readable, Transform, Writable } from 'node:stream';
 import { isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
 import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-config';
+import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import { stopDevinChild } from './devin-cli-process-shutdown';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
 import { DevinCliProbeService, type DevinCliProbeStatus } from './devin-cli-probe.service';
@@ -204,8 +205,18 @@ export class DevinAcpHost {
   }
 
   private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
-    const config = mcpServers.length > 0 ? await createDevinCliConfig(this.model, mcpServers) : undefined;
+    const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
+    const config = await createDevinCliConfig(this.model, mcpServers);
     this.config = config;
+    try {
+      const suppressedCount = await suppressInheritedDevinMcp(spec.command, config, mcpServers.map(server => server.name));
+      this.logger.debug(`Devin ACP private MCP overlay verified (${suppressedCount} inherited entries suppressed).`);
+    } catch (error) {
+      this.status = 'error';
+      await config.cleanup();
+      this.config = undefined;
+      throw error;
+    }
     if (this.closing) {
       throw new Error('Devin ACP host was closed during startup.');
     }
@@ -213,7 +224,6 @@ export class DevinAcpHost {
     // `.devin/mcp_config.local.json`; passing the legacy `--config` file
     // bypasses that loader, so keep the ephemeral project overlay discoverable
     // from the child cwd and select only the model on the command line.
-    const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
     const child = spawn(spec.command, spec.args, {
       env: { ...process.env },
       ...(config ? { cwd: config.cwd } : {}),

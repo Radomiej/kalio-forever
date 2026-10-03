@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 export interface DevinCliConfigHandle {
   path: string;
   cwd: string;
+  suppressMcpServers: (names: readonly string[]) => Promise<void>;
   cleanup: () => Promise<void>;
 }
 
@@ -40,13 +41,21 @@ export async function createDevinCliConfig(
     cursor: false, windsurf: false, claude: false,
     copilot: false, opencode: false, zed: false,
   };
-  await Promise.all([
-    writeFile(path, JSON.stringify({ version: 1, agent: { model }, read_config_from, mcpServers: mcpConfig }, null, 2), { encoding: 'utf8', mode: 0o600 }),
-    writeFile(dedicatedMcpPath, JSON.stringify({ mcpServers: mcpConfig }, null, 2), { encoding: 'utf8', mode: 0o600 }),
-  ]);
+  const writeConfig = async (names: readonly string[]): Promise<void> => {
+    const disabled = Object.fromEntries(names.filter(name => !Object.hasOwn(mcpConfig, name)).map(name => [name, {
+      command: process.execPath, args: ['-e', 'process.exit(0)'], disabled: true,
+    }]));
+    const servers = { ...disabled, ...mcpConfig };
+    await Promise.all([
+      writeFile(path, JSON.stringify({ version: 1, agent: { model }, read_config_from, mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
+      writeFile(dedicatedMcpPath, JSON.stringify({ mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
+    ]);
+  };
+  await writeConfig([]);
   return {
     path,
     cwd,
+    suppressMcpServers: writeConfig,
     // Windows can briefly retain cwd/file handles even after the child closes.
     cleanup: () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
   };

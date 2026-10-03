@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { createDevinCliConfig } from './devin-cli-config';
+import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 
 const executable = process.env['DEVIN_CONFIG_PROBE_EXECUTABLE'];
 const execFileAsync = promisify(execFile);
@@ -36,6 +37,20 @@ it.skipIf(!executable)('diagnostic: main config override preserves inherited MCP
     await config.cleanup();
   }
 }, 40000);
+
+it.skipIf(!executable)('suppresses discovered inherited names in the private overlay and verifies the catalog', async () => {
+  const config = await createDevinCliConfig('swe-2', [{
+    name: 'kalio-isolation-probe', command: process.execPath,
+    args: ['-e', 'process.exit(0)'], env: [],
+  }]);
+  try {
+    const count = await suppressInheritedDevinMcp(executable!, config, ['kalio-isolation-probe']);
+    expect(count).toBeGreaterThanOrEqual(0);
+    console.info('Private MCP overlay verified', { suppressedCount: count, allowedCount: 1 });
+  } finally {
+    await config.cleanup();
+  }
+}, 60000);
 
 it.skipIf(!executable)('diagnostic: local disabled overrides do not require global config changes', async () => {
   const config = await createDevinCliConfig('swe-2', [{
