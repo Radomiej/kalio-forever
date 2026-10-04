@@ -17,7 +17,7 @@ test('actual native failure without permission callback remains visible after F5
   const open = async () => {
     const response = page.waitForResponse(r => r.url().includes('/api/audit-log?')
       && new URL(r.url()).searchParams.get('turnId') === turnId);
-    await page.getByRole('button', { name: 'Native tool audit', exact: true }).last().click();
+    await page.getByRole('button', { name: 'Devin native tool audit', exact: true }).last().click();
     expect((await response).ok()).toBe(true);
     const panel = page.getByTestId('native-tool-audit-panel').last();
     await expect(panel).toContainText(callName);

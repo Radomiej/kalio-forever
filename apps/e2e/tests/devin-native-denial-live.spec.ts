@@ -76,7 +76,7 @@ test('real Devin native tool is denied and its evidence survives reload', async 
     expect(audit.filter(e => e.label === 'process.cmd.invocation')).toHaveLength(0);
     const open = async () => {
       const response = page.waitForResponse(r => r.url().includes('/api/audit-log?') && new URL(r.url()).searchParams.get('turnId') === turnId);
-      await page.getByRole('button', { name: 'Native tool audit', exact: true }).last().click();
+      await page.getByRole('button', { name: 'Devin native tool audit', exact: true }).last().click();
       expect((await response).ok()).toBe(true);
       const panel = page.getByTestId('native-tool-audit-panel').last();
       await expect(panel).toContainText(String(callId));
