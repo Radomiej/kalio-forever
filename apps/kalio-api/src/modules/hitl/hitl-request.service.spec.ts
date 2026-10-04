@@ -85,4 +85,40 @@ describe('HitlRequestService', () => {
       args: { path: 'report.md' }, timeoutMs: 0,
     }]);
   });
+
+  it('preserves turn and prompt binding when rebuilding an approval after restart', async () => {
+    const service = makeService();
+    await service.create({
+      id: 'restored', kind: 'tool_confirmation', sessionId: 's1',
+      turnId: 'turn-1', toolCallId: 'call-1',
+      payload: { toolName: 'fs_write', args: { path: 'styles.css' } },
+      continuation: { promptMessageId: 'prompt-1', executionState: 'pending' },
+    });
+    expect(await service.listPendingToolConfirmations('s1')).toEqual([
+      expect.objectContaining({ turnId: 'turn-1', promptMessageId: 'prompt-1' }),
+    ]);
+  });
+
+  it('does not replay a pending confirmation into a different session', async () => {
+    const service = makeService();
+    await service.create({
+      id: 'scoped', kind: 'tool_confirmation', sessionId: 'owner', turnId: 'turn', toolCallId: 'call',
+      payload: { toolName: 'terminal_spawn', args: { command: 'npm run build' } },
+      continuation: { promptMessageId: 'prompt' },
+    });
+    expect(await service.listPendingToolConfirmations('other')).toEqual([]);
+    expect(await service.listPendingToolConfirmations('owner')).toHaveLength(1);
+  });
+
+  it('omits malformed prompt linkage rather than emitting a non-string id', async () => {
+    const service = makeService();
+    await service.create({
+      id: 'legacy', kind: 'tool_confirmation', sessionId: 's1', toolCallId: 'call',
+      payload: { toolName: 'fs_write', args: { path: 'styles.css' } },
+      continuation: { promptMessageId: 123 },
+    });
+    const [request] = await service.listPendingToolConfirmations('s1');
+    expect(request).not.toHaveProperty('promptMessageId');
+    expect(request).not.toHaveProperty('turnId');
+  });
 });

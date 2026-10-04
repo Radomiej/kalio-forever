@@ -52,6 +52,9 @@ export class HitlRequestService {
         requestId: request.id,
         toolCallId: request.toolCallId,
         sessionId: request.sessionId,
+        ...(request.turnId ? { turnId: request.turnId } : {}),
+        ...(isRecord(request.continuation) && typeof request.continuation['promptMessageId'] === 'string'
+          ? { promptMessageId: request.continuation['promptMessageId'] } : {}),
         toolName,
         args,
         timeoutMs: 0,
