@@ -3,6 +3,7 @@ import type { ExecutionProfile, ToolMeta, ToolResult } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { readCodexModels } from './codex-model-catalog';
 import {
   CodexAppServerHost,
   type CodexAppServerConnection,
@@ -29,6 +30,10 @@ export class CodexAppServerLLMSource implements ILLMSource {
     const authProfileId = profile.authProfileId?.trim() || profile.id;
     const permission = profile.approvalMode === 'kalio_strict' ? 'read-only' : 'workspace-write';
     const connection = await this.host.getConnection(authProfileId, permission);
+    const model = profile.model || params.model;
+    if (!model || !(await readCodexModels(connection)).includes(model)) {
+      throw new Error(`Codex model is not currently available: ${model || '(unspecified)'}. Recheck the integration and select an available model.`);
+    }
     const threadId = await this.ensureThread(connection, authProfileId, profile, params);
     const queue: InternalLLMChunk[] = [];
     const waiters: Array<() => void> = [];

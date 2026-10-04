@@ -8,6 +8,11 @@ import type {
 } from './codex-app-server.host';
 import { CodexAppServerLLMSource } from './codex-app-server.llm-source';
 
+// Lifecycle fixtures use a verified catalog; real admission is covered separately.
+vi.mock('./codex-model-catalog', () => ({
+  readCodexModels: vi.fn().mockResolvedValue(['gpt-5.4', 'gpt-5.6-luna']),
+}));
+
 class FakeConnection implements CodexAppServerConnection {
   readonly processEpoch = 'epoch-1';
   readonly requests: Array<{ method: string; params: unknown }> = [];
