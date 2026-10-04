@@ -363,17 +363,13 @@ test.describe('Architecture chat turn projection', () => {
       variantId = variant.id;
       expect(variant.nodes?.find((node) => node.id === 'pragmatist')?.maxToolAttempts).toBe(7);
 
-      const response = await request.post(`${API_BASE}/sessions`, {
-        data: { title, personaId: 'default' },
-      });
-      expect(response.ok()).toBeTruthy();
-      const session = await response.json() as { id: string };
+      const session = await createExistingMockConversation(request, title);
       sessionId = session.id;
 
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
       await selectArchitectureInComposer(page, variant.id);
-      await expect(page.getByTestId('welcome-architecture-select').locator(`option[value="${variant.id}"]`)).toHaveCount(1, { timeout: 30_000 });
+      await expect(page.getByTestId('chat-architecture-select')).toHaveValue(variant.id);
       await sendMessageFromComposer(page, 'Run the UI-saved architecture variant and produce a concise final decision.');
 
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
