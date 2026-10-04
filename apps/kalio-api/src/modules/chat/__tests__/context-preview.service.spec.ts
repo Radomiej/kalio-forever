@@ -109,7 +109,7 @@ describe('ContextPreviewService', () => {
     expect(preview.estimatedTokens.reasoning).toBeGreaterThan(0);
   });
 
-  it('does not label persisted history as draft when backend compaction drops the draft', async () => {
+  it('preserves and labels the latest draft when backend compaction removes older history', async () => {
     const repo = makeRepo([
       { id: 'u1', sessionId: 'sid', role: 'user', content: 'kept persisted question ' + 'x'.repeat(700), createdAt: 1 },
       { id: 'u2', sessionId: 'sid', role: 'user', content: 'second persisted question ' + 'y'.repeat(700), createdAt: 2 },
@@ -156,9 +156,8 @@ describe('ContextPreviewService', () => {
     });
 
     expect(preview.compaction.applied).toBe(true);
-    expect(preview.messages.some((message) => typeof message.content === 'string' && message.content.startsWith('draft that may be removed'))).toBe(false);
-    expect(preview.messages.some((message) => message.source === 'draft')).toBe(false);
-    expect(preview.messages.some((message) => message.source === 'history' && message.role === 'user')).toBe(true);
+    expect(preview.messages.some((message) => typeof message.content === 'string' && message.content.startsWith('draft that may be removed') && message.source === 'draft')).toBe(true);
+    expect(preview.messages.some((message) => message.source === 'history' && message.role === 'user')).toBe(false);
   });
 
   it('marks compaction as applied when fallback truncation edits a message in place', async () => {
@@ -208,7 +207,9 @@ describe('ContextPreviewService', () => {
 
     expect(preview.compaction.applied).toBe(true);
     expect(preview.compaction.unboundedMessageCount).toBe(3);
-    expect(preview.compaction.finalMessageCount).toBe(2);
+    expect(preview.compaction.finalMessageCount).toBe(3);
+    expect(preview.messages.some((message) => message.role === 'user' && message.content === 'kept user question')).toBe(true);
+    expect(preview.messages.some((message) => message.role === 'assistant' && typeof message.content === 'string' && message.content.includes('[truncated '))).toBe(true);
   });
 
   it('builds a runtime-target preview without requiring an existing session', async () => {

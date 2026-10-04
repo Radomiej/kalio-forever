@@ -221,7 +221,7 @@ function removeIndexes(messages: ContextManagedLLMMessage[], indexes: Set<number
   return messages.filter((_, index) => !indexes.has(index));
 }
 
-function findOldestToolPair(messages: ContextManagedLLMMessage[]): [number, number] | null {
+function findOldestToolPair(messages: ContextManagedLLMMessage[]): number[] | null {
   for (let toolIndex = 0; toolIndex < messages.length; toolIndex += 1) {
     const toolMessage = messages[toolIndex];
     if (toolMessage.role !== 'tool' || !('toolCallId' in toolMessage) || typeof toolMessage.toolCallId !== 'string') {
@@ -237,7 +237,10 @@ function findOldestToolPair(messages: ContextManagedLLMMessage[]): [number, numb
     );
 
     if (assistantIndex >= 0) {
-      return [assistantIndex, toolIndex];
+      const callIds = new Set(messages[assistantIndex].toolCalls?.map((call) => call.id));
+      return [assistantIndex, ...messages.flatMap((message, index) =>
+        message.role === 'tool' && typeof message.toolCallId === 'string'
+          && callIds.has(message.toolCallId) ? [index] : [])];
     }
   }
 
@@ -336,46 +339,68 @@ export function compactLLMHistory(
 
   const systemMessage = messages[0]?.role === 'system' ? messages[0] : null;
   let body = systemMessage ? messages.slice(1) : [...messages];
+  let activeStart = body.map((message) => message.role).lastIndexOf('user');
+  activeStart = Math.max(0, activeStart);
+  // A result may follow a user approval while its owning call precedes it.
+  // Expand to retain every linked exchange, including multi-call messages.
+  for (;;) {
+    const activeIds = new Set(body.slice(activeStart)
+      .filter((message) => message.role === 'tool')
+      .map((message) => message.toolCallId));
+    const owner = body.findIndex((message) => message.role === 'assistant'
+      && message.toolCalls?.some((call) => activeIds.has(call.id)));
+    if (owner < 0 || owner >= activeStart) break;
+    activeStart = owner;
+  }
 
   while (body.length > 0 && totalHistoryTokens(systemMessage ? [systemMessage, ...body] : body, toolMetas) > safeTarget) {
-    const toolPair = findOldestToolPair(body);
+    const historical = body.slice(0, activeStart);
+    const toolPair = findOldestToolPair(historical);
     if (toolPair) {
       body = removeIndexes(body, new Set(toolPair));
+      activeStart -= toolPair.length;
       continue;
     }
 
-    const standaloneToolIndex = findOldestIndex(body, (message) => message.role === 'tool');
+    const standaloneToolIndex = findOldestIndex(historical, (message) => message.role === 'tool');
     if (standaloneToolIndex >= 0) {
       body = removeIndexes(body, new Set([standaloneToolIndex]));
+      activeStart -= 1;
       continue;
     }
 
     const assistantIndex = findOldestIndex(
-      body,
+      historical,
       (message) => message.role === 'assistant' && (!('toolCalls' in message) || !Array.isArray(message.toolCalls) || message.toolCalls.length === 0),
     );
     if (assistantIndex >= 0) {
       body = removeIndexes(body, new Set([assistantIndex]));
+      activeStart -= 1;
       continue;
     }
 
-    const firstUserIndex = findOldestIndex(body, (message) => message.role === 'user');
-    const laterUserIndex = findOldestIndex(body, (message, index) => message.role === 'user' && index !== firstUserIndex);
+    const firstUserIndex = findOldestIndex(historical, (message) => message.role === 'user');
+    const laterUserIndex = findOldestIndex(historical, (message, index) => message.role === 'user' && index !== firstUserIndex);
     if (laterUserIndex >= 0) {
       body = removeIndexes(body, new Set([laterUserIndex]));
+      activeStart -= 1;
       continue;
     }
 
     if (firstUserIndex >= 0 && body.length > 1) {
       body = removeIndexes(body, new Set([firstUserIndex]));
+      activeStart -= 1;
       continue;
     }
 
-    const truncationIndex = findOldestIndex(body, (message) => estimateMessageTokens(message) > 0);
+    const truncationIndex = findOldestIndex(body, (message) => message.role === 'assistant'
+      && !message.toolCalls?.length && estimateMessageTokens(message) > 0
+      && JSON.stringify(truncateMessageContent(message)) !== JSON.stringify(message));
     if (truncationIndex >= 0) {
       body = body.map((message, index) => (index === truncationIndex ? truncateMessageContent(message) : message));
+      continue;
     }
-    break;
+    throw new Error('Active turn exceeds safe context budget; committed tool evidence cannot be discarded.');
   }
 
   return systemMessage ? [systemMessage, ...body] : body;
