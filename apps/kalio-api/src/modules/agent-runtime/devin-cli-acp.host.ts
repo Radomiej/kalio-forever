@@ -276,22 +276,22 @@ export class DevinAcpHost {
   }
 
   private async restoreSession(connection: ClientConnection, sessionId: string, workspace: DevinSessionWorkspace, mcpServers: McpServer[]): Promise<void> {
-    if (this.capabilities.loadSession === true) {
-      try {
-        await connection.agent.request(methods.agent.session.load, { sessionId, ...workspace, mcpServers });
-        return;
-      } catch (error) {
-        if (!this.capabilities.sessionCapabilities?.resume) {
-          throw asError(error, `Devin ACP could not load persisted session ${sessionId}.`);
-        }
-      }
-    }
+    // Kalio already owns durable history; reattach without provider history replay.
     if (this.capabilities.sessionCapabilities?.resume) {
       try {
         await connection.agent.request(methods.agent.session.resume, { sessionId, ...workspace, mcpServers });
         return;
       } catch (error) {
         throw asError(error, `Devin ACP could not resume persisted session ${sessionId}.`);
+      }
+    }
+    // TODO: legacy fallback — load-only ACP agents cannot reattach without replay.
+    if (this.capabilities.loadSession === true) {
+      try {
+        await connection.agent.request(methods.agent.session.load, { sessionId, ...workspace, mcpServers });
+        return;
+      } catch (error) {
+        throw asError(error, `Devin ACP could not load persisted session ${sessionId}.`);
       }
     }
     throw new Error('Devin ACP host restarted but the agent does not advertise session/load or session/resume.');
