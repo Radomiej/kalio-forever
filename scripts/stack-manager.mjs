@@ -7,6 +7,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readStackState, resolveStackPaths } from './stack-state.mjs';
 import { buildStackStatusReport, hasAliveChild, renderEffectiveLlmLine, renderStateProcesses } from './stack-status.mjs';
+import { resolveListeningPids } from './stack-port-owners.mjs';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
@@ -364,71 +365,14 @@ function resolveFrontendLauncher() {
   };
 }
 
-async function captureCommand(command, commandArgs) {
-  return await new Promise((resolvePromise, reject) => {
-    const child = spawn(command, commandArgs, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    });
-    let stdout = '';
-    child.stdout?.on('data', (chunk) => {
-      stdout += String(chunk);
-    });
-    child.once('error', reject);
-    child.once('exit', (code) => {
-      resolvePromise({ code: code ?? 1, stdout });
-    });
-  });
-}
-
-async function resolveListeningPid(port) {
-  if (!Number.isInteger(port) || port <= 0) {
-    return null;
-  }
-
-  if (process.platform === 'win32') {
-    let result;
-    try {
-      result = await captureCommand(
-        resolve(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-        [
-          '-NoLogo',
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess`,
-        ],
-      );
-    } catch {
-      return null;
-    }
-    if (result.code !== 0) {
-      return null;
-    }
-    const pid = Number.parseInt(result.stdout.trim(), 10);
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
-  }
-
-  let result;
-  try {
-    result = await captureCommand('lsof', ['-tiTCP:' + String(port), '-sTCP:LISTEN']);
-  } catch {
-    return null;
-  }
-  if (result.code !== 0) {
-    return null;
-  }
-  const pid = Number.parseInt(result.stdout.trim().split(/\r?\n/)[0] ?? '', 10);
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
-}
-
 async function refreshStatePortOwners(state) {
   if (!state) {
     return state;
   }
 
-  const backendPid = await resolveListeningPid(Number(state.backendPort));
-  const frontendPid = await resolveListeningPid(Number(state.frontendPort));
+  const owners = await resolveListeningPids([Number(state.backendPort), Number(state.frontendPort)]);
+  const backendPid = owners.get(Number(state.backendPort));
+  const frontendPid = owners.get(Number(state.frontendPort));
   const nextState = structuredClone(state);
   let changed = false;
 
@@ -449,9 +393,10 @@ async function refreshStatePortOwners(state) {
 }
 
 async function ensureRequestedPortsAreFree(ports) {
+  const owners = await resolveListeningPids(ports);
   const occupied = [];
   for (const port of ports) {
-    const ownerPid = await resolveListeningPid(port);
+    const ownerPid = owners.get(port);
     if (ownerPid) {
       occupied.push({ port, pid: ownerPid });
     }
@@ -464,13 +409,14 @@ async function ensureRequestedPortsAreFree(ports) {
 }
 
 async function detectKnownManagedPortConflicts() {
+  const owners = await resolveListeningPids([3316, 5288, 4016, 6188]);
   const conflictEntries = [];
   for (const [profile, ports] of [
     ['qa', [3316, 5288]],
     ['prod', [4016, 6188]],
   ]) {
     for (const port of ports) {
-      const pid = await resolveListeningPid(port);
+      const pid = owners.get(port);
       if (pid) {
         conflictEntries.push({ profile, port, pid });
       }
@@ -845,7 +791,8 @@ async function forceRestartStack() {
 
   const portsToFree = [backendPortArg, frontendPortArg].filter((port) => Number.isInteger(port) && port > 0);
   for (const port of portsToFree) {
-    const pid = await resolveListeningPid(port);
+    // Keep a fresh per-port read immediately before destructive termination.
+    const pid = (await resolveListeningPids([port])).get(port);
     if (!pid) {
       continue;
     }

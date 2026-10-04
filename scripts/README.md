@@ -40,6 +40,7 @@ This folder contains workspace-level helper scripts. Keep command surface small.
 - `repo-preflight.mjs` - repo integrity preflight + repair checks
 - `stack-manager.mjs` - start/status/stop for built QA/prod stacks (`--profile prod`, `--runtime direct`, `status --json`)
 - `stack-state.mjs` - shared managed-stack state contract for readiness, LLM probe, activation, and QA wrappers
+- `stack-port-owners.mjs` - fresh grouped Windows listener queries; no cross-stage PID cache, explicit failure on unreadable/malformed ownership
 - `install.cmd` - thin CMD bootstrap that downloads the release installer and forwards its arguments
 - `install.ps1` - Windows runtime installer, stable launcher, and per-user Startup shortcut after Windows sign-in
 - `install-release.ps1` - download the latest published Node/Bun runtime archive

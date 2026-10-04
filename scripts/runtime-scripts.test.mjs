@@ -203,7 +203,7 @@ test('desktop build contract keeps the bundled backend and AppData paths aligned
 });
 
 test('stack manager refreshes managed PIDs from live port owners and refuses unmanaged port reuse', () => {
-  assert.match(stackManagerSource, /async function resolveListeningPid\(port\)/);
+  assert.match(stackManagerSource, /import \{ resolveListeningPids \} from '\.\/stack-port-owners\.mjs'/);
   assert.match(stackManagerSource, /async function refreshStatePortOwners\(state\)/);
   assert.match(stackManagerSource, /async function ensureRequestedPortsAreFree\(ports\)/);
   assert.match(stackManagerSource, /await ensureRequestedPortsAreFree\(\[backendPort, frontendPort\]\);/);
