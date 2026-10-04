@@ -49,6 +49,44 @@ describe('DevinCliAcpLLMSource', () => {
     expect(chunks.filter((chunk) => chunk.type === 'text_delta').map((chunk) => chunk.delta).join('')).toBe(expected);
   });
 
+  it('assigns MCP tools to the user turn rather than the run or assistant message', async () => {
+    const contexts = new KalioMcpBridgeContextRegistry();
+    let observed: ReturnType<KalioMcpBridgeContextRegistry['get']>;
+    const host = {
+      ensureSession: async () => ({ sessionId: 'acp-identity', cwd: 'C:\\fixture', processEpoch: 'epoch', resumed: false }),
+      prompt: async (_id: string, _text: string, input: DevinAcpPromptInput) => {
+        const release = input.onTurnStart?.();
+        try {
+          observed = contexts.get('chat-identity');
+          input.onText('Complete');
+          return 'end_turn' as const;
+        } finally {
+          release?.();
+        }
+      },
+    };
+    const source = new DevinCliAcpLLMSource(
+      { get: async () => host } as never,
+      { get: async () => nativeToolsPolicy } as never,
+      { getToken: async () => 'test-token' } as never,
+      contexts,
+    );
+    const params = {
+      messages: [{ role: 'user', content: 'Inspect fixture' }], tools: [],
+      sessionId: 'chat-identity', messageId: 'assistant-iteration', runId: 'journal-run',
+      turnId: 'user-turn', promptMessageId: 'user-prompt',
+      executionProfile: {
+        id: 'devin-identity', name: 'Devin', kind: 'devin-cli-acp', model: 'swe-2',
+        approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
+      },
+    } as unknown as LLMSourceParams;
+    await collect(source.stream(params));
+    expect(observed).toMatchObject({
+      sessionId: 'chat-identity', turnId: 'user-turn', promptMessageId: 'user-prompt',
+    });
+    expect(contexts.get('chat-identity')).toBeUndefined();
+  });
+
   it('binds a new ACP session, streams text/thoughts, and scopes Kalio tools through MCP', async () => {
     const prompt = vi.fn(async (_sessionId: string, text: string, input: { onText: (text: string) => void; onThought: (text: string) => void; onToolActivity?: (activity: { toolCallId: string; kind: string; title: string; status: string }) => void }) => {
       expect(text).toContain('SYSTEM:');
@@ -134,15 +172,23 @@ describe('DevinCliAcpLLMSource', () => {
       approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
     };
     await collect(source.stream({
-      messages: [{ role: 'user', content: 'old' }, { role: 'assistant', content: 'answer' }, { role: 'user', content: 'new' }],
+      messages: [
+        { role: 'user', content: 'old' }, { role: 'tool', content: 'obsolete result', toolCallId: 'old-call' },
+        { role: 'assistant', content: 'answer' }, { role: 'user', content: 'new' },
+        { role: 'tool', content: 'styles.css saved successfully', toolCallId: 'approved-write' },
+      ],
       tools: [], sessionId: 'session', messageId: 'message', executionProfile: profile, externalThreadId: 'acp-session-2', cwd: 'C:\\fixture',
     } as unknown as LLMSourceParams));
     expect(receivedPrompt).toContain('USER:\nnew');
+    expect(receivedPrompt).toContain('approved-write');
+    expect(receivedPrompt).toContain('styles.css saved successfully');
+    expect(receivedPrompt).not.toContain('obsolete result');
   });
 
   it('does not advertise or accept a Kalio MCP bridge when its token is missing', async () => {
     let receivedPrompt = '';
     let decision: string | undefined;
+    const audits: AuditEvent[] = [];
     const host = {
       ensureSession: vi.fn(async () => ({ sessionId: 'acp-session-no-bridge', cwd: 'C:\\fixture', processEpoch: 'epoch-no-bridge', resumed: false })),
       supportsHttpMcp: vi.fn(async () => true),
@@ -171,6 +217,8 @@ describe('DevinCliAcpLLMSource', () => {
       messages: [{ role: 'user', content: 'Create a site.' }],
       tools: [{ name: 'fs_list', description: 'list files', parameters: { type: 'object' }, requiresConfirmation: false }],
       sessionId: 'session-no-bridge', messageId: 'message-no-bridge',
+      turnId: 'turn-no-bridge', promptMessageId: 'prompt-no-bridge', runId: 'run-no-bridge',
+      onExternalAudit: async (event: AuditEvent) => { audits.push(event); },
       executionProfile: {
         id: 'devin-local-swe-2-high', name: 'Devin SWE-2 High', kind: 'devin-cli-acp', model: 'swe-2-high',
         approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
@@ -181,6 +229,11 @@ describe('DevinCliAcpLLMSource', () => {
     expect(receivedPrompt).toContain('Kalio MCP bridge is disabled');
     expect(receivedPrompt).not.toContain('server `kalio-runtime`');
     expect(decision).toBe('decline');
+    const approval = audits.find((event) => event.eventName === 'devin-cli-acp.native_approval');
+    expect(approval?.data).toMatchObject({
+      turnId: 'turn-no-bridge', promptMessageId: 'prompt-no-bridge', runId: 'run-no-bridge',
+      kalioSessionId: 'session-no-bridge', decisionSource: 'policy', categoryEnabled: false,
+    });
   });
 
   it('accepts the Kalio MCP wrapper without enabling native tools', async () => {
