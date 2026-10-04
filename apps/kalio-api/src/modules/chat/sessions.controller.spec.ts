@@ -43,6 +43,7 @@ function makeService() {
 function makeRunJournal() {
   return {
     getCurrentRun: vi.fn().mockResolvedValue(null),
+    getHistoryTurns: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -119,6 +120,12 @@ describe('SessionsController', () => {
   });
 
   describe('list()', () => {
+    it('reads only bounded valid turn IDs in the exact session', async () => {
+      await controller.getHistoryRuns('sess-1', 'valid-1,../other,,valid_2');
+      expect(runJournal.getHistoryTurns).toHaveBeenCalledWith('sess-1', ['valid-1', 'valid_2']);
+      await controller.getHistoryRuns('sess-1', Array.from({ length: 110 }, (_, i) => `turn-${i}`).join(','));
+      expect(runJournal.getHistoryTurns.mock.calls[1][1]).toHaveLength(100);
+    });
     it('returns all sessions', async () => {
       const result = await controller.list();
       expect(svc.list).toHaveBeenCalledWith({ includeArchived: false });

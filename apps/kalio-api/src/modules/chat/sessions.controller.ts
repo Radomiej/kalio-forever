@@ -113,6 +113,12 @@ export class SessionsController {
     return this.runJournal.getCurrentRun(id);
   }
 
+  @Get(':id/runs/history')
+  getHistoryRuns(@Param('id') id: string, @Query('turnIds') turnIds?: string): Promise<ChatRunSnapshot[]> {
+    const ids = (turnIds ?? '').split(',').filter(value => /^[\w-]{1,128}$/.test(value)).slice(0, 100);
+    return this.runJournal.getHistoryTurns(id, ids);
+  }
+
   @Post(':id/context-preview')
   getContextPreview(
     @Param('id') id: string,

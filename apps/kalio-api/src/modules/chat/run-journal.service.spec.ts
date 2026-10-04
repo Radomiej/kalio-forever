@@ -54,6 +54,18 @@ describe('RunJournalService', () => {
   });
 
   it('marks stale LLM runs as resumable after restart', async () => {
+  it('reads selected durable outcomes from one session, including cancellation, without foreign matches', async () => {
+    const own = await service.startRun({ sessionId: 'own', turnId: 'same' });
+    await service.checkpoint(own.id, { status: 'cancelled', phase: 'interrupted' });
+    await service.startRun({ sessionId: 'foreign', turnId: 'same' });
+    await service.startRun({ sessionId: 'own', turnId: 'unselected' });
+    expect(await service.getHistoryTurns('own', ['same', 'same'])).toEqual([
+      expect.objectContaining({ id: own.id, sessionId: 'own', turnId: 'same', status: 'cancelled' }),
+    ]);
+    expect(await service.getHistoryTurns('own', [])).toEqual([]);
+    expect(await service.getHistoryTurns('own', ['missing'])).toEqual([]);
+  });
+
     const run = await service.startRun({
       sessionId: 's1',
       turnId: 't1',

@@ -316,6 +316,15 @@ export class RunJournalService implements OnModuleInit {
     return row ? this.toSnapshot(row) : null;
   }
 
+  async getHistoryTurns(sessionId: string, turnIds: string[]): Promise<ChatRunSnapshot[]> {
+    const ids = [...new Set(turnIds)].slice(0, 100);
+    if (ids.length === 0) return [];
+    const rows = await this.drizzle.db.select().from(chatRuns).where(and(
+      eq(chatRuns.sessionId, sessionId), inArray(chatRuns.turnId, ids),
+    )).orderBy(desc(chatRuns.updatedAt));
+    return rows.map(row => this.toSnapshot(row));
+  }
+
   async interrupt(id: string, message: string): Promise<void> {
     const now = new Date();
     await this.drizzle.db
