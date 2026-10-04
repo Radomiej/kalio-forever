@@ -8,7 +8,9 @@ test('SWE-2 writes one confirmed HomeSite handoff and reads the actual content',
   test.setTimeout(120_000);
   const session = 'W4fggLSunrJB41C24MV7C';
   const started = Date.now();
-  const marker = `QA179_WRITE_${started}`;
+  const reportRun = process.env['KALIO_DEVIN_WRITE_REPORT_RUN'] ?? '179';
+  if (!/^[1-9]\d*$/.test(reportRun)) throw new Error('Numeric report run required');
+  const marker = `QA${reportRun}_WRITE_${started}`;
   const path = `E:/Projekty/home-site/docs/kalio-qa-handoff-${started}.md`;
   const content = `# HomeSite QA handoff\n\nReact/Vite fictional company demo.\nThe contact form is a demo and sends no email.\nBuild: npm run build.\nVerified write/read marker: ${marker}\n`;
   const audit = async () => {
@@ -34,7 +36,7 @@ test('SWE-2 writes one confirmed HomeSite handoff and reads the actual content',
     expect(calls[0].label).toBe('fs_write');
     expect(calls[0].data?.['args']).toEqual({ path, content });
     expect(before.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
-    await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-179/assets/write-awaiting-confirmation.png') });
+    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/write-awaiting-confirmation.png`) });
     await confirm.click();
     await expect(page.getByRole('heading', { name: `${marker}_RESULT`, exact: true })).toBeVisible({ timeout: 60_000 });
     await expect(stop).toHaveCount(0);
@@ -54,7 +56,7 @@ test('SWE-2 writes one confirmed HomeSite handoff and reads the actual content',
     const turn = page.getByTestId('agent-turn-bubble').filter({ hasText: `${marker}_RESULT` });
     await expect(turn.getByTestId('tool-execution-origin')).toHaveCount(2);
     await expect(turn.getByTestId('tool-execution-origin')).toHaveText(['Kalio', 'Kalio']);
-    await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-179/assets/write-read-after-f5.png') });
+    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/write-read-after-f5.png`) });
     console.log(JSON.stringify({ path, turnId: prompt!.turnId }));
   } finally {
     const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
