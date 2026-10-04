@@ -110,6 +110,12 @@ export function NativeCliIntegrationsPanel() {
         throw new Error(body?.message ?? `${response.status}: ${response.statusText}`);
       }
       const updated = await response.json() as NativeCliIntegrationStatus;
+      if (kind === 'check' && integration.provider === 'codex') {
+        const catalogResponse = await fetch(`/api/runtime/native-cli-integrations/${encodeURIComponent(integration.authProfileId)}/models/check`, { method: 'POST' });
+        if (!catalogResponse.ok) throw new Error(`Codex model catalog refresh failed (${catalogResponse.status}). Retry Recheck.`);
+        const catalog = await catalogResponse.json() as { models: string[] };
+        updated.models = catalog.models;
+      }
       setIntegrations((current) => current.map((item) => item.authProfileId === updated.authProfileId ? updated : item));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : `Failed to ${kind} native CLI integration.`;

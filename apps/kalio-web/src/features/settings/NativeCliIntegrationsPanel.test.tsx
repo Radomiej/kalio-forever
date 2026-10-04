@@ -61,6 +61,7 @@ describe('NativeCliIntegrationsPanel', () => {
         }), { status: 200 });
       }
       if (url.endsWith('/check') || url.endsWith('/reset')) {
+        if (url.endsWith('/models/check')) return new Response(JSON.stringify({ models: STATUS.models }), { status: 200 });
         return new Response(JSON.stringify({ ...STATUS, ...(url.endsWith('/reset') ? { status: 'offline', connected: false, openSessionCount: 0 } : {}) }), { status: 200 });
       }
       if (url.endsWith('/settings') && init?.method === 'PATCH') {
@@ -161,6 +162,22 @@ describe('NativeCliIntegrationsPanel', () => {
       '/api/runtime/native-cli-integrations/chatgpt-default/check',
       expect.objectContaining({ method: 'POST' }),
     ));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      '/api/runtime/native-cli-integrations/chatgpt-default/models/check',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+  });
+
+  it('reports catalog failure without resetting the host', async () => {
+    const original = vi.mocked(global.fetch).getMockImplementation()!;
+    vi.mocked(global.fetch).mockImplementation((input, init) => String(input).endsWith('/models/check')
+      ? Promise.resolve(new Response(null, { status: 503 })) : original(input, init));
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+    fireEvent.click(screen.getByTitle('Recheck all native integrations'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Codex model catalog refresh failed (503). Retry Recheck.'));
+    expect(vi.mocked(global.fetch).mock.calls.some(([input]) => String(input).endsWith('/reset'))).toBe(false);
   });
 
   it('checks and resets an integration from the panel', async () => {
