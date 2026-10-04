@@ -36,7 +36,6 @@ export function useChatComposerActions({
   const handleSendRef = useRef<(content: string, personaId: string) => void>(() => {});
   const {
     activeSessionId,
-    sessions,
     addMessage,
     setMessages,
     setAgentTurns,
@@ -55,6 +54,7 @@ export function useChatComposerActions({
   const isStreamingForActiveSession = isStreaming && streamingSessionId === activeSessionId;
 
   const handleSend = async (content: string, personaId: string, options?: { interrupt?: boolean }) => {
+    const { activeSessionId, sessions } = useSessionStore.getState();
     if (!activeSessionId) {
       return;
     }
@@ -95,6 +95,7 @@ export function useChatComposerActions({
   };
 
   const handleArchitectureRun = async (content: string, schemaId: string) => {
+    const { activeSessionId, sessions } = useSessionStore.getState();
     if (!activeSessionId || isStreamingForActiveSession) {
       return;
     }

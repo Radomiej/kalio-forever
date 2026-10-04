@@ -245,8 +245,8 @@ const updateSession = vi.fn((sessionId: string, patch: { title?: string; persona
 
 function createMockSessions(): ChatSession[] {
   return [
-    { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-    { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+    { id: 'session-1', title: 'Test', personaId: 'p1', executionProfileId: 'test-devin-swe-2', createdAt: 0, updatedAt: 0 },
+    { id: 'session-2', title: 'Other', personaId: 'p1', executionProfileId: 'test-devin-swe-2', createdAt: 0, updatedAt: 0 },
     { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
   ];
 }
@@ -394,7 +394,14 @@ vi.mock('../../services/apiClient', () => ({
     patch: vi.fn(() => Promise.resolve({ data: {} })),
   },
   getSessionVfsFiles: vi.fn(() => Promise.resolve({ files: [] })),
-  getExecutionProfiles: vi.fn(() => Promise.resolve([])),
+  getExecutionProfiles: vi.fn(() => Promise.resolve([{
+    id: 'test-devin-swe-2', name: 'Devin SWE-2 test fixture', kind: 'devin-cli-acp',
+    model: 'swe-2', approvalMode: 'kalio_strict', enabled: true,
+    capabilitiesVersion: '1', createdAt: 1, updatedAt: 1,
+  }])),
+  getDevinCliStatus: vi.fn(() => Promise.resolve({
+    modelCatalogStatus: 'ready', modelCatalogStale: false, models: ['swe-2'],
+  })),
 }));
 
 vi.mock('../architect/architect.api', () => ({

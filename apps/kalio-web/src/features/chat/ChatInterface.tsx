@@ -20,7 +20,7 @@ import type { TalkView } from '../../App.types';
 import { getArchitectureSchemas } from '../architect/architect.api';
 import { ARCHITECTURE_REGISTRY_CHANGED_EVENT } from '../architect/architectureRegistryEvents';
 import type { ArchitectSchema } from '../architect/architect.types';
-import { persistSessionLaunchSelection } from './launch/launchContext';
+import { useChatLaunchSend } from './hooks/useChatLaunchSend';
 import { useLaunchPersonas } from './launch/useLaunchPersonas';
 import {
   buildCopiedChatText,
@@ -418,22 +418,9 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     });
   };
 
-  const handleLaunchSend = useCallback(async (content: string, personaId: string, executionProfileId?: string) => {
-    if (!activeSession) {
-      return;
-    }
-
-    try {
-      if (!executionProfileId) throw new Error('Choose a connected provider and model before starting this chat.');
-      await persistSessionLaunchSelection(activeSession, personaId, executionProfileId, updateSession);
-    } catch (err: unknown) {
-      console.error('[ChatInterface] launch persona update failed', err instanceof Error ? err : new Error(String(err)));
-      setError(err instanceof Error ? err.message : 'Failed to save this chat selection.');
-      return;
-    }
-
-    handleComposerSend(content, personaId);
-  }, [activeSession, handleComposerSend, updateSession]);
+  const handleLaunchSend = useChatLaunchSend({
+    activeSession, projectId, projectPath, send: handleComposerSend, onError: setError,
+  });
 
   const handleLoadOlderMessages = useCallback(async () => {
     if (!activeSessionId || !activeSessionHistoryMeta?.hasMoreBefore || loadingOlderMessages) {
