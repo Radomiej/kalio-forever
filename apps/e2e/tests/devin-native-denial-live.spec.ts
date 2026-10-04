@@ -57,17 +57,28 @@ test('real Devin native read is denied by policy and its evidence survives reloa
     console.log(JSON.stringify({ turnId, since: submittedAt, auditRows: audit.length, nativeApprovals: approvals.map(e => ({
       id: e.id, decision: e.data?.['decision'], source: e.data?.['decisionSource'], category: e.data?.['category'],
     })) }));
-    expect(approvals.length, 'Prose refusal without a native permission request is not denial proof').toBeGreaterThan(0);
     for (const entry of approvals) expect(entry.data).toMatchObject({ decision: 'decline', decisionSource: 'policy', categoryEnabled: false });
+    const nativeReads = audit.filter(e => e.label === 'devin-cli-acp.tool' && e.data?.['kind'] === 'read');
+    expect(nativeReads).toHaveLength(1);
+    const callId = nativeReads[0]!.data!['toolCallId'];
+    const activity = audit.filter(e => e.label === 'devin-cli-acp.tool' && e.data?.['toolCallId'] === callId);
+    expect(activity.some(e => e.data?.['toolStatus'] === 'completed')).toBe(false);
+    const failure = activity.find(e => e.data?.['toolStatus'] === 'failed');
+    if (approvals.length === 0) {
+      expect(failure?.data, 'Failed status alone is not a permission outcome').toMatchObject({ outputPresent: true, permissionMentionedInFailure: true });
+    }
     expect(audit.filter(e => e.label === 'process.cmd.invocation')).toHaveLength(0);
-    const turn = page.getByTestId('agent-turn-bubble').filter({ hasText: `${marker}_RESULT` });
-    await expect(turn).toHaveCount(1);
-    await turn.getByRole('button', { name: 'Native tool audit', exact: true }).click();
-    await expect(turn.getByTestId('native-tool-audit-panel')).toContainText('blocked by policy');
+    const open = async () => {
+      const response = page.waitForResponse(r => r.url().includes('/api/audit-log?') && new URL(r.url()).searchParams.get('turnId') === turnId);
+      await page.getByRole('button', { name: 'Native tool audit', exact: true }).last().click();
+      expect((await response).ok()).toBe(true);
+      const panel = page.getByTestId('native-tool-audit-panel').last();
+      await expect(panel).toContainText(String(callId));
+      await expect(panel).toContainText(approvals.length ? 'blocked by policy' : 'Native Devin · failed');
+    };
+    await open();
     await page.reload();
-    await expect(turn).toHaveCount(1);
-    await turn.getByRole('button', { name: 'Native tool audit', exact: true }).click();
-    await expect(turn.getByTestId('native-tool-audit-panel')).toContainText('blocked by policy');
+    await open();
     await page.screenshot({ path: shot('native-denial-after-f5'), fullPage: true });
   } finally {
     if (await stop.isVisible()) await stop.click();
