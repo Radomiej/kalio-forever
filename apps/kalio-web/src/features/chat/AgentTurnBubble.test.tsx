@@ -6,6 +6,7 @@ import type { ToolActivity } from '../../store/agentStore';
 import type { AgentTurn, AgentTurnItem } from '../../store/sessionStore';
 import { eventBus } from '../../services/eventBus';
 import { apiClient } from '../../services/apiClient';
+import { buildTurnsFromHistory, mergeFetchedMessages } from './chatUtils';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -94,10 +95,11 @@ vi.mock('./ToolCallBubble', () => ({
   LiveToolCallBubble: ({ activity }: { activity: ToolActivity }) => (
     <div data-testid={`live-tool-${activity.callId}`}>{activity.toolName}</div>
   ),
-  HistoryToolCallBubble: ({ toolName, callId, isAnswered, defaultOpenOverride }: { toolName: string; callId: string; isAnswered?: boolean; defaultOpenOverride?: boolean }) => (
+  HistoryToolCallBubble: ({ toolName, callId, content, isAnswered, defaultOpenOverride }: { toolName: string; callId: string; content: string; isAnswered?: boolean; defaultOpenOverride?: boolean }) => (
     <div
       data-testid={`history-tool-${toolName}`}
       data-call-id={callId}
+      data-result={content}
       data-answered={String(isAnswered ?? false)}
       data-default-open={defaultOpenOverride === undefined ? 'unset' : String(defaultOpenOverride)}
     >
@@ -130,6 +132,90 @@ function makeTurn(items: AgentTurnItem[], done = true): AgentTurn {
 }
 
 describe('AgentTurnBubble', () => {
+  it('retains postapproval tool chips after final hydration without remount', () => {
+    const calls = [
+      { id: 'pre-approval', name: 'fs_read', args: {} },
+      { id: 'post-approval', name: 'fs_write', args: {} },
+      { id: 'output', name: 'fs_list', args: {} },
+    ];
+    const local = makeMsg({ id: 'assistant-approval', createdAt: 2,
+      turnId: 'turn-approval', promptMessageId: 'prompt-approval', toolCalls: [calls[0]] });
+    const prompt = makeMsg({ id: 'prompt-approval', role: 'user', content: 'Build it', createdAt: 1 });
+    mockMessages.push(prompt, local);
+    const liveTurn = { ...buildTurnsFromHistory(mockMessages, 's1')[0], done: false,
+      items: [...buildTurnsFromHistory(mockMessages, 's1')[0].items,
+        { kind: 'tool' as const, callId: calls[1].id }] };
+    const { rerender } = render(<AgentTurnBubble turn={liveTurn} toolActivities={[
+      { callId: calls[1].id, toolName: calls[1].name, args: {}, status: 'running', startedAt: 3 },
+    ]} />);
+    const mountedBubble = screen.getByTestId('agent-turn-bubble');
+    expect(screen.getByTestId('live-tool-post-approval')).toHaveTextContent('fs_write');
+
+    const durable = { ...local, content: 'Approval build finished', toolCalls: calls };
+    const results = calls.map((call, index) => makeMsg({ id: `result-${call.id}`,
+      role: 'tool_result', toolCallId: call.id, content: `result-${call.id}`, createdAt: 4 + index }));
+    const hydrated = mergeFetchedMessages(mockMessages, [prompt, durable, ...results]);
+    mockMessages.splice(0, mockMessages.length, ...hydrated);
+    const finalTurn = buildTurnsFromHistory(hydrated, 's1')[0];
+    expect(finalTurn.done).toBe(true);
+    rerender(<AgentTurnBubble turn={finalTurn} toolActivities={[]} />);
+
+    expect(screen.getByTestId('agent-turn-bubble')).toBe(mountedBubble);
+    expect(screen.queryAllByTestId(/^live-tool-/)).toHaveLength(0);
+    const chips = screen.getAllByTestId(/^history-tool-/);
+    expect(chips).toHaveLength(calls.length);
+    calls.forEach((call, index) => {
+      expect(chips.filter((chip) => chip.getAttribute('data-call-id') === call.id)).toHaveLength(1);
+      expect(chips[index]).toHaveAttribute('data-call-id', call.id);
+      expect(screen.getAllByTestId(`history-tool-${call.name}`)).toHaveLength(1);
+      expect(chips[index]).toHaveTextContent(call.name);
+      expect(chips.filter((chip) => chip.getAttribute('data-result') === results[index].content)).toHaveLength(1);
+    });
+    expect(screen.getAllByText('Approval build finished')).toHaveLength(1);
+  });
+
+  it.each([true, false])('does not animate retained thinking during an answer (done=%s)', (done) => {
+    mockThinkingChunks = { 'msg-1': 'Prior reasoning' };
+    mockStreamingChunks = done ? {} : { 'msg-1': 'Answer arriving' };
+    mockMessages.push(makeMsg({ content: done ? 'Final answer' : '', streaming: !done }));
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'thinking', messageId: 'msg-1' }, { kind: 'text', messageId: 'msg-1' }], done)} toolActivities={[]} />);
+    const button = screen.getByRole('button', { name: 'Thinking' });
+    expect(button.querySelector('.animate-pulse, .loading')).toBeNull();
+    fireEvent.click(button);
+    expect(screen.getByText('Prior reasoning')).toBeInTheDocument();
+  });
+
+  it('animates actual active thinking before the answer', () => {
+    mockThinkingChunks = { 'msg-1': 'Current reasoning' };
+    mockMessages.push(makeMsg({ streaming: true }));
+    render(<AgentTurnBubble turn={makeTurn([{ kind: 'thinking', messageId: 'msg-1' }], false)} toolActivities={[]} />);
+    expect(screen.getByRole('button', { name: 'Thinking' }).querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  it('stops thinking animation on the same mounted bubble as answer and completion arrive', () => {
+    mockThinkingChunks = { 'msg-1': 'Retained reasoning' };
+    mockMessages.push(makeMsg({ streaming: true }));
+    const thinkingItem: AgentTurnItem = { kind: 'thinking', messageId: 'msg-1' };
+    const textItem: AgentTurnItem = { kind: 'text', messageId: 'msg-1' };
+    const { rerender } = render(<AgentTurnBubble turn={makeTurn([thinkingItem], false)} toolActivities={[]} />);
+    const mounted = screen.getByTestId('agent-turn-bubble');
+    expect(screen.getByRole('button', { name: 'Thinking' }).querySelector('.loading')).not.toBeNull();
+
+    mockStreamingChunks = { 'msg-1': 'Answer arriving' };
+    rerender(<AgentTurnBubble turn={makeTurn([thinkingItem, textItem], false)} toolActivities={[]} />);
+    expect(screen.getByTestId('agent-turn-bubble')).toBe(mounted);
+    expect(screen.getAllByRole('button', { name: 'Thinking' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Thinking' }).querySelector('.loading, .animate-pulse')).toBeNull();
+    expect(screen.getByTestId('markdown-viewer')).toHaveTextContent('Answer arriving');
+
+    mockMessages[0] = makeMsg({ content: 'Final answer', thinking: 'Retained reasoning' });
+    mockStreamingChunks = {};
+    rerender(<AgentTurnBubble turn={makeTurn([thinkingItem, textItem], true)} toolActivities={[]} />);
+    expect(screen.getByTestId('agent-turn-bubble')).toBe(mounted);
+    expect(screen.getByRole('button', { name: 'Thinking' }).querySelector('.loading, .animate-pulse')).toBeNull();
+    expect(screen.getByTestId('markdown-viewer')).toHaveTextContent('Final answer');
+    expect(screen.queryByTestId('streaming-indicator')).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockMessages.length = 0; // Clear mock messages
