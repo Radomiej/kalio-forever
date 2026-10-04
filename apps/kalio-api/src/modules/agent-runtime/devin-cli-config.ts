@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import type { McpServer } from '@agentclientprotocol/sdk';
+import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, type DevinNativeToolsPolicy } from './devin-native-tools';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +24,7 @@ export interface DevinCliConfigHandle {
 export async function createDevinCliConfig(
   model: string,
   mcpServers: readonly McpServer[],
+  nativePolicy: DevinNativeToolsPolicy = DEFAULT_DEVIN_NATIVE_TOOLS_POLICY,
 ): Promise<DevinCliConfigHandle> {
   const directory = await mkdtemp(join(tmpdir(), 'kalio-devin-acp-'));
   const cwd = join(directory, 'workspace');
@@ -41,13 +43,24 @@ export async function createDevinCliConfig(
     cursor: false, windsurf: false, claude: false,
     copilot: false, opencode: false, zed: false,
   };
+  // Read-only tools normally bypass ACP permission callbacks. Enforce disabled
+  // categories in Devin itself; enabled categories must still request approval.
+  const groups = [
+    { enabled: nativePolicy.filesystem, tools: ['read', 'grep', 'glob', 'edit', 'write'] },
+    { enabled: nativePolicy.terminal, tools: ['exec'] },
+    { enabled: nativePolicy.web, tools: ['webfetch', 'web_search'] },
+  ];
+  const permissions = {
+    deny: groups.filter(group => !group.enabled).flatMap(group => group.tools),
+    ask: groups.filter(group => group.enabled).flatMap(group => group.tools),
+  };
   const writeConfig = async (names: readonly string[]): Promise<void> => {
     const disabled = Object.fromEntries(names.filter(name => !Object.hasOwn(mcpConfig, name)).map(name => [name, {
       command: process.execPath, args: ['-e', 'process.exit(0)'], disabled: true,
     }]));
     const servers = { ...disabled, ...mcpConfig };
     await Promise.all([
-      writeFile(path, JSON.stringify({ version: 1, agent: { model }, read_config_from, mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
+      writeFile(path, JSON.stringify({ version: 1, agent: { model }, read_config_from, permissions, mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
       writeFile(dedicatedMcpPath, JSON.stringify({ mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
     ]);
   };

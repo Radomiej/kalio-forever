@@ -4,6 +4,29 @@ import { describe, expect, it } from 'vitest';
 import { createDevinCliConfig } from './devin-cli-config';
 
 describe('Devin CLI ephemeral config', () => {
+  it('asks for enabled native categories without enabling disabled ones', async () => {
+    const config = await createDevinCliConfig('swe-2', [], { filesystem: true, terminal: false, web: true, source: 'settings' });
+    try {
+      const parsed = JSON.parse(await readFile(config.path, 'utf8')) as { permissions: { ask: string[]; deny: string[] } };
+      expect(parsed.permissions.deny).toEqual(['exec']);
+      expect(parsed.permissions.ask).toEqual(['read', 'grep', 'glob', 'edit', 'write', 'webfetch', 'web_search']);
+    } finally {
+      await config.cleanup();
+    }
+  });
+  it('denies automatic native reads in the private host configuration', async () => {
+    const config = await createDevinCliConfig('swe-2', []);
+    try {
+      const parsed = JSON.parse(await readFile(config.path, 'utf8')) as { permissions?: { deny?: string[] } };
+      expect(parsed.permissions?.deny).toEqual(expect.arrayContaining(['read', 'grep', 'glob', 'edit', 'write', 'exec']));
+      expect(parsed.permissions?.deny).not.toContain('mcp__*');
+      await config.suppressMcpServers(['foreign-server']);
+      const rewritten = JSON.parse(await readFile(config.path, 'utf8')) as { permissions?: { deny?: string[] } };
+      expect(rewritten.permissions).toEqual(parsed.permissions);
+    } finally {
+      await config.cleanup();
+    }
+  });
   it('serializes the scoped stdio bridge and cleans the temporary config', async () => {
     const config = await createDevinCliConfig('glm-5-2', [{
       name: 'kalio-runtime',

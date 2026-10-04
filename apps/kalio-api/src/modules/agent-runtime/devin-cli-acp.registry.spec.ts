@@ -17,6 +17,16 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 describe('DevinAcpHostRegistry status reads', () => {
+  it('copies the policy and rejects reusing a host after a category changes', async () => {
+    const registry = createRegistry();
+    const policy = { filesystem: false, web: false, terminal: false, source: 'settings' as const };
+    const host = await registry.get('swe-2', 'fixture', policy);
+    policy.filesystem = true;
+    expect(host.nativePolicy.filesystem).toBe(false);
+    await expect(registry.get('swe-2', 'fixture', policy)).rejects.toThrow('native tool policy changed');
+    await registry.reset();
+    expect((await registry.get('swe-2', 'fixture', policy)).nativePolicy.filesystem).toBe(true);
+  });
   function createRegistry(): DevinAcpHostRegistry {
     const commands = new DevinCliCommandQueueService();
     const catalog = new DevinCliModelCatalogService(commands);

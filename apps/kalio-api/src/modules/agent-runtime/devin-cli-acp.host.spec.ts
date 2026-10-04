@@ -60,6 +60,8 @@ describe('Devin CLI ACP host contract', () => {
         kind: 'execute',
         status: 'pending',
         rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
+        rawOutput: { error: 'Permission denied' },
+        content: [{ type: 'content', content: { type: 'text', text: 'Permission denied' } }],
       },
     } as unknown as SessionNotification);
 
@@ -67,6 +69,8 @@ describe('Devin CLI ACP host contract', () => {
       toolCallId: 'functions.mcp_call_tool:1',
       name: 'mcp_call_tool',
       rawInput: { server: 'kalio-runtime', tool: 'fs_list' },
+      rawOutput: { error: 'Permission denied' },
+      content: [{ type: 'content', content: { type: 'text', text: 'Permission denied' } }],
     });
   });
 });

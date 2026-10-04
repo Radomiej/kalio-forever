@@ -10,6 +10,7 @@ import { DevinNativeToolsPolicyService } from './devin-native-tools-policy.servi
 import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-token.service';
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 import { buildDevinStdioMcpBridgeConfig, DEVIN_KALIO_MCP_SERVER_NAME } from './devin-cli-mcp-bridge';
+import { summarizeDevinToolOutput } from './devin-tool-output-summary';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
@@ -30,7 +31,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     const model = profile.model.trim() || params.model?.trim() || '';
     if (!model) throw new Error('Devin CLI model is required.');
     const cwd = params.cwd?.trim() || process.env['WORKSPACE_ROOT']?.trim() || process.cwd();
-    const nativeToolsPolicy = await this.nativeToolsPolicy.get();
+    const nativeToolsPolicy = Object.freeze({ ...await this.nativeToolsPolicy.get() });
     const bridgeToken = await this.mcpBridgeToken.getToken();
     const bridgeContext = {
       sessionId: params.sessionId,
@@ -55,7 +56,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     let host: DevinAcpHost | undefined;
     let session: DevinAcpSession | undefined;
     try {
-      host = await this.registry.get(model, bridgeConfig ? params.sessionId : undefined);
+      host = await this.registry.get(model, bridgeConfig ? params.sessionId : undefined, nativeToolsPolicy);
       // Devin CLI 3000.x advertises ACP but ignores session/new MCP entries in
       // practice. The host therefore loads the same scoped bridge through its
       // ephemeral project-local `.devin/mcp_config.local.json` and keeps stdio
@@ -138,6 +139,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
               name: activity.name,
               title: activity.title,
               toolStatus: activity.status,
+              ...summarizeDevinToolOutput(activity.status, activity.rawOutput, activity.content),
             },
           });
         },

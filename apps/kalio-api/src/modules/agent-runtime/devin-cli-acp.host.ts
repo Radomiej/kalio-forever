@@ -7,6 +7,7 @@ import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-con
 import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import { stopDevinChild } from './devin-cli-process-shutdown';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
+import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, DEVIN_NATIVE_TOOL_CATEGORIES, type DevinNativeToolsPolicy } from './devin-native-tools';
 import { DevinCliProbeService, type DevinCliProbeStatus } from './devin-cli-probe.service';
 import {
   client,
@@ -19,6 +20,7 @@ import {
   type RequestPermissionRequest,
   type SessionNotification,
   type StopReason,
+  type ToolCallContent,
 } from '@agentclientprotocol/sdk';
 
 const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
@@ -59,6 +61,8 @@ export interface DevinAcpToolActivity {
   title?: string | null;
   status?: string | null;
   rawInput?: unknown;
+  rawOutput?: unknown;
+  content?: ToolCallContent[] | null;
 }
 
 interface SessionState {
@@ -97,7 +101,7 @@ export class DevinAcpHost {
   private closing = false;
   private closePromise?: Promise<void>;
 
-  constructor(readonly model: string) {}
+  constructor(readonly model: string, readonly nativePolicy: DevinNativeToolsPolicy = { ...DEFAULT_DEVIN_NATIVE_TOOLS_POLICY }) {}
 
   getStatus(): { model: string; status: DevinAcpIntegrationStatus; processEpoch?: string } {
     return {
@@ -206,7 +210,7 @@ export class DevinAcpHost {
 
   private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
     const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
-    const config = await createDevinCliConfig(this.model, mcpServers);
+    const config = await createDevinCliConfig(this.model, mcpServers, this.nativePolicy);
     this.config = config;
     try {
       const suppressedCount = await suppressInheritedDevinMcp(spec.command, config, mcpServers.map(server => server.name));
@@ -354,6 +358,8 @@ export class DevinAcpHost {
         title: update.title,
         status: update.status,
         rawInput: update.rawInput,
+        rawOutput: update.rawOutput,
+        content: update.content,
       });
     }
   }
@@ -385,14 +391,19 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
 
   constructor(private readonly probes: DevinCliProbeService) {}
 
-  async get(model: string, scopeKey?: string): Promise<DevinAcpHost> {
+  async get(model: string, scopeKey?: string, nativePolicy: DevinNativeToolsPolicy = DEFAULT_DEVIN_NATIVE_TOOLS_POLICY): Promise<DevinAcpHost> {
     if (this.resetPromise) await this.resetPromise;
     const normalizedModel = model.trim();
     if (!normalizedModel) throw new Error('Devin CLI model is required.');
     const key = scopeKey?.trim() ? `${normalizedModel}\u0000${scopeKey.trim()}` : normalizedModel;
     const existing = this.hosts.get(key);
-    if (existing) return existing;
-    const host = new DevinAcpHost(normalizedModel);
+    if (existing) {
+      if (DEVIN_NATIVE_TOOL_CATEGORIES.some(category => existing.nativePolicy[category] !== nativePolicy[category])) {
+        throw new Error('Devin native tool policy changed; reset the Devin host before continuing.');
+      }
+      return existing;
+    }
+    const host = new DevinAcpHost(normalizedModel, Object.freeze({ ...nativePolicy }));
     this.hosts.set(key, host);
     return host;
   }
