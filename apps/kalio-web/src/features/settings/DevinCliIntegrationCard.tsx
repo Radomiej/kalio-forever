@@ -80,7 +80,7 @@ export function DevinCliIntegrationCard({
         </div>
         <span className={`inline-flex items-center gap-1 text-xs ${statusClass}`}>
           {loading ? <Loader2 size={12} className="animate-spin" /> : !probeChecked ? <ServerCog size={12} /> : online ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-          {loading ? 'Checking' : !probeChecked ? 'Not checked' : online ? 'Online' : 'Unavailable'}
+          {loading ? 'Checking' : !probeChecked ? 'Not checked' : online ? 'CLI ready' : 'Unavailable'}
         </span>
       </div>
       <div className="flex flex-col gap-3 px-4 py-3">
@@ -118,7 +118,7 @@ export function DevinCliIntegrationCard({
           </span>
         </div>
         <p className="text-xs text-base-content/50">
-          Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Token actions and switches reset active Devin hosts.
+          CLI readiness does not mean an agent is running. Model hosts start on the first message. Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Token actions and switches reset active Devin hosts.
         </p>
         <div className="rounded-lg border border-base-300 bg-base-200/20 p-3">
           <div className="mb-2 text-sm font-medium">Kalio MCP bridge token</div>

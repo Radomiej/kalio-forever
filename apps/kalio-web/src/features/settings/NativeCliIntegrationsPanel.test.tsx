@@ -84,7 +84,8 @@ describe('NativeCliIntegrationsPanel', () => {
     expect(await screen.findByText('Codex')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Codex', { exact: true }).closest('summary')!);
     expect(within(screen.getByTestId('devin-cli-integration-card')).getByRole('button', { name: 'Browse 2 models' })).toBeInTheDocument();
-    expect(screen.getAllByText('Online')).toHaveLength(2);
+    expect(within(screen.getByTestId('devin-cli-integration-card')).getByText('CLI ready')).toBeInTheDocument();
+    expect(screen.getAllByText('Online')).toHaveLength(1);
     expect(screen.getByText('2 open sessions')).toBeInTheDocument();
     expect(screen.getAllByText(/gpt-5\.6-luna/).length).toBeGreaterThan(0);
   });
