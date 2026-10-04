@@ -7,6 +7,8 @@ test('existing ChatGPT conversation recovers after backend restart and accepts a
   test.setTimeout(120_000);
   const session = 'yvD83rgDA_ZHvUwJKlo_S';
   const started = Date.now();
+  const reportRun = process.env['KALIO_CODEX_RESTART_REPORT_RUN'] ?? '160';
+  if (!/^\d+$/.test(reportRun)) throw new Error('Report run must be numeric');
   const host = async () => {
     const statuses = await (await request.get(`${API_BASE}/runtime/native-cli-integrations`)).json() as { provider: string; authProfileId: string; connected: boolean; processEpoch: string }[];
     const current = statuses.find(item => item.provider === 'codex' && item.authProfileId === 'chatgpt-default');
@@ -20,7 +22,7 @@ test('existing ChatGPT conversation recovers after backend restart and accepts a
   const stop = page.getByRole('button', { name: 'Stop agent', exact: true });
   try {
     for (const phase of ['RECOVERED', 'FOLLOWUP']) {
-      const marker = `QA160_CODEX_${phase}_${started}`;
+      const marker = `QA${reportRun}_CODEX_${phase}_${started}`;
       await sendMessageFromComposer(page, `Test komunikacji ChatGPT/Codex, model gpt-6-luna. Bez narzędzi, plików, terminala, web ani zmian projektu. Odpowiedz tylko nagłówkiem ## ${marker} i zdaniem: Rozmowa działa poprawnie.`);
       await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible({ timeout: 60_000 });
       await expect(stop).toHaveCount(0);
@@ -34,7 +36,7 @@ test('existing ChatGPT conversation recovers after backend restart and accepts a
     expect(entries.filter(entry => entry.type === 'tool_call')).toHaveLength(0);
     expect(entries.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
     expect(entries.filter(entry => entry.label === 'llm.turn.completed')).toHaveLength(2);
-    await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-160/assets/codex-recovery-after-f5.png') });
+    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/codex-recovery-after-f5.png`) });
   } finally {
     if (await stop.isVisible()) await stop.click();
   }
