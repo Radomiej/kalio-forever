@@ -1,10 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import type { LLMToolCall, ToolResult } from '@kalio/types';
+
+export interface NativeToolExecutionOptions {
+  abortSignal: AbortSignal;
+  onApprovalProgress?: (state: 'waiting' | 'resolved') => void;
+}
+
+export type NativeToolDispatch = (call: LLMToolCall, options: NativeToolExecutionOptions) => Promise<ToolResult>;
 
 export interface KalioMcpBridgeTurnContext {
   sessionId: string;
   vfsSessionId?: string;
   turnId?: string;
   promptMessageId?: string;
+  dispatchNativeTool?: NativeToolDispatch;
 }
 
 interface ActiveContext {

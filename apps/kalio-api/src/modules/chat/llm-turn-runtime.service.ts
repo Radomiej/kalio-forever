@@ -8,26 +8,20 @@ import { AuditService } from './audit.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
-import type { LLMStructuredOutputRequest, SocketEvents, ToolResult, WorkflowErrorCode } from '@kalio/types';
+import type { LLMStructuredOutputRequest, LLMToolCall, ToolResult, WorkflowErrorCode } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
-import { toAuditToolCallData, toAuditToolResultData } from './audit-tool-data';
+import { buildAuditRequestData, buildAuditResponseData } from './llm-turn-audit-data';
+import { dispatchRuntimeTool, TurnExecutionLane } from './llm-turn-tool-execution';
+import type { NativeToolExecutionOptions } from '../../common/kalio-mcp-bridge-context';
+export { serializeToolResultContent } from './llm-turn-tool-execution';
 import { buildEmptyNoToolRuntimeAuditEvent } from './llm-turn-runtime-audit.events';
 import {
-  estimateContentTokens,
   estimateTextTokens,
   type LLMAgentLoopRequest,
   type LLMAgentLoopResult,
   type LLMUsage,
 } from './llm-turn-runtime.types';
-
-const CLI_CHILD_TOOL_NAMES = new Set([
-  'run_cli_agent',
-  'spawn_cli_agent',
-  'message_cli_agent',
-  'get_cli_agent_status',
-  'stop_cli_agent',
-]);
 
 @Injectable()
 export class LLMTurnRuntimeService {
@@ -79,6 +73,8 @@ export class LLMTurnRuntimeService {
       lastMessageId = messageId;
       await request.callbacks?.onBeforeIteration?.(iteration, messageId, currentLimit);
 
+      const lane = new TurnExecutionLane();
+      const turnFailure = new AbortController();
       let state = new TurnState();
       let ctx: StreamContext = {
         sessionId: request.sessionId,
@@ -90,7 +86,8 @@ export class LLMTurnRuntimeService {
         runtimeKind: request.runtimeKind,
         iteration,
         currentLimit,
-        markWaitingForHuman: request.callbacks?.onWaitingForHuman,
+        markWaitingForHuman: () => lane.write(async () => { await request.callbacks?.onWaitingForHuman?.(); }),
+        markToolRunning: () => lane.write(async () => { await request.callbacks?.onToolRunning?.(); }),
         messageId,
         abortSignal: request.abortSignal,
         state,
@@ -121,21 +118,21 @@ export class LLMTurnRuntimeService {
           runtimeKind: request.runtimeKind,
           iteration,
           limit: currentLimit,
-          model: request.model,
+          model: request.executionProfile?.model ?? request.model,
         },
       });
       await this.audit?.log({
         sessionId: request.sessionId,
         type: 'llm_request',
         label: messageId,
-        data: this.buildAuditRequestData(request, auditDomain, iteration, history),
+        data: buildAuditRequestData(request, auditDomain, iteration, history),
       });
 
       const auditResponseId = await this.audit?.log({
         sessionId: request.sessionId,
         type: 'llm_response',
         label: messageId,
-        data: this.buildAuditResponseData(request, auditDomain, iteration),
+        data: buildAuditResponseData(request, auditDomain, iteration),
         chunkCount: 0,
       });
 
@@ -153,47 +150,32 @@ export class LLMTurnRuntimeService {
         hasStructuredOutput: boolean;
         latestStructuredOutput: unknown;
       } = { hasStructuredOutput, latestStructuredOutput };
-      const inlineCodexToolCalls = new Set<string>();
-
-      const dispatchToolCall = async (effectiveToolCall: { id: string; name: string; args: Record<string, unknown> }): Promise<void> => {
-        await request.callbacks?.onToolPending?.();
-        request.emit('tool:start', this.toolStartPayload(request, effectiveToolCall) as SocketEvents['tool:start']);
-        await request.callbacks?.onToolRunning?.();
-        await this.audit?.log({
-          sessionId: request.sessionId,
-          type: 'tool_call',
-          label: effectiveToolCall.name,
-          data: this.buildToolCallAuditData(request, effectiveToolCall),
-        });
-        const toolStartedAt = performance.now();
-        const result = await this.toolDispatch.dispatch(
-          effectiveToolCall.id,
-          effectiveToolCall.name,
-          effectiveToolCall.args,
-          ctx,
-          request.toolMetas,
-        );
-        const content = serializeToolResultContent(effectiveToolCall.name, result);
-        await this.sessionManager.saveToolResult(request.sessionId, effectiveToolCall.id, content, {
-          turnId: request.turnId,
-          promptMessageId: request.promptMessageId,
-        });
-        request.emit('tool:result', result);
-        await this.audit?.log({
-          sessionId: request.sessionId,
-          type: 'tool_result',
-          label: effectiveToolCall.name,
-          data: this.buildToolResultAuditData(request, effectiveToolCall, result),
-          durationMs: Math.round(performance.now() - toolStartedAt),
-        });
-        await request.onToolResult?.(effectiveToolCall.id, result);
-        await toolResultHandler?.(effectiveToolCall.id, result);
-        if (effectiveToolCall.name === 'escalate' && result.status === 'success') {
-          const message = (result.data as Record<string, unknown>)?.['message'];
-          if (typeof message === 'string') {
-            request.callbacks?.onEscalation?.(message);
+      const dispatchToolCall = (call: LLMToolCall, options?: NativeToolExecutionOptions): Promise<ToolResult> => {
+        const effectiveCall = request.transformToolCall ? request.transformToolCall(call) : call;
+        return lane.execute(call.id, effectiveCall.id, async () => {
+          const toolContext: StreamContext = options ? {
+            ...ctx,
+            abortSignal: AbortSignal.any([request.abortSignal, options.abortSignal, turnFailure.signal]),
+            emit: (event, data) => {
+              request.emit(event, data);
+              if (event === 'tool:confirmation_required') options.onApprovalProgress?.('waiting');
+              else if (event === 'tool:confirmation_invalidated') options.onApprovalProgress?.('resolved');
+            },
+          } : ctx;
+          if (options) {
+            await lane.write(async () => {
+              state.addToolCall(effectiveCall);
+              await this.sessionManager.persistAssistantMessage(request.sessionId, messageId, state, {
+                turnId: request.turnId, promptMessageId: request.promptMessageId,
+              });
+            });
           }
-        }
+          return dispatchRuntimeTool({
+            request, call: effectiveCall, context: toolContext, lane,
+            sessionManager: this.sessionManager, toolDispatch: this.toolDispatch,
+            audit: this.audit, resultHandler: toolResultHandler,
+          });
+        }, Boolean(options));
       };
 
       const streamModel = async (messagesForAttempt: ContextManagedLLMMessage[]): Promise<void> => {
@@ -206,6 +188,9 @@ export class LLMTurnRuntimeService {
            providerToolNames: request.providerToolNames,
            executionProfile: request.executionProfile,
           runId: request.runId,
+          turnId: request.turnId,
+          promptMessageId: request.promptMessageId,
+          dispatchNativeTool: dispatchToolCall,
           externalThreadId: request.externalThreadId,
            cwd: request.cwd,
            onExternalThreadBound: request.onExternalThreadBound,
@@ -231,15 +216,9 @@ export class LLMTurnRuntimeService {
             continue;
           }
           chunkCount++;
-          await this.streamProcessor.process(chunk, ctx);
+          await lane.write(() => this.streamProcessor.process(chunk, ctx));
           if (chunk.type === 'tool_call' && request.providerCompletesTurn) {
-            const rawToolCall = { id: chunk.callId, name: chunk.name, args: chunk.args };
-            const effectiveToolCall = request.transformToolCall
-              ? request.transformToolCall(rawToolCall)
-              : rawToolCall;
-            inlineCodexToolCalls.add(rawToolCall.id);
-            inlineCodexToolCalls.add(effectiveToolCall.id);
-            await dispatchToolCall(effectiveToolCall);
+            await dispatchToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
           }
           if (auditResponseId && this.audit?.update && performance.now() - lastAuditUpdate >= 500) {
             void this.audit.update(auditResponseId, { chunkCount });
@@ -250,10 +229,12 @@ export class LLMTurnRuntimeService {
 
       try {
         await streamModel(history);
+        await lane.drain();
       } catch (error) {
         if (
           request.structuredOutput
           && !structuredOutputRepairRetried
+          && !lane.hasExecutions
           && !request.abortSignal.aborted
           && isStructuredOutputError(error)
         ) {
@@ -273,6 +254,24 @@ export class LLMTurnRuntimeService {
             this.structuredOutputRepairMessage(request.structuredOutput, error),
           ]);
         } else {
+          turnFailure.abort(error);
+          let cleanupError: unknown;
+          try { await lane.drain(); } catch (failure) { cleanupError = failure; }
+          // SubagentRuntimeService owns its durable error fallback; do not create a second assistant row.
+          if (auditDomain === 'chat' && (state.text.trim() || state.thinking.trim())) {
+            const partial = new TurnState();
+            partial.text = state.text;
+            partial.thinking = state.thinking;
+            partial.toolCalls.push(...state.toolCalls);
+            try {
+              await this.sessionManager.persistAssistantMessage(request.sessionId, messageId, partial, {
+                turnId: request.turnId, promptMessageId: request.promptMessageId,
+              });
+            } catch (failure) {
+              this.logger.error(`Partial history persistence failed session=${request.sessionId} turn=${request.turnId}: ${errorMessage(failure)}`);
+              cleanupError ??= failure;
+            }
+          }
           await this.runtimeAudit?.log({
             eventName: 'llm.turn.failed',
             sessionId: request.sessionId,
@@ -284,6 +283,7 @@ export class LLMTurnRuntimeService {
               runtimeKind: request.runtimeKind,
               iteration,
               message: error instanceof Error ? error.message : String(error),
+              ...(cleanupError ? { cleanupFailure: errorMessage(cleanupError).slice(0, 240) } : {}),
             },
           });
           throw error;
@@ -291,6 +291,12 @@ export class LLMTurnRuntimeService {
       }
 
       if (request.abortSignal.aborted) {
+        if (state.text.trim() || state.thinking.trim()) {
+          await lane.write(() => this.sessionManager.persistAssistantMessage(request.sessionId, messageId, state, {
+            turnId: request.turnId, promptMessageId: request.promptMessageId,
+          }));
+          if (state.text.trim()) latestText = state.text.trim();
+        }
         await this.runtimeAudit?.log({
           eventName: 'llm.turn.cancelled',
           sessionId: request.sessionId,
@@ -320,7 +326,7 @@ export class LLMTurnRuntimeService {
         chunkCount,
         durationMs: Math.round(performance.now() - turnStart),
         data: {
-          ...this.buildAuditResponseData(request, auditDomain, iteration),
+          ...buildAuditResponseData(request, auditDomain, iteration),
           textLength: state.text.length,
           thinkingLength: state.thinking.length,
           toolCallCount: state.toolCalls.length,
@@ -353,7 +359,7 @@ export class LLMTurnRuntimeService {
           const effectiveToolCall = request.transformToolCall
             ? request.transformToolCall(toolCall)
             : toolCall;
-          if (!inlineCodexToolCalls.has(toolCall.id) && !inlineCodexToolCalls.has(effectiveToolCall.id)) {
+          if (!lane.has(toolCall.id) && !lane.has(effectiveToolCall.id)) {
             await dispatchToolCall(effectiveToolCall);
           }
         }
@@ -434,121 +440,6 @@ export class LLMTurnRuntimeService {
     };
   }
 
-  private buildAuditRequestData(
-    request: LLMAgentLoopRequest,
-    auditDomain: 'chat' | 'subagent',
-    iteration: number,
-    history: Array<{ content: import('@kalio/types').LLMContent }>,
-  ): Record<string, unknown> {
-    if (auditDomain === 'subagent' && request.agentRun) {
-      return {
-        domain: 'subagent',
-        kind: 'subagent_llm_request',
-        childAgentRunId: request.agentRun.agentRunId,
-        parentSessionId: request.agentRun.parentSessionId,
-        parentToolCallId: request.agentRun.parentToolCallId,
-        iteration,
-        estimatedInputTokens: history.reduce((total, item) => total + estimateContentTokens(item.content), 0),
-        messageCount: history.length,
-        toolCount: request.toolMetas.length,
-        ...(request.auditMetadata ?? {}),
-      };
-    }
-    return {
-      estimatedInputTokens: history.reduce((total, item) => total + estimateContentTokens(item.content), 0),
-      personaId: request.personaId,
-      iteration,
-      messageCount: history.length,
-      toolCount: request.toolMetas.length,
-      ...(request.auditMetadata ?? {}),
-    };
-  }
-
-  private buildAuditResponseData(
-    request: LLMAgentLoopRequest,
-    auditDomain: 'chat' | 'subagent',
-    iteration: number,
-  ): Record<string, unknown> {
-    if (auditDomain === 'subagent' && request.agentRun) {
-      return {
-        domain: 'subagent',
-        kind: 'subagent_llm_response',
-        childAgentRunId: request.agentRun.agentRunId,
-        parentSessionId: request.agentRun.parentSessionId,
-        parentToolCallId: request.agentRun.parentToolCallId,
-        iteration,
-        textLength: 0,
-        thinkingLength: 0,
-        toolCallCount: 0,
-        ...(request.auditMetadata ?? {}),
-      };
-    }
-    return {
-      iteration,
-      textLength: 0,
-      thinkingLength: 0,
-      toolCallCount: 0,
-      ...(request.auditMetadata ?? {}),
-    };
-  }
-
-  private buildToolCallAuditData(
-    request: LLMAgentLoopRequest,
-    toolCall: { id: string; name: string; args: Record<string, unknown> },
-  ): Record<string, unknown> {
-    const auditArgs = { ...toolCall.args, ...(request.auditMetadata ?? {}) };
-    const base = toAuditToolCallData(toolCall.id, toolCall.name, auditArgs, this.findToolMeta(request, toolCall.name));
-    if (!request.agentRun) return base;
-    return {
-      ...base,
-      childAgentRunId: request.agentRun.agentRunId,
-      parentSessionId: request.agentRun.parentSessionId,
-      parentToolCallId: request.agentRun.parentToolCallId,
-    };
-  }
-
-  private buildToolResultAuditData(
-    request: LLMAgentLoopRequest,
-    toolCall: { id: string; name: string; args: Record<string, unknown> },
-    result: import('@kalio/types').ToolResult,
-  ): Record<string, unknown> {
-    const auditArgs = { ...toolCall.args, ...(request.auditMetadata ?? {}) };
-    const base = toAuditToolResultData(toolCall.id, toolCall.name, result, auditArgs, this.findToolMeta(request, toolCall.name));
-    if (!request.agentRun) return base;
-    return {
-      ...base,
-      childAgentRunId: request.agentRun.agentRunId,
-      parentSessionId: request.agentRun.parentSessionId,
-      parentToolCallId: request.agentRun.parentToolCallId,
-    };
-  }
-
-  private findToolMeta(request: LLMAgentLoopRequest, toolName: string): import('@kalio/types').ToolMeta | undefined {
-    return request.toolMetas.find((tool) => tool.name === toolName || tool.aliases?.some((alias) => alias === toolName));
-  }
-
-  private toolStartPayload(
-    request: LLMAgentLoopRequest,
-    toolCall: { id: string; name: string; args: Record<string, unknown> },
-  ): SocketEvents['tool:start'] {
-    if (request.agentRun) {
-      return {
-        callId: toolCall.id,
-        toolName: toolCall.name,
-        args: toolCall.args,
-        sessionId: request.sessionId,
-        turnId: request.turnId,
-        agentRun: request.agentRun,
-      };
-    }
-    return {
-      callId: toolCall.id,
-      toolName: toolCall.name,
-      args: toolCall.args,
-      turnId: request.turnId,
-    };
-  }
-
   private async updateAuditResponse(
     auditResponseId: string | undefined,
     patch: Parameters<AuditService['update']>[1],
@@ -603,32 +494,4 @@ function workflowErrorCodeFromThrown(error: unknown): WorkflowErrorCode {
     default:
       return 'UNKNOWN';
   }
-}
-
-export function serializeToolResultContent(toolName: string, result: ToolResult): string {
-  const fallbackErrorMessage = result.errorMessage ?? (
-    result.status === 'cancelled' ? `Tool ${toolName} was cancelled or not approved.` : ''
-  );
-
-  if (
-    CLI_CHILD_TOOL_NAMES.has(toolName)
-    && result.data
-    && typeof result.data === 'object'
-    && !Array.isArray(result.data)
-  ) {
-    return JSON.stringify({
-      ...(result.data as Record<string, unknown>),
-      toolResultStatus: result.status,
-      ...(result.errorCode ? { toolResultErrorCode: result.errorCode } : {}),
-      ...(fallbackErrorMessage ? { toolResultErrorMessage: fallbackErrorMessage } : {}),
-    });
-  }
-
-  return result.status === 'success'
-    ? JSON.stringify(result.data ?? '')
-    : JSON.stringify({
-        status: result.status,
-        errorCode: result.errorCode,
-        errorMessage: fallbackErrorMessage,
-      });
 }

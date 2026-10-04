@@ -1,4 +1,4 @@
-import type { AgentRunContext, SessionRuntimeKind, SocketEvents } from '@kalio/types';
+import type { AgentRunContext, SessionRuntimeKind, SocketEvents, ToolResult } from '@kalio/types';
 import type { TurnState } from '../turn-state';
 
 /**
@@ -22,6 +22,8 @@ export interface StreamContext {
   readonly iteration?: number;
   readonly currentLimit?: number;
   readonly markWaitingForHuman?: () => Promise<void>;
+  readonly markToolRunning?: () => Promise<void>;
+  readonly registerToolResultCommit?: (commit: (result: ToolResult) => Promise<void>) => void;
   readonly messageId: string;
   readonly abortSignal: AbortSignal;
   readonly state: TurnState;

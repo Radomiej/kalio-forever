@@ -4,7 +4,7 @@ import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest } f
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { TOOL_REGISTRY } from './chat.tokens';
-import { ToolConfirmationService, type ConfirmationResolutionStatus, type PendingMutationStatus } from './tool-confirmation.service';
+import { ToolConfirmationService, type ConfirmationResolutionStatus, type PendingMutationStatus, type ToolApprovalOutcome } from './tool-confirmation.service';
 import { MCPService } from '../mcp/mcp.service';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
@@ -110,7 +110,11 @@ export class ToolDispatchService {
             if (!approval.approved) {
               return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
             }
+            this.registerLiveExecution(ctx, approval);
           }
+          if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+          await ctx.markToolRunning?.();
+          if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
           try {
             const data = await this.mcpService.callTool(mcpRef.serverKey, mcpRef.originalName, args);
             return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
@@ -138,8 +142,12 @@ export class ToolDispatchService {
       if (!approval.approved) {
         return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
       }
+      this.registerLiveExecution(ctx, approval);
     }
 
+    if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+    await ctx.markToolRunning?.();
+    if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
     try {
       const req: ToolCallRequest = {
         sessionId: ctx.sessionId,
@@ -193,6 +201,11 @@ export class ToolDispatchService {
 
   dropPendingConfirmation(requestId: string, sessionId?: string): PendingMutationStatus {
     return this.confirmations.dropPendingConfirmation(requestId, sessionId);
+  }
+
+  private registerLiveExecution(ctx: StreamContext, approval: ToolApprovalOutcome): void {
+    const execution = approval.execution;
+    if (execution) ctx.registerToolResultCommit?.((result) => this.confirmations.finishLiveExecution(execution, { status: result.status }));
   }
 
   private withMeta(result: ToolResult, toolName: string, ctx: StreamContext): ToolResult {

@@ -13,6 +13,7 @@ type ConfirmationWaitResult = { status: 'approved' | 'rejected' | 'timeout'; req
 export interface ToolApprovalOutcome {
   approved: boolean;
   rejectionMessage?: string;
+  execution?: { requestId: string; revision: number };
 }
 export type PendingMutationStatus = 'removed' | 'not_found' | 'session_mismatch';
 
@@ -148,6 +149,14 @@ export class ToolConfirmationService {
 
     const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx);
     if (waitResult.status === 'approved') {
+      if (this.hitlRequests) {
+        const approved = await this.hitlRequests.getById(waitResult.requestId);
+        const claimed = approved && !ctx.abortSignal.aborted
+          ? await this.hitlRequests.claimApprovedContinuation(approved.id, approved.revision)
+          : null;
+        if (!claimed) return { approved: false, rejectionMessage: 'Durable approval execution could not be claimed.' };
+        return { approved: true, execution: { requestId: claimed.id, revision: claimed.revision } };
+      }
       return { approved: true };
     }
 
@@ -318,7 +327,14 @@ export class ToolConfirmationService {
             );
           }
           if (!persisted) {
-            this.logger.error(`Aborted HITL confirmation ${requestId} was not persisted; keeping it pending.`);
+            this.logger.error(`Aborted HITL confirmation ${requestId} requires durable reconciliation.`);
+            if (this.pending.get(requestId) === pending) {
+              this.pending.delete(requestId);
+              this.emitConfirmationInvalidated(pending, 'cancelled', 'Cancellation persistence failed; durable reconciliation required.');
+              if (timeout) clearTimeout(timeout);
+              cleanupAbortListener();
+              resolve({ status: 'rejected', requestId, message: 'Cancellation persistence failed; durable reconciliation required.' });
+            }
             return;
           }
         }
@@ -357,6 +373,16 @@ export class ToolConfirmationService {
       }
       ctx.abortSignal?.addEventListener('abort', handleAbort, { once: true });
     });
+  }
+
+  /** Call only after the canonical tool result has been durably saved. */
+  async finishLiveExecution(
+    execution: NonNullable<ToolApprovalOutcome['execution']>,
+    outcome: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.hitlRequests || !await this.hitlRequests.markContinuationToolResult(execution.requestId, execution.revision, outcome)) {
+      throw new Error(`Unable to commit durable tool execution ${execution.requestId}; execution remains uncertain.`);
+    }
   }
 
   private logConfirmationLifecycle(
