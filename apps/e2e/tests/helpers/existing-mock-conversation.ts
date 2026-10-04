@@ -6,6 +6,7 @@ import { API_BASE, deleteSessionIfExists } from './test-config';
 export async function createExistingMockConversation(
   request: APIRequestContext,
   title: string,
+  personaId = 'default',
 ): Promise<{ id: string }> {
   if (!process.env['DATABASE_PATH']?.replaceAll('\\', '/').includes('playwright-stack/')) {
     throw new Error('Mock conversation fixture requires the isolated Playwright database');
@@ -16,7 +17,7 @@ export async function createExistingMockConversation(
   expect(profileResponse.ok()).toBeTruthy();
   const profile = await profileResponse.json() as { id: string };
   const response = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId: 'default', executionProfileId: profile.id },
+    data: { title, personaId, executionProfileId: profile.id },
   });
   expect(response.ok()).toBeTruthy();
   const session = await response.json() as { id: string };
@@ -34,7 +35,7 @@ export async function createExistingMockConversation(
       socket.once('chat:error', (error: { message?: string }) => finish(new Error(error.message ?? 'Fixture failed')));
       socket.once('chat:complete', () => finish());
       socket.once('connect', () => socket.emit('chat:send', {
-        sessionId: session.id, personaId: 'default', executionProfileId: profile.id,
+        sessionId: session.id, personaId, executionProfileId: profile.id,
         content: '[[mock:script]] return("Initialized existing conversation fixture") [[/mock:script]]',
       }));
       socket.connect();
