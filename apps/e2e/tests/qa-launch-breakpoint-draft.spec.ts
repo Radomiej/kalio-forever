@@ -74,6 +74,10 @@ test('new chat preserves SWE-2 selection and draft across the desktop wizard bou
     const children = await request.get(`${API_BASE}/sessions/${created.id}/children`);
     expect(children.ok()).toBe(true);
     expect(await children.json(), 'Never delete a session with child executions').toEqual([]);
-    expect((await request.delete(`${API_BASE}/sessions/${created.id}`)).ok()).toBe(true);
+    if (process.env['KALIO_LAUNCH_PRESERVE_DRAFT'] === '1') {
+      console.info(`QA${reportRun} preserved empty draft: ${created.id}`);
+    } else {
+      expect((await request.delete(`${API_BASE}/sessions/${created.id}`)).ok()).toBe(true);
+    }
   }
 });
