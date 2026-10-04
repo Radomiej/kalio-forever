@@ -231,6 +231,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Full-stack architecture validation must start the task from Kalio FE and verify Conversations/Execution Graph with Playwright; API polling is supporting evidence only.
 - For manual Kalio QA, load the `kalio-manual-qa` skill with `kalio-forever`; drive web flows through Chrome or the in-app browser, not native Windows UI automation when a browser surface is available. Two-agent loop requests mean `Dev/Implementer <-> Goal Guard`, not Five Minds.
 - Before Playwright screenshot capture, inspect the live browser accessibility tree and derive selectors from observed controls; close the browser in `finally` so a failed locator cannot leave capture processes running.
+- When preserving Playwright failure artifacts, use absolute source/destination paths and verify the copied file before starting another run that clears test-results.
 - When the user asks to test Devin through Kalio, acceptance requires a real Devin CLI/ACP run driven through Kalio's UI against the exact approved project; mock E2E validates Kalio only and cannot close Devin QA.
 - For important architecture/runtime changes, write or update a `docs/sessions/YYYY-MM-DD-*.md` note with what changed, verification evidence, live-readiness status, and remaining blockers before ending the work slice.
 - For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.

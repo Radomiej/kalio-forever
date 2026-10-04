@@ -13,11 +13,8 @@ export function projectNativeToolAudit(entries: AuditLogEntry[], sessionId: stri
     const data = approval.data!;
     let status = permissionStatus(data);
     if (status === 'approved') {
-      const activity = sorted.filter((entry) => entry.label === 'devin-cli-acp.tool'
-        && callKey(entry) === key && entry.createdAt >= approval.createdAt).at(-1);
-      const toolStatus = activity?.data?.['toolStatus'];
-      if (toolStatus === 'completed' || toolStatus === 'failed') status = toolStatus;
-      else if (toolStatus === 'in_progress' || toolStatus === 'pending') status = 'running';
+      status = observedStatus(sorted.filter((entry) => entry.label === 'devin-cli-acp.tool'
+        && callKey(entry) === key && entry.createdAt >= approval.createdAt)) ?? status;
     }
     return {
       key,
@@ -37,15 +34,25 @@ export function projectNativeToolAudit(entries: AuditLogEntry[], sessionId: stri
     const title = typeof data['title'] === 'string' ? data['title'] : '';
     if (!existing && (data['name'] === 'mcp_call_tool' || /^Calling .* from /.test(title)
       || !['read', 'edit', 'delete', 'move', 'execute', 'fetch', 'search'].includes(String(data['kind'])))) continue;
-    const status = data['toolStatus'];
+    const activity = sorted.filter(candidate => candidate.label === 'devin-cli-acp.tool' && callKey(candidate) === key);
     activityOnly.set(key, {
       key, callId: data['toolCallId'] as string,
       name: existing?.name ?? (typeof data['name'] === 'string' ? data['name'] : title || 'Native tool'),
-      status: status === 'completed' || status === 'failed' ? status : existing?.status ?? 'running',
+      status: observedStatus(activity) ?? 'running',
       createdAt: existing?.createdAt ?? entry.createdAt,
     });
   }
   return [...rows, ...activityOnly.values()].sort((a, b) => a.createdAt - b.createdAt || a.key.localeCompare(b.key));
+}
+
+function observedStatus(activity: AuditLogEntry[]): string | undefined {
+  const known = activity.filter(entry => ['completed', 'failed', 'in_progress', 'pending'].includes(String(entry.data?.['toolStatus'])));
+  if (!known.length) return undefined;
+  const latestAt = Math.max(...known.map(entry => entry.createdAt));
+  const latest = known.filter(entry => entry.createdAt === latestAt);
+  const terminal = new Set(latest.map(entry => entry.data?.['toolStatus']).filter(status => status === 'completed' || status === 'failed'));
+  if (terminal.size > 1) return 'unknown';
+  return terminal.size === 1 ? [...terminal][0] as string : 'running';
 }
 
 function callKey(entry: AuditLogEntry): string | null {

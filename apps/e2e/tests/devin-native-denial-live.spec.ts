@@ -3,15 +3,20 @@ import type { AuditLogEntry, ChatMessage } from '@kalio/types';
 import { resolve } from 'node:path';
 import { selectSession } from './helpers/test-config';
 
-test.skip(process.env['KALIO_DEVIN_NATIVE_DENIAL_LIVE'] !== '1', 'Explicit authorized SWE-2 native read denial only');
+test.skip(process.env['KALIO_DEVIN_NATIVE_DENIAL_LIVE'] !== '1', 'Explicit authorized SWE-2 native denial only');
 
-test('real Devin native read is denied by policy and its evidence survives reload', async ({ page }) => {
+test('real Devin native tool is denied and its evidence survives reload', async ({ page }) => {
   test.setTimeout(180000);
   const sessionId = 'W4fggLSunrJB41C24MV7C';
   const api = 'http://127.0.0.1:3316/api';
   const reportRun = process.env['KALIO_DEVIN_NATIVE_DENIAL_REPORT_RUN'] ?? '102';
   if (!/^\d+$/.test(reportRun)) throw new Error('Report run must be numeric');
-  const marker = `QA${reportRun}_NATIVE_READ_DENIAL`;
+  const kind = process.env['KALIO_DEVIN_NATIVE_DENIAL_KIND'] ?? 'read';
+  if (kind !== 'read' && kind !== 'execute') throw new Error('Only read or harmless execute denial is supported');
+  const marker = `QA${reportRun}_NATIVE_${kind.toUpperCase()}_DENIAL`;
+  const attempt = kind === 'read'
+    ? 'Spróbuj dokładnie jeden NATYWNY Devin Read na E:/Projekty/home-site/package.json. Nie używaj terminala. '
+    : `Spróbuj dokładnie jeden NATYWNY Devin exec w E:/Projekty/home-site: node -e "process.stdout.write('QA${reportRun}_NATIVE_EXEC_MARKER')". `;
   const shot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/${name}.png`);
   const statusResponse = await page.request.get(`${api}/runtime/devin-cli/status`);
   expect(statusResponse.ok()).toBe(true);
@@ -30,8 +35,8 @@ test('real Devin native read is denied by policy and its evidence survives reloa
   await expect(stop).toHaveCount(0);
   console.log((await page.locator('body').ariaSnapshot()).slice(-1600));
   await input.fill(`${marker}: kontrolowany test odmowy natywnego narzędzia. Model dokładnie swe-2. ` +
-    'Spróbuj dokładnie jeden NATYWNY Devin Read na E:/Projekty/home-site/package.json. ' +
-    'Oczekujemy odmowy polityki. Nie używaj Kalio fs_read ani żadnego fallbacku. Nie używaj terminala, web, zapisów ani innych plików. ' +
+    attempt +
+    'Oczekujemy odmowy polityki. Nie używaj żadnych narzędzi Kalio ani fallbacku. Nie używaj web, zapisów ani innych plików. ' +
     `Po odmowie zakończ nagłówkiem ## ${marker}_RESULT i opisz tylko rzeczywisty wynik; nie twierdź, że narzędzie wywołano bez próby.`);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   try {
@@ -52,15 +57,16 @@ test('real Devin native read is denied by policy and its evidence survives reloa
       return audit.filter(e => e.label === 'llm.turn.completed').length;
     }, { timeout: 120000 }).toBe(1);
     await expect(stop).toHaveCount(0);
-    await page.screenshot({ path: shot('native-read-result'), fullPage: true });
+    await page.screenshot({ path: shot(`native-${kind}-result`), fullPage: true });
     const approvals = audit.filter(e => e.label === 'devin-cli-acp.native_approval');
     console.log(JSON.stringify({ turnId, since: submittedAt, auditRows: audit.length, nativeApprovals: approvals.map(e => ({
       id: e.id, decision: e.data?.['decision'], source: e.data?.['decisionSource'], category: e.data?.['category'],
     })) }));
     for (const entry of approvals) expect(entry.data).toMatchObject({ decision: 'decline', decisionSource: 'policy', categoryEnabled: false });
-    const nativeReads = audit.filter(e => e.label === 'devin-cli-acp.tool' && e.data?.['kind'] === 'read');
-    expect(nativeReads).toHaveLength(1);
-    const callId = nativeReads[0]!.data!['toolCallId'];
+    const nativeAttempts = audit.filter(e => e.label === 'devin-cli-acp.tool' && e.data?.['kind'] === kind);
+    expect(nativeAttempts).toHaveLength(1);
+    const callId = nativeAttempts[0]!.data!['toolCallId'];
+    for (const entry of approvals) expect(entry.data?.['toolCallId']).toBe(callId);
     const activity = audit.filter(e => e.label === 'devin-cli-acp.tool' && e.data?.['toolCallId'] === callId);
     expect(activity.some(e => e.data?.['toolStatus'] === 'completed')).toBe(false);
     const failure = activity.find(e => e.data?.['toolStatus'] === 'failed');

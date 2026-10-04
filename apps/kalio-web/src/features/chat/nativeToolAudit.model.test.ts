@@ -8,6 +8,19 @@ function entry(label: string, data: Record<string, unknown>, createdAt = 1): Aud
 const scope = { turnId: 'turn', processEpoch: 'epoch', toolCallId: 'call' };
 
 describe('native tool audit projection', () => {
+  it('leaves contradictory terminal statuses at the same instant unresolved', () => {
+    const rows = [entry('devin-cli-acp.tool', { ...scope, kind: 'execute', toolStatus: 'completed' }, 2),
+      entry('devin-cli-acp.tool', { ...scope, toolStatus: 'failed' }, 2)];
+    expect(projectNativeToolAudit(rows, 'session', 'turn')[0].status).toBe('unknown');
+  });
+  it.each([false, true])('keeps terminal status when metadata and failure share a timestamp, approved=%s', (approved) => {
+    const failure = { ...entry('devin-cli-acp.tool', { ...scope, toolStatus: 'failed' }, 2), id: 'a-failure' };
+    const metadata = { ...entry('devin-cli-acp.tool', { ...scope, kind: 'execute', title: 'Ran node' }, 2), id: 'z-metadata' };
+    const approvals = approved ? [entry('devin-cli-acp.native_approval', { ...scope, decision: 'accept' })] : [];
+    for (const events of [[failure, metadata], [metadata, failure]]) {
+      expect(projectNativeToolAudit([...approvals, ...events], 'session', 'turn')[0].status).toBe('failed');
+    }
+  });
   it('shows activity-only native reads without inventing an approval or policy reason', () => {
     const rows = [entry('devin-cli-acp.tool', { ...scope, kind: 'read', title: 'Read file' }),
       entry('devin-cli-acp.tool', { ...scope, toolStatus: 'failed' }, 2)];
