@@ -24,8 +24,14 @@ test('native audit states its Devin-only scope without claiming absent evidence 
   await page.getByTestId('nav-talk').click();
   await selectSession(page, 'W4fggLSunrJB41C24MV7C', 'HomeSite audit scope');
   const open = async () => {
-    const panel = page.getByTestId('native-tool-audit-panel').last();
+    const turn = page.getByTestId('agent-turn-bubble').filter({
+      has: page.getByRole('heading', { name: 'QA181_ERROR_1791106578162_RESULT', exact: true }),
+    });
+    await expect(turn).toHaveCount(1);
+    const panel = turn.getByTestId('native-tool-audit-panel');
+    await expect(panel).toHaveCount(1);
     const response = page.waitForResponse(result => result.url().includes('/api/audit-log?')
+      && new URL(result.url()).searchParams.get('sessionId') === 'W4fggLSunrJB41C24MV7C'
       && new URL(result.url()).searchParams.get('turnId') === 'OzSjtuCsZ7ZITyzYOVqvH');
     await panel.getByRole('button', { name: 'Devin native tool audit', exact: true }).click();
     expect((await response).ok()).toBe(true);
