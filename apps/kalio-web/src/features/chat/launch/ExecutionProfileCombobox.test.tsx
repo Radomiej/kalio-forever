@@ -1,8 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExecutionProfile } from '@kalio/types';
 import { getDevinCliStatus, resolveDevinCliExecutionProfile, type DevinCliStatus } from '../../../services/apiClient';
 import { ExecutionProfileCombobox } from './ExecutionProfileCombobox';
+import { getCodexModels, resolveCodexExecutionProfile } from '../../../services/codexModelClient';
+
+vi.mock('../../../services/codexModelClient', () => ({
+  getCodexModels: vi.fn().mockResolvedValue(['gpt-5.6']),
+  resolveCodexExecutionProfile: vi.fn(),
+}));
 
 vi.mock('../../../services/apiClient', () => ({
   getDevinCliStatus: vi.fn().mockResolvedValue({ modelCatalogStatus: 'ready', modelCatalogStale: false, models: [] }),
@@ -26,7 +32,71 @@ function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
 }
 
 describe('ExecutionProfileCombobox', () => {
-  it('searches by provider/model and ranks Devin and Codex before direct LLM profiles', () => {
+  it('does not advertise unchecked Codex profiles or start discovery without an explicit recheck', async () => {
+    vi.mocked(getCodexModels).mockClear().mockResolvedValue(null);
+    const saved = profile({ id: 'old', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.4' });
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[saved]} value="" onChange={vi.fn()} />); });
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
+    expect(screen.queryByRole('option', { name: /Codex/ })).not.toBeInTheDocument();
+    expect(getCodexModels).toHaveBeenCalledTimes(1);
+    expect(getCodexModels).toHaveBeenCalledWith('account');
+    vi.mocked(getCodexModels).mockResolvedValue(['gpt-6-luna']);
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck Codex models' }));
+    await screen.findByRole('option', { name: /Codex · gpt-6-luna/ });
+    expect(getCodexModels).toHaveBeenLastCalledWith('account', true);
+  });
+  it('uses only discovered Codex models and resolves a new exact model on its account', async () => {
+    vi.mocked(getCodexModels).mockResolvedValue(['gpt-6-luna']);
+    vi.mocked(resolveCodexExecutionProfile).mockResolvedValue(profile({ id: 'new-codex', kind: 'codex-app-server', model: 'gpt-6-luna' }));
+    const onChange = vi.fn();
+    render(<ExecutionProfileCombobox profiles={[profile({ id: 'old', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.4' })]} value="" onChange={onChange} />);
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
+    const option = await screen.findByRole('option', { name: /Codex · gpt-6-luna/ });
+    expect(screen.queryByRole('option', { name: /gpt-5.4/ })).not.toBeInTheDocument();
+    fireEvent.click(option);
+    await waitFor(() => expect(resolveCodexExecutionProfile).toHaveBeenCalledWith('account', 'gpt-6-luna'));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith('new-codex'));
+  });
+  beforeEach(() => {
+    vi.mocked(getCodexModels).mockResolvedValue(['gpt-5.6']);
+    vi.mocked(getDevinCliStatus).mockResolvedValue({
+      executable: 'devin.exe', version: 'test', authenticated: true, acp: true, probeChecked: true,
+      models: [], modelCatalogStatus: 'ready', modelCatalogStale: false, modelCatalogDiscoveredAt: 1, hostCount: 0, hosts: [],
+    });
+  });
+  it('selects the exact searched model with Enter before discovered hybrids', async () => {
+    vi.mocked(getDevinCliStatus).mockResolvedValue({
+      executable: 'devin.exe', version: 'test', authenticated: true, acp: true, probeChecked: true,
+      models: ['fusion-gpt-sidekick-swe-2-high', 'swe-2', 'swe-2-high'],
+      modelCatalogStatus: 'ready', modelCatalogStale: false, modelCatalogDiscoveredAt: 1, hostCount: 0, hosts: [],
+    });
+    const onChange = vi.fn();
+    render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'exact', kind: 'devin-cli-acp', model: 'swe-2' }),
+    ]} value="" onChange={onChange} />);
+    const input = screen.getByRole('combobox', { name: 'Provider and model' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '  SWE-2  ' } });
+    await screen.findByRole('option', { name: /fusion-gpt-sidekick/ });
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Devin CLI · swe-2');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('exact');
+  });
+
+  it('ranks exact direct-provider matches above unrelated preferred-runtime substring matches', async () => {
+    const onChange = vi.fn();
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'hybrid', kind: 'devin-cli-acp', model: 'fusion-gpt-4.1' }),
+      profile({ id: 'direct', provider: 'openai', model: 'gpt-4.1' }),
+    ]} value="" onChange={onChange} />); });
+    const input = screen.getByRole('combobox', { name: 'Provider and model' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'gpt-4.1' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('direct');
+  });
+
+  it('searches by provider/model and ranks Devin and Codex before direct LLM profiles', async () => {
     const onChange = vi.fn();
     render(
       <ExecutionProfileCombobox
@@ -42,6 +112,7 @@ describe('ExecutionProfileCombobox', () => {
 
     const input = screen.getByRole('combobox', { name: 'Provider and model' });
     fireEvent.focus(input);
+    await screen.findByRole('option', { name: /Codex · gpt-5.6/ });
     const options = screen.getAllByRole('option');
     expect(options.map((option) => option.querySelector('.font-medium')?.textContent)).toEqual([
       'Devin CLI · swe-2',

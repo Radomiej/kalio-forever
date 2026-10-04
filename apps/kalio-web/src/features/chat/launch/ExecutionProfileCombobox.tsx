@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ExecutionProfile } from '@kalio/types';
 import { getDevinCliStatus, resolveDevinCliExecutionProfile } from '../../../services/apiClient';
+import { resolveCodexExecutionProfile } from '../../../services/codexModelClient';
+import { useCodexModelChoices } from './useCodexModelChoices';
 
 interface Props {
   profiles: ExecutionProfile[];
@@ -24,6 +26,7 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
     (resolved) => !profiles.some((profile) => profile.id === resolved.id),
   )], [profiles, resolvedProfiles]);
   const selected = availableProfiles.find((profile) => profile.id === value);
+  const codex = useCodexModelChoices(availableProfiles);
   const loadDevinModels = useCallback(async () => {
     const status = await getDevinCliStatus();
     if (status.modelCatalogStatus === 'ready' && !status.modelCatalogStale) {
@@ -41,19 +44,35 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
     return () => { cancelled = true; };
   }, [loadDevinModels]);
   const options = useMemo(() => {
+    const search = query.trim().toLowerCase();
     const savedModels = new Set(availableProfiles.filter((profile) => profile.kind === 'devin-cli-acp').map((profile) => profile.model));
-    const profileOptions = availableProfiles.map((profile) => ({
+    const profileOptions = availableProfiles.filter(profile => profile.kind !== 'codex-app-server'
+      || codex.catalogs[profile.authProfileId || profile.id]?.includes(profile.model)).map((profile) => ({
       profile,
       model: profile.model,
       label: executionProfileLabel(profile),
+      authProfileId: undefined as string | undefined,
     }));
     const discoveredOptions = discoveredModels
       .filter((model) => !savedModels.has(model))
-      .map((model) => ({ profile: null, model, label: `Devin CLI · ${model}` }));
-    return [...profileOptions, ...discoveredOptions].filter(({ label }) => label.toLowerCase().includes(query.trim().toLowerCase()))
-    .sort((left, right) => profilePriority(left.profile) - profilePriority(right.profile)
+      .map((model) => ({ profile: null, model, label: `Devin CLI · ${model}`, authProfileId: undefined as string | undefined }));
+    const codexOptions = Object.entries(codex.catalogs).flatMap(([authProfileId, models]) => (models ?? [])
+      .filter(model => !profileOptions.some(option => option.profile.kind === 'codex-app-server'
+        && (option.profile.authProfileId || option.profile.id) === authProfileId && option.model === model))
+      .map(model => ({ profile: null, model, label: `Codex · ${model}`, authProfileId })));
+    const searchRank = (option: (typeof profileOptions)[number] | (typeof discoveredOptions)[number]) => {
+      if (!search) return 0;
+      const model = option.model.toLowerCase();
+      const label = option.label.toLowerCase();
+      if (model === search || label === search) return 0;
+      if (model.startsWith(search) || label.startsWith(search)) return 1;
+      return 2;
+    };
+    return [...profileOptions, ...discoveredOptions, ...codexOptions].filter(({ label }) => label.toLowerCase().includes(search))
+    .sort((left, right) => searchRank(left) - searchRank(right)
+      || profilePriority(left.profile) - profilePriority(right.profile)
       || left.label.localeCompare(right.label));
-  }, [availableProfiles, discoveredModels, query]);
+  }, [availableProfiles, discoveredModels, query, codex.catalogs]);
 
   const selectOption = async (option: (typeof options)[number]) => {
     setModelError(null);
@@ -64,13 +83,15 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
     }
     setResolvingModel(true);
     try {
-      const profile = await resolveDevinCliExecutionProfile(option.model);
+      const profile = option.authProfileId
+        ? await resolveCodexExecutionProfile(option.authProfileId, option.model)
+        : await resolveDevinCliExecutionProfile(option.model);
       setResolvedProfiles((current) => current.some((item) => item.id === profile.id) ? current : [...current, profile]);
       onChange(profile.id);
       setOpen(false);
     } catch (error) {
       console.error('[ExecutionProfileCombobox] Devin profile resolution failed', error);
-      setModelError('Could not select this Devin model. Check the CLI connection and retry.');
+      setModelError('Could not select this model. Check the CLI connection and retry.');
     } finally {
       setResolvingModel(false);
     }
@@ -124,7 +145,7 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
         >
           {options.length > 0 ? options.map((option) => (
             <button
-              key={option.profile?.id ?? option.model}
+              key={option.profile?.id ?? `${option.authProfileId ?? 'devin'}:${option.model}`}
               type="button"
               role="option"
               aria-selected={option.profile?.id === value}
@@ -135,10 +156,10 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
             >
               <span className="min-w-0">
                 <span className="block font-medium">{option.label}</span>
-                <span className="mt-0.5 block truncate text-xs text-base-content/50">{option.profile?.name ?? 'Discovered from the connected Devin CLI'}</span>
+                <span className="mt-0.5 block truncate text-xs text-base-content/50">{option.profile?.name ?? (option.authProfileId ? `Codex account: ${option.authProfileId}` : 'Discovered from the connected Devin CLI')}</span>
               </span>
               <span className="flex shrink-0 flex-col items-end gap-1">
-                {isDevinSwe2(option.model) && isSwe2FreePromotionActive()
+                {!option.authProfileId && isDevinSwe2(option.model) && isSwe2FreePromotionActive()
                   && <span className="badge badge-sm badge-success">Free · Pro+ · Oct 16</span>}
                 {option.profile?.id === value && <span className="badge badge-sm badge-primary">Selected</span>}
               </span>
@@ -150,7 +171,10 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
           )}
         </div>
       )}
-      {resolvingModel && <p role="status" className="mt-1 text-xs text-base-content/55">Selecting Devin model…</p>}
+      {codex.hasAccounts && <button type="button" className="btn btn-xs btn-outline mt-2" disabled={disabled || codex.checking || resolvingModel}
+        onClick={() => void codex.refresh()}>{codex.checking ? 'Checking Codex models…' : 'Recheck Codex models'}</button>}
+      {codex.error && <p role="alert" className="mt-1 text-xs text-error">{codex.error}</p>}
+      {resolvingModel && <p role="status" className="mt-1 text-xs text-base-content/55">Selecting model…</p>}
       {modelError && <p role="alert" className="mt-1 text-xs text-error">{modelError}</p>}
       {selected?.kind === 'devin-cli-acp' && (
         <p className="mt-1 text-xs text-base-content/55" data-testid="selected-model-cost-note">
