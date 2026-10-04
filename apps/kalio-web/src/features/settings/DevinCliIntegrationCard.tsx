@@ -1,5 +1,5 @@
 import { CheckCircle2, ChevronDown, Loader2, ServerCog, XCircle } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { DevinCliStatus } from '../../services/apiClient';
 
 export type DevinNativeToolsPolicy = {
@@ -41,6 +41,11 @@ export function DevinCliIntegrationCard({
 }: Props) {
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
+  const modelOpener = useRef<HTMLButtonElement>(null);
+  const closeModelDialog = () => {
+    setModelDialogOpen(false);
+    modelOpener.current?.focus();
+  };
   const probeChecked = status?.probeChecked === true;
   const online = probeChecked && status?.authenticated === true && status?.acp === true;
   const modelCount = status?.models.length ?? 0;
@@ -96,6 +101,7 @@ export function DevinCliIntegrationCard({
               onClick={() => setModelDialogOpen(true)}
               aria-haspopup="dialog"
               data-testid="devin-model-catalog-open"
+              ref={modelOpener}
             >
               Browse {modelCount} models
             </button>
@@ -195,7 +201,7 @@ export function DevinCliIntegrationCard({
       </div>
       {modelDialogOpen && (
         <div className="modal modal-open" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setModelDialogOpen(false);
+          if (event.target === event.currentTarget) closeModelDialog();
         }}>
           <section
             role="dialog"
@@ -203,13 +209,19 @@ export function DevinCliIntegrationCard({
             aria-labelledby="devin-model-catalog-title"
             className="modal-box max-w-2xl"
             data-testid="devin-model-catalog-dialog"
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.preventDefault();
+              event.stopPropagation();
+              closeModelDialog();
+            }}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 id="devin-model-catalog-title" className="text-lg font-semibold">Devin models</h2>
                 <p className="mt-1 text-xs text-base-content/60">{modelCount} models discovered from the connected Devin CLI.</p>
               </div>
-              <button type="button" className="btn btn-sm btn-outline" onClick={() => setModelDialogOpen(false)}>Close</button>
+              <button type="button" className="btn btn-sm btn-outline" onClick={closeModelDialog}>Close</button>
             </div>
             <label className="form-control mt-4 gap-1">
               <span className="text-xs text-base-content/65">Search models</span>
