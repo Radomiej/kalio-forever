@@ -32,6 +32,17 @@ function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
 }
 
 describe('ExecutionProfileCombobox', () => {
+  it('explains the Codex-only refresh scope when Devin is selected', async () => {
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'devin', kind: 'devin-cli-acp', model: 'swe-2' }),
+      profile({ id: 'codex', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.6' }),
+    ]} value="devin" onChange={vi.fn()} />); });
+    expect(screen.getByText('Codex catalog only — all connected Codex accounts. Does not refresh Devin.')).toBeInTheDocument();
+    const devinChecks = vi.mocked(getDevinCliStatus).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck Codex models' }));
+    await waitFor(() => expect(getCodexModels).toHaveBeenLastCalledWith('account', true));
+    expect(vi.mocked(getDevinCliStatus).mock.calls.length).toBe(devinChecks);
+  });
   it('does not advertise unchecked Codex profiles or start discovery without an explicit recheck', async () => {
     vi.mocked(getCodexModels).mockClear().mockResolvedValue(null);
     const saved = profile({ id: 'old', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.4' });

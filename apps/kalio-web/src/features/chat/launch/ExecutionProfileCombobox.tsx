@@ -171,8 +171,14 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
           )}
         </div>
       )}
-      {codex.hasAccounts && <button type="button" className="btn btn-xs btn-outline mt-2" disabled={disabled || codex.checking || resolvingModel}
-        onClick={() => void codex.refresh()}>{codex.checking ? 'Checking Codex models…' : 'Recheck Codex models'}</button>}
+      {codex.hasAccounts && <div className="mt-2">
+        <p id={`${inputId}-codex-refresh-scope`} className="text-xs text-base-content/55">
+          Codex catalog only — all connected Codex accounts. Does not refresh Devin.
+        </p>
+        <button type="button" className="btn btn-xs btn-outline mt-1" disabled={disabled || codex.checking || resolvingModel}
+          aria-describedby={`${inputId}-codex-refresh-scope`}
+          onClick={() => void codex.refresh()}>{codex.checking ? 'Checking Codex models…' : 'Recheck Codex models'}</button>
+      </div>}
       {codex.error && <p role="alert" className="mt-1 text-xs text-error">{codex.error}</p>}
       {resolvingModel && <p role="status" className="mt-1 text-xs text-base-content/55">Selecting model…</p>}
       {modelError && <p role="alert" className="mt-1 text-xs text-error">{modelError}</p>}
