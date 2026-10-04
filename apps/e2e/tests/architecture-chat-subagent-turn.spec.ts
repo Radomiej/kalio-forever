@@ -1,4 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import {
   API_BASE,
@@ -274,11 +275,10 @@ test.describe('Architecture chat turn projection', () => {
     expect(variantResponse.ok()).toBeTruthy();
     const variant = await variantResponse.json() as { id: string };
 
-    const response = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
+    const session = await createExistingMockConversation(request, title);
+    const workflowBubble = page.getByTestId('agent-turn-bubble').filter({
+      has: page.getByTestId('architecture-run-timeline'),
     });
-    expect(response.ok()).toBeTruthy();
-    const session = await response.json() as { id: string };
 
     try {
       await page.goto('/');
@@ -288,7 +288,7 @@ test.describe('Architecture chat turn projection', () => {
       await selectArchitectureInComposer(page, variant.id);
       await sendMessageFromComposer(page, 'Route this through the sequential chain.');
 
-      await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
+      await expect(workflowBubble).toHaveCount(1, { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
       const architectureRunId = await waitForArchitectureRunIdFromSession(request, session.id);
       await waitForArchitectureRunCompleted(request, architectureRunId);
@@ -310,11 +310,11 @@ test.describe('Architecture chat turn projection', () => {
       expect(graph.nodes?.filter((node) => node.kind === 'role')).toHaveLength(2);
       expect(graph.nodes?.find((node) => node.id === 'final-artifact')?.status).toBe('completed');
 
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
+      await expect(workflowBubble).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
       await expect(page.getByTestId('architecture-route-router')).toHaveCount(3);
-      await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Execution trace:');
+      await expect(workflowBubble).not.toContainText('Execution trace:');
 
       await page.getByTestId('open-architecture-run-canvas').click();
       await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
@@ -325,11 +325,11 @@ test.describe('Architecture chat turn projection', () => {
       await page.reload();
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
-      await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
+      await expect(workflowBubble).toHaveCount(1, { timeout: 30_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
       await expect(page.getByTestId('architecture-route-router')).toHaveCount(3);
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer');
+      await expect(workflowBubble).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer');
     } finally {
       await deleteSessionIfExists(request, session.id);
       await request.delete(`${API_BASE}/architecture-registry/schemas/${variant.id}`, { timeout: 5000 }).catch(() => undefined);
