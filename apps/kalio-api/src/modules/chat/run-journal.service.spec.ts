@@ -53,7 +53,6 @@ describe('RunJournalService', () => {
     service = makeService();
   });
 
-  it('marks stale LLM runs as resumable after restart', async () => {
   it('reads selected durable outcomes from one session, including cancellation, without foreign matches', async () => {
     const own = await service.startRun({ sessionId: 'own', turnId: 'same' });
     await service.checkpoint(own.id, { status: 'cancelled', phase: 'interrupted' });
@@ -66,6 +65,7 @@ describe('RunJournalService', () => {
     expect(await service.getHistoryTurns('own', ['missing'])).toEqual([]);
   });
 
+  it('marks stale LLM runs as resumable after restart', async () => {
     const run = await service.startRun({
       sessionId: 's1',
       turnId: 't1',
