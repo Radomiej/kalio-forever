@@ -81,8 +81,12 @@ export async function hydrateSessionHistoryIntoStore({
     });
     let outcomes: ChatRunSnapshot[] = [];
     // Architecture envelopes have their own durable projection; legacy synthetic IDs have no journal linkage.
-    const journalTurnIds = turns.filter(turn => !turn.turnKind
-      && !turn.id.startsWith('history-turn-') && !turn.id.startsWith('architecture-turn-')).map(turn => turn.id);
+    const journalTurnIds = [...new Set([
+      ...turns.filter(turn => !turn.turnKind
+        && !turn.id.startsWith('history-turn-') && !turn.id.startsWith('architecture-turn-')).map(turn => turn.id),
+      ...hydratedMessages.filter(message => message.sessionId === sessionId && message.role === 'user')
+        .flatMap(message => message.turnId ? [message.turnId] : []),
+    ])];
     if (journalTurnIds.length > 0) {
       try { outcomes = await loadOutcomes(sessionId, journalTurnIds); }
       catch (error) { console.warn('Could not restore durable chat run outcomes', error); }
@@ -91,7 +95,8 @@ export async function hydrateSessionHistoryIntoStore({
     if (shouldReplaceTurnsFromHydratedHistory({ sessionId, hydratedMessages,
       currentTurns: getSessionAgentTurns(sessionId), activeTurnId: getSessionActiveTurnId(sessionId),
       hasActiveLoop: hasActiveLoopForSession(sessionId) })) {
-      setAgentTurns(applyHistoryRunOutcomes(turns, outcomes), sessionId);
+      setAgentTurns(applyHistoryRunOutcomes(turns, outcomes,
+        hydratedMessages.filter(message => message.sessionId === sessionId)), sessionId);
     }
   }
 
