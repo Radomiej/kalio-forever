@@ -53,14 +53,20 @@ export async function createLocalTitleProvider(request: APIRequestContext) {
     } });
     expect(profile.ok()).toBeTruthy();
   } catch (error) {
-    if (credentialId) await request.delete(`${API_BASE}/credentials/${credentialId}`);
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    try {
+      if (credentialId) await request.delete(`${API_BASE}/credentials/${credentialId}`);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
     throw error;
   }
   return { model, async close() {
-    if (credentialId) await request.delete(`${API_BASE}/credentials/${credentialId}`);
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    try {
+      if (credentialId) await request.delete(`${API_BASE}/credentials/${credentialId}`);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   } };
 }
