@@ -196,6 +196,9 @@ describe('NativeCliIntegrationsPanel', () => {
     ));
 
     fireEvent.click(codexControls.getByRole('button', { name: 'Reset' }));
+    expect(vi.mocked(global.fetch).mock.calls.some(([input]) => String(input).endsWith('/reset'))).toBe(false);
+    const resetDialog = screen.getByRole('dialog', { name: 'Reset Codex server' });
+    fireEvent.click(within(resetDialog).getByRole('button', { name: 'Reset server' }));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/reset',
       expect.objectContaining({ method: 'POST' }),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, Loader2, RefreshCw, RotateCcw, ServerCog, XCircle } from 'lucide-react';
 import type { DevinCliStatus } from '../../services/apiClient';
 import { DevinCliIntegrationCard, type DevinCliSettings, type DevinNativeToolsPolicy } from './DevinCliIntegrationCard';
+import { NativeIntegrationResetDialog } from './NativeIntegrationResetDialog';
 
 type NativeCliIntegrationStatus = {
   id: string;
@@ -36,6 +37,7 @@ export function NativeCliIntegrationsPanel() {
   const [devinTokenOverride, setDevinTokenOverride] = useState('');
   const [devinStatusLoading, setDevinStatusLoading] = useState(false);
   const [recheckingAll, setRecheckingAll] = useState(false);
+  const [pendingReset, setPendingReset] = useState<NativeCliIntegrationStatus | null>(null);
 
   const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
     setLoading(true);
@@ -84,10 +86,6 @@ export function NativeCliIntegrationsPanel() {
   }, []);
 
   const runAction = useCallback(async (integration: NativeCliIntegrationStatus, kind: 'check' | 'reset') => {
-    if (kind === 'reset' && !window.confirm(`Reset the ${integration.displayName} server? Open native sessions will be disconnected.`)) {
-      return;
-    }
-
     const actionId = `${integration.authProfileId}:${kind}` as IntegrationAction;
     setAction(actionId);
     setError(null);
@@ -374,7 +372,7 @@ export function NativeCliIntegrationsPanel() {
                         type="button"
                         className="btn btn-xs btn-ghost gap-1 text-warning"
                         disabled={action !== null || recheckingAll}
-                        onClick={() => void runAction(integration, 'reset')}
+                        onClick={() => setPendingReset(integration)}
                       >
                         {action === resetAction ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
                         Reset
@@ -390,6 +388,15 @@ export function NativeCliIntegrationsPanel() {
           ))}
         </div>
       )}
+      {pendingReset && <NativeIntegrationResetDialog
+        name={friendlyProviderName(pendingReset.provider)}
+        onCancel={() => setPendingReset(null)}
+        onConfirm={() => {
+          const integration = pendingReset;
+          setPendingReset(null);
+          void runAction(integration, 'reset');
+        }}
+      />}
     </section>
   );
 }
