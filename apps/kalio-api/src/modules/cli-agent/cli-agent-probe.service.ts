@@ -103,7 +103,7 @@ export class CLIAgentProbeService implements OnApplicationBootstrap {
     });
 
     return new Promise((resolve) => {
-      execFile(executable, allArgs, { timeout: 5000 }, (err, stdout, stderr) => {
+      execFile(executable, allArgs, { timeout: 5000, windowsHide: true }, (err, stdout, stderr) => {
         if (err) {
           resolve({ available: false, version: null });
           return;

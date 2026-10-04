@@ -197,6 +197,7 @@ export class CLIAgentService {
       return await new Promise<CLIAgentRunResult>((resolve, reject) => {
       const proc = spawn(executable, allArgs, {
         cwd: workdir,
+        windowsHide: true,
         // pipe stdin so the process doesn't hang waiting for input
         stdio: ['pipe', 'pipe', 'pipe'],
         // Use UTF-8 on all platforms to avoid Windows codepage issues

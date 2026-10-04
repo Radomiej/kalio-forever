@@ -48,6 +48,9 @@ describe('CLIAgentProbeService', () => {
     expect(first).toHaveLength(4);
     expect(second).toEqual(first);
     expect(childProcess.execFile).toHaveBeenCalledTimes(4);
+    for (const invocation of vi.mocked(childProcess.execFile).mock.calls) {
+      expect(invocation[2]).toMatchObject({ windowsHide: true });
+    }
   });
 
   it('serializes different adapter status probes to one active process', async () => {

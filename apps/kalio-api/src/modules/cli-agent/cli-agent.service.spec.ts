@@ -174,6 +174,9 @@ describe('CLIAgentService', () => {
       turnId: 'turn-1',
       callId: 'call-1',
     });
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'cmd.exe', expect.any(Array), expect.objectContaining({ windowsHide: true, cwd: '/w' }),
+    );
 
     fakeProc.emit('close', 0);
     await run;
