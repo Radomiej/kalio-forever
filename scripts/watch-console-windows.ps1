@@ -20,6 +20,7 @@ public static class KalioConsoleWindowWatch {
     [DllImport("user32.dll")] private static extern bool UnhookWinEvent(IntPtr hook);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int size);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr hwnd, uint min, uint max, uint remove);
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Message message);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref Message message);
@@ -33,12 +34,15 @@ public static class KalioConsoleWindowWatch {
             GetClassName(hwnd, name, name.Capacity);
             if (name.ToString() != "ConsoleWindowClass" && name.ToString() != "CASCADIA_HOSTING_WINDOW_CLASS" && !(selfTest && name.ToString() == "Static")) return;
             uint pid; GetWindowThreadProcessId(hwnd, out pid);
-            rows.Add(DateTimeOffset.UtcNow.ToString("o") + " pid=" + pid + " event=" + evt + " class=" + name);
+            // visibility is sampled at callback delivery, not at original event time.
+            rows.Add(DateTimeOffset.UtcNow.ToString("o") + " pid=" + pid + " event=" + evt
+                + " hwnd=" + hwnd.ToInt64() + " visible=" + IsWindowVisible(hwnd)
+                + " eventTickMs=" + time + " class=" + name);
         };
         // OBJECT_CREATE through OBJECT_HIDE, out-of-context callback on this message loop.
         var handle = SetWinEventHook(0x8000, 0x8003, IntPtr.Zero, callback, 0, 0, 0);
         if (handle == IntPtr.Zero) throw new InvalidOperationException("Window event hook registration failed");
-        Console.WriteLine("WINDOW_EVENT_HOOK_READY seconds=" + seconds);
+        Console.WriteLine("WINDOW_EVENT_HOOK_READY seconds=" + seconds + " utc=" + DateTimeOffset.UtcNow.ToString("o"));
         IntPtr control = IntPtr.Zero;
         try {
             // No WS_VISIBLE: this control never appears on the user's desktop.
@@ -59,7 +63,7 @@ public static class KalioConsoleWindowWatch {
             if (control != IntPtr.Zero) DestroyWindow(control);
             UnhookWinEvent(handle); GC.KeepAlive(callback);
         }
-        rows.Add("WINDOW_EVENT_HOOK_FINISHED records=" + rows.Count);
+        rows.Add("WINDOW_EVENT_HOOK_FINISHED records=" + rows.Count + " utc=" + DateTimeOffset.UtcNow.ToString("o"));
         return rows.ToArray();
     }
 }

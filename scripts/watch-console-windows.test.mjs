@@ -17,3 +17,11 @@ test('console capture excludes titles, command lines and process mutation', () =
   assert.match(source, /ConsoleWindowClass/);
   assert.match(source, /CASCADIA_HOSTING_WINDOW_CLASS/);
 });
+
+test('console events identify visibility, window identity and original event time', () => {
+  assert.match(source, /extern bool IsWindowVisible\(IntPtr hwnd\)/);
+  assert.match(source, /hwnd=.+hwnd\.ToInt64\(\)/);
+  assert.match(source, /visible=.+IsWindowVisible\(hwnd\)/);
+  assert.match(source, /eventTickMs=.+time/);
+  assert.match(source, /visibility is sampled at callback delivery/);
+});
