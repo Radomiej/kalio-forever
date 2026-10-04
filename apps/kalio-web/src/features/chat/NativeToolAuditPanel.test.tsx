@@ -5,7 +5,13 @@ import { NativeToolAuditPanel } from './NativeToolAuditPanel';
 vi.mock('../../services/apiClient', () => ({ apiClient: { get: vi.fn() } }));
 const provider = vi.hoisted(() => ({ value: undefined as string | undefined }));
 vi.mock('./useTurnRuntimeProvider', () => ({ useTurnRuntimeProvider: () => provider.value }));
-beforeEach(() => { vi.mocked(apiClient.get).mockReset(); provider.value = undefined; });
+beforeEach(() => { vi.mocked(apiClient.get).mockReset(); provider.value = 'devin-cli-acp'; });
+it('does not attribute native Devin tools to an unknown turn provider', () => {
+  provider.value = undefined;
+  render(<NativeToolAuditPanel sessionId="session" turnId="turn" />);
+  expect(screen.queryByTestId('native-tool-audit-panel')).toBeNull();
+  expect(apiClient.get).not.toHaveBeenCalled();
+});
 it('does not offer Devin audit for a recorded Codex turn or fetch any audit', () => {
   provider.value = 'codex-app-server';
   render(<NativeToolAuditPanel sessionId="session" turnId="turn" />);

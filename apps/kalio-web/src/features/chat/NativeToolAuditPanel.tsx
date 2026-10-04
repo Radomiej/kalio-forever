@@ -6,8 +6,7 @@ import { useTurnRuntimeProvider } from './useTurnRuntimeProvider';
 
 export function NativeToolAuditPanel({ sessionId, turnId }: { sessionId: string; turnId: string }) {
   const provider = useTurnRuntimeProvider(sessionId, turnId);
-  // TODO: legacy fallback — keep unknown historical turns inspectable until provider journal coverage is complete.
-  if (provider && provider !== 'devin-cli-acp') return null;
+  if (provider !== 'devin-cli-acp') return null;
   return <DevinAuditContent key={`${sessionId}:${turnId}`} sessionId={sessionId} turnId={turnId} />;
 }
 
