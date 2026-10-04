@@ -345,7 +345,7 @@ function resolveFrontendLauncher() {
       argsPrefix: [viteBin],
       cwd: webDir,
       shell: false,
-      label: `${process.execPath} ${viteBin} preview --configLoader runner --strictPort`,
+      label: `${process.execPath} ${viteBin} preview --config ${resolve(webDir, 'vite.preview.config.mjs')} --configLoader native --strictPort`,
     };
   }
 
@@ -360,7 +360,7 @@ function resolveFrontendLauncher() {
     argsPrefix: [...pnpm.argsPrefix, '--filter', 'kalio-web', 'exec', 'vite'],
     cwd: repoRoot,
     shell: pnpm.shell,
-    label: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --configLoader runner --strictPort`,
+    label: `${pnpm.command} ${pnpm.argsPrefix.join(' ')} --filter kalio-web exec vite preview --config ${resolve(webDir, 'vite.preview.config.mjs')} --configLoader native --strictPort`,
   };
 }
 
@@ -556,8 +556,10 @@ async function startStack() {
     [
       ...frontendLauncher.argsPrefix,
       'preview',
+      '--config',
+      resolve(webDir, 'vite.preview.config.mjs'),
       '--configLoader',
-      'runner',
+      'native',
       '--host',
       '127.0.0.1',
       '--port',

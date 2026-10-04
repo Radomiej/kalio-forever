@@ -247,6 +247,15 @@ test('vite preview serves runtime config from the running process environment', 
   assert.match(webViteConfigSource, /Cache-Control', 'no-store'/);
 });
 
+test('built preview uses native JavaScript config without build plugins', () => {
+  assert.match(stackManagerSource, /'--config',\s*resolve\(webDir, 'vite\.preview\.config\.mjs'\)/);
+  assert.match(stackManagerSource, /'--configLoader',\s*'native'/);
+  const preview = readFileSync(new URL('../apps/kalio-web/vite.preview.config.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(preview, /plugin-react|tailwind|esbuild|defineConfig/);
+  assert.match(preview, /configurePreviewServer/);
+  assert.match(preview, /Cache-Control', 'no-store'/);
+});
+
 test('workflow release gate passes managed QA database path to Playwright tests', () => {
   assert.match(workflowReleaseGateSource, /DATABASE_PATH: stackState\.databasePath/);
   assert.match(workflowReleaseGateSource, /runPlaywrightGroup\(group, baseUrl, apiOrigin, status\.state\)/);
