@@ -11,6 +11,8 @@ test('real Codex response survives reload without stale thinking', async ({ page
     throw new Error('Only the approved fixed local DEV or QA environment is supported.');
   }
   const qa = url.port === '5288';
+  const reportRun = process.env['KALIO_CODEX_AUDIT_REPORT_RUN'] ?? '84';
+  if (!/^\d+$/.test(reportRun)) throw new Error('Report run must be numeric.');
   await page.goto(url.href);
   await page.getByTestId('nav-talk').click();
   await selectSession(page, qa ? '58mz05cKrZDGG1DPbMKBU' : 'Kgm0bdtzIt0wpO45h0Xru', qa ? 'Test Komunikacji QA84' : 'Test Komunikacji DEV84');
@@ -22,6 +24,6 @@ test('real Codex response survives reload without stale thinking', async ({ page
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
     await expect(page.getByText('Kalio is responding.', { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-84/assets/codex-${qa ? 'qa' : 'dev'}-completed-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/codex-${qa ? 'qa' : 'dev'}-completed-${width}.png`) });
   }
 });
