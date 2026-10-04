@@ -35,10 +35,10 @@ function DevinAuditContent({ sessionId, turnId }: { sessionId: string; turnId: s
       <button type="button" className="text-sky-300" aria-expanded={open} onClick={() => {
         setOpen(!open);
         if (!open && entries === null && !loading) void load();
-      }}>Devin native tool audit</button>
+      }}>Devin tool permissions</button>
       {open && (
         <div className="mt-2 space-y-2 rounded border border-base-content/15 p-2">
-          <p>Persisted Devin audit snapshot. This panel does not report native tools from other providers. Approval does not prove execution.</p>
+          <p>Native Devin permission and activity evidence only; opening this panel does not mean a native tool ran. Kalio tool calls are shown separately in the chat. This panel does not report native tools from other providers. Approval does not prove execution.</p>
           <button className="btn btn-xs" disabled={loading} onClick={() => void load()}>Refresh native audit</button>
           {loading && <p role="status">Loading native audit…</p>}
           {error && <p role="alert">{error}</p>}
