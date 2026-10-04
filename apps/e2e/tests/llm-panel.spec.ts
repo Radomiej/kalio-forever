@@ -16,12 +16,6 @@ async function deleteCredential(page: Page, id: string) {
   await page.request.delete(`${API_BASE}/credentials/${id}`);
 }
 
-async function getRuntimeModel(page: Page): Promise<string> {
-  const response = await page.request.get(`${API_BASE}/llm/config`);
-  const payload = await response.json() as { model?: string };
-  return payload.model ?? '';
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 test.describe('LLMPanel E2E', () => {
   test('LLM panel is visible when settings modal is opened', async ({ page }) => {
@@ -100,22 +94,32 @@ test.describe('LLMPanel E2E', () => {
     }
   });
 
-  test('can switch back to the env fallback after activating a saved credential', async ({ page }) => {
+  test('saved provider stays active after F5 without offering the test-only mock fallback', async ({ page }) => {
+    if (!process.env['DATABASE_PATH']?.replaceAll('\\', '/').includes('playwright-stack/')) {
+      throw new Error('Provider persistence fixture requires isolated Playwright storage');
+    }
     const previousActiveId = await getActiveCredentialId(page.request);
-    await page.request.delete(`${API_BASE}/credentials/active`);
-    const envModel = await getRuntimeModel(page);
-
-    const res = await page.request.post(`${API_BASE}/credentials`, {
-      data: {
-        name: 'E2E Env Fallback Test',
-        provider: 'ollama',
-        apiKey: 'local',
-        model: 'e2e-saved-model-switch-check',
-      },
-    });
-    const cred = await res.json() as { id: string };
-
+    let credentialId: string | null = null;
     try {
+      const clearResponse = await page.request.delete(`${API_BASE}/credentials/active`);
+      expect(clearResponse.ok()).toBeTruthy();
+      const configResponse = await page.request.get(`${API_BASE}/llm/config`);
+      expect(configResponse.ok()).toBeTruthy();
+      const config = await configResponse.json() as { provider: string };
+      expect(config.provider).toBe('mock');
+
+      const res = await page.request.post(`${API_BASE}/credentials`, {
+        data: {
+          name: 'E2E Env Fallback Test',
+          provider: 'ollama',
+          apiKey: 'local',
+          model: 'e2e-saved-model-switch-check',
+        },
+      });
+      expect(res.ok()).toBeTruthy();
+      const cred = await res.json() as { id: string };
+      credentialId = cred.id;
+
       await openLLMPanel(page);
       const row = page.getByTestId(`provider-row-${cred.id}`);
       await expect(row).toBeVisible();
@@ -126,17 +130,20 @@ test.describe('LLMPanel E2E', () => {
       await expect(page.getByTestId('model-selector')).toHaveValue('e2e-saved-model-switch-check');
 
       await page.getByTestId('settings-tab-llm').click();
-      const envFallbackRow = page.getByTestId('provider-row-env');
-      await expect(envFallbackRow).toBeVisible();
-      await page.getByTestId('provider-activate-env').click();
-
-      await expect(envFallbackRow).toContainText('active', { timeout: 5000 });
-      await expect(row).not.toContainText('active');
+      await expect(page.getByTestId('provider-env-mock')).toContainText('test-only fallback');
+      await expect(page.getByTestId('provider-row-env')).toHaveCount(0);
+      await expect(page.getByTestId('provider-activate-env')).toHaveCount(0);
+      await page.reload();
+      await openLLMPanel(page);
+      await expect(row.getByText('active', { exact: true })).toBeVisible();
+      expect(await getActiveCredentialId(page.request)).toBe(cred.id);
+      await expect(page.getByTestId('provider-row-env')).toHaveCount(0);
+      await expect(page.getByTestId('provider-activate-env')).toHaveCount(0);
       await page.getByTestId('settings-tab-runtime').click();
-      await expect(page.getByTestId('model-selector')).toHaveValue(envModel);
+      await expect(page.getByTestId('model-selector')).toHaveValue('e2e-saved-model-switch-check');
     } finally {
       await restoreActiveCredential(page.request, previousActiveId);
-      await deleteCredential(page, cred.id);
+      if (credentialId) await deleteCredential(page, credentialId);
     }
   });
 
