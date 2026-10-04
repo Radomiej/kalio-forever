@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
 import {
-  API_BASE,
   deleteSessionIfExists,
   expectComposerEnabled,
   selectSession,
   sendMessageFromComposer,
 } from './helpers/test-config';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 
 const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(160).trim()}`;
 
@@ -18,31 +18,27 @@ test.describe('AC-01: LLM streaming', () => {
   test('assistant turn appears and input re-enables after the streamed response', async ({ page, request }) => {
     const title = uniqueSessionTitle('AC01 Streaming Test');
 
-    // Pre-create session via API so the backend has a DB record
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
-    });
-    expect(res.ok()).toBeTruthy();
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, title);
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
 
-    const chatInput = await expectComposerEnabled(page, 5000);
+    await expectComposerEnabled(page, 5000);
+    const assistantBubbles = page.getByTestId('agent-turn-bubble');
+    const baselineTurns = await assistantBubbles.count();
     await sendMessageFromComposer(page, LONG_STREAMING_PROMPT);
 
     // AC-13 owns the transient "composer locks during streaming" assertion.
     // Here we keep the stable streaming contract: an agent turn appears and the
     // composer returns to ready state when the response completes.
-    const assistantBubbles = page.getByTestId('agent-turn-bubble');
-    await expect(assistantBubbles.first()).toBeVisible({ timeout: 10_000 });
+    await expect(assistantBubbles).toHaveCount(baselineTurns + 1, { timeout: 10_000 });
 
     // Wait for response — input re-enables when chat:complete fires
     await expectComposerEnabled(page, 30_000);
 
     // At least one agent turn bubble should be present (assistant replies use AgentTurnBubble)
-    const content = await assistantBubbles.first().textContent();
+    const content = await assistantBubbles.last().textContent();
     expect(content?.trim().length).toBeGreaterThan(0);
 
     // Cleanup
@@ -54,16 +50,13 @@ test.describe('AC-01: LLM streaming', () => {
 
     // Create a valid session, navigate to it, then delete it via API before sending
     // so the backend emits chat:error (SESSION_NOT_FOUND) immediately
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
-    });
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, title);
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session.id, title);
 
-    const chatInput = await expectComposerEnabled(page, 5000);
+    await expectComposerEnabled(page, 5000);
 
     // Delete the session via API — the next message send will trigger SESSION_NOT_FOUND
     await deleteSessionIfExists(request, session.id);
@@ -82,10 +75,7 @@ test.describe('AC-01: LLM streaming', () => {
 
     // Create a session on the client side only (no API call) is not possible from PW
     // Instead, verify the guard works: delete a session from DB then try to chat
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
-    });
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, title);
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
@@ -94,7 +84,7 @@ test.describe('AC-01: LLM streaming', () => {
     // Delete the session from the backend WHILE it is active in the UI
     await deleteSessionIfExists(request, session.id);
 
-    const chatInput = await expectComposerEnabled(page, 5000);
+    await expectComposerEnabled(page, 5000);
     await sendMessageFromComposer(page, 'This should fail with SESSION_NOT_FOUND');
 
     // Error banner should appear

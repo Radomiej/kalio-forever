@@ -1,0 +1,557 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: subconversation-live-hitl.spec.ts >> Subconversation live HITL >> child session restores pending HITL after backend restart and then continues
+- Location: tests\subconversation-live-hitl.spec.ts:178:7
+
+# Error details
+
+```
+Test timeout of 180000ms exceeded.
+```
+
+# Page snapshot
+
+```yaml
+- generic [ref=e4]:
+  - navigation [ref=e5]:
+    - button "Home" [ref=e6] [cursor=pointer]:
+      - generic [ref=e7]: K
+    - button "Talk" [ref=e10] [cursor=pointer]:
+      - text: Talk
+      - img [ref=e11]
+    - button "Tools" [ref=e14] [cursor=pointer]:
+      - text: Tools
+      - img [ref=e15]
+    - button "Mind" [ref=e18] [cursor=pointer]:
+      - text: Mind
+      - img [ref=e19]
+    - button "Architect" [ref=e32] [cursor=pointer]:
+      - text: Architect
+      - img [ref=e33]
+    - button "Observability" [ref=e39] [cursor=pointer]:
+      - text: Observability
+      - img [ref=e40]
+    - button "Settings" [ref=e43] [cursor=pointer]:
+      - text: Settings
+      - img [ref=e44]
+  - main [ref=e47]:
+    - generic [ref=e48]:
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - button "Conversations" [ref=e51] [cursor=pointer]:
+            - img [ref=e53]
+          - button "Active agent runs" [ref=e55] [cursor=pointer]:
+            - img [ref=e57]
+          - generic [ref=e60]: Chats
+          - button "Hide conversations" [ref=e61] [cursor=pointer]:
+            - img [ref=e62]
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - generic [ref=e68]: 51 chats
+            - group "Grupowanie rozmów" [ref=e70]:
+              - button "Projekt" [pressed] [ref=e71]
+              - button "Historia" [ref=e72]
+            - button "New" [ref=e73] [cursor=pointer]:
+              - img [ref=e74]
+              - generic [ref=e75]: New
+          - button "Session filter" [ref=e77]:
+            - generic [ref=e78]: All
+            - img [ref=e79]
+          - generic [ref=e82]:
+            - generic [ref=e83]:
+              - button "Bez projektu 25" [expanded] [ref=e84]:
+                - img [ref=e85]
+                - img [ref=e87]
+                - generic [ref=e89]: Bez projektu
+                - generic [ref=e90]: "25"
+              - generic [ref=e91]:
+                - generic [ref=e93] [cursor=pointer]:
+                  - generic [ref=e94]:
+                    - generic [ref=e95]:
+                      - generic "Root chat" [ref=e96]:
+                        - img [ref=e97]
+                      - generic [ref=e99]: Child HITL 1791119349984
+                    - generic [ref=e100]:
+                      - generic [ref=e101]: Default
+                      - generic [ref=e102]: just now
+                  - generic [ref=e103]:
+                    - button "Rename session Child HITL 1791119349984" [ref=e104]:
+                      - img [ref=e105]
+                    - button "Delete session Child HITL 1791119349984" [ref=e108]:
+                      - img [ref=e109]
+                - generic [ref=e113] [cursor=pointer]:
+                  - generic [ref=e114]:
+                    - generic [ref=e115]:
+                      - generic "Root chat" [ref=e116]:
+                        - img [ref=e117]
+                      - generic [ref=e119]: THINKING_TRANSITION_1791119335548
+                      - img "Completed" [ref=e121]
+                    - generic [ref=e124]:
+                      - generic [ref=e125]: Default
+                      - generic [ref=e126]: just now
+                  - generic [ref=e127]:
+                    - button "Rename session THINKING_TRANSITION_1791119335548" [ref=e128]:
+                      - img [ref=e129]
+                    - button "Delete session THINKING_TRANSITION_1791119335548" [ref=e132]:
+                      - img [ref=e133]
+                - generic [ref=e137] [cursor=pointer]:
+                  - generic [ref=e138]:
+                    - generic [ref=e139]:
+                      - generic "Root chat" [ref=e140]:
+                        - img [ref=e141]
+                      - generic [ref=e143]: New Chat
+                    - generic [ref=e144]:
+                      - generic [ref=e145]: Default
+                      - generic [ref=e146]: just now
+                  - generic [ref=e147]:
+                    - button "Rename session New Chat" [ref=e148]:
+                      - img [ref=e149]
+                    - button "Delete session New Chat" [ref=e152]:
+                      - img [ref=e153]
+                - generic [ref=e157] [cursor=pointer]:
+                  - generic [ref=e158]:
+                    - generic [ref=e159]:
+                      - generic "Root chat" [ref=e160]:
+                        - img [ref=e161]
+                      - generic [ref=e163]: New Chat
+                    - generic [ref=e164]:
+                      - generic [ref=e165]: Default
+                      - generic [ref=e166]: just now
+                  - generic [ref=e167]:
+                    - button "Rename session New Chat" [ref=e168]:
+                      - img [ref=e169]
+                    - button "Delete session New Chat" [ref=e172]:
+                      - img [ref=e173]
+                - generic [ref=e177] [cursor=pointer]:
+                  - generic [ref=e178]:
+                    - generic [ref=e179]:
+                      - generic "Root chat" [ref=e180]:
+                        - img [ref=e181]
+                      - generic [ref=e183]: Hello Explicit Launch Gate
+                    - generic [ref=e184]:
+                      - generic [ref=e185]: Default
+                      - generic [ref=e186]: just now
+                  - generic [ref=e187]:
+                    - button "Rename session Hello Explicit Launch Gate" [ref=e188]:
+                      - img [ref=e189]
+                    - button "Delete session Hello Explicit Launch Gate" [ref=e192]:
+                      - img [ref=e193]
+                - generic [ref=e197] [cursor=pointer]:
+                  - generic [ref=e198]:
+                    - generic [ref=e199]:
+                      - generic "Root chat" [ref=e200]:
+                        - img [ref=e201]
+                      - generic [ref=e203]: Native audit fixture 1791119318096
+                    - generic [ref=e204]:
+                      - generic [ref=e205]: Default
+                      - generic [ref=e206]: just now
+                  - generic [ref=e207]:
+                    - button "Rename session Native audit fixture 1791119318096" [ref=e208]:
+                      - img [ref=e209]
+                    - button "Delete session Native audit fixture 1791119318096" [ref=e212]:
+                      - img [ref=e213]
+                - generic [ref=e217] [cursor=pointer]:
+                  - generic [ref=e218]:
+                    - generic [ref=e219]:
+                      - generic "Root chat" [ref=e220]:
+                        - img [ref=e221]
+                      - generic [ref=e223]: New Chat
+                    - generic [ref=e224]:
+                      - generic [ref=e225]: Default
+                      - generic [ref=e226]: just now
+                  - generic [ref=e227]:
+                    - button "Rename session New Chat" [ref=e228]:
+                      - img [ref=e229]
+                    - button "Delete session New Chat" [ref=e232]:
+                      - img [ref=e233]
+                - generic [ref=e237] [cursor=pointer]:
+                  - generic [ref=e238]:
+                    - generic [ref=e239]:
+                      - generic "Root chat" [ref=e240]:
+                        - img [ref=e241]
+                      - generic [ref=e243]: New Chat
+                    - generic [ref=e244]:
+                      - generic [ref=e245]: Default
+                      - generic [ref=e246]: just now
+                  - generic [ref=e247]:
+                    - button "Rename session New Chat" [ref=e248]:
+                      - img [ref=e249]
+                    - button "Delete session New Chat" [ref=e252]:
+                      - img [ref=e253]
+                - generic [ref=e258] [cursor=pointer]:
+                  - generic [ref=e259]:
+                    - generic [ref=e260]:
+                      - generic "Root chat" [ref=e261]:
+                        - img [ref=e262]
+                      - generic [ref=e264]: AgentFlow nested restart 1791118723436
+                    - generic [ref=e265]:
+                      - generic [ref=e266]: Default
+                      - generic [ref=e267]: 10m ago
+                  - generic [ref=e268]:
+                    - button "Rename session AgentFlow nested restart 1791118723436" [ref=e269]:
+                      - img [ref=e270]
+                    - button "Delete session AgentFlow nested restart 1791118723436" [ref=e273]:
+                      - img [ref=e274]
+                    - button "Expand child conversations for AgentFlow nested restart 1791118723436" [ref=e277]:
+                      - generic [ref=e278]:
+                        - img [ref=e279]
+                        - generic [ref=e281]: "7"
+                - generic [ref=e284] [cursor=pointer]:
+                  - generic [ref=e285]:
+                    - generic [ref=e286]:
+                      - generic "Root chat" [ref=e287]:
+                        - img [ref=e288]
+                      - generic [ref=e290]: E2E resumable AgentFlow parent
+                    - generic [ref=e291]:
+                      - generic [ref=e292]: Default
+                      - generic [ref=e293]: 10m ago
+                  - generic [ref=e294]:
+                    - button "Rename session E2E resumable AgentFlow parent" [ref=e295]:
+                      - img [ref=e296]
+                    - button "Delete session E2E resumable AgentFlow parent" [ref=e299]:
+                      - img [ref=e300]
+                    - button "Expand child conversations for E2E resumable AgentFlow parent" [ref=e303]:
+                      - generic [ref=e304]:
+                        - img [ref=e305]
+                        - generic [ref=e307]: "6"
+                - generic [ref=e309] [cursor=pointer]:
+                  - generic [ref=e310]:
+                    - generic [ref=e311]:
+                      - generic "Root chat" [ref=e312]:
+                        - img [ref=e313]
+                      - generic [ref=e315]: E2E invalid AgentFlow schema parent
+                    - generic [ref=e316]:
+                      - generic [ref=e317]: Default
+                      - generic [ref=e318]: 10m ago
+                  - generic [ref=e319]:
+                    - button "Rename session E2E invalid AgentFlow schema parent" [ref=e320]:
+                      - img [ref=e321]
+                    - button "Delete session E2E invalid AgentFlow schema parent" [ref=e324]:
+                      - img [ref=e325]
+                - generic [ref=e330] [cursor=pointer]:
+                  - generic [ref=e331]:
+                    - generic [ref=e332]:
+                      - generic "Root chat" [ref=e333]:
+                        - img [ref=e334]
+                      - generic [ref=e336]: E2E missing Implementer write parent
+                    - generic [ref=e337]:
+                      - generic [ref=e338]: Default
+                      - generic [ref=e339]: 10m ago
+                  - generic [ref=e340]:
+                    - button "Rename session E2E missing Implementer write parent" [ref=e341]:
+                      - img [ref=e342]
+                    - button "Delete session E2E missing Implementer write parent" [ref=e345]:
+                      - img [ref=e346]
+                    - button "Expand child conversations for E2E missing Implementer write parent" [ref=e349]:
+                      - generic [ref=e350]:
+                        - img [ref=e351]
+                        - generic [ref=e353]: "6"
+                - generic [ref=e355] [cursor=pointer]:
+                  - generic [ref=e356]:
+                    - generic [ref=e357]:
+                      - generic "Root chat" [ref=e358]:
+                        - img [ref=e359]
+                      - generic [ref=e361]: AC26 Reload Test
+                    - generic [ref=e362]:
+                      - generic [ref=e363]: Default
+                      - generic [ref=e364]: 10m ago
+                  - generic [ref=e365]:
+                    - button "Rename session AC26 Reload Test" [ref=e366]:
+                      - img [ref=e367]
+                    - button "Delete session AC26 Reload Test" [ref=e370]:
+                      - img [ref=e371]
+                - generic [ref=e375] [cursor=pointer]:
+                  - generic [ref=e376]:
+                    - generic [ref=e377]:
+                      - generic "Root chat" [ref=e378]:
+                        - img [ref=e379]
+                      - generic [ref=e381]: New Chat
+                    - generic [ref=e382]:
+                      - generic [ref=e383]: Default
+                      - generic [ref=e384]: 11m ago
+                  - generic [ref=e385]:
+                    - button "Rename session New Chat" [ref=e386]:
+                      - img [ref=e387]
+                    - button "Delete session New Chat" [ref=e390]:
+                      - img [ref=e391]
+                - generic [ref=e395] [cursor=pointer]:
+                  - generic [ref=e396]:
+                    - generic [ref=e397]:
+                      - generic "Root chat" [ref=e398]:
+                        - img [ref=e399]
+                      - generic [ref=e401]: New Chat
+                    - generic [ref=e402]:
+                      - generic [ref=e403]: Default
+                      - generic [ref=e404]: 11m ago
+                  - generic [ref=e405]:
+                    - button "Rename session New Chat" [ref=e406]:
+                      - img [ref=e407]
+                    - button "Delete session New Chat" [ref=e410]:
+                      - img [ref=e411]
+                - generic [ref=e415] [cursor=pointer]:
+                  - generic [ref=e416]:
+                    - generic [ref=e417]:
+                      - generic "Root chat" [ref=e418]:
+                        - img [ref=e419]
+                      - generic [ref=e421]: New Chat
+                    - generic [ref=e422]:
+                      - generic [ref=e423]: Default
+                      - generic [ref=e424]: 11m ago
+                  - generic [ref=e425]:
+                    - button "Rename session New Chat" [ref=e426]:
+                      - img [ref=e427]
+                    - button "Delete session New Chat" [ref=e430]:
+                      - img [ref=e431]
+                - generic [ref=e435] [cursor=pointer]:
+                  - generic [ref=e436]:
+                    - generic [ref=e437]:
+                      - generic "Root chat" [ref=e438]:
+                        - img [ref=e439]
+                      - generic [ref=e441]: AC13 Rapid Enter Queue 1791118665743
+                    - generic [ref=e442]:
+                      - generic [ref=e443]: Default
+                      - generic [ref=e444]: 11m ago
+                  - generic [ref=e445]:
+                    - button "Rename session AC13 Rapid Enter Queue 1791118665743" [ref=e446]:
+                      - img [ref=e447]
+                    - button "Delete session AC13 Rapid Enter Queue 1791118665743" [ref=e450]:
+                      - img [ref=e451]
+                - generic [ref=e455] [cursor=pointer]:
+                  - generic [ref=e456]:
+                    - generic [ref=e457]:
+                      - generic "Root chat" [ref=e458]:
+                        - img [ref=e459]
+                      - generic [ref=e461]: AC13 Queue Test 1791118654816
+                    - generic [ref=e462]:
+                      - generic [ref=e463]: Default
+                      - generic [ref=e464]: 11m ago
+                  - generic [ref=e465]:
+                    - button "Rename session AC13 Queue Test 1791118654816" [ref=e466]:
+                      - img [ref=e467]
+                    - button "Delete session AC13 Queue Test 1791118654816" [ref=e470]:
+                      - img [ref=e471]
+                - generic [ref=e475] [cursor=pointer]:
+                  - generic [ref=e476]:
+                    - generic [ref=e477]:
+                      - generic "Root chat" [ref=e478]:
+                        - img [ref=e479]
+                      - generic [ref=e481]: AC12 Reload Test
+                    - generic [ref=e482]:
+                      - generic [ref=e483]: Default
+                      - generic [ref=e484]: 11m ago
+                  - generic [ref=e485]:
+                    - button "Rename session AC12 Reload Test" [ref=e486]:
+                      - img [ref=e487]
+                    - button "Delete session AC12 Reload Test" [ref=e490]:
+                      - img [ref=e491]
+                - generic [ref=e495] [cursor=pointer]:
+                  - generic [ref=e496]:
+                    - generic [ref=e497]:
+                      - generic "Root chat" [ref=e498]:
+                        - img [ref=e499]
+                      - generic [ref=e501]: Interactive Q&A
+                    - generic [ref=e502]:
+                      - generic [ref=e503]: RaConsierge
+                      - generic [ref=e504]: 11m ago
+                  - generic [ref=e505]:
+                    - button "Rename session Interactive Q&A" [ref=e506]:
+                      - img [ref=e507]
+                    - button "Delete session Interactive Q&A" [ref=e510]:
+                      - img [ref=e511]
+                - generic [ref=e515] [cursor=pointer]:
+                  - generic [ref=e516]:
+                    - generic [ref=e517]:
+                      - generic "Root chat" [ref=e518]:
+                        - img [ref=e519]
+                      - generic [ref=e521]: AC10 Multi-Turn Test 1791118642235-k6nylz
+                    - generic [ref=e522]:
+                      - generic [ref=e523]: Default
+                      - generic [ref=e524]: 11m ago
+                  - generic [ref=e525]:
+                    - button "Rename session AC10 Multi-Turn Test 1791118642235-k6nylz" [ref=e526]:
+                      - img [ref=e527]
+                    - button "Delete session AC10 Multi-Turn Test 1791118642235-k6nylz" [ref=e530]:
+                      - img [ref=e531]
+                - generic [ref=e535] [cursor=pointer]:
+                  - generic [ref=e536]:
+                    - generic [ref=e537]:
+                      - generic "Root chat" [ref=e538]:
+                        - img [ref=e539]
+                      - generic [ref=e541]: AC10 Streaming Test 1791118638880-69lowb
+                    - generic [ref=e542]:
+                      - generic [ref=e543]: Default
+                      - generic [ref=e544]: 11m ago
+                  - generic [ref=e545]:
+                    - button "Rename session AC10 Streaming Test 1791118638880-69lowb" [ref=e546]:
+                      - img [ref=e547]
+                    - button "Delete session AC10 Streaming Test 1791118638880-69lowb" [ref=e550]:
+                      - img [ref=e551]
+                - generic [ref=e555] [cursor=pointer]:
+                  - generic [ref=e556]:
+                    - generic [ref=e557]:
+                      - generic "Root chat" [ref=e558]:
+                        - img [ref=e559]
+                      - generic [ref=e561]: Interactive Q&A
+                    - generic [ref=e562]:
+                      - generic [ref=e563]: RaConsierge
+                      - generic [ref=e564]: 11m ago
+                  - generic [ref=e565]:
+                    - button "Rename session Interactive Q&A" [ref=e566]:
+                      - img [ref=e567]
+                    - button "Delete session Interactive Q&A" [ref=e570]:
+                      - img [ref=e571]
+                - generic [ref=e575] [cursor=pointer]:
+                  - generic [ref=e576]:
+                    - generic [ref=e577]:
+                      - generic "Root chat" [ref=e578]:
+                        - img [ref=e579]
+                      - generic [ref=e581]: Interactive Q&A
+                    - generic [ref=e582]:
+                      - generic [ref=e583]: RaConsierge
+                      - generic [ref=e584]: 11m ago
+                  - generic [ref=e585]:
+                    - button "Rename session Interactive Q&A" [ref=e586]:
+                      - img [ref=e587]
+                    - button "Delete session Interactive Q&A" [ref=e590]:
+                      - img [ref=e591]
+                - generic [ref=e595] [cursor=pointer]:
+                  - generic [ref=e596]:
+                    - generic [ref=e597]:
+                      - generic "Root chat" [ref=e598]:
+                        - img [ref=e599]
+                      - generic [ref=e601]: AC01 Streaming Test 1791118581825-g0pgng
+                    - generic [ref=e602]:
+                      - generic [ref=e603]: Default
+                      - generic [ref=e604]: 12m ago
+                  - generic [ref=e605]:
+                    - button "Rename session AC01 Streaming Test 1791118581825-g0pgng" [ref=e606]:
+                      - img [ref=e607]
+                    - button "Delete session AC01 Streaming Test 1791118581825-g0pgng" [ref=e610]:
+                      - img [ref=e611]
+            - button "Zewnętrzne 0" [expanded] [ref=e615]:
+              - img [ref=e616]
+              - img [ref=e618]
+              - generic [ref=e620]: Zewnętrzne
+              - generic [ref=e621]: "0"
+            - button "Audyt 0" [expanded] [ref=e623]:
+              - img [ref=e624]
+              - img [ref=e626]
+              - generic [ref=e628]: Audyt
+              - generic [ref=e629]: "0"
+            - button "Inne 0" [expanded] [ref=e631]:
+              - img [ref=e632]
+              - img [ref=e634]
+              - generic [ref=e636]: Inne
+              - generic [ref=e637]: "0"
+            - generic [ref=e638]:
+              - button "E2E Architecture Project 2" [expanded] [ref=e639]:
+                - img [ref=e640]
+                - img [ref=e642]
+                - generic [ref=e644]: E2E Architecture Project
+                - generic [ref=e645]: "2"
+              - generic [ref=e646]:
+                - generic [ref=e648] [cursor=pointer]:
+                  - generic [ref=e649]:
+                    - generic [ref=e650]:
+                      - generic "Root chat" [ref=e651]:
+                        - img [ref=e652]
+                      - generic [ref=e654]: New Chat
+                    - generic [ref=e655]:
+                      - generic [ref=e656]: Default
+                      - generic [ref=e657]: 9m ago
+                  - generic [ref=e658]:
+                    - button "Rename session New Chat" [ref=e659]:
+                      - img [ref=e660]
+                    - button "Delete session New Chat" [ref=e663]:
+                      - img [ref=e664]
+                - generic [ref=e668] [cursor=pointer]:
+                  - generic [ref=e669]:
+                    - generic [ref=e670]:
+                      - generic "Root chat" [ref=e671]:
+                        - img [ref=e672]
+                      - generic [ref=e674]: New Chat
+                    - generic [ref=e675]:
+                      - generic [ref=e676]: Default
+                      - generic [ref=e677]: 10m ago
+                  - generic [ref=e678]:
+                    - button "Rename session New Chat" [ref=e679]:
+                      - img [ref=e680]
+                    - button "Delete session New Chat" [ref=e683]:
+                      - img [ref=e684]
+      - generic [ref=e691]:
+        - generic [ref=e692]:
+          - generic [ref=e694]: Child HITL 1791119349984
+          - group "Widok konwersacji" [ref=e695]:
+            - button "Chat" [pressed] [ref=e696]:
+              - img [ref=e697]
+              - generic [ref=e699]: Chat
+            - button "Graf" [ref=e700]:
+              - img [ref=e701]
+              - generic [ref=e705]: Graf
+          - button "Bez projektu Sandbox VFS" [ref=e708]:
+            - img [ref=e709]
+            - generic [ref=e711]: Bez projektu
+            - generic [ref=e712]: Sandbox VFS
+            - img [ref=e713]
+          - button "Files empty" [ref=e715]:
+            - img [ref=e716]
+            - generic [ref=e718]: Files
+            - generic [ref=e719]: empty
+          - button "~18k/32k" [ref=e721] [cursor=pointer]
+          - generic "Local LLM" [ref=e722]
+        - generic [ref=e726]:
+          - paragraph [ref=e727]: Child HITL 1791119349984
+          - generic [ref=e728]:
+            - generic [ref=e729]: K
+            - heading "KALIO" [level=2] [ref=e730]
+            - paragraph [ref=e731]: AI assistant - build apps, query data, generate images, run tools
+          - generic [ref=e732]:
+            - generic [ref=e733]:
+              - paragraph [ref=e734]: Mode
+              - generic [ref=e735]:
+                - button "Chat mode" [ref=e736] [cursor=pointer]
+                - button "Workflow mode" [ref=e737] [cursor=pointer]
+            - generic [ref=e738]:
+              - generic [ref=e739]:
+                - generic [ref=e740]: Persona
+                - combobox "Persona" [ref=e742]:
+                  - generic [ref=e743]: Default
+                  - img [ref=e744]
+              - generic [ref=e747]:
+                - generic [ref=e748]: Projekt
+                - button "Bez projektu Sandbox VFS" [ref=e749]:
+                  - img [ref=e750]
+                  - generic [ref=e752]: Bez projektu
+                  - generic [ref=e753]: Sandbox VFS
+                  - img [ref=e754]
+            - generic [ref=e756]:
+              - generic [ref=e757]: Provider and model
+              - generic [ref=e758]:
+                - generic [ref=e759]: Search providers and models
+                - combobox "Provider and model" [ref=e760]
+                - generic [ref=e761]:
+                  - paragraph [ref=e762]: Codex catalog only — all connected Codex accounts. Does not refresh Devin.
+                  - button "Recheck Codex models" [ref=e763] [cursor=pointer]
+              - paragraph [ref=e764]: Choose a connected runtime/provider and model for this conversation.
+          - generic [ref=e765]:
+            - generic [ref=e766]:
+              - generic [ref=e767]: Prompt
+              - textbox "Prompt" [active] [ref=e768]:
+                - /placeholder: Ask Default...
+                - text: "[[mock:tool:run_subagent:hitl]] Use a child that triggers vfs_write HITL."
+              - generic [ref=e769]:
+                - button "Run" [disabled]:
+                  - img
+                  - text: Run
+            - generic [ref=e770]:
+              - button "What can you do?" [ref=e771] [cursor=pointer]
+              - button "Build a calculator app" [ref=e772] [cursor=pointer]
+              - button "Create a todo list" [ref=e773] [cursor=pointer]
+              - button "Generate an image of a fox" [ref=e774] [cursor=pointer]
+```
