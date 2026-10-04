@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import type { AgentFlowRunSnapshot } from '@kalio/types';
+import type { AgentFlowRunSnapshot, ChatSession } from '@kalio/types';
 import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
 import {
   CLI_AGENT_SESSION_RUNTIME,
@@ -51,7 +51,7 @@ export class SessionRuntimeStopService {
       attempt('AgentFlow runtime stop', () => this.stopAgentFlowRunsForSessions(sessionIds)),
       attempt('Subagent runtime stop', () => this.stopSubagentRunsForSessions(sessionIds)),
       ...sessionIds.flatMap(sessionId => [
-        attempt(`CLI agent stop for ${sessionId}`, () => this.stopCliAgentSessionIfNeeded(sessionId)),
+        attempt(`CLI agent stop for ${sessionId}`, () => this.stopCliAgentSessionIfNeeded(sessionId, sessionTree.childSessionsById[sessionId])),
         attempt(`Chat pipeline drain for ${sessionId}`, () => this.pipeline.stopAndDrain(sessionId)),
       ]),
     ]);
@@ -130,14 +130,15 @@ export class SessionRuntimeStopService {
     );
   }
 
-  private async stopCliAgentSessionIfNeeded(sessionId: string): Promise<void> {
+  private async stopCliAgentSessionIfNeeded(sessionId: string, collectedSession?: ChatSession): Promise<void> {
     const cliRuntime = this.getCliAgentSessionRuntime();
     if (!cliRuntime) {
       return;
     }
 
     try {
-      const session = await this.sessionsService.get(sessionId);
+      // Cancellation owners may remove children while draining; use the collected ownership.
+      const session = collectedSession ?? await this.sessionsService.get(sessionId);
       if (session.kind !== 'cli-agent' || !session.parentSessionId) {
         return;
       }

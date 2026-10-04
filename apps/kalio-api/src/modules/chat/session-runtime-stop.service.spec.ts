@@ -50,6 +50,38 @@ function makeAgentFlowSnapshot(id: string, status: 'running' | 'completed'): Age
 }
 
 describe('SessionRuntimeStopService', () => {
+  it('uses collected child ownership after another cancellation owner removes child records', async () => {
+    let removed = false;
+    const sessions = {
+      listChildren: vi.fn(async (id: string) => id === rootSession.id ? [branchSession, cliSession] : []),
+      get: vi.fn(async (id: string) => {
+        if (id === rootSession.id) return rootSession;
+        if (removed) throw new Error(`Session not found: ${id}`);
+        return id === branchSession.id ? branchSession : cliSession;
+      }),
+    };
+    const stopSession = vi.fn(async () => undefined);
+    const service = new SessionRuntimeStopService(
+      sessions as never, { stopAndDrain: vi.fn(async () => undefined) } as never,
+      undefined, { stopSession } as unknown as CLIAgentSessionRuntimePort,
+      { stopRunsForSessions: async () => { removed = true; return []; } },
+    );
+    await expect(service.stopSessionTree(rootSession.id)).resolves.toMatchObject({ rootSessionId: rootSession.id });
+    expect(stopSession).toHaveBeenCalledExactlyOnceWith(branchSession.id, cliSession.id);
+    expect(sessions.get).not.toHaveBeenCalledWith(branchSession.id);
+    expect(sessions.get).not.toHaveBeenCalledWith(cliSession.id);
+  });
+
+  it('still rejects an actual CLI stop failure with collected child ownership', async () => {
+    const service = new SessionRuntimeStopService(
+      { listChildren: vi.fn(async (id: string) => id === rootSession.id ? [cliSession] : []),
+        get: vi.fn(async (id: string) => id === cliSession.id ? cliSession : rootSession) } as never,
+      { stopAndDrain: vi.fn(async () => undefined) } as never,
+      undefined, { stopSession: vi.fn(async () => { throw new Error('CLI transport failure'); }) } as unknown as CLIAgentSessionRuntimePort,
+    );
+    await expect(service.stopSessionTree(rootSession.id)).rejects.toThrow('CLI transport failure');
+  });
+
   it('starts subagent and pipeline cancellation before awaiting architecture drain', async () => {
     let release!: () => void;
     let entered!: () => void;
