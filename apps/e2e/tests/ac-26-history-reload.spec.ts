@@ -1,14 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE, expectComposerEnabled, sendMessageFromComposer } from './helpers/test-config';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 
 // AC-26: After page reload, selecting a session restores the full conversation history
 test.describe('AC-26: Session history restored after reload', () => {
   test('user message and agent response are visible after page reload', async ({ page, request }) => {
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC26 Reload Test', personaId: 'default' },
-    });
-    expect(res.ok()).toBeTruthy();
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, 'AC26 Reload Test');
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
@@ -19,13 +16,16 @@ test.describe('AC-26: Session history restored after reload', () => {
     await page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first().click();
 
     await expectComposerEnabled(page, 5000);
+    const baselineTurns = await page.getByTestId('agent-turn-bubble').count();
     await sendMessageFromComposer(page, 'Say the single word: PINEAPPLE');
 
     // Wait for streaming to finish
     await expectComposerEnabled(page, 30_000);
 
     // Confirm agent turn appeared with content
-    const turnBubble = page.getByTestId('agent-turn-bubble').first();
+    await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(baselineTurns + 1);
+    await expect.poll(async () => (await request.get(`${API_BASE}/sessions/${session.id}/runs/current`)).text()).toBe('');
+    const turnBubble = page.getByTestId('agent-turn-bubble').last();
     await expect(turnBubble).toBeVisible({ timeout: 5000 });
     const responseText = await turnBubble.textContent();
     expect(responseText?.trim().length).toBeGreaterThan(0);
@@ -41,14 +41,15 @@ test.describe('AC-26: Session history restored after reload', () => {
     await page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first().click();
 
     // User message must still be visible
-    const userBubble = page.locator('[data-testid="message-bubble"][data-role="user"]').first();
+    const userBubble = page.locator('[data-testid="message-bubble"][data-role="user"]').filter({ hasText: 'Say the single word: PINEAPPLE' });
     await expect(userBubble).toBeVisible({ timeout: 10_000 });
 
     // Agent turn must be restored from history
-    const restoredTurn = page.getByTestId('agent-turn-bubble').first();
+    await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(baselineTurns + 1);
+    const restoredTurn = page.getByTestId('agent-turn-bubble').last();
     await expect(restoredTurn).toBeVisible({ timeout: 10_000 });
     const restoredText = await restoredTurn.textContent();
-    expect(restoredText?.trim().length).toBeGreaterThan(0);
+    expect(restoredText).toBe(responseText);
 
     await request.delete(`${API_BASE}/sessions/${session.id}`);
   });

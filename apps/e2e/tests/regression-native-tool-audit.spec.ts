@@ -26,6 +26,9 @@ test('native audit reads a real scoped SQLite snapshot and survives F5', async (
     const message = db.prepare('INSERT INTO messages (id, session_id, role, content, turn_id, prompt_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
     message.run(prompt, session, 'user', 'Inspect native audit fixture', null, null, stamp);
     message.run(`answer-${stamp}`, session, 'assistant', 'Stored fixture answer', turn, prompt, stamp + 1);
+    // Provider provenance belongs to this exact durable turn, not persona defaults.
+    db.prepare('INSERT INTO chat_runs (id, session_id, turn_id, phase, status, provider, model, runtime_kind, started_at, updated_at, last_heartbeat_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(`run-${stamp}`, session, turn, 'completed', 'completed', 'devin-cli-acp', 'swe-2', 'chat', stamp, stamp + 1, stamp + 1, stamp + 1);
     const audit = db.prepare('INSERT INTO audit_log (id, session_id, type, label, data, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     const scope = { turnId: turn, processEpoch: 'fixture-epoch' };
     audit.run(`blocked-${stamp}`, session, 'runtime_event', 'devin-cli-acp.native_approval', JSON.stringify({ ...scope, toolCallId: 'blocked', toolCallName: 'Read blocked fixture', decision: 'decline', decisionSource: 'policy' }), stamp + 2);
