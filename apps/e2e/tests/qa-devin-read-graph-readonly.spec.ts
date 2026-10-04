@@ -7,7 +7,7 @@ test('saved real Devin read agrees between chat and grouped graph after F5', asy
   expect(APP_BASE.replace(/\/$/, '')).toBe('http://localhost:5288');
   expect(API_BASE.replace(/\/$/, '')).toBe('http://127.0.0.1:3316/api');
   const session = 'W4fggLSunrJB41C24MV7C';
-  const turn = '3QuNk3QyDDWLd1YcjC5G9';
+  const callId = 'mcp-0a5fe414-5f14-4d2f-9181-8dbe33ee7d7b-5';
   const report = process.env['KALIO_READ_GRAPH_REPORT_RUN'];
   if (!report || !/^[1-9]\d*$/.test(report)) throw new Error('New numeric report run required');
   const beforeResponse = await request.get(`${API_BASE}/sessions/${session}/messages`);
@@ -26,13 +26,14 @@ test('saved real Devin read agrees between chat and grouped graph after F5', asy
   await expect(bubble).toContainText('fs_read');
   await page.getByRole('button', { name: 'Graf', exact: true }).click();
   for (let reload = 0; reload < 2; reload++) {
-    const group = page.getByTestId(`graph-node-tool-group:${turn}`);
+    const group = page.getByTestId(`graph-node-tool:${callId}`);
     await expect(group).toHaveCount(1);
     await group.click();
     const inspector = page.getByRole('complementary');
-    await inspector.getByText('fs_read', { exact: true }).click();
-    await expect(inspector.getByRole('region', { name: 'fs_read arguments' })).toContainText('E:/Projekty/home-site/package.json');
-    await expect(inspector.getByRole('region', { name: 'fs_read result' })).toContainText('nexora-home-site');
+    await expect(inspector.getByRole('heading', { name: 'Tool details', exact: true })).toBeVisible();
+    await inspector.getByRole('button', { name: 'Show raw', exact: true }).click();
+    await expect(inspector).toContainText('E:/Projekty/home-site/package.json');
+    await expect(inspector).toContainText('nexora-home-site');
     if (reload === 0) await page.reload();
   }
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
