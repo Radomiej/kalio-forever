@@ -247,9 +247,29 @@ describe('SessionPipelineService', () => {
       'turn-recovered',
       'run-recovered',
       'message-recovered',
+      expect.any(AbortController),
     );
     chatHarness.release('s1');
     await flush();
+  });
+
+  it('executes the recovered successor when claiming the queue head throws', async () => {
+    queuedRuns.push(...['head', 'next'].map((name) => makeRunSnapshot({
+      id: `run-${name}`, sessionId: 's1', turnId: `turn-${name}`,
+      phase: 'queued', status: 'queued',
+      queuedPayload: { content: name, personaId: 'p1', clientMessageId: `message-${name}` },
+    })));
+    runJournal.claimQueuedRun.mockRejectedValueOnce(new Error('head claim failed'));
+    const { emit } = makeEmit();
+    await expect(svc.resumeQueuedSession('s1', emit)).rejects.toThrow('head claim failed');
+    await flush();
+    expect(chatHarness.chat.handleTurn).toHaveBeenCalledWith(
+      's1', 'next', 'p1', emit, undefined, 'turn-next', 'run-next', 'message-next',
+      expect.any(AbortController),
+    );
+    chatHarness.release('s1');
+    await flush();
+    expect(svc.getSessionStatus('s1').active).toBe(false);
   });
 
   it('drops the recovered queue head when the durable claim returns null', async () => {
@@ -550,6 +570,85 @@ describe('SessionPipelineService', () => {
 
     await expect(svc.stopAndDrain('seeded-session')).resolves.toBeUndefined();
     expect(svc.getSessionStatus('seeded-session').active).toBe(false);
+  });
+
+  it('stopAndDrain forwards stop even when a restored approval has no pipeline slot', async () => {
+    await svc.stopAndDrain('restored-session');
+    expect(chatHarness.chat.abort).toHaveBeenCalledWith('restored-session');
+  });
+
+  it('admits a restored continuation with its original turn and drains follow-up after worker cleanup', async () => {
+    const { emit } = makeEmit();
+    let finish!: () => void;
+    const worker = vi.fn(async () => new Promise<boolean>((resolve) => { finish = () => resolve(true); }));
+    const resume = svc.runContinuation('s1', 'original-turn', worker);
+    await flush();
+    expect(svc.getSessionStatus('s1')).toMatchObject({ active: true, turnId: 'original-turn' });
+    await svc.submit(basePayload('s1', 'follow-up'), emit);
+    expect(chatHarness.callsReceived).toHaveLength(0);
+    expect(runJournal.startRun).not.toHaveBeenCalled();
+    finish();
+    await flush();
+    expect(chatHarness.callsReceived.map((call) => call.content)).toEqual(['follow-up']);
+    chatHarness.release('s1');
+    await resume;
+    expect(svc.getSessionStatus('s1').active).toBe(false);
+  });
+
+  it('rejects simultaneous normal/resumed execution and duplicate continuation admission', async () => {
+    const { emit } = makeEmit();
+    const normal = svc.submit(basePayload('s1', 'normal'), emit);
+    const effect = vi.fn().mockResolvedValue(true);
+    expect(await svc.runContinuation('s1', 'resume-turn', effect)).toBe(false);
+    expect(effect).not.toHaveBeenCalled();
+    await flush();
+    chatHarness.release('s1');
+    await normal;
+    let finish!: () => void;
+    const resumed = svc.runContinuation('s1', 'resume-turn', async () => new Promise<boolean>((resolve) => {
+      finish = () => resolve(true);
+    }));
+    await flush();
+    expect(await svc.runContinuation('s1', 'resume-turn', effect)).toBe(false);
+    finish();
+    await resumed;
+  });
+
+  it('aborts a continuation before its first await and fences follow-up until cleanup drains', async () => {
+    const { emit } = makeEmit();
+    let finish!: () => void;
+    let signal!: AbortSignal;
+    const resume = svc.runContinuation('s1', 'original-turn', async (controller) => {
+      signal = controller.signal;
+      return new Promise<boolean>((resolve) => { finish = () => resolve(false); });
+    });
+    await flush();
+    let drained = false;
+    const stop = svc.stopAndDrain('s1').then(() => { drained = true; });
+    expect(signal.aborted).toBe(true);
+    const followUp = svc.submit(basePayload('s1', 'after-stop'), emit);
+    await flush();
+    expect(drained).toBe(false);
+    expect(chatHarness.callsReceived).toHaveLength(0);
+    expect(svc.getSessionStatus('s1').active).toBe(true);
+    finish();
+    await stop;
+    await resume;
+    await flush();
+    expect(chatHarness.callsReceived.map((call) => call.content)).toEqual(['after-stop']);
+    chatHarness.release('s1');
+    await followUp;
+  });
+
+  it('releases failed continuation admission and never clears a newer turn from stale cleanup', async () => {
+    await expect(svc.runContinuation('s1', 'failed-claim', async () => false)).resolves.toBe(false);
+    expect(svc.getSessionStatus('s1').active).toBe(false);
+    const { emit } = makeEmit();
+    const next = svc.submit(basePayload('s1', 'next'), emit);
+    await flush();
+    expect(svc.getSessionStatus('s1').active).toBe(true);
+    chatHarness.release('s1');
+    await next;
   });
 
   it('serialises concurrent submits to an idle session (race condition guard)', async () => {

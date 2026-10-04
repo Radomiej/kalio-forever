@@ -235,11 +235,14 @@ describe('ChatGateway', () => {
     );
   });
 
-  it('REGRESSION: chat:stop emits a stopped runtime snapshot before slow turn drain settles', async () => {
+  it('REGRESSION: chat:stop emits authoritative snapshots only after slow turn drain settles', async () => {
     let resolveDrain!: () => void;
-    (pipeline.stopAndDrain as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((resolve) => {
-      resolveDrain = resolve;
-    }));
+    let entered!: () => void;
+    const draining = new Promise<void>((resolve) => { entered = resolve; });
+    vi.mocked(pipeline.stopAndDrain).mockImplementation(() => {
+      entered();
+      return new Promise<void>((resolve) => { resolveDrain = resolve; });
+    });
     (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockResolvedValue({
       sessionId: 'session-1',
       active: true,
@@ -260,7 +263,19 @@ describe('ChatGateway', () => {
     });
 
     const stopPromise = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await draining;
+
+    expect(client.emit).not.toHaveBeenCalledWith('session:runtime_snapshot', expect.anything());
+    expect(pipeline.getSessionStatusWithRun).not.toHaveBeenCalled();
+    vi.mocked(pipeline.getSessionStatusWithRun).mockResolvedValue({
+      sessionId: 'session-1', active: false, queueLength: 0,
+      run: {
+        id: 'run-1', sessionId: 'session-1', turnId: 'turn-1', phase: 'interrupted', status: 'interrupted',
+        errorCode: 'INTERRUPTED', retryCount: 0, safeResume: false, startedAt: 1, updatedAt: 3, lastHeartbeatAt: 3,
+      },
+    });
+    resolveDrain();
+    await stopPromise;
 
     expect(client.emit).toHaveBeenCalledWith(
       'session:runtime_snapshot',
@@ -271,13 +286,42 @@ describe('ChatGateway', () => {
         run: expect.objectContaining({
           phase: 'interrupted',
           status: 'interrupted',
-          errorCode: 'USER_STOPPED',
+          errorCode: 'INTERRUPTED',
         }),
       }),
     );
 
-    resolveDrain();
-    await stopPromise;
+    expect(client.emit.mock.calls.filter(([event]) => event === 'session:runtime_snapshot')).toHaveLength(1);
+  });
+
+  it('starts descendant cleanup while the root drain is blocked and waits for both before projecting', async () => {
+    vi.mocked(sessions.listChildren).mockImplementation(async (id) => id === 'session-1' ? [sessionFixture({ id: 'child-session' })] : []);
+    let childStarted!: () => void;
+    const child = new Promise<void>((resolve) => { childStarted = resolve; });
+    let releaseRoot!: () => void;
+    vi.mocked(pipeline.stopAndDrain).mockImplementation(async (id) => {
+      if (id === 'child-session') { childStarted(); return; }
+      await new Promise<void>((resolve) => { releaseRoot = resolve; });
+    });
+    const stopping = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    await child;
+    expect(architectureRuntimeStop.stopRunsForSessions).toHaveBeenCalled();
+    expect(pipeline.stopAndDrain).toHaveBeenCalledWith('session-1');
+    expect(client.emit).not.toHaveBeenCalledWith('session:runtime_snapshot', expect.anything());
+    releaseRoot();
+    await stopping;
+  });
+
+  it('does not fabricate interrupted state if durable pending state still exists after drain', async () => {
+    vi.mocked(pipeline.getSessionStatusWithRun).mockResolvedValue({
+      sessionId: 'session-1', active: false, queueLength: 0,
+      run: { id: 'waiting', sessionId: 'session-1', turnId: 'turn-1', phase: 'tool_pending', status: 'waiting_for_human',
+        retryCount: 0, safeResume: false, startedAt: 1, updatedAt: 2, lastHeartbeatAt: 2 },
+    });
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    const snapshots = client.emit.mock.calls.filter(([event]) => event === 'session:runtime_snapshot');
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0][1]).toMatchObject({ run: { status: 'waiting_for_human', phase: 'tool_pending' } });
   });
 
   it('REGRESSION: chat:stop stops active architecture runs for the root and descendant session tree', async () => {
@@ -324,7 +368,7 @@ describe('ChatGateway', () => {
     await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
 
     expect(sessions.listChildren).toHaveBeenCalledTimes(2);
-    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(4);
+    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
   });
 
   it('does not delegate chat:stop to CLI runtime for non-cli-agent sessions', async () => {

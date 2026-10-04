@@ -39,7 +39,7 @@ export async function replayPendingToolConfirmations(input: {
 export async function resolveToolConfirmation(input: {
   payload: SocketEvents['tool:confirm'];
   toolDispatch: Pick<ToolDispatchService, 'resolveConfirmation'>;
-  chatService?: Pick<ChatService, 'approveAndResumeTool'>;
+  chatService?: Pick<ChatService, 'approveAndResumeTool'> & Partial<Pick<ChatService, 'hasPendingToolConfirmation'>>;
   emit: EmitFn;
 }): Promise<void> {
   const { payload } = input;
@@ -55,6 +55,7 @@ export async function resolveToolConfirmation(input: {
     input.emit,
   );
   if (resumed) return;
+  if (await input.chatService?.hasPendingToolConfirmation?.(payload.requestId, payload.sessionId)) return;
   input.emit('tool:confirmation_invalidated', {
     requestId: payload.requestId,
     sessionId: payload.sessionId,

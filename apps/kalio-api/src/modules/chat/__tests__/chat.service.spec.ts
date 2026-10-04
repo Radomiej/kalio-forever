@@ -564,6 +564,19 @@ describe('ChatService', () => {
     expect(() => service.abort('sid')).not.toThrow();
   });
 
+  it('uses provider-neutral interruption text when an external host is lost', async () => {
+    const llmSource: ILLMSource = { stream: vi.fn().mockImplementation(async function* (params: LLMSourceParams) {
+      params.onExternalRuntimeLost?.({ authProfileId: 'devin-local', processEpoch: 'epoch', reason: 'reset' });
+      throw new Error('Devin host lost');
+    }) };
+    await buildService(llmSource);
+    await service.handleTurn('sid', 'q', 'p1', emit as EmitFn, undefined, 'lost-turn', 'lost-run');
+    expect(runJournal.interrupt).toHaveBeenCalledWith(expect.any(String), 'Turn interrupted because the external agent runtime was lost.');
+    expect(emit).toHaveBeenCalledWith('chat:error', expect.objectContaining({
+      code: 'INTERRUPTED', message: 'Turn interrupted because the external agent runtime was lost.',
+    }));
+  });
+
   it('keeps the newer controller when overlapping turns share a session id', async () => {
     let releaseFirst!: () => void;
     let releaseSecond!: () => void;
@@ -730,8 +743,14 @@ describe('ChatService', () => {
     };
 
     await buildCustomService(llmSource, processor);
+    toolDispatch.dispatch.mockImplementationOnce(async (_id: string, _name: string, _args: unknown, ctx: import('../interfaces/stream-context.interface').StreamContext) => {
+      await ctx.markWaitingForHuman?.();
+      await ctx.markToolRunning?.();
+      return { callId: 'c-budget-1', status: 'success', data: {} };
+    });
     await service.handleTurn('sid', 'q', 'p1', emit as EmitFn, undefined, 'turn-budget', 'run-budget');
 
+    expect(runJournal.checkpoint).toHaveBeenCalledWith('run-budget', expect.objectContaining({ phase: 'tool_running', status: 'active' }));
     expect(agentBudgetApprovals.requestAdditionalBudget).toHaveBeenCalledWith(
       expect.objectContaining({
         abortSignal: expect.any(AbortSignal),

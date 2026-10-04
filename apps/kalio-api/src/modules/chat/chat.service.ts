@@ -7,16 +7,13 @@ import { TurnErrorAlreadyEmitted } from './turn-error';
 import { RunJournalService } from './run-journal.service';
 import { ContextAssemblyService } from './context-assembly.service';
 import { CredentialsService } from '../credentials/credentials.service';
-import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
-import { serializeToolResultContent } from './llm-turn-runtime.service';
+import { LLMTurnRuntimeService, serializeToolResultContent } from './llm-turn-runtime.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { HitlRequestService } from '../hitl/hitl-request.service';
 import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { TurnState } from './turn-state';
 import { SessionsService } from './sessions.service';
-import {
-  RuntimeExecutionScheduler,
-} from '../agent-runtime/runtime-execution.scheduler';
+import { RuntimeExecutionScheduler } from '../agent-runtime/runtime-execution.scheduler';
 import {
   createRuntimeExecutionLeaseController,
   runtimeExecutionPriority,
@@ -33,22 +30,16 @@ import {
   stripPendingRAAppLaunchRuntimeContext,
 } from './raapp-launch-intent';
 
-function normalizeClientMessageId(clientMessageId: string | undefined): string | undefined {
-  if (!clientMessageId) {
-    return undefined;
-  }
-  const trimmed = clientMessageId.trim();
-  return /^[A-Za-z0-9_-]{8,128}$/.test(trimmed) ? trimmed : undefined;
-}
+import { normalizeClientMessageId, readExecutionCwd, runCheckpoint } from './chat-input.helpers';
+import type { SessionContinuationAdmission } from './session-execution-admission';
+import { readApprovedContinuation, runApprovedToolContinuation } from './chat-resumed-worker';
 
-/**
- * Socket-facing chat turn orchestrator. Persists the user draft, emits journal
- * phases, and delegates the provider-ready LLM loop to LLMTurnRuntimeService.
- */
+/** Socket-facing orchestrator; persists drafts and delegates the journalled LLM loop. */
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
   private readonly abortControllers = new Map<string, AbortController>();
+  private continuationAdmission?: SessionContinuationAdmission;
 
   constructor(
     private readonly sessionManager: SessionManagerService,
@@ -72,19 +63,19 @@ export class ChatService {
     message: string | undefined,
     emit: EmitFn,
   ): Promise<boolean> {
+    const version = this.continuationAdmission?.capture();
     if (this.nativeApprovals && await this.nativeApprovals.resolve(requestId, sessionId, 'accept', message)) {
       return true;
     }
-    if (!this.hitlRequests) return false;
+    if (!this.hitlRequests || !this.continuationAdmission) return false;
     const pending = await this.hitlRequests.getById(requestId);
     if (!pending || pending.sessionId !== sessionId || pending.status !== 'pending') return false;
-    const approved = await this.hitlRequests.resolve(
-      pending.id,
-      pending.revision,
-      'approved',
-      message ? { message } : undefined,
-    );
-    return approved ? this.resumeApprovedTool(requestId, emit) : false;
+    const continuation = readApprovedContinuation({ ...pending, status: 'approved' });
+    if (!continuation) return false;
+    return this.resumeContinuation(continuation, emit, version, async () => {
+      const approved = await this.hitlRequests!.resolve(pending.id, pending.revision, 'approved', message ? { message } : undefined);
+      return approved ? this.hitlRequests!.getById(requestId) : null;
+    });
   }
 
   async cancelPendingTool(requestId: string, sessionId: string, message?: string): Promise<boolean> {
@@ -102,137 +93,72 @@ export class ChatService {
     );
   }
 
-  async resumeApprovedTool(requestId: string, emit: EmitFn): Promise<boolean> {
-    if (!this.hitlRequests || !this.toolDispatch || !this.contextAssembly) return false;
-    const approved = await this.hitlRequests.getById(requestId);
-    const cursor = approved?.continuation;
-    const payload = approved?.payload;
-    if (
-      !approved || approved.kind !== 'tool_confirmation' || approved.status !== 'approved'
-      || !approved.turnId || !approved.toolCallId
-      || !cursor || cursor['kind'] !== 'approved_tool_then_resume_turn'
-      || cursor['executionState'] !== 'pending'
-      || typeof cursor['promptMessageId'] !== 'string'
-      || typeof cursor['iteration'] !== 'number' || typeof cursor['currentLimit'] !== 'number'
-      || !payload || typeof payload['toolName'] !== 'string'
-      || !payload['args'] || typeof payload['args'] !== 'object' || Array.isArray(payload['args'])
-    ) return false;
+  async hasPendingToolConfirmation(requestId: string, sessionId: string): Promise<boolean> {
+    const request = await this.hitlRequests?.getById(requestId);
+    return request?.sessionId === sessionId && request.kind === 'tool_confirmation' && request.status === 'pending';
+  }
 
-    const runtimeKind = cursor['runtimeKind'];
-    if (runtimeKind !== 'chat' && runtimeKind !== 'subagent' && runtimeKind !== 'agent-flow-branch') return false;
-    if (runtimeKind === 'chat' && (!approved.runId || !this.runJournal)) return false;
+  setContinuationAdmission(admission: SessionContinuationAdmission): void {
+    this.continuationAdmission = admission;
+  }
 
-    const claimed = await this.hitlRequests.claimApprovedContinuation(approved.id, approved.revision);
-    if (!claimed) return false;
-    const session = await this.sessions.get(claimed.sessionId);
-    const executionProfile = this.executionProfiles
-      ? await this.executionProfiles.assertEnabled(session.executionProfileId ?? '')
-      : undefined;
-    const runtimeContext = session.runtimeContext ?? { runtimeKind: 'chat' as const, systemPromptProfile: 'default-chat' as const };
-    const assembled = await this.contextAssembly.assembleForSessionRuntime(session.personaId, runtimeContext);
-    const controller = new AbortController();
-    this.abortControllers.set(claimed.sessionId, controller);
-    const resumeLease = createRuntimeExecutionLeaseController(this.runtimeScheduler, {
-      projectId: session.projectId ?? 'system:none',
-      priority: 'control',
-      label: `resume:${claimed.sessionId}:${claimed.turnId ?? requestId}`,
-    });
-    const toolName = payload['toolName'];
-    const args = payload['args'] as Record<string, unknown>;
-    try {
-      await resumeLease.acquire();
-      const runId = claimed.runId ?? undefined;
-      const turnId = claimed.turnId;
-      const toolCallId = claimed.toolCallId;
-      if (!turnId || !toolCallId) return false;
-      if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_running', status: 'active' });
-      const result = await this.toolDispatch.dispatchApproved(toolCallId, toolName, args, {
-        sessionId: claimed.sessionId,
-        runId,
-        turnId,
-        promptMessageId: cursor['promptMessageId'],
-        messageId: typeof cursor['messageId'] === 'string' ? cursor['messageId'] : nanoid(),
-        vfsSessionId: typeof cursor['vfsSessionId'] === 'string' ? cursor['vfsSessionId'] : undefined,
-        historySessionId: typeof cursor['historySessionId'] === 'string' ? cursor['historySessionId'] : undefined,
-        runtimeKind,
-        iteration: cursor['iteration'],
-        currentLimit: cursor['currentLimit'],
-        abortSignal: controller.signal,
-        state: new TurnState(),
-        emit,
-      }, assembled.toolMetas);
-      await this.sessionManager.saveToolResult(claimed.sessionId, toolCallId, serializeToolResultContent(toolName, result), {
-        turnId,
-        promptMessageId: cursor['promptMessageId'],
-      });
-      const committed = await this.hitlRequests.markContinuationToolResult(claimed.id, claimed.revision, { status: result.status });
-      if (!committed) throw new Error('Unable to persist approved tool result continuation state');
-      emit('tool:result', result);
-      const loopResult = await this.llmTurnRuntime.runAgentLoop({
-        runtimeKind, sessionId: claimed.sessionId, runId, turnId,
-        historySessionId: typeof cursor['historySessionId'] === 'string' ? cursor['historySessionId'] : undefined,
-        vfsSessionId: typeof cursor['vfsSessionId'] === 'string' ? cursor['vfsSessionId'] : undefined,
-        promptMessageId: cursor['promptMessageId'], personaId: session.personaId,
-        effectiveSystemPrompt: assembled.effectiveSystemPrompt, toolMetas: assembled.toolMetas, model: assembled.model,
-        providerToolNames: assembled.personaConfig?.providerToolNames,
-        executionProfile, externalThreadId: session.externalThreadId,
-         providerCompletesTurn: executionProfile?.kind === 'codex-app-server' || executionProfile?.kind === 'claude-agent-sdk' || executionProfile?.kind === 'devin-api' || executionProfile?.kind === 'devin-cli-acp',
-         onExternalRuntimeLost: () => controller.abort(),
-         cwd: readExecutionCwd(session.runtimeContext),
-         onExternalThreadBound: async (externalThreadId, binding) => bindExternalRuntime({
-           sessions: this.sessions, runJournal: this.runJournal, sessionId: claimed.sessionId, runId, externalThreadId, binding,
-         }),
-          onNativeApprovalRequested: createNativeApprovalCallback(this.nativeApprovals, {
-            sessionId: claimed.sessionId, turnId, runId, emit, abortSignal: controller.signal, hitlRequests: this.hitlRequests,
-          }),
-         onExternalAudit: createExternalAuditCallback(this.audit, claimed.sessionId),
-        abortSignal: controller.signal, emit, maxIterations: cursor['currentLimit'],
-        resumeState: { iteration: cursor['iteration'], currentLimit: cursor['currentLimit'] },
-        maxEmptyNoToolRetries: Math.max(5, cursor['currentLimit'] * 2), auditDomain: 'chat',
-        callbacks: {
-          onBeforeIteration: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'llm_streaming', status: 'active' }); },
-          onToolPending: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_pending' }); },
-          onWaitingForHuman: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_pending', status: 'waiting_for_human' }); },
-          onToolRunning: async () => { if (runId) await this.runJournal?.checkpoint(runId, { phase: 'tool_running' }); },
-        },
-      });
-       if (loopResult.aborted) {
-         if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted because the external Codex runtime was lost.');
-         emit('chat:error', {
-           sessionId: claimed.sessionId,
-           code: 'INTERRUPTED',
-           message: 'Turn interrupted because the external Codex runtime was lost.',
-           hadContent: false,
-         });
-       } else if (runId && loopResult.maxIterationsReached) await this.runJournal?.fail(runId, 'MAX_ITERATIONS_REACHED', `Agent loop exceeded ${loopResult.finalLimit} iterations`);
-      else if (runId && loopResult.emptyNoToolRetriesExhausted) await this.runJournal?.fail(runId, 'LLM_ERROR', 'Agent produced empty output after resume');
-      else if (runId) await this.runJournal?.complete(runId, {
-        finalText: loopResult.finalText,
-        structuredOutput: loopResult.structuredOutput,
-        messageId: loopResult.lastMessageId,
-      });
-      emit('agent:done', { sessionId: claimed.sessionId, turnId });
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-       if (controller.signal.aborted) {
-         if (claimed.runId) await this.runJournal?.interrupt(claimed.runId, 'Turn interrupted because the external Codex runtime was lost.');
-         emit('chat:error', {
-           sessionId: claimed.sessionId,
-           code: 'INTERRUPTED',
-           message: 'Turn interrupted because the external Codex runtime was lost.',
-           hadContent: false,
-         });
-       } else {
-         if (claimed.runId) await this.runJournal?.fail(claimed.runId, 'TOOL_EXECUTION_FAILED', message);
-         emit('chat:error', { sessionId: claimed.sessionId, code: 'LLM_ERROR', message, hadContent: false });
-       }
-      if (claimed.turnId) emit('agent:done', { sessionId: claimed.sessionId, turnId: claimed.turnId });
-      return false;
-    } finally {
-      resumeLease.release();
-      if (this.abortControllers.get(claimed.sessionId) === controller) this.abortControllers.delete(claimed.sessionId);
+  /** Called after worker cleanup, while the pipeline still fences new admission. */
+  async cancelPendingContinuations(sessionId: string): Promise<void> {
+    const pending = await this.hitlRequests?.listPending(sessionId) ?? [];
+    const waitingTurns = new Map<string, string>();
+    for (const request of pending) {
+      if (request.kind !== 'tool_confirmation') continue;
+      const cancelled = await this.hitlRequests!.resolve(request.id, request.revision, 'cancelled', { message: 'Turn interrupted by user' });
+      if (!cancelled && (await this.hitlRequests!.getById(request.id))?.status === 'pending') {
+        throw new Error(`Unable to cancel pending confirmation ${request.id}`);
+      }
+      const toolName = request.payload['toolName'];
+      if (cancelled && request.toolCallId && typeof toolName === 'string') {
+        const promptMessageId = request.continuation?.['promptMessageId'];
+        await this.sessionManager.saveToolResult(sessionId, request.toolCallId, serializeToolResultContent(toolName, {
+          callId: request.toolCallId, toolName, status: 'cancelled', errorMessage: 'Turn interrupted by user',
+        }), {
+          turnId: request.turnId ?? undefined,
+          promptMessageId: typeof promptMessageId === 'string' ? promptMessageId : undefined,
+        });
+      }
+      if (cancelled && request.runId && request.turnId) waitingTurns.set(request.runId, request.turnId);
     }
+    for (const [runId, turnId] of waitingTurns) {
+      const current = await this.runJournal?.getTurn(sessionId, turnId);
+      if (current?.id === runId && (current.status === 'active' || current.status === 'waiting_for_human' || current.status === 'interrupted_needs_retry')) {
+        await this.runJournal?.interrupt(runId, 'Turn interrupted by user');
+      }
+    }
+    const run = await this.runJournal?.getCurrentRun(sessionId);
+    if (run && (run.status === 'active' || run.status === 'waiting_for_human' || run.status === 'interrupted_needs_retry')) {
+      await this.runJournal?.interrupt(run.id, 'Turn interrupted by user');
+    }
+  }
+
+  async resumeApprovedTool(requestId: string, emit: EmitFn, version = this.continuationAdmission?.capture()): Promise<boolean> {
+    if (!this.hitlRequests || !this.toolDispatch || !this.contextAssembly || !this.continuationAdmission) return false;
+    const continuation = readApprovedContinuation(await this.hitlRequests.getById(requestId));
+    if (!continuation) return false;
+    return this.resumeContinuation(continuation, emit, version);
+  }
+
+  private async resumeContinuation(
+    continuation: NonNullable<ReturnType<typeof readApprovedContinuation>>,
+    emit: EmitFn,
+    version: number | undefined,
+    approve?: Parameters<typeof runApprovedToolContinuation>[0]['approve'],
+  ): Promise<boolean> {
+    if (!this.hitlRequests || !this.toolDispatch || !this.contextAssembly || !this.continuationAdmission
+      || (continuation.runtimeKind === 'chat' && (!continuation.approved.runId || !this.runJournal))) return false;
+    return this.continuationAdmission.run(continuation.approved.sessionId, continuation.turnId, (controller) =>
+      runApprovedToolContinuation({
+        ...continuation, controller, emit, approve,
+        hitlRequests: this.hitlRequests!, toolDispatch: this.toolDispatch!, contextAssembly: this.contextAssembly!,
+        sessionManager: this.sessionManager, sessions: this.sessions, llmTurnRuntime: this.llmTurnRuntime, audit: this.audit,
+        runJournal: this.runJournal, runtimeScheduler: this.runtimeScheduler,
+        executionProfiles: this.executionProfiles, nativeApprovals: this.nativeApprovals,
+      }), version);
   }
 
   async handleTurn(
@@ -244,8 +170,9 @@ export class ChatService {
     suppliedTurnId?: string,
     runId?: string,
     clientMessageId?: string,
+    suppliedController?: AbortController,
   ): Promise<void> {
-    const controller = new AbortController();
+    const controller = suppliedController ?? new AbortController();
     this.abortControllers.set(sessionId, controller);
     let executionLeaseController: RuntimeExecutionLeaseController | undefined;
 
@@ -256,21 +183,19 @@ export class ChatService {
       if (event === 'chat:chunk') hadContent = true;
       emit(event, data);
     };
-    const checkpointRun = async (
-      phase: import('@kalio/types').ChatRunPhase,
-      extra?: Parameters<RunJournalService['checkpoint']>[1],
-    ): Promise<void> => {
-      if (!runId || !this.runJournal) return;
-      await this.runJournal.checkpoint(runId, { phase, ...extra });
-    };
+    const checkpointRun = runCheckpoint(this.runJournal, runId);
 
     try {
+      controller.signal.throwIfAborted();
       await this.sessionManager.ensureSession(sessionId, personaId);
+      controller.signal.throwIfAborted();
       const session = await this.sessions.get(sessionId);
+      controller.signal.throwIfAborted();
       const executionProfile = this.executionProfiles
         ? await this.executionProfiles.assertEnabled(session.executionProfileId ?? '')
         : undefined;
       await this.sessions.registerRuntimeProjectPathForSession(sessionId);
+      controller.signal.throwIfAborted();
       const runtimeContext = session.runtimeContext ?? {
         runtimeKind: 'chat' as const,
         systemPromptProfile: 'default-chat' as const,
@@ -293,6 +218,7 @@ export class ChatService {
         messageId: normalizeClientMessageId(clientMessageId),
       });
       await executionLeaseController.acquire();
+      controller.signal.throwIfAborted();
       const promptMessageId = promptMessage?.id;
       trackingEmit('agent:start', { sessionId, turnId, promptMessageId });
       await checkpointRun('started', {
@@ -394,7 +320,7 @@ export class ChatService {
           },
           onToolRunning: async () => {
             await executionLeaseController?.acquire();
-            await checkpointRun('tool_running');
+            await checkpointRun('tool_running', { status: 'active' });
           },
           onEscalation: (message) => {
             void this.audit.log({
@@ -477,6 +403,7 @@ export class ChatService {
           structuredOutput: loopResult.structuredOutput,
           messageId: loopResult.lastMessageId,
         });
+        controller.signal.throwIfAborted();
         trackingEmit('chat:complete', { sessionId, messageId: loopResult.lastMessageId });
       }
       trackingEmit('agent:done', { sessionId, turnId });
@@ -488,12 +415,12 @@ export class ChatService {
         err instanceof Error ? err.stack : undefined,
       );
       if (controller.signal.aborted) {
-        if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted because the external Codex runtime was lost.');
+        if (runId) await this.runJournal?.interrupt(runId, 'Turn interrupted because the external agent runtime was lost.');
         if (!(err instanceof TurnErrorAlreadyEmitted)) {
           emit('chat:error', {
             sessionId,
             code: 'INTERRUPTED',
-            message: 'Turn interrupted because the external Codex runtime was lost.',
+            message: 'Turn interrupted because the external agent runtime was lost.',
             hadContent,
           });
         }
@@ -517,16 +444,11 @@ export class ChatService {
   }
 
   abort(sessionId: string): void {
+    this.continuationAdmission?.abort(sessionId);
     const controller = this.abortControllers.get(sessionId);
     if (controller) {
       controller.abort();
       this.abortControllers.delete(sessionId);
     }
   }
-}
-
-function readExecutionCwd(runtimeContext: import('@kalio/types').SessionRuntimeContext | undefined): string | undefined {
-  const value = runtimeContext?.architectureContext?.['executionCwd']
-    ?? runtimeContext?.architectureContext?.['projectPath'];
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
