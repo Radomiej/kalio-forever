@@ -20,6 +20,7 @@ const MOCK_SCRIPT_END = '[[/mock:script]]';
 type MockScriptAction =
   | { kind: 'wait'; ms: number }
   | { kind: 'hold'; ms: number }
+  | { kind: 'think'; text: string }
   | { kind: 'return'; text: string };
 
 type MockScriptCase = {
@@ -129,7 +130,7 @@ export function parseMockScript(script: string): MockScriptCase[] {
 
 function parseMockScriptActions(source: string): MockScriptAction[] {
   const actions: MockScriptAction[] = [];
-  const actionPattern = /hold\((\d+)\)|wait\((\d+)\)|return\((['"])([\s\S]*?)\3\)/gi;
+  const actionPattern = /hold\((\d+)\)|wait\((\d+)\)|(return|think)\((['"])([\s\S]*?)\4\)/gi;
   for (const match of source.matchAll(actionPattern)) {
     if (match[1] !== undefined) {
       actions.push({ kind: 'hold', ms: Number(match[1]) });
@@ -139,7 +140,7 @@ function parseMockScriptActions(source: string): MockScriptAction[] {
       actions.push({ kind: 'wait', ms: Number(match[2]) });
       continue;
     }
-    actions.push({ kind: 'return', text: match[4] ?? '' });
+    actions.push({ kind: match[3]?.toLowerCase() === 'think' ? 'think' : 'return', text: match[5] ?? '' });
   }
   return actions;
 }

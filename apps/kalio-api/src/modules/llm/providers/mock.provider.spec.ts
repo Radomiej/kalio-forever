@@ -3,6 +3,19 @@ import type { ContextManagedLLMMessage } from '../../../common/utils/context-man
 import { MockLLMProvider } from './mock.provider';
 
 describe('MockLLMProvider', () => {
+  it('emits scripted reasoning separately from the answer in order', async () => {
+    const provider = new MockLLMProvider({ delay: async () => undefined });
+    const chunks: unknown[] = [];
+    await provider.streamChat([{ role: 'user', content: '[[mock:script]] think("Reasoning"); hold(1); return("Answer") [[/mock:script]]' }], [], {
+      sessionId: 's', messageId: 'm', onChunk: chunk => chunks.push(chunk),
+    });
+    expect(chunks).toEqual([
+      { delta: 'Reasoning', thinking: true, done: false, sessionId: 's', messageId: 'm' },
+      { delta: 'Answer', done: false, sessionId: 's', messageId: 'm' },
+      { delta: '', done: true, sessionId: 's', messageId: 'm' },
+    ]);
+  });
+
   it('REGRESSION: throws a deterministic 429-like error when the last user prompt requests mock quota exhaustion', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

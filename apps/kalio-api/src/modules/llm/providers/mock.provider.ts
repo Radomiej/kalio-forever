@@ -168,7 +168,8 @@ export class MockLLMProvider implements ILLMProvider {
           await (this.options.delay ?? defaultDelay)(action.ms);
           continue;
         }
-        onChunk({ delta: action.text, done: false, sessionId, messageId });
+        onChunk({ delta: action.text, done: false, sessionId, messageId,
+          ...(action.kind === 'think' ? { thinking: true } : {}) });
       }
       if (!abortSignal?.aborted) {
         onChunk({ delta: '', done: true, sessionId, messageId });
