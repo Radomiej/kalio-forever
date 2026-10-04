@@ -21,7 +21,16 @@ export function stopDevinChild(child: ChildProcessWithoutNullStreams): Promise<v
       if (terminationComplete) finish();
     };
     const onError = (error: Error): void => finish(error);
-    const timeout = setTimeout(() => finish(new Error('Devin ACP process tree did not close within 10 seconds.')), 10_000);
+    const timeout = setTimeout(() => finish(Object.assign(
+      new Error('Devin ACP process tree did not close within 10 seconds.'),
+      { shutdownState: {
+        terminationComplete,
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        stdoutClosed: child.stdout.closed,
+        stderrClosed: child.stderr.closed,
+      } },
+    )), 10_000);
     child.once('close', onClose);
     child.once('error', onError);
     const terminate = async (): Promise<void> => {
