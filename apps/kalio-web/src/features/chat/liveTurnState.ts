@@ -8,6 +8,7 @@ export type LiveTurnPhase =
   | 'thinking'
   | 'streaming_text'
   | 'running_tool'
+  | 'awaiting_confirmation'
   | 'queued_followup'
   | 'completed'
   | 'stopped'
@@ -253,7 +254,7 @@ export function resolveLiveTurnState({
   }
 
   const phase: LiveTurnPhase = runningTool
-    ? 'running_tool'
+    ? runningTool.status === 'awaiting_confirmation' ? 'awaiting_confirmation' : 'running_tool'
     : latestStreamingPreview
       ? 'streaming_text'
       : latestThinkingPreview
@@ -269,7 +270,13 @@ export function resolveLiveTurnState({
     previewText: latestStreamingPreview ?? latestThinkingPreview,
     toolName: runningTool?.toolName ?? null,
     queuedDepth,
-    showPlaceholderBubble: workflowActive || !hasMaterializedIncompleteTurn(agentTurns, sessionMessages),
+    showPlaceholderBubble: workflowActive || (
+      !hasMaterializedIncompleteTurn(agentTurns, sessionMessages)
+      && !sessionMessages.some((message) => message.role === 'assistant' && (
+        Boolean(streamingChunks[message.id]?.trim())
+        || Boolean(thinkingChunks[message.id]?.trim())
+      ))
+    ),
     workflowActive,
   };
 }
