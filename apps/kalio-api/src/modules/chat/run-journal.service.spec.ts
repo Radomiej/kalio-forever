@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '../../database/schema';
@@ -53,6 +53,8 @@ describe('RunJournalService', () => {
     service = makeService();
   });
 
+  afterEach(() => vi.useRealTimers());
+
   it('reads selected durable outcomes from one session, including cancellation, without foreign matches', async () => {
     const own = await service.startRun({ sessionId: 'own', turnId: 'same' });
     await service.checkpoint(own.id, { status: 'cancelled', phase: 'interrupted' });
@@ -63,6 +65,91 @@ describe('RunJournalService', () => {
     ]);
     expect(await service.getHistoryTurns('own', [])).toEqual([]);
     expect(await service.getHistoryTurns('own', ['missing'])).toEqual([]);
+  });
+
+  it('does not project or automatically claim a safe interrupted turn after a newer turn completed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-02T20:00:00Z'));
+    const old = await service.startRun({ sessionId: 's1', turnId: 'old' });
+    await service.recoverStaleActiveRuns();
+    const interrupted = await service.getCurrentRun('s1');
+    const newer = await service.startRun({ sessionId: 's1', turnId: 'newer' });
+    await service.complete(newer.id, { finalText: 'completed continuation' });
+    vi.setSystemTime(new Date('2026-10-02T20:01:00Z'));
+    await service.checkpoint(old.id, { phase: 'llm_streaming' });
+    expect(await service.getCurrentRun('s1')).toBeNull();
+    expect(await service.listSafeRecoverableRuns()).toEqual([]);
+    expect(await service.claimChildContinuation(old.id, (interrupted?.revision ?? 0) + 1)).toBe(false);
+  });
+
+  it('does not supersede a safe interrupted turn merely because a new turn is queued', async () => {
+    const old = await service.startRun({ sessionId: 's1', turnId: 'old' });
+    await service.recoverStaleActiveRuns();
+    await service.acceptQueuedRun({
+      sessionId: 's1', turnId: 'queued', queueIdempotencyKey: 'queue-1',
+      queuedPayload: { personaId: 'default', content: 'Continue' },
+    });
+    expect(await service.getCurrentRun('s1')).toMatchObject({ id: old.id, safeResume: true });
+    expect(await service.listSafeRecoverableRuns()).toHaveLength(1);
+  });
+
+  it('keeps an unresolved unsafe interrupted tool visible after a newer turn completes', async () => {
+    const old = await service.startRun({ sessionId: 's1', turnId: 'old' });
+    await service.checkpoint(old.id, { phase: 'tool_running' });
+    await service.recoverStaleActiveRuns();
+    const newer = await service.startRun({ sessionId: 's1', turnId: 'newer' });
+    await service.complete(newer.id, { finalText: 'new response' });
+    expect(await service.getCurrentRun('s1')).toMatchObject({ id: old.id, safeResume: false });
+    expect(await service.listSafeRecoverableRuns()).toEqual([]);
+  });
+
+  it('keeps a human wait visible when a newer separate turn completed', async () => {
+    const waiting = await service.startRun({ sessionId: 's1', turnId: 'waiting' });
+    await service.checkpoint(waiting.id, { phase: 'tool_pending', status: 'waiting_for_human' });
+    const newer = await service.startRun({ sessionId: 's1', turnId: 'newer' });
+    await service.complete(newer.id);
+    expect(await service.getCurrentRun('s1')).toMatchObject({ id: waiting.id, status: 'waiting_for_human' });
+  });
+
+  it('does not supersede recovery when queued work is cancelled before execution', async () => {
+    const old = await service.startRun({ sessionId: 's1', turnId: 'old' });
+    await service.recoverStaleActiveRuns();
+    const queued = await service.acceptQueuedRun({
+      sessionId: 's1', turnId: 'queued', queueIdempotencyKey: 'cancelled-queue',
+      queuedPayload: { personaId: 'default', content: 'Continue' },
+    });
+    await service.cancelQueuedRun(queued.id);
+    expect(await service.getCurrentRun('s1')).toMatchObject({ id: old.id, safeResume: true });
+    expect(await service.listSafeRecoverableRuns()).toHaveLength(1);
+  });
+
+  it('uses queue admission time rather than queue insertion time to supersede a safe turn', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-02T20:00:00Z'));
+    const queued = await service.acceptQueuedRun({
+      sessionId: 's1', turnId: 'queued', queueIdempotencyKey: 'admitted-queue',
+      queuedPayload: { personaId: 'default', content: 'Continue' },
+    });
+    vi.setSystemTime(new Date('2026-10-02T20:01:00Z'));
+    await service.startRun({ sessionId: 's1', turnId: 'old' });
+    await service.recoverStaleActiveRuns();
+    const old = await service.getCurrentRun('s1');
+    vi.setSystemTime(new Date('2026-10-02T20:02:00Z'));
+    expect(await service.claimQueuedRun('s1')).toMatchObject({ id: queued.id });
+    await service.complete(queued.id);
+    expect(await service.getCurrentRun('s1')).toBeNull();
+    expect(await service.listSafeRecoverableRuns()).toEqual([]);
+    expect(await service.claimChildContinuation(old!.id, old!.revision ?? 0)).toBe(false);
+  });
+
+  it('does not treat a journal row of the same turn as distinct superseding work', async () => {
+    await service.startRun({ sessionId: 's1', turnId: 'same' });
+    await service.recoverStaleActiveRuns();
+    const old = await service.getCurrentRun('s1');
+    const sibling = await service.startRun({ sessionId: 's1', turnId: 'same' });
+    await service.complete(sibling.id);
+    expect(await service.getCurrentRun('s1')).toMatchObject({ id: old!.id });
+    expect(await service.claimChildContinuation(old!.id, old!.revision ?? 0)).toBe(true);
   });
 
   it('marks stale LLM runs as resumable after restart', async () => {
@@ -98,6 +185,15 @@ describe('RunJournalService', () => {
       safeResume: false,
       errorMessage: 'Backend restarted while a tool was running. Retry manually to avoid duplicate tool execution.',
     });
+  });
+
+  it('recovers an approved human wait as unsafe once execution is active', async () => {
+    const run = await service.startRun({ sessionId: 'approved-session', turnId: 'approved-turn' });
+    await service.checkpoint(run.id, { phase: 'tool_pending', status: 'waiting_for_human' });
+    await service.checkpoint(run.id, { phase: 'tool_running', status: 'active' });
+    expect(await service.getCurrentRun('approved-session')).toMatchObject({ phase: 'tool_running', status: 'active' });
+    await service.recoverStaleActiveRuns();
+    expect(await service.getCurrentRun('approved-session')).toMatchObject({ status: 'interrupted_needs_retry', safeResume: false });
   });
 
   it('stores a terminal outcome while removing the run from the active projection', async () => {
