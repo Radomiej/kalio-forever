@@ -104,6 +104,13 @@ describe('TerminalService', () => {
   });
 
   describe('spawn()', () => {
+    it('requests a hidden Windows console for exactly one terminal launch', async () => {
+      await service.spawn('npm', ['run', 'build'], '/project');
+      expect(mockSpawnFn).toHaveBeenCalledExactlyOnceWith('npm', ['run', 'build'], expect.objectContaining({
+        cwd: '/project', shell: process.platform === 'win32', windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }));
+    });
     it('audits the shell-backed terminal invocation with the originating tool IDs', async () => {
       const auditContext = { sessionId: 'session-1', turnId: 'turn-1', callId: 'call-1' };
 

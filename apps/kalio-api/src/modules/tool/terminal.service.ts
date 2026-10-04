@@ -54,6 +54,7 @@ export class TerminalService implements OnModuleDestroy {
     const proc = spawn(command, args, {
       cwd: safeCwd,
       shell: useShell,
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
