@@ -28,11 +28,20 @@ public static class KalioConsoleWindowWatch {
     [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr hwnd);
     public static string[] Capture(int seconds, bool selfTest) {
         var rows = new List<string>();
+        int unclassified = 0;
+        bool selfTestDelivered = false;
         WinEvent callback = (hook, evt, hwnd, obj, child, thread, time) => {
             if (hwnd == IntPtr.Zero || obj != 0 || child != 0) return;
             var name = new StringBuilder(256);
-            GetClassName(hwnd, name, name.Capacity);
+            if (GetClassName(hwnd, name, name.Capacity) == 0) {
+                // A vanished/inaccessible window is unknown, not evidence of no console.
+                unclassified++;
+                rows.Add(DateTimeOffset.UtcNow.ToString("o") + " event=" + evt
+                    + " hwnd=" + hwnd.ToInt64() + " eventTickMs=" + time + " class=unavailable");
+                return;
+            }
             if (name.ToString() != "ConsoleWindowClass" && name.ToString() != "CASCADIA_HOSTING_WINDOW_CLASS" && !(selfTest && name.ToString() == "Static")) return;
+            if (selfTest && name.ToString() == "Static") selfTestDelivered = true;
             uint pid; GetWindowThreadProcessId(hwnd, out pid);
             // visibility is sampled at callback delivery, not at original event time.
             rows.Add(DateTimeOffset.UtcNow.ToString("o") + " pid=" + pid + " event=" + evt
@@ -49,6 +58,10 @@ public static class KalioConsoleWindowWatch {
             if (selfTest) {
                 control = CreateWindowEx(0, "Static", "", 0, 0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
                 if (control == IntPtr.Zero) throw new InvalidOperationException("Diagnostic control creation failed");
+                // Destroy before pumping: validates the missing-class path without visible windows.
+                var transient = CreateWindowEx(0, "Static", "", 0, 0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                if (transient == IntPtr.Zero) throw new InvalidOperationException("Transient diagnostic control creation failed");
+                if (!DestroyWindow(transient)) throw new InvalidOperationException("Transient diagnostic control destruction failed");
             }
             var until = DateTime.UtcNow.AddSeconds(seconds);
             while (DateTime.UtcNow < until) {
@@ -58,12 +71,12 @@ public static class KalioConsoleWindowWatch {
                 }
                 Thread.Sleep(10);
             }
-            if (selfTest && rows.Count == 0) throw new InvalidOperationException("Window event delivery self-test failed");
+            if (selfTest && !selfTestDelivered) throw new InvalidOperationException("Window event delivery self-test failed");
         } finally {
             if (control != IntPtr.Zero) DestroyWindow(control);
             UnhookWinEvent(handle); GC.KeepAlive(callback);
         }
-        rows.Add("WINDOW_EVENT_HOOK_FINISHED records=" + rows.Count + " utc=" + DateTimeOffset.UtcNow.ToString("o"));
+        rows.Add("WINDOW_EVENT_HOOK_FINISHED records=" + rows.Count + " unclassified=" + unclassified + " utc=" + DateTimeOffset.UtcNow.ToString("o"));
         return rows.ToArray();
     }
 }
