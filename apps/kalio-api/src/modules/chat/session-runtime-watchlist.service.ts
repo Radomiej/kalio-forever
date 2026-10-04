@@ -31,6 +31,9 @@ export class SessionRuntimeWatchlistService {
       if (runtimeStatus.run?.status === 'interrupted_needs_retry') {
         this.addReasonForSession(sessionById, reasonsByRoot, session.id, 'run_recovery_required');
       }
+      if (runtimeStatus.run?.status === 'waiting_for_human') {
+        this.addReasonForSession(sessionById, reasonsByRoot, session.id, 'pending_confirmation');
+      }
     }));
 
     for (const session of sessions) {
