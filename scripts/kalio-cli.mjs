@@ -73,7 +73,7 @@ function openBrowser(url) {
     : process.platform === 'darwin'
       ? ['open', [url]]
       : ['xdg-open', [url]];
-  const child = spawn(command[0], command[1], { detached: true, stdio: 'ignore' });
+  const child = spawn(command[0], command[1], { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
 }
 

@@ -79,6 +79,7 @@ export class DevinCliModelCatalogService {
   }
 
   private async discover(executable: string): Promise<DevinCliModelCatalog> {
+    const startedAt = Date.now();
     try {
       const result = await this.commands.run(executable, ['models', 'list'], {
         timeout: MODEL_CATALOG_TIMEOUT_MS,
@@ -92,8 +93,15 @@ export class DevinCliModelCatalogService {
       }
       return { models, status: 'ready', discoveredAt, stale: false };
     } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-      this.logger.warn(`Devin CLI model discovery failed${typeof code === 'number' ? ` (exit ${code})` : ''}.`);
+      const failure = error && typeof error === 'object' ? error : {};
+      const rawCode = 'code' in failure ? failure.code : undefined;
+      const code = typeof rawCode === 'number' && Number.isInteger(rawCode) ? rawCode
+        : typeof rawCode === 'string' && /^(?:E[A-Z0-9_]{1,40}|ERR_[A-Z0-9_]{1,60})$/.test(rawCode) ? rawCode : 'unknown';
+      const rawSignal = 'signal' in failure ? failure.signal : undefined;
+      const signal = rawSignal == null ? 'none'
+        : typeof rawSignal === 'string' && /^SIG[A-Z0-9]{1,16}$/.test(rawSignal) ? rawSignal : 'unknown';
+      const killed = 'killed' in failure && failure.killed === true;
+      this.logger.warn(`Devin CLI model discovery failed code=${code} signal=${signal} killed=${killed} durationMs=${Date.now() - startedAt}.`);
       return { models: [], status: 'command-failed', discoveredAt: null, stale: false };
     }
   }

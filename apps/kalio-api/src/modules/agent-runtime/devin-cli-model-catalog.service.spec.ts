@@ -1,5 +1,32 @@
-import { describe, expect, it } from 'vitest';
-import { parseDevinCliModelCatalog } from './devin-cli-model-catalog.service';
+import { Logger } from '@nestjs/common';
+import { describe, expect, it, vi } from 'vitest';
+import { DevinCliCommandQueueService } from './devin-cli-command-queue.service';
+import { DevinCliModelCatalogService, parseDevinCliModelCatalog } from './devin-cli-model-catalog.service';
+
+describe('model catalog failure diagnostics', () => {
+  it.each([
+    [{ code: 'ENOENT' }, 'code=ENOENT signal=none killed=false'],
+    [{ code: null, signal: 'SIGTERM', killed: true }, 'code=unknown signal=SIGTERM killed=true'],
+    [{ code: 7 }, 'code=7 signal=none killed=false'],
+    [{ code: 'secret-value', signal: 'private-value' }, 'code=unknown signal=unknown killed=false'],
+  ])('logs safe failure metadata without command output: %j', async (metadata, expected) => {
+    const queue = new DevinCliCommandQueueService();
+    const run = vi.spyOn(queue, 'run').mockRejectedValue({
+      ...metadata, message: 'SECRET_MESSAGE', stdout: 'SECRET_STDOUT', stderr: 'SECRET_STDERR',
+    });
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const service = new DevinCliModelCatalogService(queue);
+      await expect(service.getCatalog('devin.exe', true)).resolves.toMatchObject({ status: 'command-failed' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(expected));
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('SECRET');
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      run.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
 
 describe('parseDevinCliModelCatalog', () => {
   it('reads family slugs and exact model ids, including current Devin model lanes', () => {
