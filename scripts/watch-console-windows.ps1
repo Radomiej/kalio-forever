@@ -20,6 +20,9 @@ public static class KalioConsoleWindowWatch {
     [DllImport("user32.dll")] private static extern bool UnhookWinEvent(IntPtr hook);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int size);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("kernel32.dll")] private static extern IntPtr OpenThread(uint access, bool inherit, uint thread);
+    [DllImport("kernel32.dll")] private static extern uint GetProcessIdOfThread(IntPtr thread);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr hwnd, uint min, uint max, uint remove);
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Message message);
@@ -36,8 +39,19 @@ public static class KalioConsoleWindowWatch {
             if (GetClassName(hwnd, name, name.Capacity) == 0) {
                 // A vanished/inaccessible window is unknown, not evidence of no console.
                 unclassified++;
+                uint eventPid = 0;
+                var eventThread = thread == 0 ? IntPtr.Zero : OpenThread(0x0800, false, thread);
+                if (eventThread != IntPtr.Zero) {
+                    try { eventPid = GetProcessIdOfThread(eventThread); }
+                    finally { CloseHandle(eventThread); }
+                }
+                // A live event thread can identify the process after its window vanished.
+                // It cannot prove the vanished window was a console or was visible.
                 rows.Add(DateTimeOffset.UtcNow.ToString("o") + " event=" + evt
-                    + " hwnd=" + hwnd.ToInt64() + " eventTickMs=" + time + " class=unavailable");
+                    + " hwnd=" + hwnd.ToInt64() + " eventTickMs=" + time
+                    + " pid=" + eventPid + " eventThreadId=" + thread
+                    + " pidSource=" + (eventPid == 0 ? "unavailable" : "event-thread")
+                    + " class=unavailable");
                 return;
             }
             if (name.ToString() != "ConsoleWindowClass" && name.ToString() != "CASCADIA_HOSTING_WINDOW_CLASS" && !(selfTest && name.ToString() == "Static")) return;
