@@ -12,6 +12,7 @@ import type { SessionEventsService } from '../session-events.service';
 import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import type { ModuleRef } from '@nestjs/core';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from '../architecture-runtime-stop.port';
+import { SUBAGENT_RUNTIME } from '../../tool/subagent-runtime.port';
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 type SessionCreatedHandler = (event: { session: ChatSession }) => void;
@@ -29,6 +30,7 @@ describe('ChatGateway', () => {
   let agentBudgetApprovals: AgentBudgetApprovalService;
   let architectureRuntimeStop: ArchitectureRuntimeStopPort;
   let moduleRef: ModuleRef;
+  let stopSubagents: ReturnType<typeof vi.fn>;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
@@ -98,8 +100,11 @@ describe('ChatGateway', () => {
     architectureRuntimeStop = {
       stopRunsForSessions: vi.fn().mockResolvedValue([]),
     };
+    stopSubagents = vi.fn().mockResolvedValue(undefined);
     moduleRef = {
-      get: vi.fn((token: symbol) => (token === ARCHITECTURE_RUNTIME_STOP ? architectureRuntimeStop : undefined)),
+      get: vi.fn((token: symbol) => token === SUBAGENT_RUNTIME
+        ? { stopAndDrainSessions: stopSubagents }
+        : token === ARCHITECTURE_RUNTIME_STOP ? architectureRuntimeStop : undefined),
     } as unknown as ModuleRef;
 
     client = {
@@ -233,6 +238,29 @@ describe('ChatGateway', () => {
         active: false,
       }),
     );
+  });
+
+  it('REGRESSION: pipeline cancellation starts while architecture drain is pending', async () => {
+    let releaseArchitecture!: () => void;
+    let enterArchitecture!: () => void;
+    const entered = new Promise<void>((resolve) => { enterArchitecture = resolve; });
+    const drain = new Promise<readonly string[]>((resolve) => {
+      releaseArchitecture = () => resolve(['architecture-run']);
+    });
+    vi.mocked(architectureRuntimeStop.stopRunsForSessions).mockImplementation(() => {
+      enterArchitecture();
+      return drain;
+    });
+    const stopping = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    try {
+      await entered;
+      await expect.poll(() => vi.mocked(pipeline.stopAndDrain).mock.calls.length, { timeout: 200 }).toBeGreaterThan(0);
+      await expect.poll(() => stopSubagents.mock.calls.length, { timeout: 200 }).toBe(1);
+      expect(stopSubagents).toHaveBeenCalledWith(['session-1']);
+    } finally {
+      releaseArchitecture();
+      await stopping;
+    }
   });
 
   it('REGRESSION: chat:stop emits authoritative snapshots only after slow turn drain settles', async () => {

@@ -199,14 +199,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const descendantSessionIds = sessionTree.descendantIdsBySessionId[payload.sessionId] ?? [];
     const stoppedSessionIds = [payload.sessionId, ...descendantSessionIds];
 
-    await this.runtime.stopArchitectureRunsForSessions(stoppedSessionIds);
-    await this.runtime.stopAgentFlowRunsForSessions(stoppedSessionIds);
-
-    // Drain descendants concurrently: the parent may await their final tool result.
-    await Promise.all(sessionTree.sessionIds.map(async (sessionId) => {
-      await this.runtime.stopCliAgentSessionIfNeeded(client.id, sessionId);
-      await this.pipeline.stopAndDrain(sessionId);
-    }));
+    await this.runtime.stopAndDrainSessions(
+      client.id, stoppedSessionIds, (sessionId) => this.pipeline.stopAndDrain(sessionId),
+    );
 
     const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree);
     this.emitRuntimeActivitySnapshotBatch(client.id, snapshotBatch);

@@ -11,3 +11,7 @@ Source: user messages in the current Codex conversation. Timezone: Europe/Warsaw
 | USER-20261004-05 | 2026-10-04 | Feature request | User's first prompt defines the goal; later messages may update it. Router receives goal and summaries. Jev reviews Devin's report and continues Devin when the goal is incomplete, finishes when achieved. | ../spec/jev-devin-goal-loop.md | Proposed contract awaiting review; not deployed |
 
 Keep future entries append-only: stable ID, known date/time, source, direct request versus interpretation, linked spec/issue/proof, and actual status. If wording is ambiguous, retain the ambiguity instead of converting it into an accepted requirement. Never store credentials or private tool payloads here.
+
+## Traceability update — 2026-10-04
+
+Implementation evidence is separate from the user request above. USER-20261004-05 still describes a proposed Jev goal loop, not a deployed feature. QA284/285 repair and verify one prerequisite: socket Stop must abort role/subagent requests, not merely mark the workflow cancelled. Both use a local HTTP fixture, not Jev or Devin. Automatic recording of all user messages remains unimplemented; this document is a manually maintained, dated paraphrase register.

@@ -25,6 +25,23 @@ type RuntimeDeps = {
 export class ChatGatewayRuntime {
   constructor(private readonly deps: RuntimeDeps) {}
 
+  async stopAndDrainSessions(
+    initiatorSocketId: string,
+    sessionIds: string[],
+    stopPipeline: (sessionId: string) => Promise<void>,
+  ): Promise<void> {
+    // Workflow drains can depend on role/subagent aborts: start all owners before waiting.
+    await Promise.all([
+      this.stopArchitectureRunsForSessions(sessionIds),
+      this.stopAgentFlowRunsForSessions(sessionIds),
+      this.getSubagentRuntime()?.stopAndDrainSessions?.(sessionIds),
+      ...sessionIds.flatMap((sessionId) => [
+        this.stopCliAgentSessionIfNeeded(initiatorSocketId, sessionId),
+        stopPipeline(sessionId),
+      ]),
+    ]);
+  }
+
   async stopAgentFlowRunsForSessions(sessionIds: string[]): Promise<void> {
     const runtime = this.getAgentFlowRuntime();
     if (!runtime?.stop) return;

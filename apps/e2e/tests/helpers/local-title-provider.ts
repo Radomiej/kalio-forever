@@ -1,13 +1,15 @@
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { expect, type APIRequestContext } from '@playwright/test';
 import { API_BASE } from './test-config';
 
 /** Real HTTP adapter boundary, deterministic local response; never a live LLM. */
-export async function createLocalTitleProvider(request: APIRequestContext) {
+export async function createLocalTitleProvider(request: APIRequestContext, streamDelayMs = 0) {
   if (!process.env['DATABASE_PATH']?.replaceAll('\\', '/').includes('playwright-stack/')) {
     throw new Error('Local title provider requires isolated Playwright storage');
   }
-  const model = 'e2e-title-provider';
+  const model = `e2e-title-provider-${randomUUID()}`;
+  let pendingStreams = 0;
   const server = createServer((incoming, outgoing) => {
     if (incoming.url === '/v1/models') {
       outgoing.setHeader('Content-Type', 'application/json');
@@ -26,7 +28,13 @@ export async function createLocalTitleProvider(request: APIRequestContext) {
       catch { outgoing.writeHead(400).end('Invalid JSON'); return; }
       if (payload.stream) {
         outgoing.setHeader('Content-Type', 'text/event-stream');
-        outgoing.end(`data: ${JSON.stringify({ choices: [{ delta: { content: 'OK' } }] })}\n\ndata: [DONE]\n\n`);
+        const finish = () => outgoing.end(`data: ${JSON.stringify({ choices: [{ delta: { content: 'OK' } }] })}\n\ndata: [DONE]\n\n`);
+        if (streamDelayMs > 0) {
+          pendingStreams += 1;
+          outgoing.once('close', () => { pendingStreams -= 1; });
+          const timer = setTimeout(finish, streamDelayMs);
+          outgoing.once('close', () => clearTimeout(timer));
+        } else finish();
       } else {
         outgoing.setHeader('Content-Type', 'application/json');
         outgoing.end(JSON.stringify({ choices: [{ message: { content: 'Session Title Verification' } }] }));
@@ -61,7 +69,7 @@ export async function createLocalTitleProvider(request: APIRequestContext) {
     }
     throw error;
   }
-  return { model, async close() {
+  return { model, get pendingStreams() { return pendingStreams; }, async close() {
     try {
       if (credentialId) await request.delete(`${API_BASE}/credentials/${credentialId}`);
     } finally {
