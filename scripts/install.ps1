@@ -249,7 +249,7 @@ exit /b %ERRORLEVEL%
         Write-Host "  run  -> $stableLauncher" -ForegroundColor Green
         if (-not $NoLaunch) {
             Write-Step 'Starting Kalio on localhost'
-            Start-Process -FilePath $stableLauncher -ArgumentList 'start'
+            Start-Process -FilePath $stableLauncher -ArgumentList 'start' -WindowStyle Hidden
         }
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

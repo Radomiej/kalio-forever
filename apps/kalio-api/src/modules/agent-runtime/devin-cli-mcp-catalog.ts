@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Logger } from '@nestjs/common';
 import type { DevinCliConfigHandle } from './devin-cli-config';
 
 const execFileAsync = promisify(execFile);
+const startupLogger = new Logger('DevinMcpStartup');
 const failure = (): Error => new Error('Devin MCP catalog format is unsupported or incomplete; host startup blocked.');
 
 export interface DevinMcpCatalogEntry { name: string; disabled: boolean }
@@ -37,26 +39,31 @@ export function parseDevinMcpCatalog(output: string): DevinMcpCatalogEntry[] {
 export async function suppressInheritedDevinMcp(
   executable: string, config: DevinCliConfigHandle, allowedNames: readonly string[],
 ): Promise<number> {
-  const read = async (args: string[]): Promise<string> => {
+  const read = async (stage: 'version' | 'discover' | 'verify', args: string[]): Promise<string> => {
+    const startedAt = Date.now();
     try {
-      const { stdout, stderr } = await execFileAsync(executable, args, {
+      const pending = execFileAsync(executable, args, {
         cwd: config.cwd, windowsHide: true, timeout: 15000, maxBuffer: 256 * 1024,
       });
+      startupLogger.log(`stage=${stage} phase=start parentPid=${process.pid} pid=${pending.child?.pid ?? 'unavailable'} windowsHide=true`);
+      const { stdout, stderr } = await pending;
       if (stderr.trim()) throw failure();
+      startupLogger.log(`stage=${stage} phase=success durationMs=${Date.now() - startedAt}`);
       return stdout;
     } catch {
+      startupLogger.log(`stage=${stage} phase=failure durationMs=${Date.now() - startedAt}`);
       // CLI errors may embed commands, URLs or secrets; preserve only the boundary.
       throw new Error('Devin MCP configuration check failed; host startup blocked.');
     }
   };
-  if (!/^devin 3000\.11\.1(?:\s|$)/.test((await read(['--version'])).trim())) {
+  if (!/^devin 3000\.11\.1(?:\s|$)/.test((await read('version', ['--version'])).trim())) {
     throw new Error('Devin MCP configuration check requires supported CLI 3000.11.1; host startup blocked.');
   }
   const allowed = new Set(allowedNames);
-  const catalog = parseDevinMcpCatalog(await read(['mcp', 'list']));
+  const catalog = parseDevinMcpCatalog(await read('discover', ['mcp', 'list']));
   const suppressed = catalog.filter(entry => !allowed.has(entry.name)).map(entry => entry.name);
   await config.suppressMcpServers(suppressed);
-  const checked = parseDevinMcpCatalog(await read(['mcp', 'list']));
+  const checked = parseDevinMcpCatalog(await read('verify', ['mcp', 'list']));
   if (checked.some(entry => entry.disabled === allowed.has(entry.name))
     || allowedNames.some(name => !checked.some(entry => entry.name === name && !entry.disabled))
     || suppressed.some(name => !checked.some(entry => entry.name === name && entry.disabled))) {

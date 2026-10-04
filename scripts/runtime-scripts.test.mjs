@@ -102,6 +102,10 @@ test('installer registers a per-user Startup shortcut for the stable launcher', 
   assert.doesNotMatch(installScriptSource, /update --auto/);
 });
 
+test('installer hides the immediate stable launcher window', () => {
+  assert.match(installScriptSource, /Start-Process -FilePath \$stableLauncher -ArgumentList 'start' -WindowStyle Hidden/);
+});
+
 test('explicit autostart opt-out removes an existing Startup shortcut', () => {
   assert.match(installScriptSource, /if \(\$NoAutostart\) \{\s*Remove-AutostartShortcut/s);
   assert.match(uninstallScriptSource, /Remove-AutostartShortcut/);
