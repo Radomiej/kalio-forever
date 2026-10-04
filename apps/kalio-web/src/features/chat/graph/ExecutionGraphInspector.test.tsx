@@ -486,7 +486,7 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.queryByText(/"incompleteReason"/)).toBeNull();
   });
 
-  it('renders grouped tool status rows without exposing raw payload by default', () => {
+  it('offers per-call arguments and results without exposing the whole raw group', () => {
     render(
       <ExecutionGraphInspector
         activeSessionId="session-1"
@@ -510,9 +510,9 @@ describe('ExecutionGraphInspector', () => {
               {
                 callId: 'call-1',
                 toolName: 'vfs_read',
-                args: {},
+                args: { path: 'package.json' },
                 status: 'running',
-                result: null,
+                result: { text: 'read-result-marker' },
                 confirmationRequired: false,
               },
               {
@@ -538,6 +538,12 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.getByText('vfs_write')).toBeTruthy();
     expect(screen.getAllByText('error').length).toBe(1);
     expect(screen.queryByText(/"tools"/)).toBeNull();
+    const disclosure = screen.getByText('vfs_read').closest('details');
+    expect(disclosure).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(screen.getByRole('region', { name: 'vfs_read arguments', hidden: true })).toHaveTextContent('package.json');
+    expect(screen.getByRole('region', { name: 'vfs_read result', hidden: true })).toHaveTextContent('read-result-marker');
+    expect(screen.getByText('No result recorded')).toBeTruthy();
   });
 
   it('opens the linked child graph for an AgentFlow node', () => {
