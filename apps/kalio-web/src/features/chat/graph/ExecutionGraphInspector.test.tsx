@@ -97,7 +97,7 @@ describe('ExecutionGraphInspector', () => {
 
     expect(screen.getByText('Node Properties')).toBeTruthy();
     expect(screen.getByText('state:')).toBeTruthy();
-    expect(screen.getByText('ready')).toBeTruthy();
+    expect(screen.getByText('completed')).toBeTruthy();
     expect(screen.queryByText('Session')).toBeNull();
     expect(screen.queryByText(/session-1234567890/)).toBeNull();
     expect(screen.queryByText(/"message"/)).toBeNull();
@@ -536,6 +536,7 @@ describe('ExecutionGraphInspector', () => {
     expect(screen.getByText('vfs_read')).toBeTruthy();
     expect(screen.getAllByText('running').length).toBe(2);
     expect(screen.getByText('vfs_write')).toBeTruthy();
+    expect(screen.getAllByText('Kalio')).toHaveLength(2);
     expect(screen.getAllByText('error').length).toBe(1);
     expect(screen.queryByText(/"tools"/)).toBeNull();
     const disclosure = screen.getByText('vfs_read').closest('details');

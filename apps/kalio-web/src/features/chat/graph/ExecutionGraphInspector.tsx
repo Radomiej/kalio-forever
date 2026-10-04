@@ -27,7 +27,7 @@ function statusLabel(status: ExecutionGraphNode['status']): string {
   if (status === 'error') return 'error';
   if (status === 'waiting') return 'waiting';
   if (status === 'running') return 'running';
-  if (status === 'success') return 'ready';
+  if (status === 'success') return 'completed';
   return 'idle';
 }
 
@@ -285,6 +285,7 @@ export function ExecutionGraphInspector({
 
             {selectedNode.payload.kind === 'tool' && (
               <>
+                <InspectorRow label="Origin" value="Kalio" />
                 <InspectorRow label="Confirm" value={selectedNode.payload.confirmationRequired ? 'accept required' : 'not required'} />
               </>
             )}
@@ -295,6 +296,7 @@ export function ExecutionGraphInspector({
                   <details key={tool.callId} className="rounded-xl border border-base-300/70 bg-base-100/65 px-3 py-2">
                     <summary className="cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
                       <span className="font-medium">{tool.toolName}</span>
+                      <span className="ml-2 text-xs text-sky-300" title="Handled by Kalio's tool dispatcher, not the provider's native tool runtime.">Kalio</span>
                       <span className="ml-3 text-xs uppercase tracking-[0.18em] text-base-content/45">{statusLabel(tool.status)}</span>
                     </summary>
                     <div className="mt-2 space-y-2">
