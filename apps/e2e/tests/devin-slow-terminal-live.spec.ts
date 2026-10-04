@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { resolve } from 'node:path';
 import { selectSession } from './helpers/test-config';
+import type { ChatMessage } from '@kalio/types';
+import { inspectCompletedPreviewTurn } from './helpers/devin-preview-result';
 
 const live = process.env['KALIO_DEVIN_SLOW_QA87'] === '1';
 const reportRun = process.env['KALIO_DEVIN_TERMINAL_REPORT_RUN'] ?? '87';
@@ -41,6 +43,9 @@ test('real SWE-2 observes a delayed process through approved Kalio UI tools', as
 
 test('restore approved HomeSite preview through the real Devin UI', async ({ page }) => {
   test.setTimeout(180000);
+  const existing = await page.request.get('http://127.0.0.1:57868/', { timeout: 3000 }).catch(() => null);
+  expect(existing?.ok(), 'Do not spawn another preview while the existing one is available').not.toBe(true);
+  const submittedAt = Date.now();
   await page.goto('http://localhost:5288/');
   await page.getByTestId('nav-talk').click();
   await selectSession(page, 'W4fggLSunrJB41C24MV7C', 'New Chat');
@@ -59,9 +64,13 @@ test('restore approved HomeSite preview through the real Devin UI', async ({ pag
   }
   await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/preview-approval.png`) });
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0, { timeout: 90000 });
-  await page.getByRole('button', { name: 'Toggle details', exact: true }).last().click();
-  await expect(page.getByText(/"status": "running"/).last()).toBeVisible();
-  await expect(page.getByText(/"output":.*57868/).last()).toBeVisible();
+  const response = await page.request.get('http://127.0.0.1:3316/api/sessions/W4fggLSunrJB41C24MV7C/messages');
+  expect(response.ok()).toBe(true);
+  const history = await response.json() as ChatMessage[];
+  const prompt = history.find(m => m.role === 'user' && m.createdAt >= submittedAt && m.content.startsWith('Przywróć QA87 preview'));
+  expect(prompt?.turnId).toBeTruthy();
+  await inspectCompletedPreviewTurn(page, 'W4fggLSunrJB41C24MV7C', prompt!.turnId!);
+  await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
+  await expect.poll(async () => (await page.request.get('http://127.0.0.1:57868/')).status(), { timeout: 30000 }).toBe(200);
   await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/preview-completed.png`) });
 });
