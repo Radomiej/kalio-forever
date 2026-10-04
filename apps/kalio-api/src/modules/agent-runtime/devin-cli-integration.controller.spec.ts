@@ -48,6 +48,19 @@ describe('DevinCliIntegrationController', () => {
     expect(registry.reset).toHaveBeenCalledOnce();
   });
 
+  it('empty settings reset preserves every native permission and leaves tokens untouched', async () => {
+    const { controller, nativeToolsPolicy, tokenService, registry } = createController({ token: 'saved-token', source: 'settings' });
+    const before = await controller.settings();
+    const after = await controller.updateSettings({});
+    expect(after.nativeTools).toMatchObject({ filesystem: false, web: false, terminal: false });
+    expect(after.mcpBridge).toEqual(before.mcpBridge);
+    expect(nativeToolsPolicy.update).toHaveBeenCalledWith({ filesystem: false, web: false, terminal: false });
+    expect(tokenService.generate).not.toHaveBeenCalled();
+    expect(tokenService.setOverride).not.toHaveBeenCalled();
+    expect(tokenService.clearOverride).not.toHaveBeenCalled();
+    expect(registry.reset).toHaveBeenCalledOnce();
+  });
+
   it('persists a manual token override and can clear it back to the environment fallback', async () => {
     const { controller, tokenService } = createController({ token: 'environment-token', source: 'environment' });
     await controller.updateSettings({ mcpBridgeToken: 'manual-bridge-token-123' });
