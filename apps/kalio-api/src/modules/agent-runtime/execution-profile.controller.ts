@@ -3,6 +3,7 @@ import type { CreateExecutionProfileDto, ResolveDirectExecutionProfileDto, Updat
 import { ExecutionProfileService } from './execution-profile.service';
 import { CodexAppServerHost } from './codex-app-server.host';
 import { DevinCliModelCatalogService } from './devin-cli-model-catalog.service';
+import { readCodexModels } from './codex-model-catalog';
 
 @Controller('runtime/profiles')
 export class ExecutionProfileController {
@@ -41,6 +42,26 @@ export class ExecutionProfileController {
   @Post('direct/resolve')
   resolveDirect(@Body() dto: ResolveDirectExecutionProfileDto) {
     return this.profiles.resolveDirect(dto);
+  }
+
+  @Post('codex/resolve')
+  async resolveCodex(@Body() dto: { model?: unknown; authProfileId?: unknown }) {
+    if (typeof dto?.model !== 'string' || !dto.model.trim()
+      || typeof dto.authProfileId !== 'string' || !dto.authProfileId.trim()) {
+      throw new BadRequestException('A Codex model and integration are required.');
+    }
+    const model = dto.model.trim();
+    const authProfileId = dto.authProfileId.trim();
+    const profiles = await this.profiles.list();
+    if (!profiles.some(profile => profile.kind === 'codex-app-server'
+      && (profile.authProfileId || profile.id) === authProfileId && profile.enabled)) {
+      throw new ConflictException('The selected Codex integration is not configured or enabled.');
+    }
+    const connection = await this.codexHost.getConnection(authProfileId, 'model-catalog');
+    if (!(await readCodexModels(connection)).includes(model)) {
+      throw new ConflictException(`Codex model is not currently available: ${model}`);
+    }
+    return this.profiles.resolveCodex(authProfileId, model);
   }
 
   @Patch(':id')

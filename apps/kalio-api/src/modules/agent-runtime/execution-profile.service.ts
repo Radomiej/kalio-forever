@@ -156,6 +156,25 @@ export class ExecutionProfileService {
     return this.get(id);
   }
 
+  async resolveCodex(authProfileId: string, model: string): Promise<ExecutionProfile> {
+    const profiles = await this.list();
+    const matches = profiles.filter(profile => profile.kind === 'codex-app-server'
+      && (profile.authProfileId || profile.id) === authProfileId && profile.model === model
+      && profile.approvalMode === 'kalio_strict' && !profile.provider);
+    const existing = matches.find(profile => profile.enabled);
+    if (existing) return existing;
+    if (matches.length) throw new ConflictException('The matching Codex execution profile is disabled.');
+    const id = `codex-local-${createHash('sha256').update(JSON.stringify([authProfileId, model])).digest('hex').slice(0, 32)}`;
+    if (profiles.some(profile => profile.id === id)) throw new ConflictException('Codex execution profile identity conflict.');
+    const now = new Date();
+    await this.drizzle.db.insert(executionProfiles).values({
+      id, name: `Codex · ${model}`, kind: 'codex-app-server', provider: null,
+      model, authProfileId, reasoningEffort: null, approvalMode: 'kalio_strict',
+      enabled: true, capabilitiesVersion: CAPABILITIES_VERSION, createdAt: now, updatedAt: now,
+    });
+    return this.get(id);
+  }
+
   async update(id: string, dto: UpdateExecutionProfileDto): Promise<ExecutionProfile> {
     const existing = await this.get(id);
     const set: {

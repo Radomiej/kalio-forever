@@ -3,6 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { ExecutionProfileController } from './execution-profile.controller';
 
 describe('ExecutionProfileController Devin CLI model resolution', () => {
+  it('rejects an undiscovered Codex model before persisting a profile', async () => {
+    const profiles = { list: vi.fn().mockResolvedValue([{ kind: 'codex-app-server', authProfileId: 'account', id: 'saved' }]), resolveCodex: vi.fn() };
+    const request = vi.fn().mockResolvedValue({ data: [{ model: 'gpt-6-luna' }] });
+    const host = { getConnection: vi.fn().mockResolvedValue({ request }) };
+    const controller = new ExecutionProfileController(profiles as never, host as never, {} as never);
+    await expect(controller.resolveCodex({ authProfileId: 'account', model: 'gpt-5.4' })).rejects.toBeInstanceOf(ConflictException);
+    expect(profiles.resolveCodex).not.toHaveBeenCalled();
+  });
   const profile = {
     id: 'devin-local-swe-2-high',
     name: 'Devin · swe-2-high',
