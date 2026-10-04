@@ -224,36 +224,36 @@ Call log:
 ```ts
   192 |       });
   193 |       expect(dropResponse.ok()).toBeTruthy();
-  194 | 
+  194 |
   195 |       await confirmButton.click();
-  196 | 
+  196 |
   197 |       await expect(page.getByTestId('confirmation-confirm-btn')).toHaveCount(0);
   198 |       await expect(page.getByText('confirmation expired')).toBeVisible();
   199 |     } finally {
   200 |       await deleteSessionIfExists(request, session.id);
   201 |     }
   202 |   });
-  203 | 
+  203 |
   204 |   test('confirming tool proceeds with execution and shows result', async ({ page, request }) => {
   205 |     const previousHitlConfig = await getHitlConfig(request);
   206 |     const previousActiveCredentialId = await getActiveCredentialId(request);
   207 |     const title = `AC02 Confirm ${Date.now()}`;
   208 |     let createdSessionId: string | null = null;
-  209 | 
+  209 |
   210 |     try {
   211 |       await ensureEnvMockProvider(request);
   212 |       const session = await createSession(request, title, 'designer');
   213 |       createdSessionId = session.id;
-  214 | 
+  214 |
   215 |       await saveManualHitlMode(page);
   216 |       await page.getByTestId('nav-talk').click();
   217 |       await selectSession(page, session.id, title);
   218 |       await runMockVfsWriteTool(page);
-  219 | 
+  219 |
   220 |       const confirmButton = page.getByTestId('confirmation-confirm-btn');
   221 |       await expect(confirmButton).toBeVisible({ timeout: 10_000 });
   222 |       await confirmButton.click();
-  223 | 
+  223 |
   224 |       await expect(confirmButton).toHaveCount(0, { timeout: 10_000 });
   225 |       await expect(page.getByText('awaiting confirmation')).toHaveCount(0);
   226 |       await expectVfsContent(request, session.id, MOCK_VFS_WRITE_PATH, MOCK_VFS_WRITE_CONTENT);
@@ -265,27 +265,27 @@ Call log:
   232 |       await restoreActiveCredential(request, previousActiveCredentialId);
   233 |     }
   234 |   });
-  235 | 
+  235 |
   236 |   test('cancelling tool shows cancellation message and does not execute', async ({ page, request }) => {
   237 |     const previousHitlConfig = await getHitlConfig(request);
   238 |     const previousActiveCredentialId = await getActiveCredentialId(request);
   239 |     const title = `AC02 Cancel ${Date.now()}`;
   240 |     let createdSessionId: string | null = null;
-  241 | 
+  241 |
   242 |     try {
   243 |       await ensureEnvMockProvider(request);
   244 |       const session = await createSession(request, title, 'designer');
   245 |       createdSessionId = session.id;
-  246 | 
+  246 |
   247 |       await saveManualHitlMode(page);
   248 |       await page.getByTestId('nav-talk').click();
   249 |       await selectSession(page, session.id, title);
   250 |       await runMockVfsWriteTool(page);
-  251 | 
+  251 |
   252 |       const cancelButton = page.getByTestId('confirmation-cancel-btn');
   253 |       await expect(cancelButton).toBeVisible({ timeout: 10_000 });
   254 |       await cancelButton.click();
-  255 | 
+  255 |
   256 |       await expect(page.getByTestId('confirmation-confirm-btn')).toHaveCount(0, { timeout: 10_000 });
   257 |       await expect(page.getByTestId('tool-call-chip').getByText('cancelled')).toBeVisible({ timeout: 10_000 });
   258 |       await expect(page.getByText('Tool call was cancelled before it completed.')).toBeVisible({ timeout: 10_000 });
@@ -298,29 +298,29 @@ Call log:
   265 |       await restoreActiveCredential(request, previousActiveCredentialId);
   266 |     }
   267 |   });
-  268 | 
+  268 |
   269 |   test('HITL dialog shows tool name and arguments', async ({ page, request }) => {
   270 |     const previousHitlConfig = await getHitlConfig(request);
   271 |     const previousActiveCredentialId = await getActiveCredentialId(request);
   272 |     const title = `AC02 Args ${Date.now()}`;
   273 |     let createdSessionId: string | null = null;
-  274 | 
+  274 |
   275 |     try {
   276 |       await ensureEnvMockProvider(request);
   277 |       const session = await createSession(request, title, 'designer');
   278 |       createdSessionId = session.id;
-  279 | 
+  279 |
   280 |       await saveManualHitlMode(page);
   281 |       await page.getByTestId('nav-talk').click();
   282 |       await selectSession(page, session.id, title);
   283 |       await runMockVfsWriteTool(page);
-  284 | 
+  284 |
   285 |       await expect(page.getByTestId('tool-call-chip')).toContainText('vfs_write', { timeout: 10_000 });
   286 |       await expect(page.getByTestId('tool-call-target')).toContainText(MOCK_VFS_WRITE_PATH);
   287 |       const toggle = page.getByTestId('confirmation-args-toggle');
   288 |       await expect(toggle).toBeVisible({ timeout: 10_000 });
   289 |       await toggle.click();
-  290 | 
+  290 |
   291 |       const expandedArgs = page.getByTestId('args-expanded');
 > 292 |       await expect(expandedArgs).toBeVisible({ timeout: 10_000 });
       |                                  ^ Error: expect(locator).toBeVisible() failed
@@ -335,5 +335,5 @@ Call log:
   301 |     }
   302 |   });
   303 | });
-  304 | 
+  304 |
 ```

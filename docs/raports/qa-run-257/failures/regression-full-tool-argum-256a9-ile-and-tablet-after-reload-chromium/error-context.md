@@ -169,7 +169,7 @@ Call log:
   1  | import { expect, test } from '@playwright/test';
   2  | import { resolve } from 'node:path';
   3  | import { API_BASE, deleteSessionIfExists, selectSession } from './helpers/test-config';
-  4  | 
+  4  |
   5  | test('long confirmation payload remains fully reviewable on mobile and tablet after reload', async ({ page, request }) => {
   6  |   const suffix = Date.now();
   7  |   const title = `Full arguments fixture ${suffix}`;
@@ -220,5 +220,5 @@ Call log:
   51 |     await deleteSessionIfExists(request, session.id);
   52 |   }
   53 | });
-  54 | 
+  54 |
 ```

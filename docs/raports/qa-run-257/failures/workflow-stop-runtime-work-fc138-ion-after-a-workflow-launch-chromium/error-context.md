@@ -618,14 +618,14 @@ Call log:
   4  |   expectComposerEnabled,
   5  |   selectArchitectureInComposer,
   6  | } from './helpers/test-config';
-  7  | 
+  7  |
   8  | const STOPPABLE_WORKFLOW_PROMPT = [
   9  |   'Evaluate the project architecture and keep the workflow running long enough for a stop request.',
   10 |   '[[mock:script]]',
   11 |   'hold(8000) return("controlled workflow stop target finished")',
   12 |   '[[/mock:script]]',
   13 | ].join('\n');
-  14 | 
+  14 |
   15 | async function clickStopButton(page: Page): Promise<void> {
   16 |   await expect
   17 |     .poll(async () => {
@@ -646,32 +646,32 @@ Call log:
   32 |     }, { timeout: 20_000 })
   33 |     .toBe('clicked');
   34 | }
-  35 | 
+  35 |
   36 | test.describe('workflow stop on built QA', () => {
   37 |   test('workflow stop clears the stop action after a workflow launch', async ({ page, request }) => {
   38 |     test.setTimeout(60_000);
-  39 | 
+  39 |
   40 |     let createdSessionId: string | null = null;
-  41 | 
+  41 |
   42 |     try {
   43 |       await page.goto('/');
   44 |       await page.getByTestId('nav-talk').click();
   45 |       await page.getByTestId('new-session-btn').click();
   46 |       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
-  47 | 
+  47 |
   48 |       await selectArchitectureInComposer(page, 'strategic-decision-council');
   49 |       await page.getByTestId('welcome-prompt-input').fill(STOPPABLE_WORKFLOW_PROMPT);
 > 50 |       await page.getByTestId('welcome-run-prompt').click();
      |                                                    ^ Error: locator.click: Test timeout of 60000ms exceeded.
-  51 | 
+  51 |
   52 |       createdSessionId = await page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id'));
-  53 | 
+  53 |
   54 |       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 20_000 });
   55 |       const stopBtn = page.getByTestId('chat-stop-btn');
   56 |       await expect(stopBtn).toBeVisible({ timeout: 20_000 });
-  57 | 
+  57 |
   58 |       await clickStopButton(page);
-  59 | 
+  59 |
   60 |       await expect(stopBtn).toBeHidden({ timeout: 20_000 });
   61 |       await expectComposerEnabled(page, 20_000);
   62 |       await expect(page.getByTestId('chat-queued-badge')).toHaveCount(0);
@@ -683,5 +683,5 @@ Call log:
   68 |     }
   69 |   });
   70 | });
-  71 | 
+  71 |
 ```

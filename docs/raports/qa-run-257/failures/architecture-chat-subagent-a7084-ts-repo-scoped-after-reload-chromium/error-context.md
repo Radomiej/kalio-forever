@@ -524,10 +524,10 @@ Call log:
   652 |         await page.getByTestId('open-architecture-run-canvas').click();
   653 |         await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
   654 |       }
-  655 | 
+  655 |
   656 |       await expect(page.getByTestId('canvas-panel')).toBeVisible({ timeout: 10_000 });
   657 |       await expect(page.getByTestId('canvas-subagents-section')).toHaveCount(0);
-  658 | 
+  658 |
   659 |       await page.getByTestId('talk-graph-switcher').click();
   660 |       await expect(page.getByTestId('execution-graph-view')).toBeVisible({ timeout: 10_000 });
   661 |       await expect(page.locator('[data-testid^="graph-node-architecture-run:"]').first()).toBeVisible({ timeout: 10_000 });
@@ -557,7 +557,7 @@ Call log:
   685 |       await deleteSessionIfExists(request, session.id);
   686 |     }
   687 |   });
-  688 | 
+  688 |
   689 |   test('restores a persisted architecture envelope selection back to the host conversation', async ({ page, request }, testInfo) => {
   690 |     test.setTimeout(120_000);
   691 |     const title = `Architecture Restore E2E ${Date.now()}`;
@@ -566,17 +566,17 @@ Call log:
   694 |     });
   695 |     expect(response.ok()).toBeTruthy();
   696 |     const session = await response.json() as { id: string };
-  697 | 
+  697 |
   698 |     try {
   699 |       await page.goto('/');
   700 |       await page.getByTestId('nav-talk').click();
   701 |       await selectSession(page, session.id, title);
-  702 | 
+  702 |
   703 |       await selectArchitectureInComposer(page, 'strategic-decision-council');
   704 |       await sendMessageFromComposer(page, 'Assess this repository.');
-  705 | 
+  705 |
   706 |       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
-  707 | 
+  707 |
   708 |       const sessions = await getSessionDescendants(request, session.id);
   709 |       const envelopeSession = sessions.find((candidate) => (
   710 |         candidate.parentSessionId === session.id
@@ -587,42 +587,42 @@ Call log:
   715 |       if (!envelopeSession) {
   716 |         throw new Error('Missing architecture envelope session');
   717 |       }
-  718 | 
+  718 |
   719 |       await page.evaluate((sessionId) => {
   720 |         window.sessionStorage.setItem('kalio:last-active-session-id', sessionId);
   721 |       }, envelopeSession.id);
   722 |       await page.reload();
   723 |       await expect(page.getByTestId('session-panel')).toBeVisible({ timeout: 30_000 });
-  724 | 
+  724 |
   725 |       await expect(page.getByTestId('chat-session-title')).toHaveText(title, { timeout: 30_000 });
   726 |       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 30_000 });
-  727 | 
+  727 |
   728 |       const screenshotPath = testInfo.outputPath('architecture-envelope-restore-proof.png');
   729 |       await page.screenshot({ path: screenshotPath, fullPage: true });
   730 |     } finally {
   731 |       await deleteSessionIfExists(request, session.id);
   732 |     }
   733 |   });
-  734 | 
+  734 |
   735 |   test('launches Architecture Debate from the welcome screen with projectPath and keeps child transcripts repo-scoped after reload', async ({ page, request }) => {
   736 |     test.setTimeout(420_000);
   737 |     const projectPath = requireProjectPath();
   738 |     let sessionId: string | null = null;
   739 |     let title = '';
-  740 | 
+  740 |
   741 |     try {
   742 |       await ensureProjectForPath(request, projectPath);
   743 |       await page.goto('/');
   744 |       await page.getByTestId('nav-talk').click();
   745 |       await page.getByTestId('new-session-btn').click();
   746 |       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
-  747 | 
+  747 |
   748 |       await selectArchitectureInComposer(page, 'strategic-decision-council');
   749 |       await selectProjectInWelcome(page, projectPath);
   750 |       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
 > 751 |       await page.getByTestId('welcome-run-prompt').click();
       |                                                    ^ Error: locator.click: Test timeout of 420000ms exceeded.
-  752 | 
+  752 |
   753 |       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
   754 |       await expect
   755 |         .poll(() => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')), { timeout: 15_000 })
@@ -631,13 +631,13 @@ Call log:
   758 |       if (!sessionId) {
   759 |         throw new Error('Missing host session id after welcome-screen workflow launch');
   760 |       }
-  761 | 
+  761 |
   762 |       title = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? '';
   763 |       expect(title.length).toBeGreaterThan(0);
-  764 | 
+  764 |
   765 |       const rootSession = await getSession(request, sessionId);
   766 |       expect(rootSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath.replaceAll('\\', '/'));
-  767 | 
+  767 |
   768 |       const currentWorkflowSessions = await getSessionDescendants(request, sessionId);
   769 |       const architectureRunId = currentWorkflowSessions
   770 |         .map((candidate) => candidate.runtimeContext?.architectureContext?.architectureRunId)
@@ -646,13 +646,13 @@ Call log:
   773 |       if (!architectureRunId) {
   774 |         throw new Error('Missing architecture run id for projectPath workflow proof');
   775 |       }
-  776 | 
+  776 |
   777 |       await waitForArchitectureRunCompleted(request, architectureRunId, 360_000);
   778 |       await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
-  779 | 
+  779 |
   780 |       const branchSessions = currentWorkflowSessions.filter((candidate) => /: (Pragmatist|User Advocate|Innovator|Analyst|Shadow)$/i.test(candidate.title));
   781 |       expect(branchSessions.length).toBe(5);
-  782 | 
+  782 |
   783 |       for (const branchSession of branchSessions) {
   784 |         const branchMessagesResponse = await request.get(`${API_BASE}/sessions/${branchSession.id}/messages`);
   785 |         expect(branchMessagesResponse.ok()).toBeTruthy();
@@ -661,12 +661,12 @@ Call log:
   788 |         expect(serialized).not.toContain('ACCESS_DENIED');
   789 |         expect(serialized.length).toBeGreaterThan(120);
   790 |       }
-  791 | 
+  791 |
   792 |       await page.reload();
   793 |       await page.getByTestId('nav-talk').click();
   794 |       await selectSession(page, sessionId, title);
   795 |       await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
-  796 | 
+  796 |
   797 |       const firstBranchSession = branchSessions[0];
   798 |       if (!firstBranchSession) {
   799 |         throw new Error('Missing branch session for projectPath transcript proof');
@@ -675,7 +675,7 @@ Call log:
   802 |       await selectSession(page, firstBranchSession.id, firstBranchSession.title);
   803 |       await expect(page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
   804 |       await expect(page.getByTestId('message-list')).not.toContainText('ACCESS_DENIED');
-  805 | 
+  805 |
   806 |       await selectSessionOriginFilter(page, 'all');
   807 |       await selectSession(page, sessionId, title);
   808 |     } finally {
@@ -685,5 +685,5 @@ Call log:
   812 |     }
   813 |   });
   814 | });
-  815 | 
+  815 |
 ```

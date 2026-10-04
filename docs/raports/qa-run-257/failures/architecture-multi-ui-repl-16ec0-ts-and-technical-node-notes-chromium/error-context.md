@@ -522,9 +522,9 @@ Call log:
 
 ```ts
   24  | }
-  25  | 
+  25  |
   26  | const projectPath = requireProjectPath();
-  27  | 
+  27  |
   28  | type SessionListItem = {
   29  |   id: string;
   30  |   parentSessionId?: string;
@@ -536,7 +536,7 @@ Call log:
   36  |     };
   37  |   };
   38  | };
-  39  | 
+  39  |
   40  | type ArchitectureGraphResponse = {
   41  |   status?: string;
   42  |   nodes?: Array<{
@@ -545,14 +545,14 @@ Call log:
   45  |     status?: string;
   46  |   }>;
   47  | };
-  48  | 
+  48  |
   49  | type ArchitectureChatResponse = {
   50  |   messages?: Array<{
   51  |     speaker?: string;
   52  |     content?: string;
   53  |   }>;
   54  | };
-  55  | 
+  55  |
   56  | async function waitForArchitectureRunCompleted(
   57  |   request: APIRequestContext,
   58  |   runId: string,
@@ -565,7 +565,7 @@ Call log:
   65  |       if (!graphResponse.ok() || !chatResponse.ok()) {
   66  |         return `http:${graphResponse.status()}:${chatResponse.status()}`;
   67  |       }
-  68  | 
+  68  |
   69  |       const graph = await graphResponse.json() as ArchitectureGraphResponse;
   70  |       const chat = await chatResponse.json() as ArchitectureChatResponse;
   71  |       const finalizerNode = graph.nodes?.find((node) => node.id === 'final-artifact' || node.kind === 'artifact');
@@ -574,12 +574,12 @@ Call log:
   74  |         && typeof message.content === 'string'
   75  |         && message.content.trim().length > 0
   76  |       )) ?? false;
-  77  | 
+  77  |
   78  |       return `${graph.status ?? 'missing'}:${finalizerNode?.status ?? 'missing'}:${hasFinalizerMessage ? 'finalizer-message' : 'missing-finalizer-message'}`;
   79  |     }, { timeout: timeoutMs })
   80  |     .toBe('completed:completed:finalizer-message');
   81  | }
-  82  | 
+  82  |
   83  | function isWorkflowDescendant(
   84  |   sessionById: Map<string, SessionListItem>,
   85  |   hostSessionId: string,
@@ -595,7 +595,7 @@ Call log:
   95  |   }
   96  |   return false;
   97  | }
-  98  | 
+  98  |
   99  | async function openTalkAndSelectHost(browser: Browser, hostSessionId: string, hostTitle: string) {
   100 |   const context = await browser.newContext();
   101 |   const page = await context.newPage();
@@ -604,20 +604,20 @@ Call log:
   104 |   await selectSession(page, hostSessionId, hostTitle);
   105 |   return { context, page };
   106 | }
-  107 | 
+  107 |
   108 | test.describe('Architecture workflow replay across a new UI session', () => {
   109 |   test('a second browser session restores host state, child transcripts, and technical node notes', async ({ page, request, browser }, testInfo) => {
   110 |     test.setTimeout(420_000);
   111 |     let hostSessionId: string | null = null;
   112 |     let hostTitle = '';
-  113 | 
+  113 |
   114 |     try {
   115 |       await ensureProjectForPath(request, projectPath);
   116 |       await page.goto('/');
   117 |       await page.getByTestId('nav-talk').click();
   118 |       await page.getByTestId('new-session-btn').click();
   119 |       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
-  120 | 
+  120 |
   121 |       await selectArchitectureInComposer(page, 'strategic-decision-council');
   122 |       await selectProjectInWelcome(page, projectPath);
   123 |       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');
@@ -630,7 +630,7 @@ Call log:
   129 |       if (!hostSessionId) {
   130 |         throw new Error('Missing host session id after workflow launch');
   131 |       }
-  132 | 
+  132 |
   133 |       await expect
   134 |         .poll(async () => {
   135 |           const sessionsResponse = await request.get(`${API_BASE}/sessions`);
@@ -641,7 +641,7 @@ Call log:
   140 |           return sessions.find((candidate) => candidate.id === hostSessionId) ?? null;
   141 |         }, { timeout: 60_000 })
   142 |         .not.toBeNull();
-  143 | 
+  143 |
   144 |       hostTitle = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? '';
   145 |       if (!hostTitle) {
   146 |         const refreshedSessionsResponse = await request.get(`${API_BASE}/sessions`);
@@ -650,13 +650,13 @@ Call log:
   149 |         hostTitle = refreshedSessions.find((candidate) => candidate.id === hostSessionId)?.title ?? '';
   150 |       }
   151 |       expect(hostTitle.length).toBeGreaterThan(0);
-  152 | 
+  152 |
   153 |       const sessionsResponse = await request.get(`${API_BASE}/sessions`);
   154 |       expect(sessionsResponse.ok()).toBeTruthy();
   155 |       const persistedSessions = await sessionsResponse.json() as SessionListItem[];
   156 |       const hostSession = persistedSessions.find((candidate) => candidate.id === hostSessionId);
   157 |       expect(hostSession?.runtimeContext?.architectureContext?.projectPath).toBe(projectPath.replaceAll('\\', '/'));
-  158 | 
+  158 |
   159 |       const sessionById = new Map(persistedSessions.map((candidate) => [candidate.id, candidate]));
   160 |       const workflowSessions = persistedSessions.filter((candidate) => isWorkflowDescendant(sessionById, hostSessionId!, candidate));
   161 |       const architectureRunId = workflowSessions
@@ -666,16 +666,16 @@ Call log:
   165 |       if (!architectureRunId) {
   166 |         throw new Error('Missing architecture run id for multi-session replay proof');
   167 |       }
-  168 | 
+  168 |
   169 |       await waitForArchitectureRunCompleted(request, architectureRunId);
   170 |       await selectSession(page, hostSessionId, hostTitle);
   171 |       await expect(page.getByTestId('architecture-run-timeline')).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
-  172 | 
+  172 |
   173 |       const branchSessions = workflowSessions.filter((candidate) => /: (Pragmatist|User Advocate|Innovator|Analyst|Shadow)$/i.test(candidate.title));
   174 |       const technicalSessions = workflowSessions.filter((candidate) => /: (Router|Finalizer)$/i.test(candidate.title));
   175 |       expect(branchSessions.length).toBe(5);
   176 |       expect(technicalSessions.length).toBeGreaterThanOrEqual(2);
-  177 | 
+  177 |
   178 |       const secondUi = await openTalkAndSelectHost(browser, hostSessionId, hostTitle);
   179 |       try {
   180 |         await expect(secondUi.page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 30_000 });
@@ -683,7 +683,7 @@ Call log:
   182 |         await expect(secondUi.page.getByTestId('architecture-route-agent')).toHaveCount(5, { timeout: 30_000 });
   183 |         await expect(secondUi.page.getByTestId('architecture-route-router').first()).toBeVisible({ timeout: 30_000 });
   184 |         await expect(secondUi.page.getByTestId('architecture-route-finalizer')).toHaveCount(1, { timeout: 30_000 });
-  185 | 
+  185 |
   186 |         for (const routerCard of await secondUi.page.getByTestId('architecture-route-router').all()) {
   187 |           await expect(routerCard).toHaveAttribute('data-status', 'completed');
   188 |           await expect(routerCard).toContainText(/Parallel Deliberation|Router completed synthesis|Route: router ->/);
@@ -694,7 +694,7 @@ Call log:
   193 |         }
   194 |         await expect(secondUi.page.getByTestId('architecture-route-finalizer')).toHaveAttribute('data-status', 'completed');
   195 |         await expect(secondUi.page.getByTestId('architecture-final-answer')).toBeVisible();
-  196 | 
+  196 |
   197 |         await selectSessionOriginFilter(secondUi.page, 'agent');
   198 |         for (const branchSession of branchSessions) {
   199 |           await expect(secondUi.page.locator(`[data-testid="session-item"][data-session-id="${branchSession.id}"]`)).toBeVisible();
@@ -702,24 +702,24 @@ Call log:
   201 |         for (const technicalSession of technicalSessions) {
   202 |           await expect(secondUi.page.locator(`[data-testid="session-item"][data-session-id="${technicalSession.id}"]`)).toBeVisible();
   203 |         }
-  204 | 
+  204 |
   205 |         const firstBranch = branchSessions[0];
   206 |         const firstTechnical = technicalSessions[0];
   207 |         if (!firstBranch || !firstTechnical) {
   208 |           throw new Error('Missing workflow child sessions for multi-session replay proof');
   209 |         }
-  210 | 
+  210 |
   211 |         await selectSession(secondUi.page, firstBranch.id, firstBranch.title);
   212 |         await expect(secondUi.page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
   213 |         await expect(secondUi.page.getByTestId('message-list')).toContainText('Architecture: Strategic Decision Council v0.1.0');
   214 |         await expect(secondUi.page.getByTestId('message-list')).toContainText(/Pragmatist|User Advocate|Innovator|Analyst|Shadow/);
-  215 | 
+  215 |
   216 |         await selectSession(secondUi.page, hostSessionId, hostTitle);
   217 |         await selectSession(secondUi.page, firstTechnical.id, firstTechnical.title);
   218 |         await expect(secondUi.page.getByTestId('message-list')).not.toContainText('Waiting for the first persisted message');
   219 |         await expect(secondUi.page.getByTestId('message-list')).toContainText(/Architecture: Strategic Decision Council v0.1.0|Status: completed|Status: running/);
   220 |         await expect(secondUi.page.getByTestId('message-list')).toContainText(/Router|Finalizer/);
-  221 | 
+  221 |
   222 |         const screenshotPath = testInfo.outputPath('architecture-multi-ui-replay-proof.png');
   223 |         await secondUi.page.screenshot({ path: screenshotPath, fullPage: true });
   224 |       } finally {

@@ -302,79 +302,79 @@ Call log:
   6  |   getComposerSendButton,
   7  |   selectSession,
   8  | } from './helpers/test-config';
-  9  | 
+  9  |
   10 | const LONG_STREAMING_PROMPT = `Repeat this text slowly: ${'HELLO '.repeat(120).trim()}`;
-  11 | 
+  11 |
   12 | // AC-13: Queue mode — composer stays enabled during streaming; extra sends queue instead of spamming active turn
   13 | test.describe('AC-13: Queue while streaming', () => {
   14 |   test('composer stays enabled while streaming and queues a second message', async ({ page, request }) => {
   15 |     const title = `AC13 Queue Test ${Date.now()}`;
-  16 | 
+  16 |
   17 |     const res = await request.post(`${API_BASE}/sessions`, {
   18 |       data: { title, personaId: 'default' },
   19 |     });
   20 |     expect(res.ok()).toBeTruthy();
   21 |     const session = await res.json() as { id: string };
-  22 | 
+  22 |
   23 |     await page.goto('/');
   24 |     await page.getByTestId('nav-talk').click();
   25 |     await selectSession(page, session.id, title);
-  26 | 
+  26 |
   27 |     const chatInput = await expectComposerEnabled(page, 5000);
   28 |     const sendBtn = await getComposerSendButton(page);
-  29 | 
+  29 |
   30 |     await chatInput.fill(LONG_STREAMING_PROMPT);
 > 31 |     await sendBtn.click();
      |                   ^ Error: locator.click: Test timeout of 30000ms exceeded.
-  32 | 
+  32 |
   33 |     await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
   34 |     const streamingInput = await expectComposerEnabled(page, 5000);
   35 |     const streamingSendBtn = await getComposerSendButton(page);
-  36 | 
+  36 |
   37 |     await streamingInput.fill('queued follow-up');
   38 |     await streamingSendBtn.click();
-  39 | 
+  39 |
   40 |     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
   41 |     await expect(userMessages).toHaveCount(2, { timeout: 10_000 });
   42 |     await expect(userMessages.nth(1)).toContainText('queued follow-up');
-  43 | 
+  43 |
   44 |     await deleteSessionIfExists(request, session.id);
   45 |   });
-  46 | 
+  46 |
   47 |   test('rapid Enter key presses while streaming can queue additional user bubbles', async ({ page, request }) => {
   48 |     test.setTimeout(45_000);
-  49 | 
+  49 |
   50 |     const title = `AC13 Rapid Enter Queue ${Date.now()}`;
-  51 | 
+  51 |
   52 |     const res = await request.post(`${API_BASE}/sessions`, {
   53 |       data: { title, personaId: 'default' },
   54 |     });
   55 |     expect(res.ok()).toBeTruthy();
   56 |     const session = await res.json() as { id: string };
-  57 | 
+  57 |
   58 |     await page.goto('/');
   59 |     await page.getByTestId('nav-talk').click();
   60 |     await selectSession(page, session.id, title);
-  61 | 
+  61 |
   62 |     const chatInput = await expectComposerEnabled(page, 5000);
-  63 | 
+  63 |
   64 |     await chatInput.fill(LONG_STREAMING_PROMPT);
   65 |     await chatInput.press('Enter');
-  66 | 
+  66 |
   67 |     await expect(page.getByTestId('chat-stop-btn')).toBeVisible({ timeout: 5000 });
   68 |     const streamingInput = await expectComposerEnabled(page, 5000);
   69 |     const userMessages = page.locator('[data-testid="message-bubble"][data-role="user"]');
-  70 | 
+  70 |
   71 |     for (let i = 0; i < 3; i++) {
   72 |       await streamingInput.fill(`queued ${i + 1}`);
   73 |       await streamingInput.press('Enter');
   74 |       await expect(userMessages).toHaveCount(i + 2, { timeout: 10_000 });
   75 |     }
-  76 | 
+  76 |
   77 |     await expect(userMessages).toHaveCount(4, { timeout: 15_000 });
-  78 | 
+  78 |
   79 |     await deleteSessionIfExists(request, session.id);
   80 |   });
   81 | });
-  82 | 
+  82 |
 ```

@@ -251,10 +251,10 @@ Call log:
   135 | 		message: 'Expected Playwright stack to fall back to env mock provider',
   136 | 	}).toBe(true);
   137 | }
-  138 | 
+  138 |
   139 | export async function selectSession(page: Page, sessionId: string, title: string): Promise<void> {
   140 | 	await expect(page.getByTestId('session-panel')).toBeVisible({ timeout: 15_000 });
-  141 | 
+  141 |
   142 | 	for (let attempt = 0; attempt < 3; attempt += 1) {
   143 | 		await expectChatTransportReady(page);
   144 | 		for (let groupAttempt = 0; groupAttempt < 10; groupAttempt += 1) {
@@ -264,7 +264,7 @@ Call log:
   148 | 			}
   149 | 			await collapsedGroup.click();
   150 | 		}
-  151 | 
+  151 |
   152 | 		const sessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
   153 | 		if (await sessionItem.isVisible().catch(() => false)) {
   154 | 			await sessionItem.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => undefined);
@@ -280,12 +280,12 @@ Call log:
   164 | 				.toBe(sessionId);
   165 | 			return;
   166 | 		}
-  167 | 
+  167 |
   168 | 		await page.waitForTimeout(1_000);
   169 | 		if (await sessionItem.isVisible().catch(() => false)) {
   170 | 			continue;
   171 | 		}
-  172 | 
+  172 |
   173 | 		if (attempt < 2) {
   174 | 			await page.reload();
   175 | 			const talkNav = page.getByTestId('nav-talk');
@@ -294,7 +294,7 @@ Call log:
   178 | 			}
   179 | 		}
   180 | 	}
-  181 | 
+  181 |
   182 | 	const visibleSessionCount = await page.getByTestId('session-item').count().catch(() => 0);
   183 | 	const transportMessages = await transportStatusMessages(page);
   184 | 	throw new Error(
@@ -302,7 +302,7 @@ Call log:
   186 | 		+ `visibleSessions=${visibleSessionCount}; transport=${transportMessages || 'ready'}`,
   187 | 	);
   188 | }
-  189 | 
+  189 |
   190 | async function expectChatTransportReady(page: Page): Promise<void> {
   191 | 	await expect
   192 | 		.poll(
@@ -314,7 +314,7 @@ Call log:
   198 | 		)
   199 | 		.toBe('');
   200 | }
-  201 | 
+  201 |
   202 | async function activeTransportStatusMessages(page: Page): Promise<string> {
   203 | 	const messages = await page
   204 | 		.getByTestId('chat-connection-status')
@@ -322,7 +322,7 @@ Call log:
   206 | 		.catch(() => []);
   207 | 	return messages.map((message) => message.trim()).filter(Boolean).join(' | ');
   208 | }
-  209 | 
+  209 |
   210 | async function transportStatusMessages(page: Page): Promise<string> {
   211 | 	const activeMessages = await page
   212 | 		.getByTestId('chat-connection-status')
@@ -337,7 +337,7 @@ Call log:
   221 | 		.filter(Boolean)
   222 | 		.join(' | ');
   223 | }
-  224 | 
+  224 |
   225 | export async function sendMessageFromComposer(page: Page, message: string): Promise<void> {
   226 | 	const input = await expectComposerEnabled(page, 10_000);
   227 | 	await input.fill(message);
@@ -347,35 +347,35 @@ Call log:
       |                           ^ Error: expect(locator).toBeEnabled() failed
   231 | 	await sendButton.click();
   232 | }
-  233 | 
+  233 |
   234 | export async function expectComposerEnabled(page: Page, timeoutMs = 10_000): Promise<Locator> {
   235 | 	const welcomeInput = page.getByTestId('welcome-prompt-input');
   236 | 	if (await welcomeInput.isVisible().catch(() => false)) {
   237 | 		await expect(welcomeInput).toBeEnabled({ timeout: timeoutMs });
   238 | 		return welcomeInput;
   239 | 	}
-  240 | 
+  240 |
   241 | 	const chatInput = page.getByTestId('chat-input');
   242 | 	await expect(chatInput).toBeEnabled({ timeout: timeoutMs });
   243 | 	return chatInput;
   244 | }
-  245 | 
+  245 |
   246 | export async function getComposerSendButton(page: Page): Promise<Locator> {
   247 | 	const welcomeButton = page.getByTestId('welcome-run-prompt');
   248 | 	if (await welcomeButton.isVisible().catch(() => false)) {
   249 | 		return welcomeButton;
   250 | 	}
-  251 | 
+  251 |
   252 | 	return page.getByTestId('chat-send-btn');
   253 | }
-  254 | 
+  254 |
   255 | export async function selectArchitectureInComposer(page: Page, architectureId: string): Promise<void> {
   256 | 	const welcomeSelect = page.getByTestId('welcome-architecture-select');
   257 | 	if (await welcomeSelect.isVisible().catch(() => false)) {
   258 | 		await welcomeSelect.selectOption(architectureId);
   259 | 		return;
   260 | 	}
-  261 | 
+  261 |
   262 | 	const workflowModeButton = page.getByTestId('welcome-mode-workflow');
   263 | 	if (await workflowModeButton.isVisible().catch(() => false)) {
   264 | 		await workflowModeButton.click();
@@ -383,10 +383,10 @@ Call log:
   266 | 		await welcomeSelect.selectOption(architectureId);
   267 | 		return;
   268 | 	}
-  269 | 
+  269 |
   270 | 	await page.getByTestId('chat-architecture-select').selectOption(architectureId);
   271 | }
-  272 | 
+  272 |
   273 | export async function selectSessionOriginFilter(
   274 | 	page: Page,
   275 | 	filterId: 'all' | 'user' | 'agent' | 'archived',
@@ -394,9 +394,9 @@ Call log:
   277 | 	await page.getByTestId('session-origin-filter-trigger').click();
   278 | 	await page.getByTestId(`session-origin-filter-${filterId}`).click();
   279 | }
-  280 | 
+  280 |
   281 | export async function deleteSessionIfExists(request: APIRequestContext, sessionId: string): Promise<void> {
   282 | 	await request.delete(`${API_BASE}/sessions/${sessionId}`, { timeout: 5000 }).catch(() => undefined);
   283 | }
-  284 | 
+  284 |
 ```

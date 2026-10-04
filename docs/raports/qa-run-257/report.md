@@ -35,7 +35,7 @@ User notes: `docs/meetings/2026-10-04-user-notes.md`. Jev goal-loop proposal: `d
 
 Runner terminated normally with exit code 1 at 15:13:12: **127 passed, 37 failed, 67 skipped, 1 did not run**, total 232, 16.9 minutes. It was not restarted. Earlier IN PROGRESS rows above describe observations during execution, not the final verdict.
 
-112 PNG/context/trace artifacts were copied into `failures/` with source/destination byte-length verification before the next run reset `test-results`. PNG and Markdown evidence are versioned; approximately 188 MB of `trace.zip` files remain local and are narrowly gitignored. No secret-bearing provider settings were exported.
+112 PNG/context/trace artifacts were copied into `failures/` with source/destination byte-length verification before the next run reset `test-results`. PNG and Markdown evidence are versioned; approximately 188 MB of `trace.zip` files remain local and are narrowly gitignored. After copying, generated Markdown contexts had trailing spaces mechanically trimmed for Git whitespace hygiene; raw contexts remain inside local traces. No secret-bearing provider settings were exported.
 
 | Failed spec | Failed cases |
 |---|---|
