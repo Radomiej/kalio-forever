@@ -99,6 +99,30 @@ describe('AuditLogController', () => {
   });
 
   describe('list()', () => {
+    it('does not fall back to unscoped records when the requested turn has no evidence', async () => {
+      const rows = await controller.list(undefined, undefined, 'sess-1', undefined, undefined, 'all', 'missing-turn');
+      expect(rows).toEqual([]);
+    });
+
+    it('applies the limit after session and turn filtering', async () => {
+      await drizzleSvc.db.insert(schema.auditLog).values([
+        { id: 'matching', sessionId: 'sess-1', type: 'runtime_event', label: 'native', data: { turnId: 'turn' }, createdAt: new Date(4000) },
+        { id: 'newer-unrelated', sessionId: 'sess-1', type: 'runtime_event', label: 'native', data: { turnId: 'other' }, createdAt: new Date(5000) },
+      ]);
+      const rows = await controller.list('1', 'runtime_event', 'sess-1', undefined, undefined, 'all', 'turn');
+      expect(rows.map(row => row.id)).toEqual(['matching']);
+    });
+
+    it('filters an explicit turn inside its session across hot and archived records', async () => {
+      await drizzleSvc.db.insert(schema.auditLog).values([
+        { id: 'native-one', sessionId: 'sess-1', type: 'runtime_event', label: 'native', data: { turnId: 'turn' }, createdAt: new Date(4000) },
+        { id: 'native-other', sessionId: 'sess-2', type: 'runtime_event', label: 'native', data: { turnId: 'turn' }, createdAt: new Date(5000) },
+        { id: 'native-old', sessionId: 'sess-1', type: 'runtime_event', label: 'native', data: { turnId: 'other' }, createdAt: new Date(6000) },
+      ]);
+      await drizzleSvc.db.insert(schema.auditLogArchive).values({ id: 'native-archive', sessionId: 'sess-1', type: 'runtime_event', label: 'native', data: { turnId: 'turn' }, createdAt: new Date(3500), archivedAt: new Date(7000) });
+      const rows = await controller.list(undefined, 'runtime_event', 'sess-1', undefined, undefined, 'all', 'turn');
+      expect(rows.map((row) => row.id)).toEqual(['native-archive', 'native-one']);
+    });
     it('returns all entries in chronological order with no filters', async () => {
       const rows = await controller.list();
       expect(rows).toHaveLength(3);

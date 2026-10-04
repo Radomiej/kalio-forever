@@ -21,6 +21,7 @@ export interface AuditLogQuery {
   types?: AuditType[] | null;
   sessionId?: string;
   runId?: string;
+  turnId?: string;
   since?: number | null;
   until?: number | null;
 }
@@ -113,6 +114,10 @@ export function buildAuditWhereClause(query: AuditLogQuery, tableName: 'audit_lo
       OR CASE WHEN json_valid(${sql.raw(`${tableName}.data`)})
         THEN json_extract(${sql.raw(`${tableName}.data`)}, '$.architectureRunId') END = ${query.runId}
     )`);
+  }
+  if (query.turnId) {
+    conditions.push(sql`CASE WHEN json_valid(${sql.raw(`${tableName}.data`)})
+      THEN json_extract(${sql.raw(`${tableName}.data`)}, '$.turnId') END = ${query.turnId}`);
   }
   if (query.since != null && Number.isFinite(query.since)) {
     conditions.push(sql`${sql.raw(`${tableName}.created_at`)} >= ${query.since}`);
