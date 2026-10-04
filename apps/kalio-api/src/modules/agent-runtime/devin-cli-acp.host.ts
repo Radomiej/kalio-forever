@@ -192,11 +192,11 @@ export class DevinAcpHost {
 
   private async ensureConnection(mcpServers: readonly McpServer[] = []): Promise<ClientConnection> {
     if (this.closing) throw new Error('Devin ACP host is closing; acquire a new host after reset.');
-    if (this.connection && !this.connection.signal.aborted) return this.connection;
     if (this.starting) {
       await this.starting;
       return this.requireConnection();
     }
+    if (this.connection && !this.connection.signal.aborted) return this.connection;
     this.closing = false;
     this.status = 'starting';
     this.starting = this.startConnection(mcpServers);

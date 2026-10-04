@@ -3,6 +3,38 @@ import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { buildDevinCliLaunchSpec, DevinAcpHost, parseDevinCliProbe } from './devin-cli-acp.host';
 
 describe('Devin CLI ACP host contract', () => {
+  it('propagates initialization failure instead of exposing the assigned transport', async () => {
+    let fail!: (error: Error) => void;
+    const host = new DevinAcpHost('swe-2');
+    const internals = host as unknown as {
+      starting: Promise<void>; connection: { signal: AbortSignal };
+      capabilities: { mcpCapabilities: { http: boolean } };
+    };
+    internals.starting = new Promise<void>((_resolve, reject) => { fail = reject; });
+    internals.connection = { signal: new AbortController().signal };
+    internals.capabilities = { mcpCapabilities: { http: true } };
+    const rejected = expect(host.supportsHttpMcp()).rejects.toThrow('initialize failed');
+    fail(new Error('initialize failed'));
+    await rejected;
+  });
+  it('waits for ACP initialization even when a transport is already assigned', async () => {
+    let complete!: () => void;
+    const initializing = new Promise<void>(resolve => { complete = resolve; });
+    const host = new DevinAcpHost('swe-2');
+    const internals = host as unknown as {
+      starting: Promise<void>; connection: { signal: AbortSignal };
+      capabilities: { mcpCapabilities: { http: boolean } };
+    };
+    internals.starting = initializing;
+    internals.connection = { signal: new AbortController().signal };
+    internals.capabilities = { mcpCapabilities: { http: true } };
+    let settled = false;
+    const result = host.supportsHttpMcp().then(value => { settled = true; return value; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    complete();
+    await expect(result).resolves.toBe(true);
+  });
   it('launches exact dynamically discovered model tokens without a shell wrapper', () => {
     expect(buildDevinCliLaunchSpec('glm-5-2', 'C:\\Users\\Radomiej\\AppData\\Local\\devin\\cli\\bin\\devin.exe')).toEqual({
       command: 'C:\\Users\\Radomiej\\AppData\\Local\\devin\\cli\\bin\\devin.exe',
