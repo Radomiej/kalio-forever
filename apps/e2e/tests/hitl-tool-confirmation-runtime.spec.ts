@@ -9,6 +9,7 @@ import {
   selectSession,
 } from './helpers/test-config';
 import { restartPlaywrightBackend } from './helpers/restart-control';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 
 const MOCK_VFS_WRITE_TRIGGER = '[[mock:tool:vfs_write:no-arg-progress]]';
 const MOCK_VFS_WRITE_PATH = 'e2e/mock-tool-trigger.txt';
@@ -103,11 +104,7 @@ async function createSession(
   title: string,
   personaId: string,
 ): Promise<{ id: string; title: string }> {
-  const response = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId },
-  });
-  expect(response.ok()).toBeTruthy();
-  const session = await response.json() as { id: string };
+  const session = await createExistingMockConversation(request, title, personaId);
   return { id: session.id, title };
 }
 
