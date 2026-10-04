@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@kalio/types';
 import { MessageBubble } from './MessageBubble';
@@ -31,6 +31,11 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('MessageBubble layout', () => {
+  it('leaves empty streaming activity to the conversation pending indicator', () => {
+    render(<MessageBubble message={makeMessage({ streaming: true, content: '' })} />);
+    expect(screen.queryByTestId('message-bubble')).toBeNull();
+    expect(screen.queryByTestId('streaming-indicator')).toBeNull();
+  });
   beforeEach(() => {
     sessionStoreState.streamingChunks = {};
     sessionStoreState.thinkingChunks = {};
@@ -56,6 +61,39 @@ describe('MessageBubble layout', () => {
     const bubble = screen.getByTestId('message-bubble').querySelector('.bg-base-300');
 
     expect(bubble).toHaveClass('px-2.5', 'py-1.5');
+  });
+
+  it('stops the thinking animation when answer text begins and allows manual collapse', () => {
+    sessionStoreState.thinkingChunks = { 'message-1': 'Planning' };
+    const message = makeMessage({ streaming: true, content: '' });
+    const { rerender } = render(<MessageBubble message={message} />);
+    expect(screen.getByRole('button', { name: 'Thinking' }).querySelector('.loading')).not.toBeNull();
+    sessionStoreState.streamingChunks = { 'message-1': 'Answer' };
+    rerender(<MessageBubble message={{ ...message }} />);
+    expect(screen.getByRole('button', { name: 'Thinking' }).querySelector('.loading')).toBeNull();
+    expect(screen.getByText('Planning')).not.toBeVisible();
+    expect(screen.getByTestId('message-content')).toHaveTextContent('Answer');
+  });
+
+  it('exposes disclosure state and keeps a manual collapse through more thinking tokens', () => {
+    sessionStoreState.thinkingChunks = { 'message-1': 'Planning' };
+    const message = makeMessage({ streaming: true, content: '' });
+    const { rerender } = render(<MessageBubble message={message} />);
+    const button = screen.getByRole('button', { name: 'Thinking' });
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    const contentId = button.getAttribute('aria-controls');
+    expect(contentId).toBeTruthy();
+    expect(document.getElementById(contentId!)).toBeVisible();
+    fireEvent.click(button);
+    sessionStoreState.thinkingChunks = { 'message-1': 'Planning more' };
+    rerender(<MessageBubble message={{ ...message }} />);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById(contentId!)).not.toBeVisible();
+    rerender(<MessageBubble message={{ ...message, streaming: false }} />);
+    expect(button.querySelector('.loading, .animate-pulse')).toBeNull();
+    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById(contentId!)).toHaveTextContent('Planning more');
   });
 
   it('wraps long user workflow prompts without horizontal overflow', () => {

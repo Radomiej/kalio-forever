@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useId, useState } from 'react';
 import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
@@ -52,6 +52,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
   const liveContent = useSessionStore((state) => state.streamingChunks[message.id] ?? '');
   const liveThinking = useSessionStore((state) => state.thinkingChunks[message.id] ?? '');
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  const thinkingContentId = useId();
 
   const isUser = message.role === 'user';
   const isStreaming = message.streaming === true;
@@ -63,13 +64,12 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
   const historicalThinking = message.thinking ?? '';
   const thinkingContent = liveThinking || historicalThinking;
   const hasThinking = thinkingContent.length > 0;
+  const thinkingActive = isStreaming && liveThinking.length > 0 && !displayContent;
 
-  // Auto-expand thinking block while streaming so the user sees real reasoning tokens live
+  // Historical thinking is not an active phase once answer text is visible.
   useEffect(() => {
-    if (isStreaming && hasThinking && !thinkingOpen) {
-      setThinkingOpen(true);
-    }
-  }, [isStreaming, hasThinking, thinkingOpen]);
+    setThinkingOpen(thinkingActive);
+  }, [thinkingActive]);
 
   if (isUser) {
     return (
@@ -85,6 +85,8 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
 
   // tool_result messages are rendered inside AgentTurnBubble — skip here to avoid duplicate JSON bubbles
   if (message.role === 'tool_result') return null;
+  // The conversation owns the pre-content activity indicator.
+  if (isStreaming && !displayContent && !hasThinking) return null;
   return (
     <div data-testid="message-bubble" data-role="assistant" className="flex justify-start mb-1 w-full">
       <div className="min-w-0 w-full max-w-none">
@@ -95,12 +97,15 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
           {hasThinking && (
             <div className="border border-base-content/10 rounded-lg overflow-hidden">
               <button
+                type="button"
+                aria-expanded={thinkingOpen}
+                aria-controls={thinkingContentId}
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-base-content/50 hover:text-base-content/70 transition-colors bg-base-200/50"
                 onClick={() => setThinkingOpen((v) => !v)}
               >
-                <BrainCircuit size={12} className={liveThinking.length > 0 ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
+                <BrainCircuit size={12} className={thinkingActive ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
                 <span>Thinking</span>
-                {liveThinking.length > 0 && (
+                {thinkingActive && (
                   <span className="loading loading-dots loading-xs ml-1" />
                 )}
                 <ChevronDown
@@ -108,14 +113,12 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
                   className={`ml-auto transition-transform duration-150 ${thinkingOpen ? 'rotate-180' : ''}`}
                 />
               </button>
-              {thinkingOpen && (
-                <div className="px-3 py-2 text-xs text-base-content/50 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto bg-base-200/20">
-                  {thinkingContent}
-                  {liveThinking.length > 0 && (
-                    <span className="inline-block h-3 w-0.5 animate-pulse bg-current ml-0.5" />
-                  )}
-                </div>
-              )}
+              <div id={thinkingContentId} hidden={!thinkingOpen} className="px-3 py-2 text-xs text-base-content/50 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto bg-base-200/20">
+                {thinkingContent}
+                {thinkingActive && (
+                  <span className="inline-block h-3 w-0.5 animate-pulse bg-current ml-0.5" />
+                )}
+              </div>
             </div>
           )}
 
