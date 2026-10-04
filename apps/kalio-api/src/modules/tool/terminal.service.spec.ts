@@ -16,6 +16,7 @@ vi.mock('node:child_process', () => ({ spawn: mockSpawnFn }));
 
 // Import AFTER vi.mock so the module receives the mocked spawn
 import { TerminalService } from './terminal.service';
+import { TerminalOutputTool } from './tools/terminal.tools';
 import type { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -67,6 +68,62 @@ describe('TerminalService', () => {
   // ── spawn() ──────────────────────────────────────────────────────────────
 
   describe('observeUntilExit()', () => {
+    it('cancels the real terminal_output tool and releases its observer', async () => {
+      vi.useFakeTimers();
+      const session = await service.spawn('npm', ['run', 'preview'], '/project');
+      const controller = new AbortController();
+      const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+      const tool = new TerminalOutputTool(service);
+      const result = tool.execute({
+        sessionId: 'terminal-stop', callId: 'output-stop', toolName: 'terminal_output',
+        args: { id: session.id, waitMs: 30000 }, abortSignal: controller.signal,
+      });
+      const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+      controller.abort();
+      await rejected;
+      expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+      expect(vi.getTimerCount()).toBe(0);
+      expect(proc.listenerCount('close')).toBe(1);
+      expect(service.get(session.id)?.status).toBe('running');
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('removes its abort listener after normal completion', async () => {
+      vi.useFakeTimers();
+      const session = await service.spawn('npm', ['run', 'build'], '/project');
+      const controller = new AbortController();
+      const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+      const result = service.observeUntilExit(session.id, 30000, controller.signal);
+      proc.emit('close', 0);
+      expect(await result).toMatchObject({ status: 'exited', exitCode: 0 });
+      expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+      controller.abort();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each([false, true])('cancels observation without killing the process (already aborted: %s)', async (alreadyAborted) => {
+      vi.useFakeTimers();
+      const session = await service.spawn('npm', ['run', 'preview'], '/project');
+      const controller = new AbortController();
+      if (alreadyAborted) controller.abort();
+      let outcome: string | undefined;
+      const result = service.observeUntilExit(session.id, 30000, controller.signal);
+      const observed = result.then(
+        () => { outcome = 'resolved'; },
+        (error: unknown) => { outcome = error instanceof Error ? error.name : 'unknown'; },
+      );
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe('AbortError');
+      await observed;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(proc.listenerCount('close')).toBe(1);
+      expect(proc.listenerCount('error')).toBe(1);
+      expect(service.get(session.id)?.status).toBe('running');
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(mockSpawnFn).toHaveBeenCalledOnce();
+    });
+
     it('observes close and cleans listeners without spawning another process', async () => {
       vi.useFakeTimers();
       const session = await service.spawn('npm', ['run', 'build'], '/project');

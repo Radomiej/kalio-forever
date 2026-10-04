@@ -117,21 +117,32 @@ export class TerminalService implements OnModuleDestroy {
   }
 
   /** Observe completion without starting, terminating or otherwise changing the process. */
-  observeUntilExit(id: string, waitMs: number): Promise<TerminalSession | null> {
+  observeUntilExit(id: string, waitMs: number, abortSignal?: AbortSignal): Promise<TerminalSession | null> {
+    if (abortSignal?.aborted) return Promise.reject(new DOMException('Terminal observation aborted', 'AbortError'));
     const session = this.sessions.get(id);
     if (!session || session.meta.status !== 'running' || waitMs === 0) {
       return Promise.resolve(this.get(id));
     }
-    return new Promise((resolve) => {
-      const finish = () => {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
         clearTimeout(timer);
         session.proc.off('close', finish);
         session.proc.off('error', finish);
+        abortSignal?.removeEventListener('abort', abort);
+      };
+      const finish = () => {
+        cleanup();
         resolve(this.get(id));
+      };
+      const abort = () => {
+        cleanup();
+        reject(new DOMException('Terminal observation aborted', 'AbortError'));
       };
       const timer = setTimeout(finish, waitMs);
       session.proc.on('close', finish);
       session.proc.on('error', finish);
+      abortSignal?.addEventListener('abort', abort, { once: true });
+      if (abortSignal?.aborted) { abort(); return; }
       if (session.meta.status !== 'running') {
         finish();
         return;

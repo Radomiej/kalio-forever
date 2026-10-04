@@ -224,7 +224,7 @@ describe('TerminalOutputTool', () => {
       const session = makeSession({ status: 'exited', exitCode: 0, output: 'built\n' });
       (terminals.observeUntilExit as ReturnType<typeof vi.fn>).mockResolvedValue(session);
       const result = await tool.execute(makeRequest('terminal_output', { id: 'term-abc', waitMs: 30000 }));
-      expect(terminals.observeUntilExit).toHaveBeenCalledWith('term-abc', 30000);
+      expect(terminals.observeUntilExit).toHaveBeenCalledWith('term-abc', 30000, undefined);
       expect(result.exitCode).toBe(0);
       expect(terminals.get).not.toHaveBeenCalled();
     });

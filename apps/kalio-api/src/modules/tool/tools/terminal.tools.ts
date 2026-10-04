@@ -138,7 +138,7 @@ export class TerminalOutputTool {
       throw new Error('INVALID_WAIT: waitMs must be an integer between 0 and 30000');
     }
     const session = waitMs > 0
-      ? await this.terminals.observeUntilExit(id, waitMs)
+      ? await this.terminals.observeUntilExit(id, waitMs, request.abortSignal)
       : this.terminals.get(id);
     if (!session) throw new Error(`Terminal session not found: ${id}`);
     return {

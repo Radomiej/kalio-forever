@@ -72,6 +72,18 @@ describe('ToolDispatchService', () => {
       expect(result).toEqual({ callId: 'call-1', status: 'success', data: { value: 42 } });
     });
 
+    it.each(['resolve', 'reject'])('returns cancelled when execution finishes after abort (%s)', async (completion) => {
+      const controller = new AbortController();
+      const ctx = { ...makeCtx(), abortSignal: controller.signal };
+      entry.execute = async () => {
+        controller.abort();
+        if (completion === 'reject') throw new Error('Observation aborted');
+        return { value: 42 };
+      };
+      const result = await service.dispatch('call-aborted', 'simple_tool', {}, ctx);
+      expect(result).toEqual({ callId: 'call-aborted', status: 'cancelled' });
+    });
+
     it('calls execute with correct ToolCallRequest', async () => {
       const ctx = makeCtx();
       await service.dispatch('call-x', 'simple_tool', { a: 'b' }, ctx);

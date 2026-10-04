@@ -164,8 +164,10 @@ export class ToolDispatchService {
         abortSignal: ctx.abortSignal,
       };
       const data = await entry.execute(req);
+      if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
     } catch (err) {
+      if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
       const message = err instanceof Error ? err.message : String(err);
       const errorCode = typeof (err as { code?: unknown })?.code === 'string'
         ? (err as { code: string }).code
