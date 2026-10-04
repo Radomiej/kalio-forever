@@ -5,7 +5,7 @@ import { API_BASE, APP_BASE, selectSession, sendMessageFromComposer } from './he
 
 test.skip(process.env['KALIO_DEVIN_APPROVED_BUILD'] !== '1', 'Explicit HomeSite build approval required');
 test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', async ({ page, request }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(process.env['KALIO_DEVIN_BUILD_LONG_APPROVAL'] === '1' ? 210_000 : 120_000);
   expect(APP_BASE.replace(/\/$/, '')).toBe('http://localhost:5288');
   const session = 'W4fggLSunrJB41C24MV7C';
   const started = Date.now();
@@ -41,6 +41,20 @@ test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', asy
       expect(reloaded.filter(entry => entry.type === 'tool_call')).toEqual(calls);
       expect(reloaded.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
       await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-pending-after-f5.png`) });
+    }
+    if (process.env['KALIO_DEVIN_BUILD_LONG_APPROVAL'] === '1') {
+      const waitingSince = Date.now();
+      // Diagnostic boundary probe only, not a runtime stabilization mechanism.
+      for (let stage = 0; stage < 2; stage++) {
+        await page.waitForTimeout(35_000);
+        await expect(confirm).toBeVisible();
+        await expect(confirm).toHaveCount(1);
+        const waiting = await audit();
+        expect(waiting.filter(entry => entry.type === 'tool_call')).toEqual(calls);
+        expect(waiting.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
+      }
+      expect(Date.now() - waitingSince).toBeGreaterThanOrEqual(70_000);
+      await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-pending-over-70s.png`) });
     }
     await confirm.click();
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible({ timeout: 60_000 });
