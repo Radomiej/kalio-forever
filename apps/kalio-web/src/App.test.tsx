@@ -64,6 +64,7 @@ vi.mock('./features/chat/ChatInterface', () => ({
   ChatInterface: ({ onTalkViewChange }: { onTalkViewChange?: (view: 'conversation' | 'graph') => void }) => (
     <div data-testid="chat-interface">
       Chat
+      <textarea aria-label="Unsent draft" defaultValue="" />
       <button type="button" data-testid="mock-switch-graph" onClick={() => onTalkViewChange?.('graph')}>
         Graph
       </button>
@@ -177,10 +178,11 @@ vi.mock('./features/memory/MemoryPage', () => ({
 }));
 
 vi.mock('./features/landing/LandingPage', () => ({
-  LandingPage: ({ onNavigateToChat }: { onNavigateToChat: () => void }) => (
+  LandingPage: ({ onNavigateToChat, onOpenSessionInChat }: { onNavigateToChat: () => void; onOpenSessionInChat?: (sessionId: string) => void }) => (
     <div data-testid="landing-page">
       Landing
       <button data-testid="landing-to-chat" onClick={onNavigateToChat}>Open chat</button>
+      <button data-testid="landing-open-approval" onClick={() => onOpenSessionInChat?.('session-1')}>Open approval</button>
     </div>
   ),
 }));
@@ -354,6 +356,78 @@ describe('App view state persistence', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([null, 'session-1'])('preserves the Talk surface across 1024 to 1023 with session %s', (sessionId) => {
+    vi.stubGlobal('innerWidth', 1440);
+    sessionStoreState.activeSessionId = sessionId;
+    render(<App />);
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    const draft = screen.getByRole('textbox', { name: 'Unsent draft' });
+    fireEvent.change(draft, { target: { value: 'Keep my unsent draft' } });
+
+    vi.stubGlobal('innerWidth', 1024);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).not.toBeNull();
+    vi.stubGlobal('innerWidth', 1023);
+    fireEvent(window, new Event('resize'));
+
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
+    expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Unsent draft' })).toBe(draft);
+    expect(draft).toHaveValue('Keep my unsent draft');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show conversations' }));
+    expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).not.toBeNull();
+    vi.stubGlobal('innerWidth', 800);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide conversations' }));
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+
+    vi.stubGlobal('innerWidth', 1440);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByRole('textbox', { name: 'Unsent draft' })).toBe(draft);
+    expect(draft).toHaveValue('Keep my unsent draft');
+    expect(setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the initial compact list until a conversation is selected', () => {
+    vi.stubGlobal('innerWidth', 390);
+    render(<App />);
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    vi.stubGlobal('innerWidth', 800);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-select-conversation'));
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+  });
+
+  it('does not switch to a conversation when crossing the breakpoint outside Talk', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    render(<App />);
+    vi.stubGlobal('innerWidth', 1023);
+    fireEvent(window, new Event('resize'));
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+  });
+
+  it('opens a Home approval directly in the conversation on compact screens even after using graph', async () => {
+    vi.stubGlobal('innerWidth', 390);
+    localStorage.setItem('kalio:talk-view', 'graph');
+    render(<App />);
+
+    await act(async () => { fireEvent.click(screen.getByTestId('landing-open-approval')); });
+
+    expect(setActiveSession).toHaveBeenCalledWith('session-1');
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
   });
 
   it('hydrates the stored section and nested tab on first mount', () => {

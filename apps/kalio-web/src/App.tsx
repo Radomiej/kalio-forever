@@ -103,6 +103,20 @@ export function App() {
   const bootstrapFetchSeqRef = useRef(0);
 
   useEffect(() => {
+    let wasCompact = window.innerWidth < 1024;
+    const handleResize = () => {
+      const isCompact = window.innerWidth < 1024;
+      // Keep the visible Talk surface when desktop panes become sequential.
+      if (!wasCompact && isCompact && activeSection === 'talk') {
+        setTalkSidebarCollapsed(true);
+      }
+      wasCompact = isCompact;
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [activeSection]);
+
+  useEffect(() => {
     const handleReviewedRuntimeAttention = () => {
       setReviewedRuntimeAttentionKeys(readReviewedRuntimeAttentionKeys());
     };
@@ -248,6 +262,7 @@ export function App() {
     });
     setTalkTab('conversations');
     if (forceChat) setTalkView('conversation');
+    if (window.innerWidth < 1024) setTalkSidebarCollapsed(true);
     setActiveSection('talk');
   };
   return (
@@ -269,19 +284,19 @@ export function App() {
       />
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">
         {activeSection === 'landing' && (
-          <LandingPage onNavigateToChat={openConversationFromLanding} onOpenSessionInChat={openSessionInConversation} />
+          <LandingPage onNavigateToChat={openConversationFromLanding} onOpenSessionInChat={(sessionId) => openSessionInConversation(sessionId, true)} />
         )}
 
         {/* talk section: always mounted so ChatInterface never loses socket listeners
             or in-flight streaming state when the user navigates to the landing page */}
-        <div className={`flex h-full flex-col md:flex-row ${activeSection !== 'talk' ? 'hidden' : ''}`}>
+        <div className={`flex h-full flex-col lg:flex-row ${activeSection !== 'talk' ? 'hidden' : ''}`}>
             {/* Left sidebar: session list */}
             {talkSidebarCollapsed ? (
               <div
-                className="h-12 w-full shrink-0 border-b border-base-300 bg-base-100 md:h-full md:w-12 md:border-b-0 md:border-r"
+                className="h-12 w-full shrink-0 border-b border-base-300 bg-base-100 lg:h-full lg:w-12 lg:border-b-0 lg:border-r"
                 data-testid="talk-sidebar-collapsed"
               >
-                <div className="flex h-full items-center justify-between gap-2 px-2 md:flex-col md:justify-start md:py-2">
+                <div className="flex h-full items-center justify-between gap-2 px-2 lg:flex-col lg:justify-start lg:py-2">
                   <button
                     type="button"
                     className="btn btn-ghost btn-xs h-8 min-h-0 w-8 rounded-md p-0 text-base-content/60 hover:text-base-content"
@@ -295,7 +310,7 @@ export function App() {
                 </div>
               </div>
             ) : (
-            <div className="h-64 w-full shrink-0 flex flex-col border-b border-base-300 overflow-hidden md:h-full md:w-80 md:border-b-0 md:border-r">
+            <div className="h-full w-full shrink-0 flex flex-col border-b border-base-300 overflow-hidden lg:w-80 lg:border-b-0 lg:border-r">
               <div className="flex h-9 items-center gap-1 border-b border-base-300 px-2 shrink-0" data-testid="talk-sidebar-mode-switcher">
                 {[
                   { id: 'conversations' as const, label: 'Conversations', icon: <MessageSquare size={14} /> },
@@ -343,7 +358,9 @@ export function App() {
               <div className="flex-1 overflow-hidden">
                 {talkTab === 'conversations' && (
                   <ConversationPanel
-                    onSelect={() => undefined}
+                    onSelect={() => {
+                      if (window.innerWidth < 1024) setTalkSidebarCollapsed(true);
+                    }}
                   />
                 )}
                 {talkTab === 'agents' && (
@@ -355,7 +372,7 @@ export function App() {
               </div>
             </div>
             )}
-            <div className="flex-1 min-w-0 flex overflow-hidden">
+            <div className={`flex-1 min-w-0 overflow-hidden ${talkSidebarCollapsed ? 'flex' : 'hidden lg:flex'}`}>
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-hidden min-h-0">
                   <div className={talkView === 'conversation' ? 'h-full' : 'hidden'}>
