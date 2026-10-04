@@ -673,6 +673,55 @@ test('launcher control plane authenticates and restarts backend after health rec
   }
 });
 
+test('playwright lifecycle requests hidden windows for stack, builds, workers and shutdown', async () => {
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-hidden-lifecycle-'));
+  const output = [];
+  let child;
+  try {
+    const { runnerPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const tracePath = resolve(sandboxRoot, 'spawn-trace.jsonl');
+    const preloadPath = resolve(sandboxRoot, 'spawn-trace.mjs');
+    await writeFile(preloadPath, `import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { appendFileSync } from 'node:fs';
+import { basename } from 'node:path';
+const original = cp.spawn;
+cp.spawn = function(command, args, options) {
+  appendFileSync(process.env.KALIO_TEST_SPAWN_TRACE, JSON.stringify({
+    command: basename(command), windowsHide: options?.windowsHide,
+  }) + '\\n');
+  return original.call(this, command, args, options);
+};
+syncBuiltinESMExports();
+`, 'utf8');
+    child = spawn(process.execPath, [runnerPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
+        CI: 'true', PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        NODE_OPTIONS: `--import=${pathToFileURL(preloadPath).href}`,
+        KALIO_TEST_SPAWN_TRACE: tracePath,
+      },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stopCollecting = collectOutput(child, output);
+    try {
+      const [code] = await once(child, 'exit');
+      assert.equal(code, 0, output.join(''));
+    } finally { stopCollecting(); }
+    const calls = (await readFile(tracePath, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(calls.length >= 5, 'must observe stack, both builds, backend, frontend and worker');
+    if (process.platform === 'win32') {
+      assert.ok(calls.some(call => call.command.toLowerCase().startsWith('taskkill')), 'must observe shutdown');
+    }
+    assert.deepEqual(calls.filter(call => call.windowsHide !== true), [], 'every lifecycle spawn must suppress its console window');
+  } finally {
+    if (child) await terminateProcess(child);
+    await removeSandbox(sandboxRoot);
+  }
+});
+
 test('playwright wrapper waits on PLAYWRIGHT_BASE_URL from repo .env.test file', async () => {
   const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-runner-envfile-'));
   const output = [];

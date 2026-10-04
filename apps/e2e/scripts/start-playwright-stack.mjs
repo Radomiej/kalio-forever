@@ -180,6 +180,7 @@ function quoteShellArg(arg) {
 }
 
 function spawnProcess(command, args, options) {
+  options = { ...options, windowsHide: true };
   if (process.platform === 'win32' && command.endsWith('.cmd')) {
     const cmd = process.env.ComSpec ?? 'cmd.exe';
     const commandLine = ['call', command, ...args].map(quoteShellArg).join(' ');
@@ -276,7 +277,7 @@ async function killChild(child) {
 
   if (process.platform === 'win32') {
     await new Promise((resolvePromise) => {
-      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
       killer.once('exit', () => resolvePromise());
       killer.once('error', () => resolvePromise());
     });

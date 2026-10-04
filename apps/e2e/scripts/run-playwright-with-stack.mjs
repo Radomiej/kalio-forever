@@ -114,7 +114,7 @@ async function killProcessTree(child) {
 
   if (process.platform === 'win32') {
     await new Promise((resolvePromise) => {
-      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
       killer.once('exit', () => resolvePromise());
       killer.once('error', () => resolvePromise());
     });
@@ -136,7 +136,7 @@ async function killProcessTree(child) {
 
 function run(command, args, options) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, options);
+    const child = spawn(command, args, { ...options, windowsHide: true });
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       resolvePromise({ code: code ?? (signal ? 1 : 0), signal });
@@ -186,6 +186,7 @@ if (!explicitProjectPath) {
 }
 const stackEnv = normalizedWindowsEnv(process.env);
 const stack = spawn(process.execPath, ['./scripts/start-playwright-stack.mjs'], {
+  windowsHide: true,
   cwd: e2eDir,
   env: {
     ...stackEnv,
