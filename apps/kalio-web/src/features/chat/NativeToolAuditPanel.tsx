@@ -2,8 +2,16 @@ import { useState } from 'react';
 import type { AuditLogEntry } from '@kalio/types';
 import { apiClient } from '../../services/apiClient';
 import { projectNativeToolAudit } from './nativeToolAudit.model';
+import { useTurnRuntimeProvider } from './useTurnRuntimeProvider';
 
 export function NativeToolAuditPanel({ sessionId, turnId }: { sessionId: string; turnId: string }) {
+  const provider = useTurnRuntimeProvider(sessionId, turnId);
+  // TODO: legacy fallback — keep unknown historical turns inspectable until provider journal coverage is complete.
+  if (provider && provider !== 'devin-cli-acp') return null;
+  return <DevinAuditContent key={`${sessionId}:${turnId}`} sessionId={sessionId} turnId={turnId} />;
+}
+
+function DevinAuditContent({ sessionId, turnId }: { sessionId: string; turnId: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<AuditLogEntry[] | null>(null);

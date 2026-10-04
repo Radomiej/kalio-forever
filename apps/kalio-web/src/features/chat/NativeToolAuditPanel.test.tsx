@@ -3,7 +3,15 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { apiClient } from '../../services/apiClient';
 import { NativeToolAuditPanel } from './NativeToolAuditPanel';
 vi.mock('../../services/apiClient', () => ({ apiClient: { get: vi.fn() } }));
-beforeEach(() => { vi.mocked(apiClient.get).mockReset(); });
+const provider = vi.hoisted(() => ({ value: undefined as string | undefined }));
+vi.mock('./useTurnRuntimeProvider', () => ({ useTurnRuntimeProvider: () => provider.value }));
+beforeEach(() => { vi.mocked(apiClient.get).mockReset(); provider.value = undefined; });
+it('does not offer Devin audit for a recorded Codex turn or fetch any audit', () => {
+  provider.value = 'codex-app-server';
+  render(<NativeToolAuditPanel sessionId="session" turnId="turn" />);
+  expect(screen.queryByTestId('native-tool-audit-panel')).toBeNull();
+  expect(apiClient.get).not.toHaveBeenCalled();
+});
 it('explicitly limits this audit to Devin rather than claiming all providers are covered', async () => {
   vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
   render(<NativeToolAuditPanel sessionId="session" turnId="turn" />);

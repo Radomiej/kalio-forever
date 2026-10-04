@@ -12,6 +12,13 @@ const turn: AgentTurn = { id: 'turn', sessionId: 'session', done: true, items: [
 const cancelledRun: ChatRunSnapshot = { id: 'run', sessionId: 'session', turnId: 'turn', phase: 'interrupted',
   status: 'cancelled', retryCount: 0, safeResume: false, startedAt: 1, updatedAt: 2, lastHeartbeatAt: 2 };
 
+it('preserves the exact historical runtime provider on successful turns', () => {
+  const result = applyHistoryRunOutcomes([turn], [{ ...run, status: 'completed', provider: 'codex-app-server' }]);
+  expect(result[0]).toEqual({ ...turn, runtimeProvider: 'codex-app-server' });
+  expect(turn).not.toHaveProperty('runtimeProvider');
+  expect(applyHistoryRunOutcomes([turn], [{ ...run, sessionId: 'other', provider: 'devin-cli-acp' }])[0]).toBe(turn);
+});
+
 it('restores a stopped label for the exact durable cancelled turn without losing partial content', () => {
   expect(applyHistoryRunOutcomes([turn], [cancelledRun])[0]).toEqual({ ...turn, error: { code: 'CANCELLED', message: 'Stopped by user' } });
 });

@@ -3,6 +3,20 @@ import { resolve } from 'node:path';
 import { selectSession } from './helpers/test-config';
 
 test.skip(process.env['KALIO_NATIVE_AUDIT_READONLY'] !== '1', 'Explicit fixed QA read-only audit');
+test('recorded Codex HomeSite turn does not display Devin native audit after F5', async ({ page }) => {
+  const run = process.env['KALIO_NATIVE_AUDIT_SCOPE_RUN'] ?? '188';
+  if (!/^[1-9]\d*$/.test(run)) throw new Error('Numeric report run required');
+  await page.goto('http://localhost:5288/');
+  await page.getByTestId('nav-talk').click();
+  await selectSession(page, 'yvD83rgDA_ZHvUwJKlo_S', 'ChatGPT HomeSite read');
+  for (let reload = 0; reload < 2; reload++) {
+    const turn = page.getByTestId('agent-turn-bubble').filter({ hasText: 'QA187_CODEX_READ_1791107469085_RESULT' });
+    await expect(turn.getByTestId('tool-execution-origin')).toHaveText('Kalio');
+    await expect(turn.getByTestId('native-tool-audit-panel')).toHaveCount(0);
+    if (!reload) await page.reload();
+  }
+  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/codex-without-devin-audit.png`) });
+});
 test('native audit states its Devin-only scope without claiming absent evidence is no execution', async ({ page }) => {
   const run = process.env['KALIO_NATIVE_AUDIT_SCOPE_RUN'] ?? '186';
   if (!/^[1-9]\d*$/.test(run)) throw new Error('Numeric report run required');

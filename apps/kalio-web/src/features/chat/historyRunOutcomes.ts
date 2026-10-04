@@ -21,8 +21,9 @@ export function applyHistoryRunOutcomes(turns: AgentTurn[], runs: ChatRunSnapsho
   return projected.map(turn => {
     const run = runs.filter(candidate => candidate.sessionId === turn.sessionId && candidate.turnId === turn.id)
       .sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.updatedAt - left.updatedAt)[0];
-    if (!run || !turn.done || !['cancelled', 'interrupted', 'interrupted_needs_retry', 'failed'].includes(run.status)) return turn;
-    return { ...turn, error: run.status === 'cancelled'
+    const scopedTurn = run?.provider ? { ...turn, runtimeProvider: run.provider } : turn;
+    if (!run || !turn.done || !['cancelled', 'interrupted', 'interrupted_needs_retry', 'failed'].includes(run.status)) return scopedTurn;
+    return { ...scopedTurn, error: run.status === 'cancelled'
       ? { code: 'CANCELLED', message: 'Stopped by user' }
       : { code: run.errorCode ?? 'INTERRUPTED', message: run.errorMessage ?? 'Interrupted' } };
   });
