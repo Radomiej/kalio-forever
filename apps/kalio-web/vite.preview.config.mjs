@@ -4,6 +4,12 @@ const apiOrigin = process.env.VITE_API_URL ?? 'http://127.0.0.1:3016';
 const wsOrigin = process.env.VITE_WS_URL ?? apiOrigin;
 
 export default {
+  preview: {
+    proxy: {
+      '/api': { target: apiOrigin, changeOrigin: true },
+      '/socket.io': { target: wsOrigin, changeOrigin: true, ws: true },
+    },
+  },
   plugins: [{
     name: 'kalio-runtime-config',
     configurePreviewServer(server) {

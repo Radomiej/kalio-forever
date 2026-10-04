@@ -8,6 +8,9 @@ test('built preview serves runtime origins and prevents stale routing cache', as
     process.env.VITE_API_URL = 'http://127.0.0.1:3316';
     process.env.VITE_WS_URL = 'http://127.0.0.1:4316';
     const { default: config } = await import('../apps/kalio-web/vite.preview.config.mjs?test=origins');
+    assert.equal(config.preview?.proxy?.['/api']?.target, process.env.VITE_API_URL);
+    assert.equal(config.preview?.proxy?.['/socket.io']?.target, process.env.VITE_WS_URL);
+    assert.equal(config.preview?.proxy?.['/socket.io']?.ws, true);
     let handler;
     config.plugins[0].configurePreviewServer({ middlewares: { use(path, callback) {
       assert.equal(path, '/runtime-config.js'); handler = callback;
