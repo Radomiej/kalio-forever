@@ -106,6 +106,22 @@ describe('CodexAppServerProtocolRouter', () => {
     });
   });
 
+  it('starts only one process for simultaneous connection requests', async () => {
+    const connection = makeConnection('shared-epoch');
+    const factory = vi.fn(async () => connection);
+    const host = new CodexAppServerHost(undefined, factory);
+    const results = await Promise.allSettled([
+      host.getConnection('chatgpt-default', 'settings-check'),
+      host.getConnection('chatgpt-default', 'read-only'),
+    ]);
+    expect(factory).toHaveBeenCalledOnce();
+    expect(results).toEqual([
+      { status: 'fulfilled', value: connection },
+      { status: 'fulfilled', value: connection },
+    ]);
+    await host.reset('chatgpt-default');
+  });
+
   it('does not resurrect a process that reset invalidated while it was starting', async () => {
     let resolveFirst!: (connection: CodexAppServerConnection) => void;
     let resolveSecond!: (connection: CodexAppServerConnection) => void;
@@ -132,6 +148,17 @@ describe('CodexAppServerProtocolRouter', () => {
     await expect(secondRequest).resolves.toBe(second);
     expect(host.getStatus('chatgpt-default')).toMatchObject({ status: 'online', connected: true });
     expect(first.close).toHaveBeenCalledOnce();
+  });
+
+  it('does not spawn if reset invalidates a reserved connection before policy lookup finishes', async () => {
+    const factory = vi.fn(async () => makeConnection('never-started'));
+    const host = new CodexAppServerHost(undefined, factory);
+    const pending = host.getConnection('chatgpt-default', 'read-only');
+    const rejected = expect(pending).rejects.toThrow('was reset while starting');
+    await host.reset('chatgpt-default');
+    await rejected;
+    expect(factory).not.toHaveBeenCalled();
+    expect(host.getStatus('chatgpt-default').connected).toBe(false);
   });
 });
 

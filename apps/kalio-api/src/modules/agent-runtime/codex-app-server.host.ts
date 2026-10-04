@@ -378,10 +378,16 @@ export class CodexAppServerHost implements OnModuleDestroy {
     }
     const generation = this.advanceGeneration(key);
     this.connectionStates.set(key, { status: 'starting' });
-    const mcpPolicy = await this.codexMcpPolicy?.get(authProfileId);
-    const connection = this.connectionFactory(this.logger, {
-      env: codexAuthEnvironment(authProfileId),
-      inheritConfiguredMcp: mcpPolicy?.inheritConfiguredMcp,
+    // Reserve the profile synchronously before policy lookup can yield.
+    const connection = Promise.resolve().then(async () => {
+      const mcpPolicy = await this.codexMcpPolicy?.get(authProfileId);
+      if (this.connectionGenerations.get(key) !== generation) {
+        throw new Error('Codex App Server connection was reset while starting.');
+      }
+      return this.connectionFactory(this.logger, {
+        env: codexAuthEnvironment(authProfileId),
+        inheritConfiguredMcp: mcpPolicy?.inheritConfiguredMcp,
+      });
     });
     this.connections.set(key, connection);
     try {
