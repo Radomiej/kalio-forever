@@ -14,6 +14,8 @@ it('loads only the selected session audit and clears evidence when the session c
   const query = new URLSearchParams(get.mock.calls[0][0].split('?')[1]);
   expect(query.get('sessionId')).toBe('first');
   expect(query.get('source')).toBe('all');
+  expect(query.get('label')).toBe('llm.turn.started');
+  expect(result.current.error).toBeNull();
   get.mockReturnValueOnce(new Promise(() => undefined));
   rerender({ sessionId: 'second' });
   expect(result.current.entries).toEqual([]);

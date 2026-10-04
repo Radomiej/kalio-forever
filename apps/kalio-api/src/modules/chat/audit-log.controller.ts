@@ -14,7 +14,8 @@ export class AuditLogController {
   /**
    * GET /api/audit-log
    * Query params:
-   *   limit  — max rows to return (default 200, max 500)
+   *   limit  — max rows to return (default 200, max 2000)
+   *   label  — exact event label (optional filter, applied before limit)
    *   type   — comma-separated AuditType values (optional filter)
    *   since  — Unix ms timestamp (optional, inclusive lower bound)
    *   until  — Unix ms timestamp (optional, inclusive upper bound)
@@ -28,6 +29,7 @@ export class AuditLogController {
     @Query('until') untilStr?: string,
     @Query('source') sourceStr?: string,
     @Query('turnId') turnId?: string,
+    @Query('label') label?: string,
   ) {
     const parsedLimit = parseInt(limitStr ?? '200', 10);
     const limit = Math.max(1, Math.min(Number.isFinite(parsedLimit) ? parsedLimit : 200, 2000));
@@ -35,7 +37,7 @@ export class AuditLogController {
     const since = parseTimestampQuery(sinceStr);
     const until = parseTimestampQuery(untilStr);
     const source = parseSource(sourceStr);
-    return this.audit.listEntries({ limit, types, sessionId, turnId, since, until, source });
+    return this.audit.listEntries({ limit, types, sessionId, turnId, label, since, until, source });
   }
 
   @Get('retention')

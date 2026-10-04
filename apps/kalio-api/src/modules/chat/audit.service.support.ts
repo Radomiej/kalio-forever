@@ -21,6 +21,7 @@ export interface AuditLogQuery {
   types?: AuditType[] | null;
   sessionId?: string;
   runId?: string;
+  label?: string;
   turnId?: string;
   since?: number | null;
   until?: number | null;
@@ -106,6 +107,9 @@ export function buildAuditWhereClause(query: AuditLogQuery, tableName: 'audit_lo
   }
   if (query.sessionId) {
     conditions.push(sql`${sql.raw(`${tableName}.session_id`)} = ${query.sessionId}`);
+  }
+  if (query.label) {
+    conditions.push(sql`${sql.raw(`${tableName}.label`)} = ${query.label}`);
   }
   if (query.runId) {
     conditions.push(sql`(

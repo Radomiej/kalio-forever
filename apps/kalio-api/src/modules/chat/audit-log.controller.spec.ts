@@ -99,6 +99,19 @@ describe('AuditLogController', () => {
   });
 
   describe('list()', () => {
+    it('filters exact labels in hot and archived records before the limit', async () => {
+      await drizzleSvc.db.insert(schema.auditLog).values([
+        { id: 'model-hot', sessionId: 'sess-1', type: 'runtime_event', label: 'llm.turn.started', createdAt: new Date(4000) },
+        { id: 'newer-noise', sessionId: 'sess-1', type: 'runtime_event', label: 'devin.tool', createdAt: new Date(6000) },
+      ]);
+      await drizzleSvc.db.insert(schema.auditLogArchive).values({
+        id: 'model-archive', sessionId: 'sess-1', type: 'runtime_event', label: 'llm.turn.started',
+        createdAt: new Date(3000), archivedAt: new Date(7000),
+      });
+      const rows = await controller.list('2', 'runtime_event', 'sess-1', undefined, undefined, 'all', undefined, 'llm.turn.started');
+      expect(rows.map(row => row.id)).toEqual(['model-archive', 'model-hot']);
+    });
+
     it('does not fall back to unscoped records when the requested turn has no evidence', async () => {
       const rows = await controller.list(undefined, undefined, 'sess-1', undefined, undefined, 'all', 'missing-turn');
       expect(rows).toEqual([]);

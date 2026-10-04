@@ -8,7 +8,7 @@ export function useExecutionGraphTurnModels(sessionId: string | null, lifecycleK
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
-    const query = new URLSearchParams({ sessionId, type: 'runtime_event', source: 'all', limit: '2000' });
+    const query = new URLSearchParams({ sessionId, type: 'runtime_event', label: 'llm.turn.started', source: 'all', limit: '2000' });
     void apiClient.get<AuditLogEntry[]>(`/api/audit-log?${query}`).then(({ data }) => {
       if (!Array.isArray(data)) throw new Error('Invalid graph runtime audit response');
       if (!cancelled) setSnapshot({ sessionId, entries: data, error: data.length >= 2000 ? 'Runtime audit limit reached; older models may be unavailable.' : null });
