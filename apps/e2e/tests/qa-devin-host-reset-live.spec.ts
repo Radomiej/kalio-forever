@@ -39,9 +39,10 @@ test('host reset terminates a no-tool turn and the same Devin chat answers again
     await expect.poll(async () => (await request.get(`${API_BASE}/sessions/${session}/runs/current`)).text()).toBe('');
     const runResponse = await request.get(`${API_BASE}/sessions/${session}/runs/history?turnIds=${prompt!.turnId!}`);
     expect(runResponse.ok()).toBe(true);
-    const outcomes = await runResponse.json() as { status: string }[];
+    const outcomes = await runResponse.json() as { status: string; errorMessage?: string }[];
     expect(outcomes).toHaveLength(1);
     expect(['failed', 'interrupted', 'cancelled', 'interrupted_needs_retry']).toContain(outcomes[0].status);
+    expect(outcomes[0].errorMessage).toBe('Turn interrupted because the external agent runtime was lost.');
     await page.reload();
     const bubble = page.getByTestId('agent-turn-bubble').filter({ hasText: partial });
     await expect(bubble.getByTestId('turn-error-indicator')).toBeVisible();
