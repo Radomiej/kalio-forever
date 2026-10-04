@@ -32,6 +32,16 @@ test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', asy
     expect(calls[0].data?.['args']).toEqual({ command: 'npm', args: ['run', 'build'], cwd: 'E:/Projekty/home-site' });
     expect((await audit()).filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
     await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-awaiting-confirmation.png`) });
+    if (process.env['KALIO_DEVIN_BUILD_PENDING_RELOAD'] === '1') {
+      await page.reload();
+      await expect(confirm).toBeVisible({ timeout: 30_000 });
+      await expect(confirm).toHaveCount(1);
+      await expect(page.getByTestId('tool-call-bubble').filter({ has: confirm }).getByRole('region', { name: 'Full tool arguments' })).toBeVisible();
+      const reloaded = await audit();
+      expect(reloaded.filter(entry => entry.type === 'tool_call')).toEqual(calls);
+      expect(reloaded.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
+      await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-pending-after-f5.png`) });
+    }
     await confirm.click();
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible({ timeout: 60_000 });
     await expect.poll(async () => (await request.get(`${API_BASE}/sessions/${session}/runs/current`)).text()).toBe('');
