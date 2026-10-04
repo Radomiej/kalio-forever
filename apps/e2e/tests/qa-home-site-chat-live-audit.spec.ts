@@ -25,6 +25,11 @@ test('completed real Home Site conversation hydrates without stale thinking on m
     await expect(page.getByTestId('session-panel')).not.toBeVisible();
     const thinking = page.getByRole('button', { name: 'Thinking', exact: true });
     expect(await thinking.locator('.animate-pulse, .loading').count()).toBe(0);
+    const headingWidths = await page.getByTestId('agent-turn-bubble').getByRole('heading').evaluateAll(
+      headings => headings.map(heading => ({ client: heading.clientWidth, scroll: heading.scrollWidth })),
+    );
+    expect(headingWidths.length, 'Inspect actual persisted response headings').toBeGreaterThan(0);
+    expect(headingWidths.every(width => width.scroll <= width.client + 1), 'Headings must wrap, not clip internally').toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/completed-real-chat-${width}.png`) });
   }

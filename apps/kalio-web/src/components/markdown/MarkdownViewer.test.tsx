@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { MarkdownViewer } from './MarkdownViewer';
 
 describe('MarkdownViewer', () => {
+  it.each([1, 2, 3, 4])('allows long level-%s headings to wrap without clipping', (level) => {
+    const title = 'QA235_PREVIEW_RESULT_1791115971691';
+    render(<MarkdownViewer content={`${'#'.repeat(level)} ${title}`} />);
+    expect(screen.getByRole('heading', { level, name: title })).toHaveClass('[overflow-wrap:anywhere]');
+  });
   it('REGRESSION: renders raw tool_call XML as escaped transcript text', () => {
     render(
       <MarkdownViewer
