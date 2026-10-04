@@ -121,6 +121,26 @@ describe('KalioMcpBridgeService', () => {
     await client.close();
   });
 
+  it('preserves a long file result including its tail over the real HTTP MCP transport', async () => {
+    const content = Array.from({ length: 461 }, (_, index) => `${index + 1}: zażółć gęślą jaźń`).join('\n');
+    dispatchSpy.mockImplementationOnce(async (callId: string) => ({
+      callId, status: 'success' as const, data: { path: 'fixture.jsx', lines: 461, content },
+    }));
+    const client = new Client({ name: 'full-file-bridge-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: { headers: { Authorization: 'Bearer test-bridge-token', 'x-kalio-session-id': 'session-1' } },
+    });
+    try {
+      await client.connect(transport);
+      const result = await client.callTool({ name: 'vfs_read', arguments: { filePath: 'fixture.jsx' } });
+      const text = findTextContent(result.content);
+      expect(JSON.parse(text?.text ?? '')).toEqual({ path: 'fixture.jsx', lines: 461, content });
+      expect(text?.text).toContain('461: zażółć gęślą jaźń');
+    } finally {
+      await client.close();
+    }
+  });
+
   describe.each(['standalone', 'managed'] as const)('tool result serialization (%s)', (mode) => {
     it.each([
       { callId: 'cancelled-no-reason', status: 'cancelled' },
