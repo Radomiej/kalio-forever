@@ -33,7 +33,8 @@ async function clickStopButton(page: Page): Promise<void> {
 }
 
 test.describe('workflow stop on built QA', () => {
-  test('workflow stop clears the stop action after a workflow launch', async ({ page, request }) => {
+  for (const transport of ['socket', 'delete'] as const) {
+  test(`workflow ${transport} drains active role requests after a workflow launch`, async ({ page, request }) => {
     test.setTimeout(60_000);
 
     let createdSessionId: string | null = null;
@@ -69,6 +70,21 @@ test.describe('workflow stop on built QA', () => {
       await expect(stopBtn).toBeVisible({ timeout: 20_000 });
       await expect.poll(() => provider.pendingStreams).toBeGreaterThan(0);
 
+      if (transport === 'delete') {
+        expect(createdSessionId).not.toBeNull();
+        const deletedId = createdSessionId;
+        const response = await request.delete(`${API_BASE}/sessions/${deletedId}`, { timeout: 5000 });
+        expect(response.ok()).toBeTruthy();
+        await expect.poll(() => provider.pendingStreams, { timeout: 2000 }).toBe(0);
+        expect((await request.get(`${API_BASE}/sessions/${deletedId}`)).status()).toBe(404);
+        createdSessionId = null;
+        await page.reload();
+        await expect(page.getByTestId('chat-stop-btn')).toBeHidden();
+        await expect(page.getByTestId('pending-agent-bubble')).toHaveCount(0);
+        await page.screenshot({ path: test.info().outputPath('deleted-workflow-after-reload.png'), fullPage: true });
+        return;
+      }
+
       await clickStopButton(page);
       expect(stopFrames).toHaveLength(1);
       console.log(JSON.stringify({ createdSessionId, stopFrames }));
@@ -99,4 +115,5 @@ test.describe('workflow stop on built QA', () => {
       }
     }
   });
+  }
 });

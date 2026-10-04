@@ -45,14 +45,16 @@ export class SessionRuntimeStopService {
       }
     };
 
-    await attempt('Architecture runtime stop', () => this.stopArchitectureRunsForSessions(sessionIds));
-    await attempt('AgentFlow runtime stop', () => this.stopAgentFlowRunsForSessions(sessionIds));
-    await attempt('Subagent runtime stop', () => this.stopSubagentRunsForSessions(sessionIds));
-
-    for (const sessionId of sessionIds) {
-      await attempt(`CLI agent stop for ${sessionId}`, () => this.stopCliAgentSessionIfNeeded(sessionId));
-      await attempt(`Chat pipeline drain for ${sessionId}`, () => this.pipeline.stopAndDrain(sessionId));
-    }
+    // Workflow drain can await descendants; initiate every cancellation owner first.
+    await Promise.all([
+      attempt('Architecture runtime stop', () => this.stopArchitectureRunsForSessions(sessionIds)),
+      attempt('AgentFlow runtime stop', () => this.stopAgentFlowRunsForSessions(sessionIds)),
+      attempt('Subagent runtime stop', () => this.stopSubagentRunsForSessions(sessionIds)),
+      ...sessionIds.flatMap(sessionId => [
+        attempt(`CLI agent stop for ${sessionId}`, () => this.stopCliAgentSessionIfNeeded(sessionId)),
+        attempt(`Chat pipeline drain for ${sessionId}`, () => this.pipeline.stopAndDrain(sessionId)),
+      ]),
+    ]);
 
     if (failures.length > 0) {
       throw new Error(`Session runtime did not become quiescent: ${failures.join('; ')}`);

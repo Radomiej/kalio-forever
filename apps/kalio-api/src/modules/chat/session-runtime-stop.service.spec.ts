@@ -50,6 +50,31 @@ function makeAgentFlowSnapshot(id: string, status: 'running' | 'completed'): Age
 }
 
 describe('SessionRuntimeStopService', () => {
+  it('starts subagent and pipeline cancellation before awaiting architecture drain', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const entering = new Promise<void>(resolve => { entered = resolve; });
+    const drain = new Promise<readonly string[]>(resolve => { release = () => resolve([]); });
+    const stopSubagents = vi.fn(async () => undefined);
+    const stopPipeline = vi.fn(async () => undefined);
+    const service = new SessionRuntimeStopService(
+      { listChildren: vi.fn(async () => []), get: vi.fn(async () => rootSession) } as never,
+      { stopAndDrain: stopPipeline } as never,
+      undefined, undefined,
+      { stopRunsForSessions: () => { entered(); return drain; } },
+      { stopAndDrainSessions: stopSubagents } as unknown as SubagentRuntimePort,
+    );
+    const stopping = service.stopSessionTree('root-session');
+    try {
+      await entering;
+      await expect.poll(() => stopSubagents.mock.calls.length, { timeout: 200 }).toBe(1);
+      expect(stopPipeline).toHaveBeenCalledWith('root-session');
+    } finally {
+      release();
+      await stopping;
+    }
+  });
+
   it('stops architecture, agent flow, CLI, and chat pipeline for the full session tree', async () => {
     const sessions = {
       listChildren: vi.fn(async (sessionId: string): Promise<ChatSession[]> => {
