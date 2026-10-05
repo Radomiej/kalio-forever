@@ -22,7 +22,10 @@ export function withRecordedTurnModels(model: ExecutionGraphModel, entries: Audi
     if (node.payload.kind !== 'turn') return node;
     const turn = node.payload.turn;
     const identity = buildTurnIdentity(turn, sessionById, personaById, recordedTurnModel(entries, turn.sessionId, turn.id));
-    const detail = turn.done && node.status === 'error' ? 'Turn ended with errors' : identity.detail;
+    const detail = turn.done && node.status === 'error'
+      ? turn.error?.code === 'CANCELLED' || turn.error?.code === 'INTERRUPTED'
+        ? 'Turn interrupted' : 'Turn ended with errors'
+      : identity.detail;
     return { ...node, subtitle: identity.subtitle, detail: identity.modelLabel ? detail : `${detail ?? ''} · Runtime model unavailable`,
       payload: { ...node.payload, actorLabel: identity.actorLabel, modelLabel: identity.modelLabel } };
   }) };

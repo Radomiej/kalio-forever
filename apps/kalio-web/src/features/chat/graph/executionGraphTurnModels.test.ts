@@ -11,13 +11,20 @@ function entry(sessionId: string, turnId: string, model: unknown, createdAt = 1)
 describe('recordedTurnModel', () => {
   it('does not label a terminal error as completed when hydrating the runtime model', () => {
     const model = buildExecutionGraphModel({ sessionId: 'session', messages: [],
-      turns: [{ id: 'turn', sessionId: 'session', done: true, error: { code: 'CANCELLED', message: 'Stopped' }, items: [] }],
+      turns: [{ id: 'turn', sessionId: 'session', done: true, error: { code: 'TOOL_ERROR', message: 'Failed' }, items: [] }],
       toolActivities: [], activeAgentLoops: {}, sessions: [], sessionMessages: {} });
     const hydrated = withRecordedTurnModels(model, [entry('session', 'turn', 'swe-2')], [], []);
     const turn = hydrated.nodes.find(node => node.payload.kind === 'turn');
     expect(turn?.status).toBe('error');
     expect(turn?.detail).toBe('Turn ended with errors');
     expect(turn?.payload.kind === 'turn' && turn.payload.modelLabel).toBe('swe-2');
+  });
+  it.each(['CANCELLED', 'INTERRUPTED'])('distinguishes %s from a failed turn after model hydration', (code) => {
+    const model = buildExecutionGraphModel({ sessionId: 'session', messages: [],
+      turns: [{ id: 'turn', sessionId: 'session', done: true, error: { code, message: 'Stopped' }, items: [] }],
+      toolActivities: [], activeAgentLoops: {}, sessions: [], sessionMessages: {} });
+    const hydrated = withRecordedTurnModels(model, [entry('session', 'turn', 'swe-2')], [], []);
+    expect(hydrated.nodes.find(node => node.payload.kind === 'turn')?.detail).toBe('Turn interrupted');
   });
   it('reads the historical model from the exact session and turn', () => {
     expect(recordedTurnModel([entry('other', 'turn', 'wrong'), entry('session', 'other', 'wrong'),
