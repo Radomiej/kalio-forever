@@ -63,6 +63,9 @@ test('window monitor attributes a vanished hidden control to its live event thre
       assert.ok(vanished.length > 0, 'destroy-before-delivery control must exercise attribution');
       assert.ok(vanished.some(row => row.includes(`pid=${monitor.pid} `)
         && row.includes('pidSource=event-thread')), 'vanished control must retain process attribution');
+      assert.ok(vanished.some(row => row.includes(`pid=${monitor.pid} `)
+        && /processName=powershell\.exe(?:\s|$)/i.test(row)),
+      'event callback must resolve the process name without relying on a later process snapshot');
       assert.match(stdout, /WINDOW_EVENT_HOOK_FINISHED/);
     } finally {
       if (monitor.exitCode === null) monitor.kill();

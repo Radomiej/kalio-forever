@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 function runCommand(command, args) {
   return new Promise((accept, reject) => {
-    execFile(command, args, { windowsHide: true, timeout: 10000, maxBuffer: 65536 },
+    execFile(command, args, { windowsHide: true, timeout: 10000, maxBuffer: 1048576 },
       (error, stdout) => {
         if (error && typeof error.code !== 'number') { reject(error); return; }
         accept({ code: error?.code ?? 0, stdout });
@@ -19,19 +19,26 @@ export async function resolveListeningPids(ports, { platform = process.platform,
 
   if (platform === 'win32') {
     const result = await run(
-      resolve(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-        `$ErrorActionPreference='Stop'; Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in @(${requested.join(',')}) } | ForEach-Object { "$($_.LocalPort):$($_.OwningProcess)" }`],
+      resolve(process.env.SystemRoot ?? 'C:/Windows', 'System32/netstat.exe'),
+      ['-ano', '-p', 'tcp'],
     );
     if (result.code !== 0) throw new Error('Listener ownership query failed');
-    for (const line of result.stdout.trim().split(/\r?\n/).filter(Boolean)) {
-      const match = /^(\d+):(\d+)$/.exec(line.trim());
+    const lines = result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    // The title and column labels may be localized; protocol identifiers are not.
+    if (lines.length > 1 && /^Proto\s/i.test(lines[1])) lines.shift();
+    if (/^Proto\s/i.test(lines[0] ?? '')) lines.shift();
+    for (const line of lines) {
+      const match = /^TCP\s+\S+:(\d+)\s+\S+:\d+\s+(\S+)\s+(\d+)$/.exec(line);
       const port = Number(match?.[1]);
-      const pid = Number(match?.[2]);
-      if (!match || !requested.includes(port) || !Number.isSafeInteger(pid) || pid <= 0) {
+      const pid = Number(match?.[3]);
+      if (!match || port < 0 || port > 65535 || !Number.isSafeInteger(pid) || pid < 0) {
         throw new Error('Invalid listener ownership response');
       }
-      if (!owners.has(port)) owners.set(port, pid);
+      if (match[2] !== 'LISTENING' || !requested.includes(port)) continue;
+      if (pid === 0 || (owners.has(port) && owners.get(port) !== pid)) {
+        throw new Error('Ambiguous listener ownership response');
+      }
+      owners.set(port, pid);
     }
     return owners;
   }

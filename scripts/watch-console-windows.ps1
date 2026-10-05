@@ -22,6 +22,8 @@ public static class KalioConsoleWindowWatch {
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("kernel32.dll")] private static extern IntPtr OpenThread(uint access, bool inherit, uint thread);
     [DllImport("kernel32.dll")] private static extern uint GetProcessIdOfThread(IntPtr thread);
+    [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder name, ref uint size);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr hwnd, uint min, uint max, uint remove);
@@ -29,6 +31,18 @@ public static class KalioConsoleWindowWatch {
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref Message message);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CreateWindowEx(uint ex, string cls, string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr hwnd);
+    private static string ProcessName(uint pid) {
+        if (pid == 0) return "unavailable";
+        var process = OpenProcess(0x1000, false, pid);
+        if (process == IntPtr.Zero) return "unavailable";
+        try {
+            var name = new StringBuilder(32768);
+            uint size = (uint)name.Capacity;
+            // Only the executable basename is retained; no path or arguments are logged.
+            return QueryFullProcessImageName(process, 0, name, ref size)
+                ? System.IO.Path.GetFileName(name.ToString()) : "unavailable";
+        } finally { CloseHandle(process); }
+    }
     public static string[] Capture(int seconds, bool selfTest) {
         var rows = new List<string>();
         int unclassified = 0;
@@ -51,6 +65,7 @@ public static class KalioConsoleWindowWatch {
                     + " hwnd=" + hwnd.ToInt64() + " eventTickMs=" + time
                     + " pid=" + eventPid + " eventThreadId=" + thread
                     + " pidSource=" + (eventPid == 0 ? "unavailable" : "event-thread")
+                    + " processName=" + ProcessName(eventPid)
                     + " class=unavailable");
                 return;
             }
@@ -59,6 +74,7 @@ public static class KalioConsoleWindowWatch {
             uint pid; GetWindowThreadProcessId(hwnd, out pid);
             // visibility is sampled at callback delivery, not at original event time.
             rows.Add(DateTimeOffset.UtcNow.ToString("o") + " pid=" + pid + " event=" + evt
+                + " processName=" + ProcessName(pid)
                 + " hwnd=" + hwnd.ToInt64() + " visible=" + IsWindowVisible(hwnd)
                 + " eventTickMs=" + time + " class=" + name);
         };
