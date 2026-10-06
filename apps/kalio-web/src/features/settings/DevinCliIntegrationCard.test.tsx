@@ -15,6 +15,8 @@ it('CLI readiness does not claim that a model host is running', () => {
   expect(screen.getByText('CLI ready')).toBeVisible();
   expect(screen.queryByText('Online', { exact: true })).toBeNull();
   expect(screen.getByText(/Model hosts start on the first message/)).toBeVisible();
+  expect(screen.getByText(/Kalio tools are forwarded through the local MCP bridge/)).toBeVisible();
+  expect(screen.queryByText(/local Streamable HTTP bridge/)).toBeNull();
   expect(screen.getByText('0 model hosts · devin.exe')).toBeVisible();
 });
 

@@ -118,7 +118,7 @@ export function DevinCliIntegrationCard({
           </span>
         </div>
         <p className="text-xs text-base-content/50">
-          CLI readiness does not mean an agent is running. Model hosts start on the first message. Host-local Devin uses ACP. Kalio tools are forwarded through the local Streamable HTTP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Token actions and switches reset active Devin hosts.
+          CLI readiness does not mean an agent is running. Model hosts start on the first message. Host-local Devin uses ACP. Kalio tools are forwarded through the local MCP bridge and remain scoped to the current session. Native provider tools stay blocked until enabled below and still pass through Kalio approval. Token actions and switches reset active Devin hosts.
         </p>
         <div className="rounded-lg border border-base-300 bg-base-200/20 p-3">
           <div className="mb-2 text-sm font-medium">Kalio MCP bridge token</div>
