@@ -71,6 +71,7 @@ export function statusTone(status: ExecutionGraphNode['status']): string {
 }
 
 export function statusLabel(status: ExecutionGraphNode['status']): string {
+  if (status === 'cancelled') return 'cancelled';
   if (status === 'error') return 'error';
   if (status === 'waiting') return 'waiting';
   if (status === 'running') return 'running';

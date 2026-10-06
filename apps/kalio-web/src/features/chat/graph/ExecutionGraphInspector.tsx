@@ -24,6 +24,7 @@ function shortNodeLabel(value: string | null | undefined): string {
 }
 
 function statusLabel(status: ExecutionGraphNode['status']): string {
+  if (status === 'cancelled') return 'cancelled';
   if (status === 'error') return 'error';
   if (status === 'waiting') return 'waiting';
   if (status === 'running') return 'running';
