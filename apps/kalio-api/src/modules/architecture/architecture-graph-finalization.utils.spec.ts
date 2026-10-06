@@ -157,6 +157,66 @@ describe('architecture graph finalization helpers', () => {
     })).toBe('CLI child implementation is incomplete: child status is running.');
   });
 
+  it.each(['running', 'cancelled', 'failed', undefined])('does not let a passed QA gate hide unresolved child status %s', (status) => {
+    const implementation = event('participant_output', 'implementer', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['spawn_cli_agent'],
+      targetPaths: ['src/index.ts'],
+      childCliSessions: [{ status }],
+    }));
+    const verification = event('participant_output', 'verifier', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['fs_read'],
+      targetPaths: ['package.json'],
+    }));
+    expect(blockingFinalizationReason({
+      schema,
+      runContext: { externalQualityGate: { source: 'QA', status: 'passed', highFindings: 0 } },
+      events: [implementation, verification],
+    })).toBe(`CLI child implementation is incomplete: child status is ${status ?? 'unknown'}.`);
+  });
+
+  it('does not let independent read/build proof hide a currently running implementation child', () => {
+    const implementation = event('participant_output', 'implementer', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['spawn_cli_agent'],
+      targetPaths: ['src/index.ts'],
+      childCliSessions: [{ status: 'running' }],
+    }));
+    const verification = event('participant_output', 'verifier', toolData({
+      toolResultCount: 2,
+      successfulToolNames: ['fs_read', 'terminal_output'],
+      targetPaths: ['package.json'],
+    }), [{ kind: 'BUILD_RESULT', status: 'passed', data: { exitCode: 0 } }]);
+    expect(blockingFinalizationReason({ schema, runContext: {}, events: [implementation, verification] }))
+      .toBe('CLI child implementation is incomplete: child status is running.');
+  });
+
+  it.each(['completed', 'terminal-success', 'success', 'exited'])('allows a newer resolved child status %s to supersede old running evidence', (status) => {
+    const running = event('participant_output', 'implementer', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['spawn_cli_agent'],
+      targetPaths: ['src/index.ts'],
+      childCliSessions: [{ status: 'running' }],
+    }));
+    const resolved: ArchitectureExecutionEvent = {
+      ...running,
+      id: 'resolved-implementation',
+      sequence: 2,
+      data: toolData({
+        toolResultCount: 2,
+        successfulToolNames: ['message_cli_agent'],
+        targetPaths: ['src/index.ts'],
+        childCliSessions: [{ status }],
+      }),
+    };
+    expect(blockingFinalizationReason({
+      schema,
+      runContext: { externalQualityGate: { source: 'QA', status: 'passed', highFindings: 0 } },
+      events: [running, resolved],
+    })).toBeUndefined();
+  });
+
   it('validates implementation and verifier tool-executor contracts from typed evidence', () => {
     expect(architectureToolExecutorContract({
       slot: implementerSlot,

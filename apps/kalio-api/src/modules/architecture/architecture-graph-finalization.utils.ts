@@ -32,6 +32,10 @@ export function blockingFinalizationReason(input: ArchitectureGraphFinalizationI
   if (externalBlocker) {
     return externalBlocker;
   }
+  const childBlocker = blockingLatestImplementationChildReason(input);
+  if (childBlocker) {
+    return childBlocker;
+  }
   if (externalQualityGateAcceptanceReason(input) && hasVisibleWorkflowToolProof(input)) {
     return undefined;
   }
@@ -236,12 +240,12 @@ function blockingIncompleteMaterializationReason(input: ArchitectureGraphFinaliz
     if (!evidence) {
       continue;
     }
-    if (hasIndependentHostVerificationEvidence(input)) {
-      return undefined;
-    }
     const unresolvedReason = unresolvedCliChildReason(evidence);
     if (unresolvedReason) {
       return unresolvedReason;
+    }
+    if (hasIndependentHostVerificationEvidence(input)) {
+      return undefined;
     }
     if (hasMaterializationEvidence(evidence, input.events)) {
       return undefined;
@@ -252,6 +256,17 @@ function blockingIncompleteMaterializationReason(input: ArchitectureGraphFinaliz
     }
   }
   return undefined;
+}
+
+function blockingLatestImplementationChildReason(input: ArchitectureGraphFinalizationInput): string | undefined {
+  const implementationSlotIds = new Set(input.schema.roleSlots.filter(isImplementationProofSlot).map(slot => slot.id));
+  const latest = [...input.events].reverse().find(event => (
+    event.type === 'participant_output'
+    && event.roleSlotId !== undefined
+    && implementationSlotIds.has(event.roleSlotId)
+    && isRecord(event.data)
+  ));
+  return latest && isRecord(latest.data) ? unresolvedCliChildReason(toolEvidence(latest.data)) : undefined;
 }
 
 function hasIndependentHostVerificationEvidence(input: ArchitectureGraphFinalizationInput): boolean {
