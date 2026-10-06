@@ -21,9 +21,13 @@ function makeAdapter(id: string) {
 describe('CLIAgentProbeService', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('uses a resolved native default instead of cmd while keeping the probe audited', async () => {
+  it.each(['copilot', 'gemini'])('uses a resolved %s default instead of cmd with scoped probe options', async (agentId) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    vi.mocked(installedWindowsProbeCommand).mockReturnValueOnce({ executable: 'C:/npm/copilot.exe', args: [] });
+    const beforeRelaunch = process.env.GEMINI_CLI_NO_RELAUNCH;
+    const executable = agentId === 'gemini' ? process.execPath : 'C:/npm/copilot.exe';
+    const args = agentId === 'gemini' ? ['C:/npm/gemini.js'] : [];
+    vi.mocked(installedWindowsProbeCommand).mockReturnValueOnce({ executable, args,
+      ...(agentId === 'gemini' ? { env: { GEMINI_CLI_NO_RELAUNCH: 'true' } } : {}) });
     vi.mocked(childProcess.execFile).mockImplementation((
       ((_file: string, _args: readonly string[], _options: Record<string, unknown>,
         callback: (error: Error | null, stdout: string, stderr: string) => void) => {
@@ -32,15 +36,21 @@ describe('CLIAgentProbeService', () => {
       }) as unknown as typeof childProcess.execFile
     ));
     const copilot = { ...makeAdapter('copilot'), executable: () => 'cmd', wrapperArgs: () => ['/c', 'copilot'] };
+    const gemini = { ...makeAdapter('gemini'), executable: () => 'cmd', wrapperArgs: () => ['/c', 'gemini'] };
     const audit = { recordInvocation: vi.fn().mockResolvedValue(undefined) };
     try {
       const service = new CLIAgentProbeService({ getConfig: vi.fn().mockResolvedValue({ cliPath: '' }) } as never,
-        copilot as never, makeAdapter('gemini') as never, makeAdapter('claude') as never,
+        copilot as never, gemini as never, makeAdapter('claude') as never,
         makeAdapter('codex') as never, audit as never);
-      expect(await service.probe('copilot')).toEqual({ available: true, version: 'native-version' });
-      expect(childProcess.execFile).toHaveBeenCalledWith('C:/npm/copilot.exe', ['--version'],
-        expect.objectContaining({ windowsHide: true }), expect.any(Function));
-      expect(audit.recordInvocation).toHaveBeenCalledWith(expect.objectContaining({ command: 'C:/npm/copilot.exe' }));
+      expect(await service.probe(agentId)).toEqual({ available: true, version: 'native-version' });
+      expect(childProcess.execFile).toHaveBeenCalledWith(executable, [...args, '--version'],
+        expect.objectContaining({ windowsHide: true,
+          ...(agentId === 'gemini' ? { env: expect.objectContaining({
+            GEMINI_CLI_NO_RELAUNCH: 'true', PATH: process.env.PATH,
+          }) } : {}),
+        }), expect.any(Function));
+      expect(process.env.GEMINI_CLI_NO_RELAUNCH).toBe(beforeRelaunch);
+      expect(audit.recordInvocation).toHaveBeenCalledWith(expect.objectContaining({ command: executable }));
     } finally { vi.restoreAllMocks(); }
   });
 

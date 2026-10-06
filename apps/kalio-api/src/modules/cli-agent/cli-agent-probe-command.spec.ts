@@ -27,7 +27,8 @@ describe('resolveWindowsProbeCommand', () => {
   });
   it('runs Gemini bundle using system Node, without cmd', () => {
     const result = resolveWindowsProbeCommand('gemini', 'x64', ['C:/npm/gemini'], () => 'C:/npm/gemini/bundle/gemini.js');
-    expect(result).toEqual({ executable: process.execPath, args: ['C:/npm/gemini/bundle/gemini.js'] });
+    expect(result).toEqual({ executable: process.execPath, args: ['C:/npm/gemini/bundle/gemini.js'],
+      env: { GEMINI_CLI_NO_RELAUNCH: 'true' } });
   });
   it('returns no override for absent packages, unsupported architecture or unknown agents', () => {
     const missing = () => { throw Object.assign(new Error('missing'), { code: 'MODULE_NOT_FOUND' }); };

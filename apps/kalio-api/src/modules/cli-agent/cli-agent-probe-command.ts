@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { delimiter, dirname, join } from 'node:path';
 
-interface ProbeCommand { executable: string; args: string[] }
+interface ProbeCommand { executable: string; args: string[]; env?: Record<string, string> }
 type ModuleResolver = (id: string, options: { paths: string[] }) => string;
 
 /** Resolve installed packages, never parse or execute arbitrary shim contents. */
@@ -23,7 +23,8 @@ export function resolveWindowsProbeCommand(
         executable = resolve(join(dirname(executable), 'vendor', target, 'bin', 'codex.exe'), { paths: [root] });
       }
       if (agentId === 'gemini' && executable.endsWith('.js')) {
-        return { executable: process.execPath, args: [executable] };
+        // Version checks need no memory tuning, IPC supervisor, or relaunch loop.
+        return { executable: process.execPath, args: [executable], env: { GEMINI_CLI_NO_RELAUNCH: 'true' } };
       }
       if (executable.toLowerCase().endsWith('.exe')) return { executable, args: [] };
     } catch (error: unknown) {
