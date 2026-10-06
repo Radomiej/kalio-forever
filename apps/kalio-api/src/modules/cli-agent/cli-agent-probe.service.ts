@@ -8,6 +8,7 @@ import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
 import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
+import { installedWindowsProbeCommand } from './cli-agent-probe-command';
 
 interface ProbeResult {
   available: boolean;
@@ -91,8 +92,11 @@ export class CLIAgentProbeService implements OnApplicationBootstrap {
 
     const agentConfig = await this.config.getConfig(agentId);
     const platform = process.platform;
-    const executable = agentConfig.cliPath || adapter.executable(platform);
-    const wrapperArgs = agentConfig.cliPath ? [] : adapter.wrapperArgs(platform);
+    const nativeProbe = !agentConfig.cliPath && platform === 'win32'
+      && adapter.executable(platform).toLowerCase() === 'cmd'
+      ? installedWindowsProbeCommand(agentId) : null;
+    const executable = agentConfig.cliPath || nativeProbe?.executable || adapter.executable(platform);
+    const wrapperArgs = agentConfig.cliPath ? [] : nativeProbe?.args ?? adapter.wrapperArgs(platform);
     const allArgs = [...wrapperArgs, ...adapter.probeArgs()];
 
     await this.cmdAudit?.recordInvocation({
