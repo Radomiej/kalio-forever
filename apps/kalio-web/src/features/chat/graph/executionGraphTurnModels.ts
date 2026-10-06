@@ -15,7 +15,7 @@ export function recordedTurnModel(entries: AuditLogEntry[], sessionId: string, t
   return models.size > 0 ? [...models].join(' → ') : null;
 }
 
-export function withRecordedTurnModels(model: ExecutionGraphModel, entries: AuditLogEntry[], sessions: ChatSession[], personas: Persona[]): ExecutionGraphModel {
+export function withRecordedTurnModels(model: ExecutionGraphModel, entries: AuditLogEntry[], sessions: ChatSession[], personas: Persona[], loading = false): ExecutionGraphModel {
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const personaById = new Map(personas.map((persona) => [persona.id, persona]));
   return { ...model, nodes: model.nodes.map((node) => {
@@ -26,7 +26,7 @@ export function withRecordedTurnModels(model: ExecutionGraphModel, entries: Audi
       ? turn.error?.code === 'CANCELLED' || turn.error?.code === 'INTERRUPTED'
         ? 'Turn interrupted' : 'Turn ended with errors'
       : identity.detail;
-    return { ...node, subtitle: identity.subtitle, detail: identity.modelLabel ? detail : `${detail ?? ''} · Runtime model unavailable`,
+    return { ...node, subtitle: identity.subtitle, detail: identity.modelLabel ? detail : `${detail ?? ''} · ${loading ? 'Loading runtime model…' : 'Runtime model unavailable'}`,
       payload: { ...node.payload, actorLabel: identity.actorLabel, modelLabel: identity.modelLabel } };
   }) };
 }

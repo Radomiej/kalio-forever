@@ -392,7 +392,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
   const selectedModel = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
     ? architectureRootModel
     : messageModel;
-  const baseModel = withRecordedTurnModels(selectedModel, runtimeAudit.entries, sessions, personas);
+  const baseModel = withRecordedTurnModels(selectedModel, runtimeAudit.entries, sessions, personas, runtimeAudit.loading);
   const waitingSessionIds = new Set(Object.entries(pendingConfirmations)
     .filter(([, requests]) => requests.length > 0)
     .map(([sessionId]) => sessionId));

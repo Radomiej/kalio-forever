@@ -9,6 +9,16 @@ function entry(sessionId: string, turnId: string, model: unknown, createdAt = 1)
 }
 
 describe('recordedTurnModel', () => {
+  it('shows loading rather than unavailable before identity evidence settles', () => {
+    const model = buildExecutionGraphModel({ sessionId: 'session', messages: [],
+      turns: [{ id: 'turn', sessionId: 'session', done: true, items: [] }],
+      toolActivities: [], activeAgentLoops: {}, sessions: [], sessionMessages: {} });
+    const pending = withRecordedTurnModels(model, [], [], [], true);
+    expect(pending.nodes.find(node => node.payload.kind === 'turn')?.detail).toContain('Loading runtime model');
+    expect(pending.nodes.find(node => node.payload.kind === 'turn')?.detail).not.toContain('unavailable');
+    const settled = withRecordedTurnModels(model, [], [], [], false);
+    expect(settled.nodes.find(node => node.payload.kind === 'turn')?.detail).toContain('Runtime model unavailable');
+  });
   it('does not label a terminal error as completed when hydrating the runtime model', () => {
     const model = buildExecutionGraphModel({ sessionId: 'session', messages: [],
       turns: [{ id: 'turn', sessionId: 'session', done: true, error: { code: 'TOOL_ERROR', message: 'Failed' }, items: [] }],

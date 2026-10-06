@@ -26,4 +26,33 @@ it('exposes failure without using fabricated model evidence', async () => {
   const { result } = renderHook(() => useExecutionGraphTurnModels('session', 'done'));
   await waitFor(() => expect(result.current.error).toBe('offline'));
   expect(result.current.entries).toEqual([]);
+  expect(result.current.loading).toBe(false);
+});
+
+it('marks lifecycle refresh pending and ignores an obsolete session response', async () => {
+  let finishOld!: (value: { data: [] }) => void;
+  get.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve; }));
+  get.mockResolvedValueOnce({ data: [] });
+  const { result, rerender } = renderHook(({ sessionId, lifecycle }) =>
+    useExecutionGraphTurnModels(sessionId, lifecycle),
+    { initialProps: { sessionId: 'old', lifecycle: 'active' } });
+  rerender({ sessionId: 'new', lifecycle: 'done' });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  finishOld({ data: [] });
+  expect(result.current.sessionId).toBe('new');
+  get.mockReturnValueOnce(new Promise(() => undefined));
+  rerender({ sessionId: 'new', lifecycle: 'next' });
+  expect(result.current.loading).toBe(true);
+  expect(result.current.entries).toEqual([]);
+});
+
+it('distinguishes pending evidence from settled missing evidence', async () => {
+  let finish!: (value: { data: [] }) => void;
+  get.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const { result } = renderHook(() => useExecutionGraphTurnModels('session', 'done'));
+  expect(result.current.loading).toBe(true);
+  finish({ data: [] });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.entries).toEqual([]);
+  expect(result.current.error).toBeNull();
 });
