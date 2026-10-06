@@ -22,3 +22,9 @@ These are argument-guard tests, not parser/child-failure/timeout coverage.
 Reviewed the existing startup launcher: it gates startup on both monitor READY
 signals and retains raw capture. A genuine startup test needs first checking
 active sessions and backing up retained provider configuration before stopping QA.
+
+Parser follow-up: eight Node tests passed, including valid banner-prefixed JSON,
+missing/truncated JSON and malformed rows. Invalid captures now throw instead
+of being treated as empty. Importing the parser no longer launches observers.
+Replayed the real saved artifact: 484 samples / 47 process identities parsed.
+Child spawn-failure and cleanup/timeout tests remain outside this proof.
