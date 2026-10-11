@@ -29,7 +29,7 @@ describe('model catalog failure diagnostics', () => {
 });
 
 describe('parseDevinCliModelCatalog', () => {
-  it('reads family slugs and exact model ids, including current Devin model lanes', () => {
+  it('returns only concrete row IDs, excluding family slugs and aliases', () => {
     const output = [
       '\u001b[1mAvailable models (2 families)\u001b[0m',
       'GLM-5.2 (glm-5.2)',
@@ -45,9 +45,16 @@ describe('parseDevinCliModelCatalog', () => {
     ].join('\r\n');
 
     expect(parseDevinCliModelCatalog(output)).toEqual([
-      'glm-5.2', 'glm-5-2', 'swe-2', 'swe-2-high', 'swe-2-medium', 'swe-2-max',
+      'glm-5-2', 'swe-2-high', 'swe-2-medium', 'swe-2-max',
       'fusion-gpt-6-sol-high-sidekick-swe-2-medium',
     ]);
+  });
+  it('does not advertise a family-only catalog as ready or invent its variant', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: 'SWE-2 (swe-2)\n  aliases: swe', stderr: '' });
+    const service = new DevinCliModelCatalogService({ run } as unknown as DevinCliCommandQueueService);
+    await expect(service.getCatalog('devin.exe', true)).resolves.toMatchObject({
+      models: [], status: 'unrecognized-output', stale: false,
+    });
   });
 
   it('rejects control characters and returns no identifiers for unrecognized output', () => {

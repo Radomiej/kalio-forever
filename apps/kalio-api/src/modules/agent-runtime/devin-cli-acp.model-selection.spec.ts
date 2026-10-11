@@ -9,12 +9,12 @@ const options = (currentValue = 'swe-2'): SessionConfigOption[] => [{
   options: [{ value: 'swe-2', name: 'SWE-2' }, { value: 'swe-2-high', name: 'SWE-2 High' }],
 }];
 
-function setup(configOptions: SessionConfigOption[] | undefined, restore?: 'resume' | 'load') {
+function setup(configOptions: SessionConfigOption[] | undefined, restore?: 'resume' | 'load', model = 'swe-2') {
   const request = vi.fn().mockImplementation(async (method: string) => {
     if (method === methods.agent.session.prompt) return { stopReason: 'end_turn' };
     return { sessionId: 'thread', configOptions };
   });
-  const host = new DevinAcpHost('swe-2');
+  const host = new DevinAcpHost(model);
   const internals = host as unknown as {
     connection: ClientConnection; processEpoch: string; capabilities: object;
     handleSessionUpdate(params: SessionNotification): void;
@@ -28,6 +28,54 @@ function setup(configOptions: SessionConfigOption[] | undefined, restore?: 'resu
 }
 
 describe('Devin exact session model binding', () => {
+  for (const duringSetter of [false, true]) {
+    it(`distinguishes initial GLM notification from drift during setter (${duringSetter})`, async () => {
+      const test = setup(options('glm-5-2'), undefined, 'swe-2-high');
+      const update = () => test.internals.handleSessionUpdate({ sessionId: 'thread', update: {
+        sessionUpdate: 'config_option_update', configOptions: options('glm-5-2'),
+      } });
+      test.request.mockImplementation(async (method: string) => {
+        if (method === methods.agent.session.new) {
+          update();
+          return { sessionId: 'thread', configOptions: options('glm-5-2') };
+        }
+        if (method === methods.agent.session.setConfigOption) {
+          if (duringSetter) update();
+          return { configOptions: options('swe-2-high') };
+        }
+        return { stopReason: 'end_turn' };
+      });
+      if (duringSetter) {
+        await expect(test.ensure()).rejects.toThrow(/model/i);
+        await expect(test.prompt()).rejects.toThrow();
+      } else {
+        await expect(test.ensure()).resolves.toMatchObject({ sessionId: 'thread' });
+      }
+      expect(test.request.mock.calls.some(([method]) => method === methods.agent.session.prompt)).toBe(false);
+    });
+  }
+  it('identifies a stale setter response with bounded current-model diagnostics', async () => {
+    const request = vi.fn().mockResolvedValue({ configOptions: options('glm-5-2') });
+    await expect(bindDevinSessionModel({ agent: { request } } as unknown as ClientConnection,
+      'thread', 'swe-2-high', options('glm-5-2'))).rejects.toThrow('"source":"setter_response"');
+    await expect(bindDevinSessionModel({ agent: { request } } as unknown as ClientConnection,
+      'thread', 'swe-2-high', options('glm-5-2'))).rejects.toThrow('"current":"glm-5-2"');
+  });
+  it('reports bounded model-only diagnostics without exposing metadata or other config', async () => {
+    const config: SessionConfigOption[] = [{ id: 'model', category: 'model', type: 'select', name: 'Model',
+      currentValue: 'glm-5-2-high', _meta: { private: 'DO_NOT_EXPOSE' }, options: [
+        { value: 'canonical-swe', name: 'SWE-2', description: 'DO_NOT_EXPOSE' },
+        { value: 'glm-5-2-high', name: 'GLM-5.2 High' },
+      ] }, { id: 'secret', type: 'select', name: 'Other', currentValue: 'DO_NOT_EXPOSE', options: [] }];
+    const test = setup(config);
+    let message = '';
+    try { await test.ensure(); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('canonical-swe');
+    expect(message).toContain('glm-5-2-high');
+    expect(message).not.toContain('DO_NOT_EXPOSE');
+    expect(message.length).toBeLessThan(5000);
+    expect(test.request).toHaveBeenCalledTimes(1);
+  });
   it('removes refusal fallback case-insensitively without mutating the parent environment', () => {
     const env = { DEVIN_REFUSAL_FALLBACK: 'fixture', devin_refusal_fallback: 'fixture', PATH: 'path' };
     expect(devinAcpChildEnv(env)).toEqual({ PATH: 'path' });

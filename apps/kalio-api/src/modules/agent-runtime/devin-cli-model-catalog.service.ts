@@ -30,9 +30,6 @@ export function parseDevinCliModelCatalog(output: string): string[] {
   const models = new Set<string>();
 
   for (const line of text.split(/\r?\n/)) {
-    const family = line.match(/^[^()\r\n]+\(([^\s()]+)\)\s*$/)?.[1];
-    if (family && isModelToken(family)) models.add(family);
-
     const modelId = line.match(/^\s{2,}([^\s]+)\s{2,}\S/)?.[1];
     if (modelId && modelId !== 'aliases:' && isModelToken(modelId)) models.add(modelId);
   }

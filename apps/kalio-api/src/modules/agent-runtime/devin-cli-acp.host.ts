@@ -133,7 +133,7 @@ export class DevinAcpHost {
         }
       }
       const response = await this.restoreSession(connection, externalThreadId, sessionWorkspace, normalizedMcpServers);
-      const configOptions = await bindDevinSessionModel(connection, externalThreadId, this.model, response.configOptions);
+      const configOptions = await bindDevinSessionModel(connection, externalThreadId, this.model, response.configOptions, () => { this.earlyModelUpdates.delete(externalThreadId); });
       const latestOptions = this.earlyModelUpdates.get(externalThreadId) ?? configOptions;
       assertDevinSessionModel(this.model, latestOptions);
       this.earlyModelUpdates.delete(externalThreadId);
@@ -149,7 +149,7 @@ export class DevinAcpHost {
     });
     const sessionId = response.sessionId?.trim();
     if (!sessionId) throw new Error('Devin ACP did not return a session id.');
-    const configOptions = await bindDevinSessionModel(connection, sessionId, this.model, response.configOptions);
+    const configOptions = await bindDevinSessionModel(connection, sessionId, this.model, response.configOptions, () => { this.earlyModelUpdates.delete(sessionId); });
     const latestOptions = this.earlyModelUpdates.get(sessionId) ?? configOptions;
     assertDevinSessionModel(this.model, latestOptions);
     this.earlyModelUpdates.delete(sessionId);

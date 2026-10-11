@@ -20,6 +20,11 @@ export async function collectDevinSessionReadinessChecks(options = {}) {
     return typeof candidate === 'string' && candidate.trim() && !candidate.startsWith('--') ? candidate.trim() : null;
   };
   const sessionId = value('--devin-session');
+  const modelFlags = argv.filter(arg => arg === '--expected-devin-model' || arg.startsWith('--expected-devin-model='));
+  const expectedModel = modelFlags.length === 0 ? 'swe-2' : value('--expected-devin-model');
+  check(modelFlags.length === 0 || (modelFlags.length === 1 && modelFlags[0] === '--expected-devin-model'
+    && ['swe-2-medium', 'swe-2-high', 'swe-2-max'].includes(expectedModel)),
+  'Expected Devin model must be one explicit swe-2-medium, swe-2-high or swe-2-max value (legacy swe-2 when omitted)');
   const resumeRequested = argv.includes('--resume-session');
   const resumeId = value('--resume-session');
   check(!resumeRequested || (resumeId === sessionId && validId(resumeId)), 'Resume must name the exact approved Devin session');
@@ -69,8 +74,8 @@ export async function collectDevinSessionReadinessChecks(options = {}) {
   if (checks.some(item => !item.ok)) return checks;
   const profile = await read(`/runtime/profiles/${session.executionProfileId}`);
   check(profile?.id === session.executionProfileId && profile?.enabled === true
-    && profile?.kind === 'devin-cli-acp' && profile?.model === 'swe-2' && profile?.approvalMode === 'kalio_strict',
-  'Effective session profile is enabled Devin ACP / exact swe-2 / kalio_strict');
+    && profile?.kind === 'devin-cli-acp' && profile?.model === expectedModel && profile?.approvalMode === 'kalio_strict',
+  `Effective session profile is enabled Devin ACP / exact ${expectedModel} / kalio_strict`);
   const projects = await read('/projects');
   const matches = Array.isArray(projects) ? projects.filter(project => project?.id === session.projectId) : [];
   const context = session.runtimeContext?.architectureContext;
@@ -105,14 +110,14 @@ export async function collectDevinSessionReadinessChecks(options = {}) {
     && status?.modelCatalogStatus === 'ready' && status?.modelCatalogStale === false
     && typeof status.modelCatalogDiscoveredAt === 'number'
     && status.modelCatalogDiscoveredAt <= now + 60000 && now - status.modelCatalogDiscoveredAt <= 300000
-    && Array.isArray(status.models) && status.models.some(model => model === 'swe-2' || model?.id === 'swe-2'),
-  'Refreshed authenticated ACP catalog contains exact swe-2 and is fresh');
+    && Array.isArray(status.models) && status.models.some(model => model === expectedModel || model?.id === expectedModel),
+  `Refreshed authenticated ACP catalog contains exact ${expectedModel} and is fresh`);
   if (resumeRequested) {
     check(typeof session.externalThreadId === 'string' && session.externalThreadId.length > 0
       && status?.hostCount === 1 && Array.isArray(status.hosts) && status.hosts.length === 1
-      && status.hosts[0].model === 'swe-2' && status.hosts[0].status === 'online'
+      && status.hosts[0].model === expectedModel && status.hosts[0].status === 'online'
       && typeof status.hosts[0].processEpoch === 'string' && status.hosts[0].processEpoch.length > 0,
-    'Exact existing thread with one online SWE-2 host and known epoch');
+    `Exact existing thread with one online ${expectedModel} host and known epoch`);
   } else {
     check(status?.hostCount === 0 && Array.isArray(status?.hosts) && status.hosts.length === 0,
       'No Devin hosts exist at the time of this snapshot');

@@ -128,7 +128,7 @@ for (const [label, mutate] of [
   ['cross-profile response', r => { r['/runtime/profiles/profile-1'].id = 'other'; }],
   ['wrong project', r => { r['/projects'][0].path = 'E:/Projekty/home-site-other'; }],
   ['wrong execution cwd', r => { r['/sessions/session-1'].runtimeContext.architectureContext.executionCwd = 'E:/Projekty'; }],
-  ['paid or fallback model', r => { r['/runtime/profiles/profile-1'].model = 'swe-2-high'; }],
+  ['model differing from the legacy default', r => { r['/runtime/profiles/profile-1'].model = 'swe-2-high'; }],
   ['permissive approval', r => { r['/runtime/profiles/profile-1'].approvalMode = 'auto'; }],
   ['stale catalog', r => { r['/runtime/devin-cli/status?refresh=true'].modelCatalogStale = true; }],
   ['old catalog timestamp', r => { r['/runtime/devin-cli/status?refresh=true'].modelCatalogDiscoveredAt = -1000000; }],
@@ -186,4 +186,56 @@ for (const [label, mutate] of [
 ]) test(`Devin resume rejects ${label}`, async () => {
   const routes = resumeFixtures(); mutate(routes);
   assert.equal((await run(routes, { argv: resumeArgv })).exit, 1);
+});
+
+for (const model of ['swe-2-medium', 'swe-2-high', 'swe-2-max']) {
+  test(`Devin readiness binds exact ${model} in cold-start and resume snapshots`, async () => {
+    for (const resume of [false, true]) {
+      const routes = resume ? resumeFixtures() : fixtures();
+      routes['/runtime/profiles/profile-1'].model = model;
+      const status = routes['/runtime/devin-cli/status?refresh=true'];
+      status.models = [{ id: model }];
+      if (resume) status.hosts[0].model = model;
+      const result = await run(routes, { argv: [...(resume ? resumeArgv : argv), '--expected-devin-model', model] });
+      assert.equal(result.exit, 0, result.output.join('\n'));
+      assert.ok(result.output.some(line => line.includes(`exact ${model}`)));
+      assert.ok(result.requests.every(request => request.init.method === 'GET'));
+    }
+  });
+}
+
+for (const boundary of ['profile', 'catalog', 'host']) {
+  for (const mismatch of ['swe-2', 'swe-2-medium', 'swe-2-max', 'swe-2-high-extra']) {
+    test(`explicit high rejects ${boundary} mismatch ${mismatch}`, async () => {
+      const routes = resumeFixtures();
+      routes['/runtime/profiles/profile-1'].model = 'swe-2-high';
+      const status = routes['/runtime/devin-cli/status?refresh=true'];
+      status.models = ['swe-2-high'];
+      status.hosts[0].model = 'swe-2-high';
+      if (boundary === 'profile') routes['/runtime/profiles/profile-1'].model = mismatch;
+      if (boundary === 'catalog') status.models = [{ id: mismatch }];
+      if (boundary === 'host') status.hosts[0].model = mismatch;
+      const result = await run(routes, { argv: [...resumeArgv, '--expected-devin-model', 'swe-2-high'] });
+      assert.equal(result.exit, 1);
+      const message = boundary === 'profile' ? 'Effective session profile'
+        : boundary === 'catalog' ? 'Refreshed authenticated ACP catalog' : 'Exact existing thread';
+      assert.ok(result.output.some(line => line.startsWith('FAIL ') && line.includes(message)), result.output.join('\n'));
+    });
+  }
+}
+
+for (const args of [
+  ['--expected-devin-model'],
+  ['--expected-devin-model', '--resume-session', 'session-1'],
+  ['--expected-devin-model', ''],
+  ['--expected-devin-model', 'swe-2'],
+  ['--expected-devin-model', 'swe-2-high-extra'],
+  ['--expected-devin-model', 'SWE-2-HIGH'],
+  ['--expected-devin-model', 'swe-2-high', '--expected-devin-model', 'swe-2-high'],
+  ['--expected-devin-model=swe-2-high'],
+  ['--expected-devin-model', 'swe-2-high', '--expected-devin-model=swe-2-max'],
+]) test(`Devin readiness rejects invalid model arguments ${JSON.stringify(args)} before requests`, async () => {
+  const result = await run(fixtures(), { argv: [...argv, ...args] });
+  assert.equal(result.exit, 1);
+  assert.equal(result.requests.length, 0);
 });
