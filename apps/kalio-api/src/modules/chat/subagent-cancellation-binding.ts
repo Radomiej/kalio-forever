@@ -13,8 +13,8 @@ export function bindObservedSubagentCancellation(registry: ActiveSubagentRunRegi
   const handle = registry.bindCancellationRecording(childSessionId, controller, (executionIdentity, executionSignal) =>
     createHostCancellationRecordingScope({ executionIdentity, executionSignal, identity,
       maxPersistenceLeaseMs: CANCELLATION_RECORDING_LIMIT_MS,
-      acquirePersistenceLease: () => ({ signal: AbortSignal.timeout(CANCELLATION_RECORDING_LIMIT_MS),
-        expiresAt: Date.now() + CANCELLATION_RECORDING_LIMIT_MS }) }));
+      acquirePersistenceLease: (stoppedAt) => ({ signal: AbortSignal.timeout(CANCELLATION_RECORDING_LIMIT_MS),
+        expiresAt: stoppedAt + CANCELLATION_RECORDING_LIMIT_MS }) }));
   if (!handle) throw new Error('HOST_CANCELLATION_BINDING_INVALID');
   return handle;
 }

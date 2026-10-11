@@ -266,15 +266,30 @@ describe('LLMPanel', () => {
 
   it('renders runtime mode without the provider management list', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const fetchImplementation = fetchMock.getMockImplementation()!;
+    let resolveCredentials!: (response: Response) => void;
+    const credentialsResponse = new Promise<Response>((resolve) => {
+      resolveCredentials = resolve;
+    });
+    fetchMock.mockImplementation((...args) => (
+      args[0] === '/api/credentials' ? credentialsResponse : fetchImplementation(...args)
+    ));
     render(<LLMPanel mode="runtime" />);
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Runtime Settings', level: 2 })).toBeInTheDocument(),
     );
 
+    // The heading is visible while provider data is still loading.
+    expect(screen.queryByTestId('runtime-provider-selector')).not.toBeInTheDocument();
+    resolveCredentials(new Response(JSON.stringify([CRED]), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(await screen.findByTestId('runtime-provider-selector')).toHaveValue(CRED.id);
     expect(screen.queryByTestId('add-provider-btn')).not.toBeInTheDocument();
     expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument();
-    expect(screen.getByTestId('runtime-provider-selector')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { name: 'Runtime Settings' })).toHaveLength(1);
   });
 

@@ -25,6 +25,7 @@ describe('host-owned bounded cancellation recording scope', () => {
     expect(f.handle.permitFor('call', f.recorder)).toBeNull();
     f.execution.abort('generic failure'); expect(f.handle.permitFor('call', f.recorder)).toBeNull(); expect(f.acquire).not.toHaveBeenCalled();
     f.handle.stop(); const permit = f.handle.permitFor('call', f.recorder)!;
+    expect(f.acquire).toHaveBeenCalledWith(1000);
     const lease = readHostCancellationRecordingPermit(permit, identity, 'call', f.recorder);
     expect(lease.expiresAt).toBe(1500); expect(lease.signal).not.toBe(f.execution.signal); expect(lease.signal.aborted).toBe(false);
     expect(JSON.stringify(permit)).toBe('{}');

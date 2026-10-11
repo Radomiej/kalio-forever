@@ -17,7 +17,7 @@ export interface HostCancellationRecordingScopeInput {
   readonly executionSignal: AbortSignal;
   readonly identity: HostRuntimeReceiptIdentity;
   readonly maxPersistenceLeaseMs: number;
-  readonly acquirePersistenceLease: () => HostCancellationPersistenceLease;
+  readonly acquirePersistenceLease: (stoppedAt: number) => HostCancellationPersistenceLease;
 }
 
 const fail = (code: string): never => { throw new Error(`HOST_CANCELLATION_RECORDING_${code}`); };
@@ -126,7 +126,8 @@ export function createHostCancellationRecordingScope(input: HostCancellationReco
       stopped = true; // Fence before any host callback; never retry or renew this episode.
       try {
         const now = Date.now();
-        const supplied = record(acquirePersistenceLease(), ['signal', 'expiresAt']);
+        // The host and validator share the Stop timestamp; acquisition must not extend the deadline.
+        const supplied = record(acquirePersistenceLease(now), ['signal', 'expiresAt']);
         if (supplied.signal === executionSignal || signalAborted(supplied.signal)
           || typeof supplied.expiresAt !== 'number' || !Number.isFinite(supplied.expiresAt)
           || supplied.expiresAt <= now || supplied.expiresAt > now + maxPersistenceLeaseMs) return fail('LEASE');
