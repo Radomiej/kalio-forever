@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid';
 import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-config';
 import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import { stopDevinChild } from './devin-cli-process-shutdown';
+import { assertDevinSessionModel, bindDevinSessionModel, devinAcpChildEnv } from './devin-cli-acp.model-selection';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
 import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, DEVIN_NATIVE_TOOL_CATEGORIES, type DevinNativeToolsPolicy } from './devin-native-tools';
 import { DevinCliProbeService, type DevinCliProbeStatus } from './devin-cli-probe.service';
@@ -19,6 +20,7 @@ import {
   type McpServer,
   type RequestPermissionRequest,
   type SessionNotification,
+  type SessionConfigOption,
   type StopReason,
   type ToolCallContent,
 } from '@agentclientprotocol/sdk';
@@ -66,6 +68,7 @@ export interface DevinAcpToolActivity {
 }
 
 interface SessionState {
+  configOptions?: SessionConfigOption[];
   cwd: string;
   processEpoch: string;
   mcpServers: McpServer[];
@@ -89,6 +92,7 @@ export function buildDevinCliLaunchSpec(model: string, executable = resolveDevin
 }
 
 export class DevinAcpHost {
+  private readonly earlyModelUpdates = new Map<string, SessionConfigOption[]>();
   private readonly logger = new Logger(DevinAcpHost.name);
   private readonly sessions = new Map<string, SessionState>();
   private connection?: ClientConnection;
@@ -124,12 +128,17 @@ export class DevinAcpHost {
           throw new Error('Devin ACP session tool policy changed; reset the Devin host before continuing.');
         }
         if (existing.processEpoch === this.processEpoch) {
+          assertDevinSessionModel(this.model, existing.configOptions);
           return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: existing.processEpoch, resumed: false };
         }
       }
-      await this.restoreSession(connection, externalThreadId, sessionWorkspace, normalizedMcpServers);
+      const response = await this.restoreSession(connection, externalThreadId, sessionWorkspace, normalizedMcpServers);
+      const configOptions = await bindDevinSessionModel(connection, externalThreadId, this.model, response.configOptions);
+      const latestOptions = this.earlyModelUpdates.get(externalThreadId) ?? configOptions;
+      assertDevinSessionModel(this.model, latestOptions);
+      this.earlyModelUpdates.delete(externalThreadId);
       const restoredEpoch = this.requireProcessEpoch();
-      const state: SessionState = { cwd: normalizedCwd, processEpoch: restoredEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() };
+      const state: SessionState = { configOptions: latestOptions, cwd: normalizedCwd, processEpoch: restoredEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() };
       this.sessions.set(externalThreadId, state);
       return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: restoredEpoch, resumed: true };
     }
@@ -140,8 +149,12 @@ export class DevinAcpHost {
     });
     const sessionId = response.sessionId?.trim();
     if (!sessionId) throw new Error('Devin ACP did not return a session id.');
+    const configOptions = await bindDevinSessionModel(connection, sessionId, this.model, response.configOptions);
+    const latestOptions = this.earlyModelUpdates.get(sessionId) ?? configOptions;
+    assertDevinSessionModel(this.model, latestOptions);
+    this.earlyModelUpdates.delete(sessionId);
     const processEpoch = this.requireProcessEpoch();
-    this.sessions.set(sessionId, { cwd: normalizedCwd, processEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() });
+    this.sessions.set(sessionId, { configOptions: latestOptions, cwd: normalizedCwd, processEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() });
     return { sessionId, cwd: normalizedCwd, processEpoch, resumed: false };
   }
 
@@ -185,6 +198,7 @@ export class DevinAcpHost {
     this.child = undefined;
     this.starting = undefined;
     this.sessions.clear();
+    this.earlyModelUpdates.clear();
     const config = this.config;
     await config?.cleanup();
     this.config = undefined;
@@ -229,7 +243,7 @@ export class DevinAcpHost {
     // bypasses that loader, so keep the ephemeral project overlay discoverable
     // from the child cwd and select only the model on the command line.
     const child = spawn(spec.command, spec.args, {
-      env: { ...process.env },
+      env: devinAcpChildEnv(process.env),
       ...(config ? { cwd: config.cwd } : {}),
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -275,12 +289,11 @@ export class DevinAcpHost {
       : { cwd: configCwd };
   }
 
-  private async restoreSession(connection: ClientConnection, sessionId: string, workspace: DevinSessionWorkspace, mcpServers: McpServer[]): Promise<void> {
+  private async restoreSession(connection: ClientConnection, sessionId: string, workspace: DevinSessionWorkspace, mcpServers: McpServer[]): Promise<{ configOptions?: SessionConfigOption[] | null }> {
     // Kalio already owns durable history; reattach without provider history replay.
     if (this.capabilities.sessionCapabilities?.resume) {
       try {
-        await connection.agent.request(methods.agent.session.resume, { sessionId, ...workspace, mcpServers });
-        return;
+        return await connection.agent.request(methods.agent.session.resume, { sessionId, ...workspace, mcpServers });
       } catch (error) {
         throw asError(error, `Devin ACP could not resume persisted session ${sessionId}.`);
       }
@@ -288,8 +301,7 @@ export class DevinAcpHost {
     // TODO: legacy fallback — load-only ACP agents cannot reattach without replay.
     if (this.capabilities.loadSession === true) {
       try {
-        await connection.agent.request(methods.agent.session.load, { sessionId, ...workspace, mcpServers });
-        return;
+        return await connection.agent.request(methods.agent.session.load, { sessionId, ...workspace, mcpServers });
       } catch (error) {
         throw asError(error, `Devin ACP could not load persisted session ${sessionId}.`);
       }
@@ -301,6 +313,7 @@ export class DevinAcpHost {
     const connection = await this.ensureConnection();
     const session = this.sessions.get(sessionId);
     if (!session || session.processEpoch !== this.processEpoch) throw new Error(`Devin ACP session ${sessionId} is not active on this host.`);
+    assertDevinSessionModel(this.model, session.configOptions);
     if (input.signal?.aborted) return 'cancelled';
     let rejectConnection!: (error: Error) => void;
     const connectionFailure = new Promise<never>((_, reject) => { rejectConnection = reject; });
@@ -342,6 +355,24 @@ export class DevinAcpHost {
   }
 
   private handleSessionUpdate(params: SessionNotification): void {
+    const session = this.sessions.get(params.sessionId);
+    if (!session && params.update.sessionUpdate === 'config_option_update') {
+      this.earlyModelUpdates.set(params.sessionId, structuredClone(params.update.configOptions));
+      return;
+    }
+    if (session && params.update.sessionUpdate === 'config_option_update') {
+      session.configOptions = structuredClone(params.update.configOptions);
+      try {
+        assertDevinSessionModel(this.model, session.configOptions);
+      } catch (error) {
+        session.active?.rejectConnection(asError(error, 'Devin ACP model drift.'));
+        if (session.active) {
+          void this.connection?.agent.notify(methods.agent.session.cancel, { sessionId: params.sessionId }).catch(() => { this.logger.warn('Devin ACP model drift cancellation failed; closing host.'); });
+          void this.close().catch(() => { this.logger.warn('Devin ACP model drift host shutdown failed.'); });
+        }
+      }
+      return;
+    }
     const active = this.sessions.get(params.sessionId)?.active;
     if (!active) return;
     const update = params.update;
@@ -367,6 +398,7 @@ export class DevinAcpHost {
   private handleConnectionClosed(processEpoch: string, reason: 'exit' | 'error' | 'closed', error: Error): void {
     if (processEpoch !== this.processEpoch || this.closing || this.status === 'offline') return;
     this.status = 'error';
+    this.earlyModelUpdates.clear();
     this.connection = undefined;
     this.child = undefined;
     for (const session of this.sessions.values()) session.active?.rejectConnection(error);
