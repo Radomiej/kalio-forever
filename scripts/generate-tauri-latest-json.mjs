@@ -57,17 +57,6 @@ async function platformEntry(predicate, label) {
     throw new Error(`Empty updater signature: ${signaturePath}`);
   }
 
-  const signaturePath = files.find(
-    (candidate) => (candidate.split(/[\\/]/).pop() ?? '') === `${artifactName}.sig`,
-  );
-  if (!signaturePath) {
-    throw new Error(`Missing updater signature: ${artifactName}.sig`);
-  }
-  const signature = (await readFile(signaturePath, 'utf8')).trim();
-  if (!signature) {
-    throw new Error(`Empty updater signature: ${signaturePath}`);
-  }
-
   return {
     url: `https://github.com/Radomiej/kalio-forever/releases/download/${encodeURIComponent(releaseTag)}/${encodeURIComponent(artifactName)}`,
     signature,

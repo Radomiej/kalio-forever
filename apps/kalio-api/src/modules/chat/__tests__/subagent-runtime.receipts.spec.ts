@@ -65,8 +65,11 @@ describe('subagent owns the final receipt drain and durable completion ACK', () 
   it('connects actual observed service Stop to its bounded cancellation handle', async () => {
     let release!: () => void;
     const f = fixture(undefined, new Promise<void>(resolve => { release = resolve; }));
-    const running = f.run();
-    const rejected = expect(running).rejects.toThrow('loop drained after abort');
+    const running = f.run({ timeoutMs: 30_000 });
+    const rejected = running.then(
+      () => { throw new Error('expected subagent stop to reject'); },
+      error => expect(error).toMatchObject({ message: 'loop drained after abort' }),
+    );
     await vi.waitFor(() => expect(f.received?.hostCancellationRecording).toBeDefined());
     const request = f.received!;
     const handle = request.hostCancellationRecording!;
@@ -76,6 +79,7 @@ describe('subagent owns the final receipt drain and durable completion ACK', () 
     const stopping = f.runtime.stopAndDrainSessions(['parent']);
     expect(request.abortSignal.aborted).toBe(true);
     const permit = handle.permitFor('call', recorder)!;
+    expect(permit).not.toBeNull();
     const lease = readHostCancellationRecordingPermit(permit, identity, 'call', recorder);
     expect(lease.signal.aborted).toBe(false);
     release();

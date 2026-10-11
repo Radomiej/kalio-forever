@@ -188,27 +188,30 @@ export class TerminalService implements OnModuleDestroy {
 
     return new Promise((resolve, reject) => {
       // Attach listener FIRST, then check status — avoids a race where the process
-      // exits between the status check above and the listener registration.
+      // exits between the status check above and the listener registration. Arm the
+      // timer first so a synchronous close during registration can safely clear it.
+      let settled = false;
       const closeHandler = () => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         s.proc.off('close', closeHandler);
         resolve(finalResult());
       };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        s.proc.off('close', closeHandler);
+        s.proc.kill('SIGTERM');
+        reject(new Error(`CLI agent timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       s.proc.on('close', closeHandler);
 
       // Re-check after attaching; if it already exited we'd miss the event
       if (s.meta.status !== 'running') {
-        s.proc.off('close', closeHandler);
-        resolve(finalResult());
-        return;
+        closeHandler();
       }
-
-      const timer = setTimeout(() => {
-        s.proc.off('close', closeHandler);
-        s.proc.kill('SIGTERM');
-        reject(new Error(`CLI agent timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
     });
   }
 
