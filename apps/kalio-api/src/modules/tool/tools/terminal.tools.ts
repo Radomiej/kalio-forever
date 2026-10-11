@@ -87,7 +87,10 @@ export class TerminalSpawnTool {
       turnId: request.turnId,
       callId: request.callId,
     });
-    return { id: session.id, pid: session.pid, command: session.command };
+    return {
+      id: session.id, pid: session.pid, command: session.command,
+      ...(session.executionDescriptor ? { executionDescriptor: structuredClone(session.executionDescriptor) } : {}),
+    };
   }
 }
 
@@ -146,6 +149,8 @@ export class TerminalOutputTool {
       status: session.status,
       exitCode: session.exitCode,
       output: session.output,
+      ...(session.executionDescriptor?.ownerIdentity?.sessionId === request.sessionId
+        ? { executionDescriptor: structuredClone(session.executionDescriptor) } : {}),
     };
   }
 }

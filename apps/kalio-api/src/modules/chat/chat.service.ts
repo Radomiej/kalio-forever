@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type { EmitFn } from './interfaces/stream-context.interface';
+import type { OrdinaryCancellationBatchInput } from '../../database/ordinary-continuation-cancellation';
 import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
 import { TurnErrorAlreadyEmitted } from './turn-error';
@@ -104,36 +105,31 @@ export class ChatService {
 
   /** Called after worker cleanup, while the pipeline still fences new admission. */
   async cancelPendingContinuations(sessionId: string): Promise<void> {
-    const pending = await this.hitlRequests?.listPending(sessionId) ?? [];
-    const waitingTurns = new Map<string, string>();
+    if (!this.hitlRequests) throw new Error('ORDINARY_CANCELLATION_UNAVAILABLE');
+    const pending = (await this.hitlRequests.listPending(sessionId)).filter(request => request.kind === 'tool_confirmation');
+    const requests: OrdinaryCancellationBatchInput['requests'][number][] = [];
+    const runs = new Map<string, OrdinaryCancellationBatchInput['requests'][number]['expectedRun']>();
     for (const request of pending) {
-      if (request.kind !== 'tool_confirmation') continue;
-      const cancelled = await this.hitlRequests!.resolve(request.id, request.revision, 'cancelled', { message: 'Turn interrupted by user' });
-      if (!cancelled && (await this.hitlRequests!.getById(request.id))?.status === 'pending') {
-        throw new Error(`Unable to cancel pending confirmation ${request.id}`);
+      if (request.runId && request.turnId && !runs.has(request.runId)) {
+        const run = await this.runJournal?.getTurn(sessionId, request.turnId);
+        if (run && typeof run.revision !== 'number') throw new Error('ORDINARY_CANCELLATION_CONFLICT');
+        runs.set(request.runId, run && run.id === request.runId && typeof run.revision === 'number'
+          ? { id: run.id, turnId: run.turnId, revision: run.revision } : null);
       }
-      const toolName = request.payload['toolName'];
-      if (cancelled && request.toolCallId && typeof toolName === 'string') {
-        const promptMessageId = request.continuation?.['promptMessageId'];
-        await this.sessionManager.saveToolResult(sessionId, request.toolCallId, serializeToolResultContent(toolName, {
+      const toolName = request.payload?.['toolName'];
+      requests.push({ requestId: request.id, expectedRequestRevision: request.revision,
+        expectedRun: request.runId ? runs.get(request.runId) ?? null : null,
+        serializedToolResult: request.toolCallId && typeof toolName === 'string' ? serializeToolResultContent(toolName, {
           callId: request.toolCallId, toolName, status: 'cancelled', errorMessage: 'Turn interrupted by user',
-        }), {
-          turnId: request.turnId ?? undefined,
-          promptMessageId: typeof promptMessageId === 'string' ? promptMessageId : undefined,
-        });
-      }
-      if (cancelled && request.runId && request.turnId) waitingTurns.set(request.runId, request.turnId);
+        }) : null,
+      });
     }
-    for (const [runId, turnId] of waitingTurns) {
-      const current = await this.runJournal?.getTurn(sessionId, turnId);
-      if (current?.id === runId && (current.status === 'active' || current.status === 'waiting_for_human' || current.status === 'interrupted_needs_retry')) {
-        await this.runJournal?.interrupt(runId, 'Turn interrupted by user');
-      }
-    }
-    const run = await this.runJournal?.getCurrentRun(sessionId);
-    if (run && (run.status === 'active' || run.status === 'waiting_for_human' || run.status === 'interrupted_needs_retry')) {
-      await this.runJournal?.interrupt(run.id, 'Turn interrupted by user');
-    }
+    const run = pending.length === 0 ? await this.runJournal?.getCurrentRun(sessionId) : null;
+    if (run && typeof run.revision !== 'number') throw new Error('ORDINARY_CANCELLATION_CONFLICT');
+    const result = await this.hitlRequests.cancelOrdinaryContinuationsRequired({ sessionId, requests,
+      expectedRunWithoutConfirmations: run && typeof run.revision === 'number'
+        ? { id: run.id, turnId: run.turnId, revision: run.revision } : null });
+    if (result !== 'committed') throw new Error('ORDINARY_CANCELLATION_CONFLICT');
   }
 
   async resumeApprovedTool(requestId: string, emit: EmitFn, version = this.continuationAdmission?.capture()): Promise<boolean> {

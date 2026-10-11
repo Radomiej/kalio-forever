@@ -1,6 +1,8 @@
-import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureSchema, ArchitectureSchemaNode } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureRun, ArchitectureSchema, ArchitectureSchemaNode } from '@kalio/types';
 import { describe, expect, it } from 'vitest';
 import { judgeArchitectureContinuationGuard } from './architecture-graph-judge-guard.utils';
+import { createArchitectureGraphEvents } from './architecture-graph-runtime';
+import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 
 const judgeSlot: ArchitectureRoleSlot = {
   id: 'judge',
@@ -115,11 +117,106 @@ function guard(input: {
 }
 
 describe('judge architecture continuation guard', () => {
-  it('routes to continuation once when finalization lacks visible workflow proof', () => {
+  async function runGoalGraph(withProof: boolean, buildExitCodes: number[] = [0]) {
+    const goalSchema: ArchitectureSchema = {
+      ...schema,
+      roleSlots: [judgeSlot, { ...implementerSlot, slotType: 'participant' }],
+      nodes: [{ id: 'entry', label: 'Entry', kind: 'parallel' }, ...schema.nodes],
+      edges: [...schema.edges,
+        { id: 'entry-worker', fromNodeId: 'entry', toNodeId: 'continue-node' },
+        { id: 'worker-judge', fromNodeId: 'continue-node', toNodeId: judgeNode.id },
+      ],
+    };
+    const run: ArchitectureRun = {
+      id: 'goal-evidence-run', schemaId: goalSchema.id, prompt: 'Complete the goal with evidence.',
+      executionMode: 'subagent_execution', status: 'running', rootSessionId: 'goal-root',
+      branchSessionIds: { judge: 'judge-child', implementer: 'worker-child' },
+      context: { requireGoalMasterLoopProof: true, maxArchitectureSteps: 12, maxArchitectureNodeVisits: 2 },
+      createdAt: 1, updatedAt: 1,
+    };
+    let workerCalls = 0;
+    const roleExecutor: ArchitectureRoleExecutor = {
+      async execute({ slot }) {
+        if (slot.id === implementerSlot.id) {
+          workerCalls += 1;
+          const exitCode = buildExitCodes[Math.min(workerCalls - 1, buildExitCodes.length - 1)];
+          return { message: 'done', data: withProof ? {
+            toolEvidence: { toolResultCount: 2, successfulToolNames: ['fs_write', 'fs_read'], targetPaths: ['src/index.ts'] },
+            evidence: [{ kind: 'BUILD_RESULT', status: exitCode === 0 ? 'passed' : 'failed', data: { exitCode } }],
+          } : { response: 'done' } };
+        }
+        return { message: 'complete', data: { routerOutput: {
+          selectedStrategy: 'final-node', mergedDecision: 'complete', acceptedInputs: [], rejectedInputs: [],
+          unresolvedConflicts: [], risks: [], confidence: 1, nextAction: 'route_to', targetNodeId: 'final-node',
+        } } };
+      },
+    };
+    const events = await createArchitectureGraphEvents({
+      schema: goalSchema, run, now: 1, roleExecutor, personaForSlot: (slot) => slot.defaultPersonaId,
+    });
+    return { events, workerCalls };
+  }
+
+  it('terminates unsupported claims at the existing visit bound without a successful final artifact', async () => {
+    const { events, workerCalls } = await runGoalGraph(false);
+    expect(workerCalls).toBe(2);
+    expect(events.some((item) => item.reasonCode === 'max_node_visits')).toBe(true);
+    expect(events.some((item) => item.type === 'final_artifact')).toBe(false);
+    expect(events.filter((item) => item.type === 'router_decision' && item.nodeId === judgeNode.id)
+      .every((item) => item.route?.selectedNodeIds.includes('continue-node'))).toBe(true);
+  });
+
+  it('finalizes valid passed build and write proof without an extra worker execution', async () => {
+    const { events, workerCalls } = await runGoalGraph(true);
+    expect(workerCalls).toBe(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'final_artifact', reasonCode: 'final_artifact_accepted', status: 'done',
+    }));
+  });
+
+  it('blocks a typed complete route after failed builds until the visit limit', async () => {
+    const { events, workerCalls } = await runGoalGraph(true, [1]);
+    expect(workerCalls).toBe(2);
+    expect(events.some((item) => item.reasonCode === 'max_node_visits')).toBe(true);
+    expect(events.some((item) => item.type === 'final_artifact')).toBe(false);
+  });
+
+  it('recovers from a failed attempt once the next build passes without another worker', async () => {
+    const { events, workerCalls } = await runGoalGraph(true, [1, 0]);
+    expect(workerCalls).toBe(2);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'final_artifact', reasonCode: 'final_artifact_accepted', status: 'done',
+    }));
+    expect(events.some((item) => item.reasonCode === 'max_node_visits')).toBe(false);
+  });
+
+  it('keeps an unsupported done claim on continuation after a previous continuation', () => {
+    const result = guard({
+      selectedNodeIds: ['final-node'],
+      events: [
+        event({ type: 'router_decision', nodeId: judgeNode.id, route: {
+          source: 'runtime_fallback', fromNodeId: judgeNode.id, selectedNodeIds: ['continue-node'],
+        } }),
+        event({ roleSlotId: implementerSlot.id, message: 'done', data: { response: 'done' } }),
+      ],
+    });
+    expect(result.selectedNodeIds).toEqual(['continue-node']);
+    expect(result.applied).toBe(true);
+  });
+
+  it('rejects a complete verdict when the latest typed build failed despite read proof', () => {
+    const proof = visibleProofEvent();
+    proof.evidence = [{ kind: 'BUILD_RESULT', status: 'failed', data: { exitCode: 1 } }];
+    expect(guard({ selectedNodeIds: ['final-node'], events: [proof],
+      runContext: { externalQualityGate: { source: 'Jev', status: 'passed' } },
+    }).selectedNodeIds).toEqual(['continue-node']);
+  });
+
+  it('routes to continuation when finalization lacks visible workflow proof', () => {
     expect(guard({ selectedNodeIds: ['final-node'] })).toEqual({
       selectedNodeIds: ['continue-node'],
       applied: true,
-      reason: 'Runtime Goal Master guard required one visible continuation through continue-node before finalization.',
+      reason: 'Goal completion requires successful workflow tool evidence.',
     });
   });
 
@@ -141,7 +238,7 @@ describe('judge architecture continuation guard', () => {
     });
   });
 
-  it('does not create an infinite continuation loop after a previous judge continuation', () => {
+  it('no longer treats a previous continuation as completion proof', () => {
     expect(guard({
       selectedNodeIds: ['final-node'],
       events: [
@@ -156,8 +253,9 @@ describe('judge architecture continuation guard', () => {
         }),
       ],
     })).toEqual({
-      selectedNodeIds: ['final-node'],
-      applied: false,
+      selectedNodeIds: ['continue-node'],
+      applied: true,
+      reason: 'Goal completion requires successful workflow tool evidence.',
     });
   });
 });

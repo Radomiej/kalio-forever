@@ -9,6 +9,7 @@ import { CLIAgentPanel } from './CLIAgentPanel';
 import { ImageSettingsPanel } from './ImageSettingsPanel';
 import { TelegramSettings } from './TelegramSettings';
 import { HITLSettingsPanel } from './HITLSettingsPanel';
+import { DecisionSettingsPanel } from './DecisionSettingsPanel';
 import { AuditRetentionSettingsPanel } from './AuditRetentionSettingsPanel';
 import { ConversationSettingsPanel } from './ConversationSettingsPanel';
 import { IntegrationsPanel } from './IntegrationsPanel';
@@ -26,6 +27,7 @@ export const SETTINGS_BLOCKS: SettingsBlock[] = [
   { id: 'runtime',      label: 'Runtime Settings', icon: <Gauge size={16} />,    component: () => <LLMPanel mode="runtime" /> },
   { id: 'conversation', label: 'Conversation',     icon: <MessageSquareText size={16} />, component: ConversationSettingsPanel },
   { id: 'hitl',         label: 'HITL Approvals',   icon: <ShieldAlert size={16} />, component: HITLSettingsPanel },
+  { id: 'decision',     label: 'Decision Settings', icon: <ShieldAlert size={16} />, component: DecisionSettingsPanel },
   { id: 'audit-retention', label: 'Audit Retention', icon: <DatabaseZap size={16} />, component: AuditRetentionSettingsPanel },
   { id: 'embeddings',   label: 'Embeddings',        icon: <Database size={16} />, component: EmbeddingsPanel },
   { id: 'web-search',   label: 'Web Search',        icon: <Search size={16} />,   component: WebSearchPanel },

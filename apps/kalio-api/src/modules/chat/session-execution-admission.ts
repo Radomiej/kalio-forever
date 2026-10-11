@@ -1,3 +1,5 @@
+import type { createHostCancellationRecordingScope, HostCancellationLifecycleHandle } from './host-cancellation-recording-scope';
+
 export interface SessionExecutionReservation {
   turnId: string;
   controller: AbortController;
@@ -14,6 +16,7 @@ export interface SessionContinuationAdmission {
 export class SessionExecutionAdmission {
   private readonly reservations = new Map<string, SessionExecutionReservation>();
   private readonly completions = new WeakMap<SessionExecutionReservation, () => void>();
+  private readonly cancellationRecording = new WeakMap<SessionExecutionReservation, HostCancellationLifecycleHandle>();
   private readonly stops = new Map<string, Promise<void>>();
   private readonly stoppedVersions = new Map<string, number>();
   private version = 0;
@@ -25,6 +28,16 @@ export class SessionExecutionAdmission {
   keys(): IterableIterator<string> { return this.reservations.keys(); }
   isStopping(sessionId: string): boolean { return this.stops.has(sessionId); }
   waitForStop(sessionId: string): Promise<void> | undefined { return this.stops.get(sessionId); }
+
+  bindCancellationRecording(sessionId: string, reservation: SessionExecutionReservation,
+    scope: ReturnType<typeof createHostCancellationRecordingScope>): boolean {
+    if (this.reservations.get(sessionId) !== reservation || this.stops.has(sessionId)
+      || reservation.controller.signal.aborted || this.cancellationRecording.has(reservation)) return false;
+    const handle = scope.lookup(reservation, reservation.controller.signal);
+    if (!handle) return false;
+    this.cancellationRecording.set(reservation, handle);
+    return true;
+  }
 
   reserve(sessionId: string, turnId: string, options?: { seeded?: boolean; version?: number }): SessionExecutionReservation | null {
     if (this.reservations.has(sessionId) || this.stops.has(sessionId)
@@ -39,6 +52,8 @@ export class SessionExecutionAdmission {
 
   release(sessionId: string, reservation: SessionExecutionReservation): void {
     if (this.reservations.get(sessionId) !== reservation) return;
+    this.cancellationRecording.get(reservation)?.close();
+    this.cancellationRecording.delete(reservation);
     this.reservations.delete(sessionId);
     this.completions.get(reservation)?.();
     this.completions.delete(reservation);
@@ -49,6 +64,10 @@ export class SessionExecutionAdmission {
     if (existingStop) return existingStop;
     this.stoppedVersions.set(sessionId, ++this.version);
     const reservation = this.reservations.get(sessionId);
+    let recordingError: unknown;
+    let recordingFailed = false;
+    try { if (reservation) this.cancellationRecording.get(reservation)?.stop(); }
+    catch (error) { recordingError = error; recordingFailed = true; }
     const drain = Promise.resolve().then(async () => {
       let cleanupError: unknown;
       let cleanupFailed = false;
@@ -57,6 +76,7 @@ export class SessionExecutionAdmission {
       await reservation?.done;
       try { await cleanup?.(); } catch (error) { cleanupError = error; cleanupFailed = true; }
       try { await finalize?.(); } catch (error) { cleanupError = error; cleanupFailed = true; }
+      if (recordingFailed) throw recordingError;
       if (cleanupFailed) throw cleanupError;
     }).finally(() => {
       if (this.stops.get(sessionId) === drain) this.stops.delete(sessionId);

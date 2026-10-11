@@ -4,6 +4,28 @@ import { describe, expect, it, vi } from 'vitest';
 import { ArchitectRunConfig, estimateArchitectureBudget } from './ArchitectRunConfig';
 import type { ArchitectSchema } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
+vi.mock('../chat/launch/ExecutionProfileCombobox', () => ({
+  ExecutionProfileCombobox: ({ value, onChange, disabled }: { value: string; onChange: (id: string) => void; disabled: boolean }) =>
+    <input aria-label="Provider and model" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />,
+}));
+
+describe('Architect execution selection', () => {
+  it('shows explicit selection and resets only through the default action', () => {
+    const change = vi.fn();
+    render(<RunConfigHarness executionProfileId="devin-swe-2" onExecutionProfileChange={change} />);
+    expect(screen.getByRole('textbox', { name: 'Provider and model' })).toHaveValue('devin-swe-2');
+    fireEvent.click(screen.getByText('Use runtime default'));
+    expect(change).toHaveBeenCalledWith('');
+  });
+  it('fails closed for Goal Guard instead of invoking its callback', () => {
+    const start = vi.fn();
+    render(<RunConfigHarness executionProfileId="devin-swe-2" onStartGoalGuardFlow={start} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Task' }), { target: { value: 'Task' } });
+    fireEvent.click(screen.getByTestId('architect-start-goal-guard-flow'));
+    expect(start).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('cannot forward');
+  });
+});
 
 describe('estimateArchitectureBudget', () => {
   it('keeps small architectures in the low budget class', () => {
@@ -421,9 +443,13 @@ describe('estimateArchitectureBudget', () => {
 });
 
 function RunConfigHarness({
+  executionProfileId = '', onExecutionProfileChange = vi.fn(), onStartGoalGuardFlow = vi.fn(),
   llmConfig = defaultLlmConfig,
   schema = makeSchema(3, 0, false, 'judge'),
 }: {
+  executionProfileId?: string;
+  onExecutionProfileChange?: (id: string) => void;
+  onStartGoalGuardFlow?: () => void;
   llmConfig?: LLMConfigWithSource | null;
   schema?: ArchitectSchema | null;
 }) {
@@ -439,6 +465,7 @@ function RunConfigHarness({
 
   return (
     <ArchitectRunConfig
+      executionProfileId={executionProfileId} onExecutionProfileChange={onExecutionProfileChange}
       activeCredentialId="credential-1"
       llmConfig={llmConfig}
       maxNodeVisits={maxNodeVisits}
@@ -463,7 +490,7 @@ function RunConfigHarness({
       onAutoApproveTerminalChange={setAutoApproveTerminal}
       onTaskPromptChange={setTaskPrompt}
       onStartRun={vi.fn()}
-      onStartGoalGuardFlow={vi.fn()}
+      onStartGoalGuardFlow={onStartGoalGuardFlow}
     />
   );
 }

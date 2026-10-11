@@ -279,7 +279,6 @@ export function ChatWelcomeScreen({
       onProjectPathChange={onProjectPathChange}
       onProjectChange={onProjectChange}
       onRunPrompt={(content, executionProfileId) => {
-        onDraftChange('');
         if (selectedArchitectureId === 'single-chat') {
           if (executionProfileId === undefined) onSend(content, selectedPersonaId);
           else onSend(content, selectedPersonaId, executionProfileId);
@@ -314,6 +313,8 @@ function liveTurnStatusLabel(liveTurnState: LiveTurnState): string {
       return 'responding';
     case 'running_tool':
       return liveTurnState.toolName ? `${liveTurnState.toolName} running` : 'tool running';
+    case 'awaiting_confirmation':
+      return 'waiting for approval';
     case 'queued_followup':
       return liveTurnState.queuedDepth > 0 ? `queued ${liveTurnState.queuedDepth}` : 'queued';
     case 'pending':
@@ -323,6 +324,12 @@ function liveTurnStatusLabel(liveTurnState: LiveTurnState): string {
 }
 
 function liveTurnBody(liveTurnState: LiveTurnState): string {
+  if (liveTurnState.phase === 'awaiting_confirmation') {
+    return liveTurnState.toolName
+      ? `Kalio is waiting for your approval to use ${liveTurnState.toolName}.`
+      : 'Kalio is waiting for your approval.';
+  }
+
   if (liveTurnState.previewText?.trim()) {
     return liveTurnState.previewText.trim();
   }
@@ -353,7 +360,7 @@ export function PendingAssistantBubble({ liveTurnState }: PendingAssistantBubble
     <div className="flex justify-start" data-testid="pending-agent-bubble">
       <div className="max-w-[min(42rem,92%)] rounded-2xl border border-sky-500/20 bg-base-300/85 px-4 py-3 text-sm text-base-content shadow-sm">
         <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sky-300/90">
-          <span className="loading loading-dots loading-xs" />
+          {liveTurnState.phase !== 'awaiting_confirmation' && <span className="loading loading-dots loading-xs" />}
           <span data-testid="pending-agent-phase">{liveTurnStatusLabel(liveTurnState)}</span>
         </div>
         <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-base-content/80">

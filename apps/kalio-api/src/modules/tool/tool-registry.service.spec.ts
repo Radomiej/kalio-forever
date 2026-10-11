@@ -47,6 +47,7 @@ import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDe
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
 import { EscalateTool } from './tools/escalate.tool';
 import { IdeDiagnosticsTool, IdeQueryTool, IdeStatusTool } from '../code-intelligence/code-intelligence.tools';
+import { RefreshProjectContextTool, SearchProjectContextTool } from './tools/project-context.tools';
 
 /** Create a stub whose constructor is the real class (so @Tool metadata is present) */
 function stub<T extends abstract new (...a: never[]) => object>(Cls: T): InstanceType<T> {
@@ -96,6 +97,8 @@ describe('ToolRegistryService — all tools registered', () => {
       stub(MemoryIngestTool),
       stub(MemorySearchTool),
       stub(MemoryIngestConversationTool),
+      stub(RefreshProjectContextTool),
+      stub(SearchProjectContextTool),
       stub(WebSearchTool),
       stub(ListToolsTool),
       stub(GetToolDetailsTool),
@@ -146,6 +149,7 @@ describe('ToolRegistryService — all tools registered', () => {
     'raapp_test',
     // Memory
     'memory_ingest', 'memory_search', 'memory_ingest_conversation',
+    'refresh_project_context', 'search_project_context',
     // Web
     'web_search',
     // Meta
@@ -192,6 +196,12 @@ describe('ToolRegistryService — all tools registered', () => {
     }
   });
 
+  it('registers project context tools as confirmation-gated tools', () => {
+    const tools = registry.getAllTools();
+    expect(tools.find(tool => tool.name === 'refresh_project_context')?.requiresConfirmation).toBe(true);
+    expect(tools.find(tool => tool.name === 'search_project_context')?.requiresConfirmation).toBe(true);
+  });
+
   it('getToolsForSkills filters to the requested subset', () => {
     const subset = registry.getToolsForSkills(['fs_read', 'vfs_write', 'terminal_spawn']);
     expect(subset.map((m) => m.name).sort()).toEqual(['fs_read', 'terminal_spawn', 'vfs_write']);
@@ -221,5 +231,61 @@ describe('ToolRegistryService — all tools registered', () => {
 
   it('setOverride returns false for unknown tool names', () => {
     expect(registry.setOverride('does_not_exist', false)).toBe(false);
+  });
+
+  const PROOF_IDENTITIES = [
+    ['fs_list', 'kalio.catalog.fs-list', 'kalio.executor.fs-list'],
+    ['fs_read', 'kalio.catalog.fs-read', 'kalio.executor.fs-read'],
+    ['fs_write', 'kalio.catalog.fs-write', 'kalio.executor.fs-write'],
+    ['terminal_spawn', 'kalio.catalog.terminal-spawn', 'kalio.executor.terminal-spawn'],
+    ['terminal_list', 'kalio.catalog.terminal-list', 'kalio.executor.terminal-list'],
+    ['terminal_output', 'kalio.catalog.terminal-output', 'kalio.executor.terminal-output'],
+    ['run_sub_agentflow', 'kalio.catalog.run-sub-agentflow', 'kalio.executor.run-sub-agentflow'],
+  ] as const;
+
+  it.each(PROOF_IDENTITIES)('exposes explicit host identity for %s', (name, catalogEntryId, executorImplementationId) => {
+    const entry = registry.getEntries().find(item => item.meta.name === name);
+    expect(entry).toMatchObject({ catalogEntryId, executorImplementationId, executorImplementationVersion: 1 });
+  });
+
+  it('does not manufacture identities for any other registered tool', () => {
+    const allowed = new Set<string>(PROOF_IDENTITIES.map(([name]) => name));
+    for (const entry of registry.getEntries().filter(item => !allowed.has(item.meta.name))) {
+      for (const field of ['catalogEntryId', 'executorImplementationId', 'executorImplementationVersion']) {
+        expect(Object.hasOwn(entry, field), `${entry.meta.name}/${field}`).toBe(false);
+      }
+    }
+  });
+
+  it('retains entries, executors, metadata and identity across confirmation overrides', () => {
+    const entries = registry.getEntries();
+    const entry = entries.find(item => item.meta.name === 'terminal_list')!;
+    const executor = entry.execute; const meta = entry.meta;
+    expect(registry.setOverride('terminal_list', true)).toBe(true);
+    expect(registry.getEntries()).toBe(entries);
+    expect(registry.getEntries().find(item => item.meta.name === 'terminal_list')).toBe(entry);
+    expect(entry.execute).toBe(executor); expect(entry.meta).toBe(meta);
+    expect(meta.requiresConfirmation).toBe(true);
+    expect(registry.setOverride('terminal_list', false)).toBe(true);
+    expect(meta.requiresConfirmation).toBe(false);
+    expect(entry).toMatchObject({ catalogEntryId: 'kalio.catalog.terminal-list', executorImplementationId: 'kalio.executor.terminal-list', executorImplementationVersion: 1 });
+  });
+
+  it('makes identities immutable without freezing mutable confirmation metadata', () => {
+    const entry = registry.getEntries().find(item => item.meta.name === 'fs_read')!;
+    for (const key of ['catalogEntryId', 'executorImplementationId', 'executorImplementationVersion']) {
+      expect(Object.getOwnPropertyDescriptor(entry, key)).toMatchObject({ writable: false, configurable: false, enumerable: true });
+      expect(Reflect.set(entry, key, 'foreign')).toBe(false);
+      expect(Reflect.deleteProperty(entry, key)).toBe(false);
+    }
+    expect(Object.isFrozen(entry.meta)).toBe(false);
+  });
+
+  it('does not expose authority identity fields in model tool metadata', () => {
+    for (const meta of [...registry.getAllTools(), ...registry.getToolsForSkills(['fs_read', 'terminal_spawn'])]) {
+      expect(meta).not.toHaveProperty('catalogEntryId');
+      expect(meta).not.toHaveProperty('executorImplementationId');
+      expect(meta).not.toHaveProperty('executorImplementationVersion');
+    }
   });
 });

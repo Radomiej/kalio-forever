@@ -10,7 +10,7 @@ import { HitlPolicyService } from '../../hitl/hitl-policy.service';
 import { RuntimeAuditLogger } from '../runtime-audit-logger.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
-import type { ToolDomain } from '@kalio/types';
+import type { ToolDomain, ToolResult } from '@kalio/types';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { MemoryService } from '../../memory/memory.service';
 import type { WebSearchService } from '../../search/web-search.service';
@@ -49,6 +49,27 @@ function makeDrizzleMock(personaId = 'persona-dispatch'): DrizzleService {
 }
 
 describe('ToolDispatchService', () => {
+  it.each([false, true])('defers registered execution ACK to its persistence owner and propagates ACK rejection=%s', async reject => {
+    const confirmations = new ToolConfirmationService(null, null);
+    vi.spyOn(confirmations, 'approveOrRequestConfirmation').mockResolvedValue({ approved: true, execution: { requestId: 'approval', revision: 4 } });
+    const finish = vi.spyOn(confirmations, 'finishLiveExecution').mockImplementation(async () => {
+      if (reject) throw new Error('durable ACK rejected');
+    });
+    const entry = makeEntry('receipt_tool', true, { written: true });
+    const service = new ToolDispatchService([entry], null, null, null, null, confirmations);
+    let commit: ((result: ToolResult) => Promise<void>) | undefined;
+    const result = await service.dispatch('receipt-call', 'receipt_tool', {}, {
+      ...makeCtx(), registerToolResultCommit: callback => { commit = callback; },
+    });
+    expect(result.status).toBe('success');
+    expect(finish).not.toHaveBeenCalled();
+    expect(commit).toBeTypeOf('function');
+    if (reject) await expect(commit!(result)).rejects.toThrow('durable ACK rejected');
+    else await commit!(result);
+    expect(entry.execute).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledWith({ requestId: 'approval', revision: 4 }, { status: 'success' });
+  });
+
   describe('dispatch — no confirmation required', () => {
     let service: ToolDispatchService;
     let entry: ToolRegistryEntry;

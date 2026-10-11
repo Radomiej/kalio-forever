@@ -18,6 +18,7 @@ import {
 } from './architecture-seed-schemas.lab';
 import { LAB_PRESET_SCHEMAS } from './architecture-seed-schemas.lab-presets';
 import { cloneArchitectureContextPolicy, isArchitectureContextPolicy } from './architecture-context-policy';
+import { hasValidAutoRoutingTopology, isAutoRoutingConfig } from './architecture-runtime-schema.utils';
 
 const SCHEMA_ALIASES: Record<string, string> = {
   goal_guard_delivery_loop: 'goal-master-delivery-loop',
@@ -76,6 +77,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
       const nodes = (dto.nodes ?? baseSchema.nodes).map((node) => ({
         ...node,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
+        autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
         kind: nodeKindOverrides[node.id] ?? node.kind,
       }));
       const variant: ArchitectureSchema = {
@@ -245,6 +247,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
       nodes: schema.nodes.map((node) => ({
         ...node,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
+        autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
       })),
       edges: schema.edges.map((edge) => ({ ...edge })),
       routerPolicy: { ...schema.routerPolicy },
@@ -301,10 +304,22 @@ export class ArchitectureRegistryService implements OnModuleInit {
         throw new BadRequestException(`Unknown architecture node ${nodeId}`);
       }
     }
-    if (dto.nodes) {
-      this.validateNodes(dto.nodes, slotById);
+    const sourceNodes: ArchitectureSchema['nodes'] = dto.nodes ?? baseSchema.nodes;
+    const kindOverrides: Record<string, ArchitectureSchema['nodes'][number]['kind']> = dto.nodeKindOverrides ?? {};
+    if (dto.nodes) this.validateNodes(dto.nodes, slotById);
+    this.validateEdges(dto.edges ?? baseSchema.edges, new Set(sourceNodes.map((node) => node.id)));
+    const effectiveNodes = sourceNodes.map((node) => ({
+      ...node, kind: kindOverrides[node.id] ?? node.kind,
+    }));
+    for (const node of effectiveNodes) {
+      if ((node.autoRouting !== undefined && !isAutoRoutingConfig(node.autoRouting))
+        || (node.kind === 'auto_router' ? node.roleSlotId !== undefined : node.autoRouting !== undefined)) {
+        throw new BadRequestException(`Invalid auto-routing configuration for ${node.id}`);
+      }
     }
-    this.validateEdges(dto.edges ?? baseSchema.edges, new Set((dto.nodes ?? baseSchema.nodes).map((node) => node.id)));
+    if (!hasValidAutoRoutingTopology(effectiveNodes, dto.edges ?? baseSchema.edges)) {
+      throw new BadRequestException('Auto-routing nodes require choices and exactly one default route');
+    }
   }
 
   private validateNodes(nodes: ArchitectureSchema['nodes'], slotById: Map<string, ArchitectureSchema['roleSlots'][number]>): void {
@@ -364,6 +379,9 @@ export class ArchitectureRegistryService implements OnModuleInit {
       if (!nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId)) {
         throw new BadRequestException(`Architecture edge ${edge.id} references an unknown node`);
       }
+      if (edge.selection !== undefined && !['default', 'choice', 'converge', 'continuation'].includes(edge.selection)) {
+        throw new BadRequestException(`Invalid selection for architecture edge ${edge.id}`);
+      }
     }
   }
 
@@ -381,6 +399,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
     return value === 'parallel'
       || value === 'role'
       || value === 'router'
+      || value === 'auto_router'
       || value === 'artifact';
   }
 

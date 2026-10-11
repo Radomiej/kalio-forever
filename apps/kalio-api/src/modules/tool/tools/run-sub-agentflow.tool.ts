@@ -61,6 +61,27 @@ function withLaunchAllowedToolNames(
   };
 }
 
+function withTrustedSourceIdentity(
+  context: RunSubAgentFlowArgs['context'],
+  request: ToolCallRequest,
+): RunSubAgentFlowArgs['context'] {
+  const promptMessageId = typeof request.promptMessageId === 'string' && request.promptMessageId.trim()
+    ? request.promptMessageId : undefined;
+  const parentTurnId = typeof request.turnId === 'string' && request.turnId.trim()
+    ? request.turnId : undefined;
+  if ((typeof context === 'string' || context === undefined) && !promptMessageId && !parentTurnId) return context;
+  const safeContext: Record<string, unknown> = typeof context === 'string'
+    ? { subAgentFlowContext: context } : { ...(context ?? {}) };
+  // Source identifiers belong to the host request, never to model-supplied tool arguments.
+  delete safeContext['promptMessageId'];
+  delete safeContext['parentTurnId'];
+  return {
+    ...safeContext,
+    ...(promptMessageId ? { promptMessageId } : {}),
+    ...(parentTurnId ? { parentTurnId } : {}),
+  };
+}
+
 function getVfsMode(args: ToolCallRequest['args']): VFSMode {
   const value = args['vfsMode'];
   if (value === undefined) return 'isolated';
@@ -212,7 +233,7 @@ export class RunSubAgentFlowTool {
       goal: getRequiredString(request.args, 'goal'),
       parentSessionId,
       parentToolCallId: request.callId,
-      context: withLaunchAllowedToolNames(getContext(request.args), request),
+      context: withTrustedSourceIdentity(withLaunchAllowedToolNames(getContext(request.args), request), request),
       startMode: getStartMode(request.args),
       vfsMode: getVfsMode(request.args),
       copyBack: getCopyBack(request.args),

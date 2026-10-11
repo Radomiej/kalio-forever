@@ -125,4 +125,25 @@ describe('HitlDecisionService', () => {
     }));
     expect(llmService.streamChat).not.toHaveBeenCalled();
   });
+
+  it.each(['deny', 'ask_user'] as const)('does not let agree=true override an explicit %s', async (decision) => {
+    llmService.streamChat.mockImplementationOnce(async (_messages, _tools, options) => {
+      options.onChunk({ delta: JSON.stringify({ agree: true, decision, reason: 'Needs review.' }) });
+      return [];
+    });
+    await expect(service.evaluateApproval({
+      personaId: 'reviewer-persona',
+      request: { kind: 'tool', sessionId: 's', name: 'fs_read', args: {} },
+    })).resolves.toMatchObject({ agree: false, decision });
+  });
+
+  it('propagates abort even when the provider resolves instead of throwing', async () => {
+    const controller = new AbortController();
+    const reason = new Error('stopped');
+    llmService.streamChat.mockImplementationOnce(async () => { controller.abort(reason); return []; });
+    await expect(service.evaluateApproval({
+      personaId: 'reviewer-persona',
+      request: { kind: 'tool', sessionId: 's', name: 'fs_read', args: {}, abortSignal: controller.signal },
+    })).rejects.toBe(reason);
+  });
 });

@@ -1,7 +1,47 @@
 import { describe, expect, it } from 'vitest';
 import { SessionExecutionAdmission } from './session-execution-admission';
+import { createHostCancellationRecordingScope, readHostCancellationRecordingPermit } from './host-cancellation-recording-scope';
 
 describe('SessionExecutionAdmission', () => {
+  it('binds cancellation recording to the exact reservation and revokes it on release', async () => {
+    const owner = new SessionExecutionAdmission();
+    const slot = owner.reserve('session', 'turn')!;
+    const identity = { runId: 'run', sessionId: 'session', turnId: 'turn', promptMessageId: 'prompt' };
+    const recorder = {};
+    const scope = createHostCancellationRecordingScope({ executionIdentity: slot, executionSignal: slot.controller.signal,
+      identity, maxPersistenceLeaseMs: 1000, acquirePersistenceLease: () => ({ signal: new AbortController().signal, expiresAt: Date.now() + 500 }) });
+    const handle = scope.lookup(slot, slot.controller.signal)!;
+    expect(owner.bindCancellationRecording('other', slot, scope)).toBe(false);
+    expect(owner.bindCancellationRecording('session', slot, scope)).toBe(true);
+    await handle.registerAdmission({ identity, callId: 'call', toolName: 'read', args: {} }, recorder, Promise.resolve());
+    const stopping = owner.stopAndDrain('session');
+    expect(slot.controller.signal.aborted).toBe(true);
+    const permit = handle.permitFor('call', recorder)!;
+    expect(readHostCancellationRecordingPermit(permit, identity, 'call', recorder).signal.aborted).toBe(false);
+    owner.release('session', slot);
+    await stopping;
+    expect(() => readHostCancellationRecordingPermit(permit, identity, 'call', recorder)).toThrow('HOST_CANCELLATION_RECORDING_CLOSED');
+  });
+
+  it('still aborts and drains the worker when cancellation lease acquisition fails', async () => {
+    const owner = new SessionExecutionAdmission();
+    const slot = owner.reserve('session', 'turn')!;
+    const scope = createHostCancellationRecordingScope({ executionIdentity: slot, executionSignal: slot.controller.signal,
+      identity: { runId: 'run', sessionId: 'session', turnId: 'turn', promptMessageId: 'prompt' },
+      maxPersistenceLeaseMs: 1000, acquirePersistenceLease: () => { throw new Error('private lease failure'); } });
+    expect(owner.bindCancellationRecording('session', slot, scope)).toBe(true);
+    let settled = false;
+    const stopped = owner.stopAndDrain('session');
+    const rejected = expect(stopped).rejects.toThrow('HOST_CANCELLATION_RECORDING_LEASE').then(() => { settled = true; });
+    expect(slot.controller.signal.aborted).toBe(true);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(owner.reserve('session', 'next')).toBeNull();
+    owner.release('session', slot);
+    await rejected;
+    expect(owner.reserve('session', 'next')).not.toBeNull();
+  });
+
   it('reserves one turn synchronously before continuation work can await', () => {
     const owner = new SessionExecutionAdmission();
     const resume = owner.reserve('session', 'original-turn');

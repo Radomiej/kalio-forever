@@ -6,6 +6,8 @@ Priority: P1 — users cannot reliably understand or select the executor for a c
 
 ## Decision
 
+Desktop creation is a single screen: at >=1024px (`lg`), persona, provider/model and prompt are visible together, with no Next/Back or step indicator. Only mobile/tablet compact viewports below 1024px use sequential configuration -> prompt steps, preserving selections and draft on Back/Next. The rule follows viewport width rather than the device label.
+
 Separate identity from execution. A persona owns role/instructions and persona-scoped behavior and may recommend a default provider/runtime + model pair. The new-chat provider/model fuzzy finder preselects that recommendation while allowing the user to choose another connected pair. The conversation/run owns the final persisted, validated selection. Devin and Codex are first-class execution choices. Mock is test/development infrastructure, not a normal user-facing provider. Never silently fall back.
 
 The backend remains authoritative. At launch, resolve and snapshot the exact selection, project/workspace, credentials source, and capability policy. Later settings changes do not mutate a running session. UI must display this effective selection and a typed pending/ready/blocked/failed state.
@@ -49,5 +51,31 @@ The implemented slice passed focused UI/API checks and the fixed-port QA build. 
 - Keep legacy persona-bound runtime fields until migration and historical session behavior are proven.
 
 ## Current evidence boundary
+
+### QA80 desktop/compact review — 2026-10-03
+
+The existing `NewChatScreen.tsx` implements the desktop/compact split with `lg` visibility classes. All seven supplied QA80 PNGs were inspected: `docs/raports/qa-run-80/assets/launch-desktop-1440.png` and `launch-config-{320,390,820}.png` / `launch-prompt-{320,390,820}.png` in that directory. At 1440x900, all three fields appear together and Next/Back are absent; at 320/390/820x900, the captures show configuration then prompt with SWE-2 in the header and an unsent draft. No desktop discrepancy was found.
+
+The parent-owned `apps/e2e/tests/qa-live-launch-wizard.spec.ts` includes desktop visibility/Next/Back assertions and compact model/header, overflow and Back/Next model/draft checks. Parent reports PASS in 3.6s against fixed local QA `http://localhost:5288/`; the sidecar reviewed artifacts without rerunning browser/test/build or dispatching a model request. Desktop capture precedes SWE-2 selection and does not prove a selected desktop pair. QA79 `8aad6e4` remains prior narrow evidence, not a QA80 served-build receipt.
+
+Verdict: CONDITIONAL for launch layout only. Exact breakpoint edges, desktop selection interaction, accessible input/reflow, refresh/reconnect and served revision remain unverified. Real Devin launch/tool/approval/completion proof stays the parent's top priority; UI proof does not close it. The 320px configuration capture starts with the card's top outside the frame; scroll cause and initial visibility need confirmation before treating it as a defect. Detailed acceptance matrix and remaining gates: `docs/raports/qa-run-80/desktop-review.md`. Historical observations below retain their original run boundaries.
+
+QA run 27 isolated a 60-second approval/transport mismatch: cancelled writes were not human denials. Run 28 adds protocol-native progress during actual pending approval, cancellation forwarding and the missing tool:start event. RED/GREEN HTTP/protocol tests and backend static gates passed. This does not yet prove genuine Devin's outer timeout, durable tool history, or Home Site completion; these remain release-blocking evidence gaps.
+
+### Follow-up: live run 26 and reboot
+
+User-approved SWE-2 execution reached real Kalio bridge reads and a confirmed App.jsx write in Home Site. CSS retained its original hash after reboot; no successful generated-project build was proven. The runtime must not be described as fully working yet.
+
+User additionally requires sequential compact-screen creation, removal of duplicate/stale thinking indicators, and a provenance-labeled tool timeline. The first two have focused frontend implementations/regressions; actual compact-browser proof and persisted tool timeline remain acceptance gates. Sidebar showed Completed while the durable run was active, and generic turn audit recorded the persona model rather than the effective ACP model. Both are trust/correctness defects, not polish.
+
+Recovery preserves the AppData QA database and exact project, restarts only the owned QA stack, and inspects pending approvals before any continuation. No automatic retry of the interrupted write is authorized by process startup alone.
+
+### Reconciled live evidence — 2026-10-04
+
+The run-26 unfinished project boundary is superseded by QA144's actual approved SWE-2 build, QA164's single-command preview recovery, and QA161's rendered React demo audit. Devin now has real queue, Stop, denial, host-reset/F5/recovery and user-only interruption evidence; ChatGPT/Codex has queue, Stop, denial and backend-restart/warm-follow-up evidence. These are exact scenario closures, not blanket production readiness.
+
+QA156 closes the reproduced desktop-to-compact draft hiding regression. QA163 closes lost error display after F5 when no assistant message was saved. QA164 system events establish a Windows restart during QA162's process loss; no application crash cause is inferred. Provider settings remain protected; no new autostart behavior is authorized or implemented by this update.
+
+Required before a whole-goal/release claim: reconcile remaining integration settings and token behavior, validate tool/native provenance and user-visible states across required surfaces, finish owned source commits and matching gates, and obtain broader process-spam proof. Neutral external-agent interruption wording is local/tested, not served yet. See `docs/raports/qa-run-165/report.md` for the consolidated evidence matrix.
 
 QA UI/API were reachable on `localhost:5288` / `127.0.0.1:3316` during inspection. The visible Home Site bridge was not ready. The UI showed mock as environment fallback, five Claude cards, 773 Devin models, and an unavailable workspace permission. No token was generated and no Devin run was started in this inspection. Prior run 24 proved one historical, read-only Devin SWE-2 `fs_list`; it is not evidence that this new flow works now.

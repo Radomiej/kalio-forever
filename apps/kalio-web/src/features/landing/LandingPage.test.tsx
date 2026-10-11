@@ -13,6 +13,7 @@ const {
   markSessionHydrated,
   getRAApps,
   getRAAppGroups,
+  getExecutionProfiles,
   getPendingRAAppApprovals,
   apiPost,
   confirmTool,
@@ -34,6 +35,7 @@ const {
   markSessionHydrated: vi.fn(),
   getRAApps: vi.fn<() => Promise<RAAppSummary[]>>(),
   getRAAppGroups: vi.fn<() => Promise<RAAppGroup[]>>(),
+  getExecutionProfiles: vi.fn(),
   getPendingRAAppApprovals: vi.fn().mockResolvedValue([]),
   apiPost: vi.fn(),
   confirmTool: vi.fn(),
@@ -133,6 +135,7 @@ vi.mock('../../services/eventBus', () => ({
 vi.mock('../../services/apiClient', () => ({
   getRAApps,
   getRAAppGroups,
+  getExecutionProfiles,
   getPendingRAAppApprovals,
   apiClient: {
     post: apiPost,
@@ -157,8 +160,60 @@ function makeSummary(id: string, source: 'core' | 'user', name = id): RAAppSumma
 describe('LandingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getExecutionProfiles.mockResolvedValue([{ id: 'enabled-profile', name: 'Enabled', kind: 'devin-cli-acp', model: 'swe-2', enabled: true }]);
     agentStoreState.pendingConfirmations = {};
     agentStoreState.sessionToolActivities = {};
+  });
+
+  it('persists the selected profile when launching from Home', async () => {
+    getRAApps.mockResolvedValue([makeSummary('qa-interactive', 'core', 'Q&A')]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockResolvedValue({ data: { id: 'qa-session', title: 'Q&A' } });
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    await screen.findByRole('option', { name: /Enabled/ });
+    fireEvent.change(screen.getByRole('combobox', { name: 'App execution profile' }), { target: { value: 'enabled-profile' } });
+    fireEvent.click(await screen.findByTestId('tile-qa-interactive'));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ executionProfileId: 'enabled-profile' })));
+    expect(setPendingRAAppLaunchIntent).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('Generate missing values using this conversation runtime') }));
+  });
+
+  it('shows profile loading and errors and explains backend-default inheritance', async () => {
+    getRAApps.mockResolvedValue([]);
+    getRAAppGroups.mockResolvedValue([]);
+    getExecutionProfiles.mockRejectedValue(new Error('Profiles offline'));
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading execution profiles');
+    expect(screen.getByRole('combobox', { name: 'App execution profile' })).toBeDisabled();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Profiles offline');
+    expect(screen.getByRole('option', { name: 'Use saved default execution profile' })).toBeInTheDocument();
+  });
+
+  it('excludes disabled profiles and leaves blank selection to backend defaults', async () => {
+    getExecutionProfiles.mockResolvedValue([
+      { id: 'disabled', name: 'Disabled', enabled: false },
+      { id: 'enabled-profile', name: 'Enabled', enabled: true, kind: 'devin-cli-acp', model: 'swe-2' },
+    ]);
+    getRAApps.mockResolvedValue([makeSummary('core-calc', 'core', 'Calculator')]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockResolvedValue({ data: { id: 'default-session', title: 'Calculator' } });
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    await screen.findByRole('option', { name: /Enabled/ });
+    expect(screen.queryByRole('option', { name: /Disabled/ })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByTestId('tile-core-calc'));
+    await waitFor(() => expect(setPendingRAAppLaunchIntent).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0]?.[1]).not.toHaveProperty('executionProfileId');
+  });
+
+  it('displays a launch failure without navigating or queuing an intent', async () => {
+    getRAApps.mockResolvedValue([makeSummary('core-calc', 'core', 'Calculator')]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockRejectedValueOnce(new Error('Profile unavailable'));
+    const navigate = vi.fn();
+    render(<LandingPage onNavigateToChat={navigate} />);
+    fireEvent.click(await screen.findByTestId('tile-core-calc'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('App launch failed: Profile unavailable');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(setPendingRAAppLaunchIntent).not.toHaveBeenCalled();
   });
 
   it('renders home tiles from the same catalog system as RA-App manager', async () => {
@@ -407,16 +462,14 @@ describe('LandingPage', () => {
     });
     fireEvent.click(screen.getByTestId('home-hitl-approve-req-approve'));
 
-    expect(updateToolActivity).toHaveBeenCalledWith('call-approve', {
-      status: 'running',
-      startedAt: expect.any(Number),
-    });
+    expect(updateToolActivity).not.toHaveBeenCalled();
     expect(confirmTool).toHaveBeenCalledWith({
       requestId: 'req-approve',
       sessionId: 'session-hitl',
       message: 'Looks safe, continue.',
     });
-    expect(removePendingConfirmation).toHaveBeenCalledWith('session-hitl', 'req-approve');
+    expect(removePendingConfirmation).not.toHaveBeenCalled();
+    expect(screen.getByTestId('home-hitl-approve-req-approve')).toBeInTheDocument();
   });
 
   it('rejects a pending tool from Home and sends the rejection note to the agent', async () => {

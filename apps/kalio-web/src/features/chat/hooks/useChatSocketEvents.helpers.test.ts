@@ -37,6 +37,25 @@ function makeWaitingRuntimeSnapshot(sessionId: string, turnId = 'turn-1'): Runti
   };
 }
 
+describe('durable human wait after backend restart', () => {
+  it('does not classify a human wait as terminal when no process is active', () => {
+    const snapshot = makeWaitingRuntimeSnapshot('session-1');
+    snapshot.run = { ...snapshot.run!, status: 'waiting_for_human', phase: 'tool_pending' };
+    expect(sessionStatusKeepsSessionLive(snapshot)).toBe(true);
+    expect(runtimeSnapshotKeepsSessionLive(snapshot)).toBe(true);
+    const finalizeAgentTurn = vi.fn();
+    handleSessionStatusEvent(snapshot, {
+      getActiveSessionId: () => 'session-1', isSessionHydrated: () => true,
+      hasActiveLoopForSession: () => false, getSessionActiveTurnId: () => null,
+      setRecoveryNotice: vi.fn(), addActiveAgentLoop: vi.fn(), startAgentTurn: vi.fn(),
+      finalizeAgentTurn, removeActiveAgentLoop: vi.fn(), setAwaitingFirstChunk: vi.fn(),
+      setStreaming: vi.fn(), recordSessionStatusSnapshot: vi.fn(),
+      clearBufferedSessionStatusSnapshots: vi.fn(),
+    });
+    expect(finalizeAgentTurn).not.toHaveBeenCalled();
+  });
+});
+
 function runConnectionEventSequence(
   initialConnectionState: ChatConnectionState,
   reconnectUiState: ReconnectUiState,

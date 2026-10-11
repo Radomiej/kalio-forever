@@ -26,6 +26,8 @@ describe('WebResultsMemoryStore', () => {
       getModelName: () => Promise.resolve('local-minilm'),
       embedBatch,
       getProfileId: () => profileId,
+      captureSpace: () => ({ id: profileId, model: 'local-minilm', dimensions: 2 }),
+      embedPinned: (_space: unknown, texts: string[]) => embedBatch(texts),
     } as never);
     const storeState = store as unknown as { getStore: () => { insert: typeof insert } };
 
@@ -108,6 +110,8 @@ describe('WebResultsMemoryStore', () => {
     const close = vi.fn();
     const store = new WebResultsMemoryStore(dbBasePath, {
       getProfileId: () => profileId,
+      captureSpace: () => ({ id: profileId }),
+      getStatus: () => ({ configured: true }),
     } as never);
     const storeState = store as unknown as { stores: Map<string, { close: () => void }> };
     const rmSyncSpy = vi.mocked(fs.rmSync);

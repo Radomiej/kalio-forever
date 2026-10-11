@@ -13,6 +13,7 @@ import {
 import { RAAppRenderer } from './RAAppRenderer';
 import { RAAppGroupCard } from './components/RAAppGroupCard';
 import { RAAppCoreCard } from './components/RAAppCoreCard';
+import { RAAppExecutionProfileControl } from './components/RAAppExecutionProfileControl';
 import type { RAAppGroup, RAAppSummary } from '@kalio/types';
 import type { CatalogRunTarget, FoundRAApp, WorkDraft } from './RAAppManager.types';
 
@@ -25,6 +26,8 @@ export function CatalogView({
   onRun,
   runInputsJson,
   onRunInputsChange,
+  executionProfileId,
+  onExecutionProfileChange,
   onGroupDelete,
   onGroupApprove,
   onGroupDiscard,
@@ -39,6 +42,8 @@ export function CatalogView({
   onRun: (target: CatalogRunTarget, inputsJson: string) => void;
   runInputsJson: string;
   onRunInputsChange: (value: string) => void;
+  executionProfileId: string;
+  onExecutionProfileChange: (id: string) => void;
   onGroupDelete: (slug: string) => void;
   onGroupApprove: (slug: string, bumpType: 'patch' | 'minor' | 'major') => Promise<void>;
   onGroupDiscard: (slug: string) => Promise<void>;
@@ -51,6 +56,7 @@ export function CatalogView({
         <h2 className="text-sm font-semibold text-base-content">Catalog ({catalogCount})</h2>
         <p className="text-xs text-base-content/45">Installed user and core RAApps ready to run.</p>
       </div>
+      <RAAppExecutionProfileControl value={executionProfileId} onChange={onExecutionProfileChange} />
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium text-base-content/70">Run inputs (optional JSON)</span>
         <textarea

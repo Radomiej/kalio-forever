@@ -65,7 +65,8 @@
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
     "patchedDependencies": {
-      "@nestjs/cli": "patches/@nestjs__cli.patch"
+      "@nestjs/cli": "patches/@nestjs__cli.patch",
+      "@huggingface/transformers@4.3.1": "patches/@huggingface__transformers@4.3.1.patch"
     }
   }
 }

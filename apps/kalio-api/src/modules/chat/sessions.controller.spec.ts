@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionsController } from './sessions.controller';
 import type { ChatSession, ChatMessage, RuntimeWatchTarget } from '@kalio/types';
+import { readPendingRAAppLaunchInputs } from './raapp-launch-intent';
 
 const mockSession: ChatSession = {
   id: 'sess-1',
@@ -294,6 +295,54 @@ describe('SessionsController', () => {
     it('restores an archived session', async () => {
       await controller.restore('sess-1');
       expect(svc.restore).toHaveBeenCalledWith('sess-1');
+    });
+  });
+
+  describe('RA-App launch inputs public boundary', () => {
+    for (const method of ['create', 'update'] as const) {
+      it(`${method} preserves exact serialized inputs while stripping private keys`, async () => {
+        const inputs = ' { "question": "Choose?", "options": ["Yes", "No"] } ';
+        const runtimeContext = {
+          runtimeKind: 'chat' as const,
+          explicitToolNames: ['terminal_spawn'],
+          architectureContext: {
+            raAppLaunchId: 'qa-interactive',
+            raAppLaunchName: 'Interactive Q&A',
+            raAppLaunchSource: 'raapp_manager',
+            raAppLaunchInputs: inputs,
+            launchAllowedToolNames: ['terminal_spawn'],
+            privateControl: 'must not survive',
+          },
+        };
+        if (method === 'create') await controller.create({ personaId: 'ra-apps', runtimeContext });
+        else await controller.update('sess-1', { runtimeContext });
+        const expected = { runtimeContext: { runtimeKind: 'chat', architectureContext: {
+          raAppLaunchId: 'qa-interactive', raAppLaunchName: 'Interactive Q&A',
+          raAppLaunchSource: 'raapp_manager', raAppLaunchInputs: inputs,
+        } } };
+        if (method === 'create') expect(svc.create).toHaveBeenCalledWith({ personaId: 'ra-apps', ...expected });
+        else expect(svc.update).toHaveBeenCalledWith('sess-1', expected);
+        expect(readPendingRAAppLaunchInputs(runtimeContext)).toEqual({ question: 'Choose?', options: ['Yes', 'No'] });
+      });
+    }
+
+    it.each([undefined, null, 42, {}, [], '', '   '])('strips non-string/blank launch inputs: %j', async (value) => {
+      await controller.create({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchId: 'qa-interactive', raAppLaunchInputs: value,
+      } } });
+      expect(svc.create).toHaveBeenCalledWith({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchId: 'qa-interactive',
+      } } });
+    });
+
+    it.each(['{broken}', '[]', 'null', '42'])('retains string policy but the existing input reader rejects invalid serialized objects: %s', async (raw) => {
+      await controller.create({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchInputs: raw,
+      } } });
+      expect(svc.create).toHaveBeenCalledWith({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchInputs: raw,
+      } } });
+      expect(readPendingRAAppLaunchInputs({ runtimeKind: 'chat', architectureContext: { raAppLaunchInputs: raw } })).toBeUndefined();
     });
   });
 

@@ -1303,6 +1303,18 @@ describe('ChatGateway', () => {
   });
 
   describe('tool confirmations', () => {
+    it('passes only the server socket identity after membership, ignoring client origin claims', async () => {
+      const resolve = vi.fn().mockResolvedValue('resolved');
+      toolDispatch.resolveConfirmationFromGateway = resolve;
+      const payload = { requestId: 'request', sessionId: 'session-1', socketId: 'forged',
+        approvalOrigin: { kind: 'gateway_tool_confirm' }, message: 'ok' };
+      await gateway.handleToolConfirm(observer as never, payload);
+      expect(resolve).not.toHaveBeenCalled();
+      await gateway.handleToolConfirm(client as never, payload);
+      expect(resolve).toHaveBeenCalledExactlyOnceWith('request', 'session-1', client.id, 'ok');
+      expect(toolDispatch.resolveConfirmation).not.toHaveBeenCalled();
+    });
+
     it('rejects tool confirm when socket does not own the session', () => {
       const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
 

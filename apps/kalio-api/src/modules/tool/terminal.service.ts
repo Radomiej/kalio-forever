@@ -4,6 +4,16 @@ import { nanoid } from 'nanoid';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { CmdInvocationAuditService } from '../chat/cmd-invocation-audit.service';
 
+export interface TerminalExecutionDescriptor {
+  readonly terminalId: string;
+  readonly executable: string;
+  readonly argv: readonly string[];
+  /** Lexical cwd passed to spawn, not a canonical/realpath workspace assertion. */
+  readonly actualCwd: string;
+  readonly shell: boolean;
+  readonly ownerIdentity: Readonly<{ sessionId: string; turnId?: string; callId?: string }> | null;
+}
+
 export interface TerminalSession {
   id: string;
   command: string;
@@ -12,6 +22,7 @@ export interface TerminalSession {
   output: string;
   exitCode: number | null;
   createdAt: number;
+  executionDescriptor?: TerminalExecutionDescriptor;
 }
 
 @Injectable()
@@ -34,24 +45,32 @@ export class TerminalService implements OnModuleDestroy {
   ): Promise<TerminalSession> {
     const id = nanoid();
     const safeCwd = cwd ?? process.cwd();
+    const capturedArgs = [...args];
+    const useShell = process.platform === 'win32';
+    const ownerIdentity = auditContext ? Object.freeze({
+      sessionId: auditContext.sessionId, turnId: auditContext.turnId, callId: auditContext.callId,
+    }) : null;
+    const executionDescriptor: TerminalExecutionDescriptor = Object.freeze({
+      terminalId: id, executable: command, argv: Object.freeze([...capturedArgs]),
+      actualCwd: safeCwd, shell: useShell, ownerIdentity,
+    });
 
     const allowed = await this.allowedPaths.isAllowed(safeCwd);
     if (!allowed) {
       throw new ForbiddenException(`ACCESS_DENIED: cwd is outside allowed roots: ${safeCwd}`);
     }
 
-    const useShell = process.platform === 'win32';
     await this.cmdAudit?.recordInvocation({
       command,
       shell: useShell,
       source: 'terminal.spawn',
       launcher: 'spawn',
-      ...auditContext,
+      ...ownerIdentity,
     });
 
     // On Windows most CLI tools are .cmd shims and won't resolve without a shell.
     // shell:true is acceptable here — terminal_spawn already requires user confirmation.
-    const proc = spawn(command, args, {
+    const proc = spawn(command, capturedArgs, {
       cwd: safeCwd,
       shell: useShell,
       windowsHide: true,
@@ -64,12 +83,13 @@ export class TerminalService implements OnModuleDestroy {
 
     const meta: TerminalSession = {
       id,
-      command: [command, ...args].join(' '),
+      command: [command, ...capturedArgs].join(' '),
       pid: proc.pid,
       status: 'running',
       output: '',
       exitCode: null,
       createdAt: Date.now(),
+      executionDescriptor,
     };
 
     const append = (chunk: Buffer) => {
@@ -94,17 +114,17 @@ export class TerminalService implements OnModuleDestroy {
 
     this.sessions.set(id, { meta, proc });
     this.logger.log(`Spawned terminal ${id}: ${meta.command} (pid=${proc.pid})`);
-    return meta;
+    return structuredClone(meta);
   }
 
   list(): TerminalSession[] {
-    return Array.from(this.sessions.values()).map((s) => ({ ...s.meta }));
+    return Array.from(this.sessions.values()).map((s) => structuredClone(s.meta));
   }
 
   get(id: string): TerminalSession | null {
     const s = this.sessions.get(id);
     if (!s) return null;
-    return { ...s.meta };
+    return structuredClone(s.meta);
   }
 
   kill(id: string): boolean {
@@ -158,8 +178,12 @@ export class TerminalService implements OnModuleDestroy {
   waitForExit(id: string, timeoutMs: number): Promise<{ output: string; exitCode: number }> {
     const s = this.sessions.get(id);
     if (!s) return Promise.reject(new Error(`Terminal session not found: ${id}`));
+    const finalResult = () => ({
+      output: s.meta.output,
+      exitCode: s.meta.status === 'killed' ? -1 : s.meta.exitCode ?? -1,
+    });
     if (s.meta.status !== 'running') {
-      return Promise.resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+      return Promise.resolve(finalResult());
     }
 
     return new Promise((resolve, reject) => {
@@ -168,7 +192,7 @@ export class TerminalService implements OnModuleDestroy {
       const closeHandler = () => {
         clearTimeout(timer);
         s.proc.off('close', closeHandler);
-        resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+        resolve(finalResult());
       };
 
       s.proc.on('close', closeHandler);
@@ -176,7 +200,7 @@ export class TerminalService implements OnModuleDestroy {
       // Re-check after attaching; if it already exited we'd miss the event
       if (s.meta.status !== 'running') {
         s.proc.off('close', closeHandler);
-        resolve({ output: s.meta.output, exitCode: s.meta.exitCode ?? 0 });
+        resolve(finalResult());
         return;
       }
 

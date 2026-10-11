@@ -1,6 +1,7 @@
 import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
+import { types } from 'node:util';
 
-import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest } from '@kalio/types';
+import type { ToolMeta, ToolCallRequest, ToolResult, ToolConfirmationRequest, HostDispatchApproval, HostResolvedToolDispatch } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { TOOL_REGISTRY } from './chat.tokens';
@@ -9,6 +10,8 @@ import { MCPService } from '../mcp/mcp.service';
 import { HitlNotificationService } from '../hitl/hitl-notification.service';
 import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
+import { detachHostReceiptArgs } from './llm-turn-runtime-dispatch';
+import { readHostConfirmationRequirement } from './tool-confirmation.persistence';
 
 const SUBAGENT_AUTO_APPROVE_TOOL_NAMES = new Set([
   'vfs_write',
@@ -78,6 +81,7 @@ export class ToolDispatchService {
     ctx: StreamContext,
     toolMetas?: ToolMeta[],
   ): Promise<ToolResult> {
+    if (Object.hasOwn(ctx, 'hostConfirmationRequirement')) throw new Error('HOST_CONFIRMATION_BYPASS_FORBIDDEN');
     return this.dispatchInternal(callId, toolName, args, ctx, toolMetas, false);
   }
 
@@ -99,24 +103,41 @@ export class ToolDispatchService {
     }
 
     const entry = this.toolMap.get(toolName);
+    const observed = Boolean(ctx.onResolvedToolDispatch);
+    const execute = entry?.execute;
+    const canonicalName = entry?.meta.name;
+    const requiresConfirmation = Boolean(entry?.meta.requiresConfirmation);
+    const hostRequirement = readHostConfirmationRequirement(ctx, callId, canonicalName ?? toolName);
+    if (hostRequirement && (!entry || canonicalName !== toolName || !requestConfirmation
+      || !ctx.onResolvedToolDispatch || !ctx.registerToolResultReceiptCommit)) throw new Error('HOST_CONFIRMATION_DURABILITY_REQUIRED');
+    if (observed && entry && canonicalName !== toolName) throw new Error('HOST_DISPATCH_REGISTRY_MISMATCH');
+    if (observed) args = detachHostReceiptArgs(args);
+    let approvalProof: HostDispatchApproval = Object.freeze({ kind: 'non_durable', reason: requestConfirmation ? 'not_required' : 'explicit_bypass' });
     if (!entry) {
       // Route MCP tools by their canonical mcp_{serverKey}_{toolName} names.
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {
+          const resolvedMcpTarget = observed
+            ? Object.freeze({ serverKey: mcpRef.serverKey, originalName: mcpRef.originalName }) : mcpRef;
           // External MCP calls always require a human, regardless of global policy or tool metadata.
           if (requestConfirmation) {
             const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx, true);
             if (!approval.approved) {
               return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
             }
+            approvalProof = this.approvalProof(approval);
             this.registerLiveExecution(ctx, approval);
           }
           if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
           await ctx.markToolRunning?.();
           if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+          if (observed) await this.resolvedDispatch(ctx, callId, toolName, toolName, args,
+            { kind: 'external_mcp', serverKey: resolvedMcpTarget.serverKey, originalName: resolvedMcpTarget.originalName }, approvalProof);
+          if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+          if (observed) acknowledgeExecutorEntry(ctx);
           try {
-            const data = await this.mcpService.callTool(mcpRef.serverKey, mcpRef.originalName, args);
+            const data = await this.mcpService.callTool(resolvedMcpTarget.serverKey, resolvedMcpTarget.originalName, args);
             return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -135,21 +156,28 @@ export class ToolDispatchService {
 
     if (
       requestConfirmation
-      && entry.meta.requiresConfirmation
-      && !isAutoApprovedSubagentTool(toolName, ctx)
+      && (hostRequirement || (observed ? requiresConfirmation : entry.meta.requiresConfirmation))
+      && (hostRequirement || !isAutoApprovedSubagentTool(toolName, ctx))
     ) {
-      const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx);
+      const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx, Boolean(hostRequirement));
       if (!approval.approved) {
         return this.cancelledResult(callId, toolName, ctx, approval.rejectionMessage);
       }
+      if (hostRequirement && !approval.execution) throw new Error('HOST_CONFIRMATION_DURABLE_CLAIM_REQUIRED');
+      approvalProof = this.approvalProof(approval);
       this.registerLiveExecution(ctx, approval);
+    }
+    else if (requestConfirmation && requiresConfirmation && isAutoApprovedSubagentTool(toolName, ctx)) {
+      approvalProof = Object.freeze({ kind: 'non_durable', reason: 'subagent_auto' });
     }
 
     if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
     await ctx.markToolRunning?.();
     if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
-    try {
-      const req: ToolCallRequest = {
+    if (observed) await this.resolvedDispatch(ctx, callId, toolName, canonicalName ?? toolName, args,
+      { kind: 'kalio_registry', entryIdentity: entry, executorIdentity: execute!, requiresConfirmation }, approvalProof);
+    if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+    const req: ToolCallRequest = {
         sessionId: ctx.sessionId,
         turnId: ctx.turnId,
         promptMessageId: ctx.promptMessageId,
@@ -162,8 +190,10 @@ export class ToolDispatchService {
         // Pass the socket emitter so streaming tools can push progress events
         _emit: ctx.emit as ToolCallRequest['_emit'],
         abortSignal: ctx.abortSignal,
-      };
-      const data = await entry.execute(req);
+    };
+    if (observed) acknowledgeExecutorEntry(ctx);
+    try {
+      const data = observed ? await execute!.call(entry, req) : await entry.execute(req);
       if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
     } catch (err) {
@@ -188,6 +218,9 @@ export class ToolDispatchService {
   async resolveConfirmation(requestId: string, sessionId?: string, message?: string): Promise<ConfirmationResolutionStatus> {
     return this.confirmations.resolveConfirmation(requestId, sessionId, message);
   }
+  async resolveConfirmationFromGateway(requestId: string, sessionId: string, socketId: string, message?: string): Promise<ConfirmationResolutionStatus> {
+    return this.confirmations.resolveConfirmationFromGateway(requestId, sessionId, socketId, message);
+  }
 
   async cancelConfirmation(requestId: string, sessionId?: string, message?: string): Promise<ConfirmationResolutionStatus> {
     return this.confirmations.cancelConfirmation(requestId, sessionId, message);
@@ -207,7 +240,28 @@ export class ToolDispatchService {
 
   private registerLiveExecution(ctx: StreamContext, approval: ToolApprovalOutcome): void {
     const execution = approval.execution;
+    if (execution && ctx.onResolvedToolDispatch) {
+      if (!ctx.registerToolResultReceiptCommit) throw new Error('HOST_DISPATCH_COMMIT_OWNER_REQUIRED');
+      const claimed = Object.freeze({ requestId: execution.requestId, revision: execution.revision });
+      ctx.registerToolResultReceiptCommit((result) => this.confirmations.finishLiveExecutionRequired(claimed, { status: result.status }));
+      return;
+    }
     if (execution) ctx.registerToolResultCommit?.((result) => this.confirmations.finishLiveExecution(execution, { status: result.status }));
+  }
+
+  private approvalProof(approval: ToolApprovalOutcome): HostDispatchApproval {
+    return Object.freeze(approval.execution
+      ? { kind: 'durable_confirmation', requestId: approval.execution.requestId, claimedRevision: approval.execution.revision }
+      : { kind: 'non_durable', reason: approval.nonDurableReason ?? 'legacy_confirmation' });
+  }
+
+  private async resolvedDispatch(ctx: StreamContext, callId: string, requestedName: string, canonicalName: string,
+    args: Record<string, unknown>, target: HostResolvedToolDispatch['target'], approval: HostDispatchApproval): Promise<void> {
+    if (!ctx.onResolvedToolDispatch) return;
+    const { runId, sessionId, turnId, promptMessageId } = ctx;
+    if (!runId || !sessionId || !turnId || !promptMessageId) throw new Error('HOST_DISPATCH_IDENTITY_REQUIRED');
+    await ctx.onResolvedToolDispatch(Object.freeze({ identity: Object.freeze({ runId, sessionId, turnId, promptMessageId }),
+      callId, requestedName, canonicalName, args, target: Object.freeze(target), approval }));
   }
 
   private withMeta(result: ToolResult, toolName: string, ctx: StreamContext): ToolResult {
@@ -228,6 +282,17 @@ export class ToolDispatchService {
     }, toolName, ctx);
   }
 
+}
+
+function acknowledgeExecutorEntry(ctx: StreamContext): void {
+  const callback = ctx.onToolExecutorEntered;
+  if (!callback) return;
+  if (types.isAsyncFunction(callback)) throw new Error('HOST_DISPATCH_ENTRY_ASYNC');
+  const result: unknown = callback();
+  if (result !== undefined) {
+    if (types.isPromise(result)) void result.then(() => undefined, () => undefined);
+    throw new Error('HOST_DISPATCH_ENTRY_ASYNC');
+  }
 }
 
 function isAutoApprovedSubagentTool(toolName: string, ctx: StreamContext): boolean {

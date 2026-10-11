@@ -22,6 +22,7 @@ export function readApprovedContinuation(approved: Request | null) {
   const cursor = approved?.continuation;
   const payload = approved?.payload;
   if (!approved || approved.kind !== 'tool_confirmation' || approved.status !== 'approved'
+    || cursor && Object.hasOwn(cursor, 'hostConfirmationRequirement')
     || !approved.turnId || !approved.toolCallId
     || !cursor || cursor['kind'] !== 'approved_tool_then_resume_turn' || cursor['executionState'] !== 'pending'
     || typeof cursor['promptMessageId'] !== 'string'
@@ -57,6 +58,7 @@ export async function runApprovedToolContinuation(input: NonNullable<ReturnType<
   nativeApprovals?: NativeApprovalService;
   approve?: () => Promise<Request | null>;
 }): Promise<boolean> {
+  if (input.approved.continuation && Object.hasOwn(input.approved.continuation, 'hostConfirmationRequirement')) return false;
   const { cursor, runtimeKind, controller, emit, toolName, args } = input;
   let approved = input.approved;
   let claimed: Request | null = null;

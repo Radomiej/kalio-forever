@@ -6,14 +6,15 @@ import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionManagerService } from './session-manager.service';
 import { AuditService } from './audit.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
+import { HostDispatchReceiptService } from './host-dispatch-receipt.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
-import type { LLMStructuredOutputRequest, LLMToolCall, ToolResult, WorkflowErrorCode } from '@kalio/types';
+import type { LLMStructuredOutputRequest, ToolResult, WorkflowErrorCode } from '@kalio/types';
 import type { StreamContext } from './interfaces/stream-context.interface';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { buildAuditRequestData, buildAuditResponseData } from './llm-turn-audit-data';
-import { dispatchRuntimeTool, TurnExecutionLane } from './llm-turn-tool-execution';
-import type { NativeToolExecutionOptions } from '../../common/kalio-mcp-bridge-context';
+import { TurnExecutionLane, hostReceiptIdentity } from './llm-turn-tool-execution';
+import { createRuntimeToolDispatcher, detachHostReceiptArgs } from './llm-turn-runtime-dispatch';
 export { serializeToolResultContent } from './llm-turn-tool-execution';
 import { buildEmptyNoToolRuntimeAuditEvent } from './llm-turn-runtime-audit.events';
 import {
@@ -34,9 +35,14 @@ export class LLMTurnRuntimeService {
     private readonly toolDispatch: ToolDispatchService,
     @Optional() private readonly audit?: AuditService,
     @Optional() private readonly runtimeAudit?: RuntimeAuditLogger,
+    @Optional() private readonly hostDispatchReceipts?: HostDispatchReceiptService,
   ) {}
 
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
+    if (request.hostRuntimeReceiptObserver && !request.hostDispatchReceiptRecorder && this.hostDispatchReceipts) {
+      request = { ...request, hostDispatchReceiptRecorder: this.hostDispatchReceipts.recorder };
+    }
+    if (request.hostRuntimeReceiptObserver) hostReceiptIdentity(request);
     const maxEmptyNoToolRetries = request.maxEmptyNoToolRetries ?? 0;
     let iteration = request.resumeState?.iteration ?? 0;
     let currentLimit = request.resumeState?.currentLimit ?? request.maxIterations;
@@ -150,33 +156,11 @@ export class LLMTurnRuntimeService {
         hasStructuredOutput: boolean;
         latestStructuredOutput: unknown;
       } = { hasStructuredOutput, latestStructuredOutput };
-      const dispatchToolCall = (call: LLMToolCall, options?: NativeToolExecutionOptions): Promise<ToolResult> => {
-        const effectiveCall = request.transformToolCall ? request.transformToolCall(call) : call;
-        return lane.execute(call.id, effectiveCall.id, async () => {
-          const toolContext: StreamContext = options ? {
-            ...ctx,
-            abortSignal: AbortSignal.any([request.abortSignal, options.abortSignal, turnFailure.signal]),
-            emit: (event, data) => {
-              request.emit(event, data);
-              if (event === 'tool:confirmation_required') options.onApprovalProgress?.('waiting');
-              else if (event === 'tool:confirmation_invalidated') options.onApprovalProgress?.('resolved');
-            },
-          } : ctx;
-          if (options) {
-            await lane.write(async () => {
-              state.addToolCall(effectiveCall);
-              await this.sessionManager.persistAssistantMessage(request.sessionId, messageId, state, {
-                turnId: request.turnId, promptMessageId: request.promptMessageId,
-              });
-            });
-          }
-          return dispatchRuntimeTool({
-            request, call: effectiveCall, context: toolContext, lane,
-            sessionManager: this.sessionManager, toolDispatch: this.toolDispatch,
-            audit: this.audit, resultHandler: toolResultHandler,
-          });
-        }, Boolean(options));
-      };
+      const dispatchToolCall = createRuntimeToolDispatcher({
+        request, lane, context: () => ctx, failureSignal: turnFailure.signal,
+        sessionManager: this.sessionManager, toolDispatch: this.toolDispatch,
+        audit: this.audit, resultHandler: () => toolResultHandler,
+      });
 
       const streamModel = async (messagesForAttempt: ContextManagedLLMMessage[]): Promise<void> => {
         for await (const chunk of this.llmSource.stream({
@@ -216,7 +200,9 @@ export class LLMTurnRuntimeService {
             continue;
           }
           chunkCount++;
-          await lane.write(() => this.streamProcessor.process(chunk, ctx));
+          const safeChunk = chunk.type === 'tool_call' && request.hostRuntimeReceiptObserver
+            ? { ...chunk, args: detachHostReceiptArgs(chunk.args) } : chunk;
+          await lane.write(() => this.streamProcessor.process(safeChunk, ctx));
           if (chunk.type === 'tool_call' && request.providerCompletesTurn) {
             await dispatchToolCall({ id: chunk.callId, name: chunk.name, args: chunk.args });
           }
@@ -356,12 +342,7 @@ export class LLMTurnRuntimeService {
         emptyNoToolRetries = 0;
         for (const toolCall of state.toolCalls) {
           if (request.abortSignal.aborted) break;
-          const effectiveToolCall = request.transformToolCall
-            ? request.transformToolCall(toolCall)
-            : toolCall;
-          if (!lane.has(toolCall.id) && !lane.has(effectiveToolCall.id)) {
-            await dispatchToolCall(effectiveToolCall);
-          }
+          await dispatchToolCall(toolCall);
         }
       }
 

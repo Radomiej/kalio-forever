@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../database/schema';
 import { DrizzleService } from '../../database/drizzle.service';
@@ -25,22 +27,12 @@ afterEach(() => { databases.splice(0).forEach((database) => database.close()); }
 async function fixture() {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
-  sqlite.exec(`CREATE TABLE hitl_requests (
-    id text PRIMARY KEY NOT NULL, kind text NOT NULL, status text NOT NULL DEFAULT 'pending',
-    session_id text NOT NULL, turn_id text, run_id text, tool_call_id text,
-    payload text NOT NULL, continuation text, outcome text, revision integer NOT NULL DEFAULT 1,
-    created_at integer NOT NULL, updated_at integer NOT NULL, resolved_at integer
-  );`);
-  sqlite.exec(`CREATE TABLE chat_runs (
-    id text PRIMARY KEY NOT NULL, session_id text NOT NULL, turn_id text NOT NULL, phase text NOT NULL, status text NOT NULL,
-    provider text, model text, runtime_kind text, execution_profile_id text, external_thread_id text, external_turn_id text, process_epoch text,
-    revision integer NOT NULL DEFAULT 1, retry_count integer NOT NULL DEFAULT 0, safe_resume integer NOT NULL DEFAULT 0,
-    error_code text, error_message text, queue_idempotency_key text, queued_payload text, queued_at integer,
-    queue_claimed_at integer, queue_cancelled_at integer, outcome text, started_at integer NOT NULL,
-    updated_at integer NOT NULL, last_heartbeat_at integer NOT NULL, completed_at integer
-  );`);
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder: resolve(__dirname, '../../database/migrations') });
+  db.insert(schema.personas).values({ id: 'persona', name: 'Test', model: 'mock', createdAt: new Date(1), updatedAt: new Date(1) }).run();
+  db.insert(schema.sessions).values({ id: 'session', personaId: 'persona', createdAt: new Date(1), updatedAt: new Date(1) }).run();
   const database = new DrizzleService(null as never);
-  (database as unknown as { db: unknown }).db = drizzle(sqlite, { schema });
+  (database as unknown as { db: unknown }).db = db;
   const durableJournal = new RunJournalService(database);
   await database.db.insert(schema.chatRuns).values({
     id: 'original-run', sessionId: 'session', turnId: 'original-turn', phase: 'tool_pending', status: 'waiting_for_human',
@@ -70,7 +62,7 @@ async function fixture() {
   const loopResult = { finalText: 'done', lastMessageId: 'assistant', finalLimit: 8, aborted: false, maxIterationsReached: false, emptyNoToolRetriesExhausted: false };
   const loop = { runAgentLoop: vi.fn().mockResolvedValue(loopResult) };
   const journal = {
-    getTurn: vi.fn().mockResolvedValue(null),
+    getTurn: vi.fn().mockImplementation((sessionId: string, turnId: string) => durableJournal.getTurn(sessionId, turnId)),
     getCurrentRun: vi.fn().mockResolvedValue(null),
     startRun: vi.fn().mockResolvedValue({ id: 'new-run' }), checkpoint: vi.fn().mockResolvedValue(undefined),
     complete: vi.fn().mockResolvedValue(undefined), fail: vi.fn().mockResolvedValue(undefined), interrupt: vi.fn().mockResolvedValue(undefined),
@@ -83,7 +75,7 @@ async function fixture() {
   );
   const pipeline = new SessionPipelineService(chat, journal as never);
   const approve = () => chat.approveAndResumeTool('approval', 'session', 'approved', emit);
-  return { requests, chat, pipeline, approve, emit, manager, sessions, context, profiles, profile, assembled, dispatch, toolResult, loop, loopResult, journal, durableJournal, scheduler, lease };
+  return { sqlite, requests, chat, pipeline, approve, emit, manager, sessions, context, profiles, profile, assembled, dispatch, toolResult, loop, loopResult, journal, durableJournal, scheduler, lease };
 }
 
 describe('restored HITL shared admission (isolated SQLite)', () => {
@@ -103,10 +95,10 @@ describe('restored HITL shared admission (isolated SQLite)', () => {
   it('persists a cancelled tool result with its original turn binding on idle Stop', async () => {
     const f = await fixture();
     await f.pipeline.stopAndDrain('session');
-    expect(f.manager.saveToolResult).toHaveBeenCalledWith(
-      'session', 'call', expect.stringContaining('"status":"cancelled"'),
-      { turnId: 'original-turn', promptMessageId: 'original-prompt' },
-    );
+    expect(f.sqlite.prepare('SELECT content,turn_id,prompt_message_id FROM messages WHERE tool_call_id=?').get('call')).toEqual({
+      content: '{"status":"cancelled","errorMessage":"Turn interrupted by user"}',
+      turn_id: 'original-turn', prompt_message_id: 'original-prompt',
+    });
     expect(f.dispatch.dispatchApproved).not.toHaveBeenCalled();
   });
 
@@ -116,9 +108,10 @@ describe('restored HITL shared admission (isolated SQLite)', () => {
     f.journal.getCurrentRun.mockImplementation((id: string) => f.durableJournal.getCurrentRun(id));
     f.journal.getTurn.mockImplementation((sessionId: string, turnId: string) => f.durableJournal.getTurn(sessionId, turnId));
     const cleanup = barrier<void>();
-    f.journal.interrupt.mockImplementation(async (id: string, message: string) => {
+    vi.spyOn(f.requests, 'cancelOrdinaryContinuationsRequired').mockImplementation(async (input) => {
+      const result = HitlRequestService.prototype.cancelOrdinaryContinuationsRequired.call(f.requests, input);
       await cleanup.promise;
-      await f.durableJournal.interrupt(id, message);
+      return result;
     });
     let drained = false;
     const stop = f.pipeline.stopAndDrain('session').then(() => { drained = true; });
@@ -126,7 +119,8 @@ describe('restored HITL shared admission (isolated SQLite)', () => {
     const followUp = f.pipeline.submit({ sessionId: 'session', content: 'next', personaId: 'persona' }, f.emit);
     await flush();
     expect((await f.requests.getById('approval'))?.status).toBe('cancelled');
-    expect(f.journal.interrupt).toHaveBeenCalledWith('original-run', 'Turn interrupted by user');
+    expect(await f.durableJournal.getTurn('session', 'original-turn')).toMatchObject({ status: 'interrupted', safeResume: false });
+    expect(f.journal.interrupt).not.toHaveBeenCalled();
     expect(drained).toBe(false);
     expect(normal).not.toHaveBeenCalled();
     cleanup.resolve();
@@ -237,8 +231,8 @@ describe('restored HITL shared admission (isolated SQLite)', () => {
     await f.pipeline.stopAndDrain('session');
     metadata.resolve(pending);
     expect(await approval).toBe(false);
-    expect(resolve).toHaveBeenCalledTimes(1);
-    expect(resolve).toHaveBeenCalledWith('approval', 1, 'cancelled', { message: 'Turn interrupted by user' });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(await f.durableJournal.getTurn('session', 'original-turn')).toMatchObject({ status: 'interrupted', safeResume: false });
     expect(claim).not.toHaveBeenCalled();
     expect(f.dispatch.dispatchApproved).not.toHaveBeenCalled();
     expect((await f.requests.getById('approval'))?.status).toBe('cancelled');

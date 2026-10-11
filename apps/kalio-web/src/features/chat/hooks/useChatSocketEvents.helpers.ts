@@ -219,6 +219,7 @@ export function sessionStatusKeepsSessionLive(
   return snapshot.active
     || (snapshot.queueLength ?? 0) > 0
     || runStatus === 'active'
+    || runStatus === 'waiting_for_human'
     || runStatus === 'waiting_on_orchestrator';
 }
 
@@ -228,6 +229,7 @@ export function runtimeSnapshotKeepsSessionLive(
   const runStatus = snapshot.run?.status as string | undefined;
   return snapshot.active
     || runStatus === 'active'
+    || runStatus === 'waiting_for_human'
     || runStatus === 'waiting_on_orchestrator'
     || snapshot.queueLength > 0
     || snapshot.toolActivities.some((activity) => (

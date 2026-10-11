@@ -10,7 +10,7 @@ import { SessionsService } from '../chat/sessions.service';
 import { SessionManagerService } from '../chat/session-manager.service';
 import { buildArchitectureParentChatMessages } from './architecture-parent-chat-projection';
 import { buildArchitectureRuntimeChatProjection } from './architecture-runtime-chat-projection.utils';
-import { getArchitectureParentSessionId } from './architecture-session-context';
+import { getArchitectureParentSessionId, getArchitecturePromptMessageId } from './architecture-session-context';
 
 @Injectable()
 export class ArchitectureRuntimeChatProjectionService {
@@ -47,9 +47,14 @@ export class ArchitectureRuntimeChatProjectionService {
     }
     const messages = buildArchitectureParentChatMessages(schema, run, targetSessionId, events, Date.now());
     const existingMessageIds = new Set(existingMessages.map((message) => message.id));
+    const sourceMessageId = getArchitecturePromptMessageId(run.context);
+    const hasSourceUserMessage = existingMessages.some((message) => (
+      message.id === sourceMessageId && message.role === 'user' && message.sessionId === targetSessionId
+    ));
     await Promise.all(
       messages
         .filter((message) => !existingMessageIds.has(message.id))
+        .filter((message) => message.role !== 'user' || !hasSourceUserMessage)
         .map((message) => this.sessionManager.persistMessage(message)),
     );
   }

@@ -33,6 +33,7 @@ import { IdeDiagnosticsTool, IdeQueryTool, IdeStatusTool } from '../code-intelli
 import { KVStoreService } from './kv-store.service';
 import { TerminalService } from './terminal.service';
 import { ToolRegistryService } from './tool-registry.service';
+import { RefreshProjectContextTool, SearchProjectContextTool } from './tools/project-context.tools';
 
 export const TOOL_PROVIDER_CLASSES = [
   VFSWriteTool, VFSReadTool, VFSListTool, VFSGrepSearchTool, VFSFileSearchTool,
@@ -47,6 +48,7 @@ export const TOOL_PROVIDER_CLASSES = [
   RaAppCreateDraftTool, RaAppExecuteDslTool, RaAppPublishDraftTool,
   RaAppTestTool,
   MemoryIngestTool, MemorySearchTool, MemoryIngestConversationTool,
+  RefreshProjectContextTool, SearchProjectContextTool,
   WebSearchTool,
   ListToolsTool, GetToolDetailsTool,
   SpawnCliAgentTool, MessageCliAgentTool, GetCliAgentStatusTool, StopCliAgentTool,

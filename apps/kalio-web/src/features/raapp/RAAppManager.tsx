@@ -21,8 +21,8 @@ import {
   deleteRAAppGroup,
 } from '../../services/apiClient';
 import type { RAAppBlock, RAAppSummary, RAAppGroup, VFSFile } from '@kalio/types';
-import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 import { buildRAAppLaunchRuntimeContext } from './raappLaunchRuntimeContext';
+import { buildRAAppRunPrompt, createRAAppHostSession, prepareRAAppLaunchInputs, resolveRAAppExecutionProfile } from './raappExecutionProfile';
 
 type RAAppSource = 'catalog' | 'work' | 'session';
 
@@ -92,6 +92,7 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
   const setPendingRAAppLaunchIntent = useSessionStore((s) => s.setPendingRAAppLaunchIntent);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [runInputsJson, setRunInputsJson] = useState('');
+  const [executionProfileId, setExecutionProfileId] = useState('');
   const [workFiles, setWorkFiles] = useState<VFSFile[]>([]);
   const [workLoading, setWorkLoading] = useState(false);
   const [workError, setWorkError] = useState<string | null>(null);
@@ -218,18 +219,21 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
         return;
       }
       try {
-        const session = await createAndActivateEmptyHostSession({
+        setCatalogError(null);
+        const currentSession = useSessionStore.getState().sessions.find((item) => item.id === activeSessionId);
+        const selectedProfileId = resolveRAAppExecutionProfile(executionProfileId, currentSession);
+        const session = await createRAAppHostSession({
           personaId: 'ra-apps',
           title: target.name,
-          runtimeContext: buildRAAppLaunchRuntimeContext(target.id, target.name, 'raapp_manager', inputs),
+          executionProfileId: selectedProfileId,
+          runtimeContext: buildRAAppLaunchRuntimeContext(target.id, target.name, 'raapp_manager', prepareRAAppLaunchInputs(target.id, inputs)),
+        }, {
           addSession,
           setActiveSession,
           setMessages,
           setAgentTurns,
-          reason: 'app-open',
         });
-        const inputInstruction = inputs ? ` Use these JSON inputs: ${JSON.stringify(inputs)}.` : '';
-        const prompt = `Run the "${target.name}" RA-App for me.${target.description ? ` ${target.description}` : ''}${inputInstruction} Launch it immediately.`;
+        const prompt = buildRAAppRunPrompt(target.id, target.name, target.description, inputs);
         setPendingRAAppLaunchIntent({
           targetSessionId: session.id,
           appId: target.id,
@@ -241,9 +245,10 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
         onRunWithAgent();
       } catch (err) {
         console.error('[RAAppManager] failed to create session for RA-App run', err);
+        setCatalogError(`App launch failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
-    [addSession, onRunWithAgent, setActiveSession, setAgentTurns, setMessages, setPendingRAAppLaunchIntent],
+    [activeSessionId, executionProfileId, addSession, onRunWithAgent, setActiveSession, setAgentTurns, setMessages, setPendingRAAppLaunchIntent],
   );
 
   const handleWorkAction = useCallback((message: string) => {
@@ -335,6 +340,8 @@ export function RAAppManager({ onOpenVFS, onRunWithAgent }: RAAppManagerProps) {
               onRun={handleRun}
               runInputsJson={runInputsJson}
               onRunInputsChange={setRunInputsJson}
+              executionProfileId={executionProfileId}
+              onExecutionProfileChange={setExecutionProfileId}
               onGroupDelete={(slug) => {
                 void deleteRAAppGroup(slug).then(refreshCatalog);
               }}

@@ -12,6 +12,7 @@ import { LocalEmbeddingInstallService } from './local-embedding-install.service'
 import { LocalTransformersEmbeddingProvider } from './local-transformers-embedding.provider';
 import { MemoryController } from './memory.controller';
 import { MemoryService } from './memory.service';
+import { createServer } from 'node:http';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -392,7 +393,7 @@ describe('MemoryController — embedding credential routes', () => {
     it('returns { ok: true } when provider responds correctly', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ data: [{ index: 0, embedding: [0.1, 0.2] }] }),
+        json: async () => ({ data: [{ index: 0, embedding: Array<number>(BASE_DTO.dimensions).fill(0.1) }] }),
       }));
       const c = await controller.createEmbeddingCredential(BASE_DTO);
       const result = await controller.testEmbeddingCredential(c.id);
@@ -404,7 +405,7 @@ describe('MemoryController — embedding credential routes', () => {
     it('tests ollama credential via OllamaEmbeddingProvider', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ embeddings: [[0.1, 0.2]] }),
+        json: async () => ({ embeddings: [Array<number>(768).fill(0.1)] }),
       }));
       const c = await controller.createEmbeddingCredential({
         name: 'LocalOllama',
@@ -422,7 +423,7 @@ describe('MemoryController — embedding credential routes', () => {
     it('does NOT change active credential after test', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ data: [{ index: 0, embedding: [0.1] }] }),
+        json: async () => ({ data: [{ index: 0, embedding: Array<number>(BASE_DTO.dimensions).fill(0.1) }] }),
       }));
       const active = await controller.createEmbeddingCredential({ ...BASE_DTO, name: 'Active' });
       const tested = await controller.createEmbeddingCredential({ ...BASE_DTO, name: 'Tested' });
@@ -491,10 +492,66 @@ describe('MemoryController — embedding credential routes', () => {
   // ── POST /embedding-credentials/probe (test-without-saving) ──────────────────
 
   describe('probeEmbeddingCredential', () => {
+    it('uses /api/embed for 127.0.0.1:11434 against a real HTTP fixture in probe and saved test', async () => {
+      const paths: string[] = [];
+      const server = createServer((request, response) => {
+        paths.push(request.url ?? '');
+        request.resume();
+        response.setHeader('content-type', 'application/json');
+        if (request.url !== '/api/embed') { response.writeHead(404); response.end('{"error":"wrong endpoint"}'); return; }
+        response.end(JSON.stringify({ embeddings: [[0.1, 0.2]] }));
+      });
+      await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Fixture did not bind');
+      const nativeFetch = globalThis.fetch;
+      // Keep provider detection on :11434; remap transport only to avoid occupying the real Ollama port.
+      const transport = vi.fn<typeof fetch>(async (input, init) => {
+        const target = new URL(String(input));
+        target.port = String(address.port);
+        return nativeFetch(target, init);
+      });
+      vi.stubGlobal('fetch', transport);
+      try {
+        const dto = { ...BASE_DTO, provider: 'ollama' as const, baseUrl: 'http://127.0.0.1:11434', dimensions: 2 };
+        expect(await controller.probeEmbeddingCredential(dto)).toEqual({ ok: true });
+        const credential = await controller.createEmbeddingCredential(dto);
+        expect(await controller.testEmbeddingCredential(credential.id)).toEqual({ ok: true });
+        expect(paths).toEqual(['/api/embed', '/api/embed']);
+        expect(transport.mock.calls.map(call => String(call[0])))
+          .toEqual(['http://127.0.0.1:11434/api/embed', 'http://127.0.0.1:11434/api/embed']);
+      } finally {
+        vi.unstubAllGlobals();
+        await new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); });
+      }
+    });
+    it.each([
+      ['http://localhost:11434', '/api/embed'],
+      ['http://[::1]:11434', '/api/embed'],
+      ['http://127.0.0.1:11435', '/embeddings'],
+      ['http://localhost:11435', '/embeddings'],
+      ['http://[::1]:11435', '/embeddings'],
+      ['https://example.test/ollama', '/embeddings'],
+    ])('matches active provider routing for probe and saved test at %s', async (baseUrl, endpoint) => {
+      const transport = vi.fn().mockImplementation(async () => ({ ok: true,
+        json: async () => endpoint === '/api/embed' ? { embeddings: [[0.1, 0.2]] } : { data: [{ index: 0, embedding: [0.1, 0.2] }] },
+      }));
+      vi.stubGlobal('fetch', transport);
+      try {
+        const dto = { ...BASE_DTO, baseUrl, dimensions: 2 };
+        expect(await controller.probeEmbeddingCredential(dto)).toEqual({ ok: true });
+        const credential = await controller.createEmbeddingCredential(dto);
+        expect(await controller.testEmbeddingCredential(credential.id)).toEqual({ ok: true });
+        await controller.setActiveEmbeddingCredential(credential.id);
+        await embeddingService.embedPinned(embeddingService.captureSpace(), ['test']);
+        expect(transport.mock.calls.map(call => String(call[0])))
+          .toEqual(Array<string>(3).fill(`${baseUrl}${endpoint}`));
+      } finally { vi.unstubAllGlobals(); }
+    });
     it('returns { ok: true } when provider responds correctly — without saving a credential', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ data: [{ index: 0, embedding: [0.1, 0.2] }] }),
+        json: async () => ({ data: [{ index: 0, embedding: Array<number>(BASE_DTO.dimensions).fill(0.1) }] }),
       }));
       const result = await controller.probeEmbeddingCredential(BASE_DTO);
       expect(result.ok).toBe(true);
@@ -520,7 +577,7 @@ describe('MemoryController — embedding credential routes', () => {
     it('tests ollama URL via OllamaEmbeddingProvider in probe', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ embeddings: [[0.1, 0.2]] }),
+        json: async () => ({ embeddings: [Array<number>(768).fill(0.1)] }),
       }));
       const result = await controller.probeEmbeddingCredential({
         name: 'probe-ollama',
@@ -541,7 +598,7 @@ describe('MemoryController — embedding credential routes', () => {
 
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ data: [{ index: 0, embedding: [0.1] }] }),
+        json: async () => ({ data: [{ index: 0, embedding: Array<number>(BASE_DTO.dimensions).fill(0.1) }] }),
       }));
       await controller.probeEmbeddingCredential({ ...BASE_DTO, name: 'probe-only' });
 

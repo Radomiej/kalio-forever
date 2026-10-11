@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../audit.service';
 import type { DrizzleService } from '../../../database/drizzle.service';
+import { SQL } from 'drizzle-orm';
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 
 function makeDrizzle(opts: { fail?: boolean } = {}): { drizzle: DrizzleService; inserted: unknown[]; updated: unknown[]; deleted: unknown[]; runQueries: unknown[] } {
   const inserted: unknown[] = [];
@@ -18,8 +20,12 @@ function makeDrizzle(opts: { fail?: boolean } = {}): { drizzle: DrizzleService; 
     set: (patch: unknown) => ({
       where: () => {
         if (opts.fail) throw new Error('db unavailable');
-        updated.push(patch);
-        return Promise.resolve();
+        // Mirror SQLite's bound JSON text rather than asserting a query object.
+        const value = patch as Record<string, unknown>;
+        updated.push(value.data instanceof SQL
+          ? { ...value, data: JSON.parse(String(new SQLiteSyncDialect().sqlToQuery(value.data).params[0])) as unknown }
+          : patch);
+        return { run: () => undefined };
       },
     }),
   });
@@ -35,7 +41,8 @@ function makeDrizzle(opts: { fail?: boolean } = {}): { drizzle: DrizzleService; 
     runQueries.push(query);
     return Promise.resolve();
   };
-  return { drizzle: { db: { insert, update, delete: deleteFn, run } } as unknown as DrizzleService, inserted, updated, deleted, runQueries };
+  const db = { insert, update, delete: deleteFn, run, all: () => [] };
+  return { drizzle: { db: { ...db, transaction: (action: (tx: typeof db) => unknown) => action(db) } } as unknown as DrizzleService, inserted, updated, deleted, runQueries };
 }
 
 describe('AuditService', () => {

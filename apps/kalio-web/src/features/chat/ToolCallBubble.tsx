@@ -34,7 +34,7 @@ import {
   extractSubagentResult,
   extractWebSearchResult,
 } from './ToolCallBubble.parsers';
-import { Chip, ConfirmationInlineBubble, formatArgValue } from './ToolCallBubble.Chrome';
+import { Chip, ConfirmationInlineBubble, FullToolArguments } from './ToolCallBubble.Chrome';
 import { SubagentResultBlock, CLIAgentSessionStatusBlock, SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { getToolTargetLabel } from './toolTargetLabel';
 import { CLIChildConversationCard } from './CLIChildConversationCard';
@@ -205,13 +205,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       {!showCliChildCard && cliSessionSnapshot && <CLIAgentSessionStatusBlock snapshot={cliSessionSnapshot} />}
       {imageResult && <ImageResultRenderer data={imageResult} />}
       {hasArgs && (
-        <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
-          {Object.entries(activity.args).map(([k, v]) => (
-            <div key={k}>
-              <span className="text-base-content/40">{k}:</span> {formatArgValue(v)}
-            </div>
-          ))}
-        </div>
+        <FullToolArguments args={activity.args} />
       )}
       {hasNonRaappResult && activity.result?.data != null && (
         <div className="font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-base-content/60">
@@ -219,7 +213,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
         </div>
       )}
       {activity.result?.errorMessage && (
-        <div className="text-xs text-error">{activity.result.errorMessage}</div>
+        <div className={`text-xs ${activity.status === 'cancelled' ? 'text-base-content/50' : 'text-error'}`}>{activity.result.errorMessage}</div>
       )}
       {activity.status === 'cancelled' && !activity.result?.errorMessage && (
         <div className="text-xs text-base-content/50">Tool call was cancelled before it completed.</div>
@@ -240,7 +234,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
 export function HistoryToolCallBubble({
   toolName,
   content,
-  isAnswered,
+  isAnswered: hasLaterUserMessage,
   args,
   callId = '',
   parentSessionId: parentSessionIdProp,
@@ -272,6 +266,7 @@ export function HistoryToolCallBubble({
   }
 
   const raapp = extractRAAppBlock(parsed);
+  const isAnswered = Boolean(hasLaterUserMessage && raapp?.mode === 'interactive');
   const cliResult = isCliAgent ? extractCLIAgentResult(parsed) : null;
   const cliSessionSnapshot = isDurableCliAgent ? extractCLIAgentSessionSnapshot(parsed) : null;
   const historyChildSessionId = cliSessionSnapshot?.childSessionId ?? cliResult?.childSessionId;
@@ -304,12 +299,17 @@ export function HistoryToolCallBubble({
   const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const agentFlowOpenGraphRunId = displayedSubAgentFlowResult?.openGraphRunId ?? displayedSubAgentFlowResult?.flowRunId;
   const agentFlowOpenChatSessionId = displayedSubAgentFlowResult?.openChatSessionId ?? displayedSubAgentFlowResult?.childSessionId;
-  const historyIcon = persistedToolResultMeta?.status === 'error'
+  const resultUnconfirmed = content.trim().length === 0;
+  const historyIcon = resultUnconfirmed
+    ? <AlertTriangle size={12} className="text-warning shrink-0" />
+    : persistedToolResultMeta?.status === 'error'
     ? <XCircle size={12} className="text-error shrink-0" />
     : persistedToolResultMeta?.status === 'cancelled'
       ? <XCircle size={12} className="text-base-content/40 shrink-0" />
       : <CheckCircle2 size={12} className="text-success shrink-0" />;
-  const historyStatusBadge = persistedToolResultMeta?.status === 'error'
+  const historyStatusBadge = resultUnconfirmed
+    ? <span className="text-[10px] font-mono text-warning">unconfirmed</span>
+    : persistedToolResultMeta?.status === 'error'
     ? <span className="text-[10px] font-mono text-error/80 bg-error/10 rounded px-1">failed</span>
     : persistedToolResultMeta?.status === 'cancelled'
       ? <span className="text-[10px] font-mono text-base-content/55 bg-base-200/70 rounded px-1">cancelled</span>
@@ -373,7 +373,7 @@ export function HistoryToolCallBubble({
         badge={
           <>
             {historyStatusBadge}
-            {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">â†© answered</span>}
+            {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">answered</span>}
             {displayedSubAgentFlowResult != null && agentFlowOpenChatSessionId && (
               <button
                 className="ml-1 text-[10px] text-sky-400/60 hover:text-sky-400 flex items-center gap-0.5"
@@ -409,11 +409,7 @@ export function HistoryToolCallBubble({
         {hasArgs && (
           <div className="font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/50">
             <div className="text-[10px] text-base-content/30 mb-0.5">input</div>
-            {Object.entries(args!).map(([k, v]) => (
-              <div key={k}>
-                <span className="text-base-content/40">{k}:</span> {formatArgValue(v)}
-              </div>
-            ))}
+            <FullToolArguments args={args!} />
           </div>
         )}
         {hasResult && (
@@ -446,7 +442,7 @@ export function HistoryToolCallBubble({
         {webSearchResult && <WebSearchResultRenderer data={webSearchResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
         {persistedToolResultMeta?.errorMessage && (
-          <div className="text-xs text-error">{persistedToolResultMeta.errorMessage}</div>
+          <div className={`text-xs ${persistedToolResultMeta.status === 'cancelled' ? 'text-base-content/50' : 'text-error'}`}>{persistedToolResultMeta.errorMessage}</div>
         )}
         {persistedToolResultMeta?.status === 'cancelled' && !persistedToolResultMeta.errorMessage && (
           <div className="text-xs text-base-content/50">Tool call was cancelled before it completed.</div>
@@ -455,7 +451,7 @@ export function HistoryToolCallBubble({
       )}
       {raapp && isAnswered && (
         <div className="border-l-[3px] border-l-emerald-500/20 pl-3 py-1 my-0.5 text-xs text-base-content/40 italic">
-          Interactive app â€” answer submitted
+          Interactive app — answer submitted
         </div>
       )}
     </>

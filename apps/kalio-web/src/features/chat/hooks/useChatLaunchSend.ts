@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ChatSession } from '@kalio/types';
 import { useSessionStore } from '../../../store/sessionStore';
 import { activateConversationSession } from '../activeConversationSession';
@@ -14,8 +14,11 @@ export function useChatLaunchSend({ activeSession, projectId, projectPath, send,
 }) {
   const pending = useRef(false);
   const createdSession = useRef<{ session: ChatSession; projectId: string; projectPath: string } | null>(null);
+  useEffect(() => {
+    if (activeSession) createdSession.current = null;
+  }, [activeSession?.id]);
   return async (content: string, personaId: string, executionProfileId?: string) => {
-    if (pending.current) return;
+    if (pending.current || !content.trim()) return;
     pending.current = true;
     try {
       if (!executionProfileId) throw new Error('Choose a connected provider and model before starting this chat.');

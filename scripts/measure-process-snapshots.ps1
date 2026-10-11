@@ -1,4 +1,4 @@
-param([ValidateRange(1, 60)][int]$Seconds = 30)
+param([ValidateRange(1, 300)][int]$Seconds = 30)
 
 # Read-only sampling: no arguments, environment, titles or process mutation.
 $ErrorActionPreference = 'Stop'

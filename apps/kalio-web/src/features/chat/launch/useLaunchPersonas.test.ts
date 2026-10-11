@@ -15,6 +15,11 @@ const profile = (id: string): ExecutionProfile => ({
 });
 
 describe('resolveLaunchExecutionProfileId', () => {
+  it('uses the saved default for a new chat without overriding an existing conversation', () => {
+    const profiles = [profile('devin-default'), profile('persona-recommendation'), profile('chat-choice')];
+    expect(resolveLaunchExecutionProfileId(undefined, 'persona-recommendation', profiles, 'devin-default')).toBe('devin-default');
+    expect(resolveLaunchExecutionProfileId('chat-choice', 'persona-recommendation', profiles, 'devin-default')).toBe('chat-choice');
+  });
   it('keeps an existing conversation choice, otherwise seeds from the selected persona recommendation', () => {
     const profiles = [profile('chat-choice'), profile('persona-recommendation')];
     expect(resolveLaunchExecutionProfileId('chat-choice', 'persona-recommendation', profiles)).toBe('chat-choice');

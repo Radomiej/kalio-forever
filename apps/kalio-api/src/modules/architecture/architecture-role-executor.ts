@@ -1,21 +1,19 @@
+import { ArchitectureRoleObjective } from './architecture-role-objective';
+import { buildGoalProposalWorkerContract, validateGoalProposalWorkerOutput } from './architecture-goal-worker-contract';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type {
   ArchitectureExecutionEvent,
   ArchitectureExecutionMode,
-  ArchitectureContextPolicy,
+  ArchitectureGoalPacketV1,
   ArchitectureRouterOutput,
   ArchitectureRoleSlot,
   ArchitectureRun,
   ArchitectureSchema,
   ArchitectureSchemaNode,
+  HostRuntimeReceiptObserver,
 } from '@kalio/types';
 import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { SUBAGENT_RUNTIME, type SubagentEmit, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
-import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION } from './architecture-final-artifact-contract';
-import {
-  summarizeArchitectureIncomingEvent,
-  summarizeArchitectureIncomingHandoffPacket,
-} from './architecture-incoming-event-summary';
 import {
   finalArtifactContractFromStructuredOutput,
   routerOutputFromStructuredOutput,
@@ -28,7 +26,6 @@ import {
   architectureRecoverableErrorMessage,
   architectureSlotMessage,
   compactStreamSnapshot,
-  incomingEventEvidenceSummary,
   summarizeToolEvidence,
 } from './architecture-role-evidence.utils';
 import { PersonaService } from '../persona/persona.service';
@@ -48,30 +45,17 @@ export interface ArchitectureRoleExecutionInput {
   outgoingNodeIds?: string[];
   resumeChildTurnId?: string;
   emit?: SubagentEmit;
+  /** Host-supplied only, never read from run.context or model tool arguments. */
+  purpose?: { kind: 'goal_proposal'; packet: ArchitectureGoalPacketV1 };
+  /** Host-only object capability; never derive from run context or DTOs. */
+  hostRuntimeReceiptObserver?: HostRuntimeReceiptObserver;
 }
 
 export interface ArchitectureRoleExecutionResult {
   message: string;
   data: Record<string, unknown>;
+  structuredOutput?: unknown;
 }
-
-type EffectiveContextPolicy = Required<Pick<
-  ArchitectureContextPolicy,
-  'includeUserTask'
-  | 'includeProjectMemory'
-  | 'includeBrowserSession'
-  | 'includePriorDecisions'
->> & {
-  includeOtherAgentOutputs: boolean;
-  includeToolResults: boolean;
-  contextCompression: NonNullable<ArchitectureContextPolicy['contextCompression']>;
-};
-
-type CliBackendPolicy = {
-  preferred?: string;
-  allowed: string[];
-  purpose: string;
-};
 
 export interface ArchitectureRoleExecutor {
   execute(input: ArchitectureRoleExecutionInput): Promise<ArchitectureRoleExecutionResult>;
@@ -79,6 +63,7 @@ export interface ArchitectureRoleExecutor {
 
 @Injectable()
 export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor {
+  private readonly executionPolicy = new ArchitectureRoleObjective();
   constructor(
     @Optional()
     @Inject(SUBAGENT_RUNTIME)
@@ -88,6 +73,12 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
   ) {}
 
   async execute(input: ArchitectureRoleExecutionInput): Promise<ArchitectureRoleExecutionResult> {
+    if (input.hostRuntimeReceiptObserver && (input.run.executionMode !== 'subagent_execution' || !this.subagentRuntime)) {
+      throw createWorkflowError('CONTRACT_VIOLATION', 'Host receipt execution requires the subagent runtime.', { source: 'architecture-role-executor' });
+    }
+    if (input.purpose && (input.purpose.kind !== 'goal_proposal' || input.run.executionMode !== 'subagent_execution' || !this.subagentRuntime)) {
+      throw createWorkflowError('CONTRACT_VIOLATION', 'Goal proposal requires the subagent runtime.', { source: 'architecture-goal-worker' });
+    }
     if (input.run.executionMode === 'subagent_execution') {
       return this.executeSubagent(input);
     }
@@ -112,6 +103,22 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       };
     }
 
+    let goalSnapshot: ArchitectureGoalPacketV1 | undefined;
+    let goalContract: ReturnType<typeof buildGoalProposalWorkerContract> | undefined;
+    try {
+      if (input.purpose) {
+        goalSnapshot = structuredClone(input.purpose.packet);
+        goalContract = buildGoalProposalWorkerContract(goalSnapshot, buildArchitectureSlotToolPolicy({
+          slot: input.slot, node: input.node, architectureContext: input.run.context, incomingEvents: input.incomingEvents,
+        }));
+      }
+    } catch {
+      throw createWorkflowError('CONTRACT_VIOLATION', 'Invalid goal proposal worker contract.', { source: 'architecture-goal-worker' });
+    }
+    const goalStillCurrent = () => {
+      try { return input.purpose?.kind === 'goal_proposal' && JSON.stringify(input.purpose.packet) === JSON.stringify(goalSnapshot); }
+      catch { return false; }
+    };
     const streamHook = createArchitectureBranchStreamHook({
       runId: input.run.id,
       nodeId: input.node?.id,
@@ -120,7 +127,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       personaId: input.personaId,
       parentEmit: input.emit,
     });
-    const slotPolicy = buildArchitectureSlotToolPolicy({
+    const slotPolicy = goalContract?.slotPolicy ?? buildArchitectureSlotToolPolicy({
       slot: input.slot,
       node: input.node,
       architectureContext: input.run.context,
@@ -128,14 +135,17 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     });
     let result: Awaited<ReturnType<SubagentRuntimePort['runSubagent']>>;
     try {
+      const maxIterations = await this.maxIterationsForSlot(input);
+      if (goalContract && !goalStillCurrent()) throw new Error('Stale goal worker contract.');
       result = await this.subagentRuntime.runSubagent({
         parentSessionId: input.run.rootSessionId ?? input.branchSessionId,
         parentToolCallId: `architecture:${input.run.id}:${input.slot.id}`,
         childSessionId: input.branchSessionId,
         resumeTurnId: input.resumeChildTurnId,
         personaId: input.personaId,
-        model: this.modelForSlot(input),
-        objective: this.buildObjective(input),
+        model: input.hostRuntimeReceiptObserver ? undefined : this.modelForSlot(input),
+        hostRuntimeReceiptObserver: input.hostRuntimeReceiptObserver,
+        objective: goalContract?.objective ?? this.executionPolicy.buildObjective(input),
         auditContext: {
           architectureRunId: input.run.id,
           schemaId: input.schema.id,
@@ -145,18 +155,21 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
           roleSlotType: input.slot.slotType,
           roleLabel: input.slot.label,
           displayLabel: input.slot.label,
+          ...(goalSnapshot ? { purpose: 'goal_proposal', goalSourceVersion: goalSnapshot.version, goalSourceFingerprint: goalSnapshot.sourceFingerprint } : {}),
         },
         slotPolicy: slotPolicy ?? undefined,
         architectureContext: input.run.context,
         timeoutMs: this.timeoutMsForSlot(input),
-        maxIterations: await this.maxIterationsForSlot(input),
-        structuredOutput: structuredOutputForArchitectureSlot(input.slot),
+        maxIterations,
+        structuredOutput: goalContract?.structuredOutput ?? structuredOutputForArchitectureSlot(input.slot),
         vfsMode: 'shared',
         copyOutputs: false,
-        autoApproveTools: this.autoApproveToolsForSlot(input),
+        autoApproveTools: goalContract ? [] : this.executionPolicy.autoApproveToolsForSlot(input),
         emit: streamHook.emit,
       });
     } catch (error) {
+      if (input.hostRuntimeReceiptObserver) throw error;
+      if (goalContract) throw createWorkflowError('CONTRACT_VIOLATION', 'Goal proposal worker failed.', { source: 'architecture-goal-worker' });
       const streamSnapshot = streamHook.snapshot();
       const toolEvidence = summarizeToolEvidence(streamSnapshot);
       if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0) {
@@ -183,6 +196,21 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
 
     const streamSnapshot = streamHook.snapshot();
     const toolEvidence = summarizeToolEvidence(streamSnapshot);
+    if (goalSnapshot && goalContract) {
+      try {
+        if (!goalStillCurrent() || result.status !== 'completed' || result.reasonCode || result.errorCode || result.failure) {
+          throw new Error('Invalid goal proposal completion.');
+        }
+        const structuredOutput = validateGoalProposalWorkerOutput(goalSnapshot, result.structuredOutput);
+        return { message: 'Goal proposal returned for host review.', structuredOutput, data: {
+          ...this.baseData(input, 'subagent_execution'), taskId: result.taskId, durationMs: result.durationMs,
+          goalSourceVersion: goalSnapshot.version, goalSourceFingerprint: goalSnapshot.sourceFingerprint,
+          stream: compactStreamSnapshot(streamSnapshot), toolEvidence,
+        } };
+      } catch {
+        throw createWorkflowError('CONTRACT_VIOLATION', 'Invalid or stale goal proposal worker output.', { source: 'architecture-goal-worker' });
+      }
+    }
     const boundedToolLoopExhausted = result.reasonCode === 'max_steps';
     const message = architectureSlotMessage(input, result.result, toolEvidence, boundedToolLoopExhausted, result.structuredOutput);
 
@@ -222,21 +250,13 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       }
     }
 
-    const preferenceKey = this.isHighLevelSlot(input.slot)
+    const preferenceKey = this.executionPolicy.isHighLevelSlot(input.slot)
       ? 'highLevelModelPreference'
       : 'workerModelPreference';
     const preference = input.run.context?.[preferenceKey];
     return typeof preference === 'string' && preference.trim().length > 0
       ? preference.trim()
       : undefined;
-  }
-
-  private isHighLevelSlot(slot: ArchitectureRoleSlot): boolean {
-    return slot.slotType === 'router'
-      || slot.slotType === 'finalizer'
-      || slot.slotType === 'judge'
-      || slot.id === 'orchestrator'
-      || slot.id === 'goal_master';
   }
 
   private async maxIterationsForSlot(input: ArchitectureRoleExecutionInput): Promise<number> {
@@ -249,441 +269,6 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       personaMaxToolAttempts: personaOverride,
       globalMaxToolAttempts: global,
     });
-  }
-
-  private autoApproveToolsForSlot(input: ArchitectureRoleExecutionInput): string[] | undefined {
-    const canUseCliAgents = this.canUseCliAgentsForSlot(input.run.context, input.slot);
-    if (input.slot.slotType === 'tool_executor') {
-      const tools = ['vfs_write'];
-      if (this.isImplementationWriterSlot(input.slot) && canUseCliAgents) {
-        tools.push('spawn_cli_agent', 'message_cli_agent');
-      }
-      if (this.canAutoApproveProjectWrites(input.run.context)) {
-        tools.push('fs_write');
-      }
-      if (this.canAutoApproveTerminal(input.run.context)) {
-        tools.push('terminal_spawn');
-      }
-      return tools;
-    }
-    if (this.isOrchestrationSlot(input.slot)) {
-      return canUseCliAgents
-        ? ['vfs_write', 'spawn_cli_agent', 'message_cli_agent']
-        : ['vfs_write'];
-    }
-    if (this.isGoalGuardProofImplementer(input)) {
-      const tools = ['vfs_write'];
-      if (this.canAutoApproveProjectWrites(input.run.context)) {
-        tools.push('fs_write');
-      }
-      return tools;
-    }
-    return undefined;
-  }
-
-  private buildObjective(input: ArchitectureRoleExecutionInput): string {
-    const outgoingNodeIds = input.outgoingNodeIds ?? [];
-    const policy = this.contextPolicyForSlot(input.schema.contextPolicy, input.slot.id);
-    const incomingEvents = policy.includeOtherAgentOutputs ? input.incomingEvents ?? [] : [];
-    const lines = [
-      `Architecture: ${input.schema.name} v${input.schema.version}`,
-      `Slot: ${input.slot.label} (${input.slot.slotType})`,
-      input.node ? `Node: ${input.node.label} (${input.node.kind})` : null,
-      policy.includeUserTask ? `Task: ${input.run.prompt}` : null,
-      '',
-      this.instructionForSlot(
-        input.slot,
-        outgoingNodeIds,
-        this.canUseCliAgentsForSlot(input.run.context, input.slot),
-        this.canUseOrchestratorSubagents(input.run.context),
-      ),
-      this.goalGuardProofImplementerInstruction(input),
-      this.cliBackendPolicyInstruction(input),
-    ].filter((line): line is string => typeof line === 'string');
-    if (incomingEvents.length > 0) {
-      lines.push('', 'Incoming graph outputs:');
-      for (const event of incomingEvents) {
-        lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType)}${incomingEventEvidenceSummary(event)}`);
-      }
-      const handoffPackets = incomingEvents
-        .map((event) => summarizeArchitectureIncomingHandoffPacket(event))
-        .filter((packet): packet is string => packet !== undefined);
-      if (handoffPackets.length > 0) {
-        lines.push('', 'Incoming handoff packets:');
-        for (const packet of handoffPackets) {
-          lines.push(`- ${packet}`);
-        }
-      }
-    }
-    if (outgoingNodeIds.length > 0) {
-      lines.push('', `Available next nodes: ${outgoingNodeIds.join(', ')}`);
-    }
-    const canUseEvidenceTools = this.canUseEvidenceToolsForSlot(input.slot, input.run.context);
-    const attachedFilePaths = canUseEvidenceTools ? this.attachedFilePaths(input.run.context) : [];
-    if (attachedFilePaths.length > 0) {
-      if (this.isOrchestrationSlot(input.slot)) {
-        lines.push(
-          '',
-          'Attached VFS project files for delegation:',
-          ...attachedFilePaths.map((path) => `- ${path}`),
-          '',
-          'Use these paths in the task packet for the evidence owner. Do not read attached project files from this orchestrator slot by default unless the node editor explicitly configured this node to own direct evidence gathering.',
-        );
-      } else {
-        lines.push(
-          '',
-          'Attached VFS project files:',
-          ...attachedFilePaths.map((path) => `- ${path}`),
-          '',
-          'If your answer depends on file content, call vfs_read or vfs_grep_search first. Do not write "I will read" unless you actually call the tool.',
-        );
-      }
-    }
-    const localProjectPath = canUseEvidenceTools ? this.localProjectPath(input.run.context) : undefined;
-    if (localProjectPath) {
-      if (this.isOrchestrationSlot(input.slot)) {
-        lines.push(
-          '',
-          `Local host project path for delegation: ${localProjectPath}`,
-          'Use this path as delegation context in the task packet. Do not inspect host project files from this orchestrator slot by default; evidence gathering belongs to the routed researcher, implementer, verifier, or explicit child agent unless the node editor explicitly configured this node to own direct evidence gathering.',
-          'When repository evidence is needed, route to the evidence owner with expected paths, acceptance criteria, and the exact evidence to return.',
-        );
-      } else {
-        lines.push(
-          '',
-          `Local host project path: ${localProjectPath}`,
-          'If your answer depends on host project files, call fs_list or fs_read first. Use fs_write only from tool-executor slots when an approved implementation write is required.',
-          'Use fs_list for directories and fs_read only for files.',
-          'If fs_read returns NOT_A_FILE, switch to fs_list for that path instead of retrying fs_read.',
-          'Inspect only the minimum high-signal paths needed for your role, then conclude instead of recursively traversing the whole repository.',
-        );
-      }
-    }
-    const context = this.contextForObjective(input.run.context, policy);
-    if (Object.keys(context).length > 0) {
-      lines.push('', `Context: ${JSON.stringify(context)}`);
-    }
-    return lines.join('\n');
-  }
-
-  private contextPolicyForSlot(policy: ArchitectureContextPolicy, slotId: string): EffectiveContextPolicy {
-    const override = policy.perSlotOverrides?.[slotId] ?? {};
-    return {
-      includeUserTask: override.includeUserTask ?? policy.includeUserTask,
-      includeProjectMemory: override.includeProjectMemory ?? policy.includeProjectMemory,
-      includeBrowserSession: override.includeBrowserSession ?? policy.includeBrowserSession,
-      includePriorDecisions: override.includePriorDecisions ?? policy.includePriorDecisions,
-      includeOtherAgentOutputs: override.includeOtherAgentOutputs ?? policy.includeOtherAgentOutputs ?? true,
-      includeToolResults: override.includeToolResults ?? policy.includeToolResults ?? false,
-      contextCompression: override.contextCompression ?? policy.contextCompression ?? 'none',
-    };
-  }
-
-  private contextForObjective(
-    context: Record<string, unknown> | undefined,
-    policy: EffectiveContextPolicy,
-  ): Record<string, unknown> {
-    if (!context) {
-      return {};
-    }
-    if (policy.contextCompression === 'evidence_only') {
-      return this.pickDefined({
-        evidence: context['evidence'],
-        citations: context['citations'],
-        toolResults: policy.includeToolResults ? context['toolResults'] : undefined,
-      });
-    }
-
-    const filtered: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(context)) {
-      if (this.isRuntimeContextKey(key) || this.isControlledContextKey(key)) {
-        continue;
-      }
-      filtered[key] = value;
-    }
-    if (policy.includeProjectMemory && context['projectMemory'] !== undefined) {
-      filtered['projectMemory'] = context['projectMemory'];
-    }
-    if (policy.includeBrowserSession && context['browserSession'] !== undefined) {
-      filtered['browserSession'] = context['browserSession'];
-    }
-    if (policy.includePriorDecisions && context['priorDecisions'] !== undefined) {
-      filtered['priorDecisions'] = context['priorDecisions'];
-    }
-    if (policy.includeToolResults && context['toolResults'] !== undefined) {
-      filtered['toolResults'] = context['toolResults'];
-    }
-    return filtered;
-  }
-
-  private pickDefined(entries: Record<string, unknown>): Record<string, unknown> {
-    return Object.fromEntries(Object.entries(entries).filter(([, value]) => value !== undefined));
-  }
-
-  private attachedFilePaths(context: Record<string, unknown> | undefined): string[] {
-    const filePaths = context?.['hydrateFilePaths'];
-    return Array.isArray(filePaths)
-      ? filePaths.filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
-      : [];
-  }
-
-  private hasExecutionCwd(context: Record<string, unknown> | undefined): boolean {
-    return typeof context?.['executionCwd'] === 'string' && context['executionCwd'].trim().length > 0;
-  }
-
-  private canAutoApproveProjectWrites(context: Record<string, unknown> | undefined): boolean {
-    return context?.['autoApproveArchitectureProjectWrites'] === true
-      && this.hasLocalProjectContext(context);
-  }
-
-  private canAutoApproveTerminal(context: Record<string, unknown> | undefined): boolean {
-    return context?.['autoApproveArchitectureTerminal'] === true
-      && this.hasExecutionCwd(context);
-  }
-
-  private canUseCliStop(context: Record<string, unknown> | undefined): boolean {
-    return context?.['allowArchitectureCliStop'] === true;
-  }
-
-  private canUseCliAgents(context: Record<string, unknown> | undefined): boolean {
-    if (context?.['architectureCliAgentsEnabled'] === false) {
-      return false;
-    }
-    const available = context?.['availableCliAgents'];
-    return !Array.isArray(available) || available.some((value) => typeof value === 'string' && value.trim().length > 0);
-  }
-
-  private canUseCliAgentsForSlot(
-    context: Record<string, unknown> | undefined,
-    slot: ArchitectureRoleSlot,
-  ): boolean {
-    if (!this.canUseCliAgents(context)) {
-      return false;
-    }
-    return !this.isOrchestrationSlot(slot) || this.canUseOrchestratorSubagents(context);
-  }
-
-  private canUseOrchestratorSubagents(context: Record<string, unknown> | undefined): boolean {
-    return context?.['allowArchitectureOrchestratorSubagents'] === true;
-  }
-
-  private hasLocalProjectContext(context: Record<string, unknown> | undefined): boolean {
-    return this.localProjectPath(context) !== undefined;
-  }
-
-  private localProjectPath(context: Record<string, unknown> | undefined): string | undefined {
-    const projectPath = context?.['projectPath'];
-    if (typeof projectPath === 'string' && projectPath.trim().length > 0) {
-      return projectPath.trim();
-    }
-    const executionCwd = context?.['executionCwd'];
-    if (typeof executionCwd === 'string' && executionCwd.trim().length > 0) {
-      return executionCwd.trim();
-    }
-    return undefined;
-  }
-
-  private isRuntimeContextKey(key: string): boolean {
-    return key === 'parentSessionId'
-      || key === 'maxArchitectureSteps'
-      || key === 'maxArchitectureNodeVisits'
-      || key === 'maxArchitectureSubagentIterations'
-      || key === 'maxArchitectureSubagentIterationsBySlot'
-      || key === 'maxArchitectureSubagentTimeoutMs'
-      || key === 'maxArchitectureSubagentTimeoutMsBySlot'
-      || key === 'cliBackendPolicy'
-      || key === 'cliAgentToolPreferences'
-      || key === 'architectureCliAgentsEnabled'
-      || key === 'allowArchitectureOrchestratorSubagents'
-      || key === 'availableCliAgents'
-      || key === 'autoApproveArchitectureProjectWrites'
-      || key === 'autoApproveArchitectureTerminal'
-      || key === 'allowArchitectureCliStop'
-      || key === 'requireGoalMasterLoopProof'
-      || key === 'requireImplementerWriteProof'
-      || key === 'hydrateFromSessionId'
-      || key === 'hydrateTargetPrefix'
-      || key === 'hydrateFilePaths';
-  }
-
-  private cliBackendPolicyInstruction(input: ArchitectureRoleExecutionInput): string | null {
-    if (!this.canUseCliAgentsForSlot(input.run.context, input.slot)) {
-      return 'CLI agents are unavailable for this run. Do not call CLI-agent tools or claim CLI implementation proof; use Kalio sub-agents and visible VFS/tool evidence instead.';
-    }
-    const policy = this.cliBackendPolicyForSlot(input.run.context, input.slot);
-    if (!policy) {
-      return null;
-    }
-    const preferred = policy.preferred ? ` Preferred CLI backend: ${policy.preferred}.` : '';
-    return [
-      'CLI backend policy:',
-      `${policy.purpose}.`,
-      `${preferred} Allowed CLI backends: ${policy.allowed.join(', ')}.`,
-      'When calling spawn_cli_agent, message_cli_agent, or run_cli_agent, set agentId explicitly from this policy; do not rely on the default Copilot adapter unless Copilot is the selected backend.',
-      'If the selected CLI backend is unavailable or fails, record that evidence, choose the next allowed backend when appropriate, or continue with Kalio sub-agents instead of silently changing the architecture role.',
-    ].join(' ');
-  }
-
-  private cliBackendPolicyForSlot(
-    context: Record<string, unknown> | undefined,
-    slot: ArchitectureRoleSlot,
-  ): CliBackendPolicy | null {
-    const configured = this.configuredCliBackendPolicyForSlot(context, slot.id);
-    if (configured) {
-      return configured;
-    }
-    if (this.isOrchestrationSlot(slot)) {
-      return {
-        allowed: ['gemini', 'copilot', 'codex'],
-        purpose: 'Use Gemini for reconnaissance or brainstorming, Copilot for implementation delegation, and Codex for conservative analysis or final verification delegation',
-      };
-    }
-    if (slot.id === 'implementer') {
-      return {
-        preferred: 'codex',
-        allowed: ['codex', 'copilot'],
-        purpose: 'Use Codex for implementation work; use Copilot only as an explicit fallback when Codex is unavailable or the run config selects Copilot',
-      };
-    }
-    if (slot.id === 'verifier' || slot.id === 'tester') {
-      return {
-        preferred: 'codex',
-        allowed: ['codex', 'gemini'],
-        purpose: 'Use Codex for conservative verification; use Gemini only for broad analysis when Codex is unavailable',
-      };
-    }
-    if (slot.slotType === 'judge') {
-      return {
-        preferred: 'codex',
-        allowed: ['codex', 'gemini'],
-        purpose: 'Use Codex for strict completion review and Gemini only for secondary brainstorming about unresolved weak points',
-      };
-    }
-    return null;
-  }
-
-  private configuredCliBackendPolicyForSlot(
-    context: Record<string, unknown> | undefined,
-    slotId: string,
-  ): CliBackendPolicy | null {
-    const raw = context?.['cliBackendPolicy'];
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      return null;
-    }
-    const slotPolicy = (raw as Record<string, unknown>)[slotId] ?? (raw as Record<string, unknown>)['default'];
-    if (!slotPolicy || typeof slotPolicy !== 'object' || Array.isArray(slotPolicy)) {
-      return null;
-    }
-    const record = slotPolicy as Record<string, unknown>;
-    const allowed = Array.isArray(record['allowed'])
-      ? record['allowed'].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      : [];
-    if (allowed.length === 0) {
-      return null;
-    }
-    const preferred = typeof record['preferred'] === 'string' && record['preferred'].trim().length > 0
-      ? record['preferred'].trim()
-      : undefined;
-    const purpose = typeof record['purpose'] === 'string' && record['purpose'].trim().length > 0
-      ? record['purpose'].trim()
-      : 'Use the configured CLI backend policy for this architecture slot';
-    return { preferred, allowed, purpose };
-  }
-
-  private isControlledContextKey(key: string): boolean {
-    return key === 'projectMemory'
-      || key === 'browserSession'
-      || key === 'priorDecisions'
-      || key === 'toolResults'
-      || key === 'evidence'
-      || key === 'citations';
-  }
-
-  private instructionForSlot(
-    slot: ArchitectureRoleSlot,
-    outgoingNodeIds: string[],
-    canUseCliAgents = true,
-    canUseOrchestratorSubagents = false,
-  ): string {
-    if (slot.slotType === 'judge') {
-      const routeHint = outgoingNodeIds.length > 0
-        ? `Available next nodes are ${outgoingNodeIds.join(', ')}. If acceptance evidence is incomplete, set routerOutput.nextAction to "route_to", routerOutput.targetNodeId to the continuation node, and routerOutput.response to the reason. Route to the final artifact only when incoming graph outputs prove the goal is complete.`
-        : 'Explain whether the incoming graph outputs prove the goal is complete.';
-      return [
-        'Act as a strict Goal Master judge.',
-        'Use only the incoming graph outputs and provided evidence. Do not invent previous passes, hidden work, files, tests, or approvals.',
-        'You may delegate focused review checks with synchronous run_subagent and inspect CLI child-session status, but do not spawn background review agents from this judge slot. Final acceptance must cite visible evidence from incoming outputs or tool results.',
-        'If you mention a previous rejection, loop, pass, test, or artifact, it must be visible in the incoming graph outputs.',
-        routeHint,
-        'Return provider-native structured routerOutput with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction.',
-      ].join(' ');
-    }
-    if (slot.slotType === 'router') {
-      const contract = 'Return provider-native structured routerOutput with selectedStrategy, mergedDecision, acceptedInputs, rejectedInputs, unresolvedConflicts, risks, confidence, and nextAction. When nextAction is "route_to", include targetNodeId and response.';
-      if (this.isOrchestrationSlot(slot)) {
-        const llmSubagentRule = canUseOrchestratorSubagents
-          ? 'LLM sub-agents may be used only for focused checks when a graph node is not the right execution target.'
-          : 'LLM sub-agent tools are disabled for this orchestrator slot.';
-        const agentMap = canUseCliAgents
-          ? `Treat CLI agents as delegated sub-agents at the architecture level: Copilot CLI is the implementation sub-agent backend, Codex CLI is the conservative development or code-analysis sub-agent backend, and Gemini CLI is the broad analysis or brainstorming sub-agent backend. Use spawn_cli_agent only when the architecture policy exposes it and a durable external child is explicitly required; otherwise route to the next graph node. ${llmSubagentRule}`
-          : canUseOrchestratorSubagents
-            ? 'CLI agents are not available in this run. Use Kalio sub-agent tools only for focused checks when a graph node is not the right execution target.'
-            : 'CLI agents and LLM sub-agent tools are unavailable for this orchestrator slot; route to the next architecture node instead.';
-        const routingRule = canUseOrchestratorSubagents
-          ? 'When the next graph node is known, prefer a structured routerOutput route over spawning another child.'
-          : 'This run keeps orchestration inside the architecture graph: do not call run_subagent, spawn_subagent, or message_subagent from the orchestrator. Choose the next architecture node with routerOutput.nextAction="route_to" and routerOutput.targetNodeId, then let that node execute the work.';
-        return outgoingNodeIds.length > 0
-          ? `Act as the delivery orchestrator. Define acceptance criteria, prepare a task packet with owner, expected evidence, verification command, and route graph execution. Do not perform project reconnaissance yourself by default; route evidence gathering to the responsible researcher, implementer, verifier, or explicit child agent unless this node has an explicit editor tool override for direct evidence gathering. ${agentMap} ${routingRule} Route to the next implementation node with structured routerOutput once the next step is clear. Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`
-          : `Act as the delivery orchestrator. Define acceptance criteria, prepare a task packet with owner, expected evidence, verification command, and route graph execution. Do not perform project reconnaissance yourself by default; route evidence gathering to the responsible researcher, implementer, verifier, or explicit child agent unless this node has an explicit editor tool override for direct evidence gathering. ${agentMap} ${routingRule} Do not claim files, tests, or completion unless visible tool output proves them. ${contract}`;
-      }
-      return outgoingNodeIds.length > 0
-        ? `Act as a graph router. Synthesize only the incoming outputs. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them. When choosing a specific next node, emit structured routerOutput with nextAction="route_to", targetNodeId, and response. ${contract}`
-        : `Act as a graph router. Synthesize only the incoming outputs and explain the routing decision. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them. ${contract}`;
-    }
-    if (slot.slotType === 'finalizer') {
-      return [
-        'Produce the final user-facing answer from the incoming graph outputs.',
-        'Do not call tools or start a new investigation. Do not describe runtime mechanics unless they are relevant to the answer. Do not claim files, tools, or capabilities unless incoming outputs explicitly prove them.',
-        FINAL_ARTIFACT_CONTRACT_INSTRUCTION,
-      ].join(' ');
-    }
-    if (slot.slotType === 'tool_executor') {
-      return [
-        'Act as an execution slot, not a planner.',
-        'Use the available tools to implement or verify the incoming architecture step.',
-        'If this slot is an implementer, create or update the required artifacts first with vfs_write, fs_write, or a durable CLI child agent. An implementer cannot pass by only inspecting an existing artifact or running build/test commands; build-only work belongs to verifier slots. Do not spend early tool calls on environment probes such as node -v, npm -v, or git branch unless the incoming evidence says those probes are required before writing.',
-        'If this implementer delegates writes to a CLI child, use spawn_cli_agent with expectedChangedFiles and verificationCommands when possible, then poll get_cli_agent_status and report the childSessionId, status, changed paths, and weak points. Do not spawn a second implementation path when an existing CLI child already owns the same work; poll or message that child instead.',
-        'After an implementer has visible write evidence, it may run install/build commands when terminal tools are available, then report exact paths written and command results.',
-        'If this slot is a verifier, use VFS or host-project reads as evidence unless terminal tools are available with an explicit execution cwd in context; when incoming evidence references a CLI child session, inspect it with get_cli_agent_status before judging the delegated work.',
-        'When terminal tools are available, run the narrowest relevant command and report exact command, exit status, and tool output summary.',
-        'If a required write or command needs human approval, request it through the tool flow and stop after reporting the pending approval.',
-        'Do not claim runtime proof unless a visible tool result proves it.',
-      ].join(' ');
-    }
-    return [
-      'Return a concise role-specific contribution for the next graph node.',
-      'If project files are attached or a local project path is available, gather only the smallest evidence batch you need with read/list tools, then stop calling tools and answer.',
-      'After any successful file read/list result, produce a final answer with exactly: Recommendation, Evidence, Risk, Next step.',
-      'Do not spend the full tool budget exploring; prefer a partial evidence-based conclusion over another read when the next useful action is already clear.',
-    ].join(' ');
-  }
-
-  private goalGuardProofImplementerInstruction(input: ArchitectureRoleExecutionInput): string | null {
-    if (!this.isGoalGuardProofImplementer(input)) {
-      return null;
-    }
-    const projectWriteInstruction = this.canAutoApproveProjectWrites(input.run.context)
-      ? ' When a local project path is configured, use fs_write for host project files.'
-      : '';
-    return `Implementation proof mode: the Implementer must create or update at least one artifact with vfs_write before completing.${projectWriteInstruction} A read-only recommendation is incomplete evidence for Goal Guard.`;
-  }
-
-  private isGoalGuardProofImplementer(input: ArchitectureRoleExecutionInput): boolean {
-    return input.slot.id === 'implementer'
-      && (
-        input.run.context?.['requireGoalMasterLoopProof'] === true
-        || input.run.context?.['requireImplementerWriteProof'] === true
-      );
   }
 
   private routeData(
@@ -775,27 +360,6 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       ...(parsed.evidence.length > 0 ? { evidence: parsed.evidence } : {}),
       ...(parsed.answer ? { finalArtifactAnswer: parsed.answer } : {}),
     };
-  }
-
-  private isOrchestrationSlot(slot: ArchitectureRoleSlot): boolean {
-    return slot.slotType === 'router' && /\borchestrator\b/i.test(`${slot.id} ${slot.label}`);
-  }
-
-  private isImplementationWriterSlot(slot: ArchitectureRoleSlot): boolean {
-    return slot.id === 'implementer';
-  }
-
-  private canUseEvidenceToolsForSlot(
-    slot: ArchitectureRoleSlot,
-    context: Record<string, unknown> | undefined,
-  ): boolean {
-    if (slot.slotType === 'finalizer') {
-      return false;
-    }
-    if (slot.slotType === 'router' && !this.isOrchestrationSlot(slot)) {
-      return context?.['allowArchitectureRouterEvidenceTools'] === true;
-    }
-    return true;
   }
 
   private baseData(

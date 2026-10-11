@@ -28,6 +28,7 @@ const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'raAppLaunchId',
   'raAppLaunchName',
   'raAppLaunchSource',
+  'raAppLaunchInputs',
 ]);
 
 @Controller('sessions')

@@ -147,6 +147,7 @@ $previousEnv = @{
     DATABASE_PATH = $env:DATABASE_PATH
     WORKSPACE_ROOT = $env:WORKSPACE_ROOT
     CORS_ORIGIN = $env:CORS_ORIGIN
+    KALIO_DECISION_FRONTEND_ORIGINS = $env:KALIO_DECISION_FRONTEND_ORIGINS
     VITE_API_URL = $env:VITE_API_URL
     VITE_WS_URL = $env:VITE_WS_URL
     VITE_PORT = $env:VITE_PORT
@@ -241,6 +242,7 @@ if (-not $env:LLM_MODEL) {
 }
 
 $env:PORT = "$BE_PORT"
+$env:KALIO_DECISION_FRONTEND_ORIGINS = "http://localhost:$FE_PORT,http://127.0.0.1:$FE_PORT"
 $env:VITE_API_URL = $apiOrigin
 $env:VITE_WS_URL = $apiOrigin
 $env:VITE_PORT = "$FE_PORT"

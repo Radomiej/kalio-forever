@@ -16,6 +16,8 @@ import type {
   WorkflowRuntimeDecision,
 } from '@kalio/types';
 
+import { goalRouteAuditData } from './architecture-goal-route-audit';
+
 export interface ArchitectureAuditEventSummary {
   type: string;
   reasonCode?: WorkflowReasonCode;
@@ -25,9 +27,6 @@ export interface ArchitectureAuditEventSummary {
 export function statusFromArchitectureEvents(
   events: ArchitectureExecutionEvent[],
 ): ArchitectureRun['status'] {
-  if (events.some((event) => event.type === 'final_artifact')) {
-    return 'completed';
-  }
   return statusFromArchitectureAuditEventSummary(events.map((event) => ({
     type: event.type,
     reasonCode: architectureAuditReasonCodeForEvent(event),
@@ -38,6 +37,7 @@ export function statusFromArchitectureEvents(
 export function statusFromArchitectureAuditEventSummary(
   events: ArchitectureAuditEventSummary[],
 ): ArchitectureRun['status'] {
+  const hasFinalArtifact = events.some((event) => event.type === 'final_artifact');
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event?.status === 'failed' || event?.status === 'blocked') {
@@ -61,7 +61,7 @@ export function statusFromArchitectureAuditEventSummary(
     ) {
       return 'failed';
     }
-    if (event) {
+    if (event && !hasFinalArtifact) {
       return 'running';
     }
   }
@@ -220,6 +220,41 @@ export function architectureAuditRouteDecisionField(
   return isArchitectureRouteDecision(value) ? value : undefined;
 }
 
+/** Decode the flattened durable checkpoint, never guessing a route from display text. */
+export function architectureAuditAutoRoutingData(record: Record<string, unknown>): Record<string, unknown> {
+  const goal = goalRouteAuditData(record);
+  const recovered = Object.keys(goal).length ? { ...record, ...goal } : record;
+  const rawRoute = architectureAuditRecordField(record, 'route');
+  const checkpoint = ['autoRoutingVisit', 'selectedEdgeId']
+    .some((key) => Object.prototype.hasOwnProperty.call(record, key))
+    || rawRoute?.source === 'jev_choice' || rawRoute?.selectedEdgeId !== undefined;
+  if (!checkpoint) return recovered;
+
+  const route = architectureAuditRouteDecisionField(record, 'route');
+  const nodeId = record.nodeId;
+  const visit = record.autoRoutingVisit;
+  const counts = record.visitCounts;
+  const selected = record.selectedNodeIds;
+  const pending = record.pendingNodeIds;
+  const validIds = (value: unknown): value is string[] => Array.isArray(value)
+    && value.every(isNonEmptyString) && new Set(value).size === value.length;
+  if (record.eventType !== 'router_decision' || !isNonEmptyString(record.eventId)
+    || !Number.isSafeInteger(record.sequence) || (record.sequence as number) < 1
+    || !isNonEmptyString(nodeId) || !Number.isSafeInteger(visit) || (visit as number) < 1
+    || !route || (route.source !== 'jev_choice' && route.source !== 'runtime_fallback')
+    || route.fromNodeId !== nodeId || !isNonEmptyString(record.selectedEdgeId)
+    || route.selectedEdgeId !== record.selectedEdgeId || !isNonEmptyString(route.nextNodeId)
+    || !validIds(selected) || selected.length !== 1 || selected[0] !== route.nextNodeId
+    || route.selectedNodeIds.length !== 1 || route.selectedNodeIds[0] !== selected[0]
+    || !validIds(pending) || !pending.includes(route.nextNodeId)
+    || !isPlainRecord(counts) || counts[nodeId] !== visit
+    || !Object.entries(counts).every(([key, count]) => isNonEmptyString(key)
+      && Number.isSafeInteger(count) && (count as number) >= 0)) {
+    throw new Error('Invalid durable Auto-routing checkpoint metadata.');
+  }
+  return { ...recovered, kind: 'auto_routing_decision' };
+}
+
 export function architectureAuditRouterOutputField(
   record: Record<string, unknown>,
   key: string,
@@ -320,7 +355,7 @@ function isWorkflowEvidenceStatus(value: unknown): value is WorkflowEvidenceStat
 
 function isArchitectureRouteDecision(value: unknown): value is ArchitectureRouteDecision {
   return isPlainRecord(value)
-    && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback')
+    && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback' || value.source === 'jev_choice')
     && isNonEmptyString(value.fromNodeId)
     && Array.isArray(value.selectedNodeIds)
     && value.selectedNodeIds.every((nodeId) => typeof nodeId === 'string')
@@ -328,7 +363,10 @@ function isArchitectureRouteDecision(value: unknown): value is ArchitectureRoute
     && (value.nextNodeId === undefined || typeof value.nextNodeId === 'string')
     && (value.convergeToNodeId === undefined || typeof value.convergeToNodeId === 'string')
     && (value.mode === undefined || isNodeBehaviorMode(value.mode))
-    && (value.response === undefined || typeof value.response === 'string');
+    && (value.response === undefined || typeof value.response === 'string')
+    && (value.selectedEdgeId === undefined || isNonEmptyString(value.selectedEdgeId))
+    && (value.confidence === undefined || (typeof value.confidence === 'number' && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1))
+    && (value.decisionReason === undefined || typeof value.decisionReason === 'string');
 }
 
 function isArchitectureRouterOutput(value: unknown): value is ArchitectureRouterOutput {

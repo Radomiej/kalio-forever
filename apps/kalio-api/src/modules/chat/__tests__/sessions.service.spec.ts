@@ -167,6 +167,16 @@ describe('SessionsService', () => {
   });
 
   describe('create', () => {
+    it('uses the saved default agent for new top-level sessions but preserves explicit choices', async () => {
+      const defaults = { getId: vi.fn().mockResolvedValue('devin-swe-2') };
+      const withDefault = new SessionsService(
+        makeDrizzle(rows).drizzle, {} as SessionManagerService, sessionEvents, repo, llm, allowedPaths,
+        projects as never, activeSessionRegistry as never, undefined,
+        personas as unknown as PersonaService, executionProfiles as never, defaults as never,
+      );
+      expect((await withDefault.create({ personaId: 'p1' })).executionProfileId).toBe('devin-swe-2');
+      expect((await withDefault.create({ personaId: 'p1', executionProfileId: 'explicit' })).executionProfileId).toBe('explicit');
+    });
     it('inserts a session row and returns ChatSession', async () => {
       const result = await service.create({ personaId: 'p1', title: 'Test' });
       expect(result.personaId).toBe('p1');

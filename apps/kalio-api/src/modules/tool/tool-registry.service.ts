@@ -33,16 +33,33 @@ import { SkillListTool, SkillReadTool, SkillCreateTool, SkillUpdateTool, SkillDe
 import { PersonaListTool, PersonaCreateTool, PersonaUpdateTool, PersonaDeleteTool } from './tools/persona.tools';
 import { EscalateTool } from './tools/escalate.tool';
 import { IdeDiagnosticsTool, IdeQueryTool, IdeStatusTool } from '../code-intelligence/code-intelligence.tools';
+import { RefreshProjectContextTool, SearchProjectContextTool } from './tools/project-context.tools';
 
 /** Minimal registry entry shape — structurally compatible with chat module's ToolRegistryEntry. */
 export interface ToolEntry {
   meta: ToolMeta;
+  readonly catalogEntryId?: string;
+  readonly executorImplementationId?: string;
+  readonly executorImplementationVersion?: number;
   execute(req: ToolCallRequest): Promise<unknown>;
 }
 
 type RegisteredToolEntry = ToolEntry & { defaultRequiresConfirmation: boolean };
 
 type HasExecute = { execute(req: ToolCallRequest): Promise<unknown> };
+
+// Explicit first executor contracts. Bump the affected implementation version
+// when executor semantics/dependencies change its durable proof contract.
+// Names/functions/constructors never generate identities; unlisted tools omit them.
+const HOST_DISPATCH_IDENTITIES: ReadonlyMap<string, readonly [string, string, number]> = new Map([
+  ['fs_list', ['kalio.catalog.fs-list', 'kalio.executor.fs-list', 1]],
+  ['fs_read', ['kalio.catalog.fs-read', 'kalio.executor.fs-read', 1]],
+  ['fs_write', ['kalio.catalog.fs-write', 'kalio.executor.fs-write', 1]],
+  ['terminal_spawn', ['kalio.catalog.terminal-spawn', 'kalio.executor.terminal-spawn', 1]],
+  ['terminal_list', ['kalio.catalog.terminal-list', 'kalio.executor.terminal-list', 1]],
+  ['terminal_output', ['kalio.catalog.terminal-output', 'kalio.executor.terminal-output', 1]],
+  ['run_sub_agentflow', ['kalio.catalog.run-sub-agentflow', 'kalio.executor.run-sub-agentflow', 1]],
+]);
 
 /**
  * Reads @Tool() metadata off every tool class and exposes a typed registry
@@ -90,6 +107,8 @@ export class ToolRegistryService {
     private readonly memoryIngest: MemoryIngestTool,
     private readonly memorySearch: MemorySearchTool,
     private readonly memoryIngestConversation: MemoryIngestConversationTool,
+    private readonly refreshProjectContext: RefreshProjectContextTool,
+    private readonly searchProjectContext: SearchProjectContextTool,
     private readonly webSearch: WebSearchTool,
     private readonly listTools: ListToolsTool,
     private readonly getToolDetails: GetToolDetailsTool,
@@ -129,6 +148,7 @@ export class ToolRegistryService {
       raappCreateDraft, raappExecuteDsl, raappPublishDraft,
       raappTest,
       memoryIngest, memorySearch, memoryIngestConversation,
+      refreshProjectContext, searchProjectContext,
       webSearch,
       listTools, getToolDetails,
       spawnCliAgent, messageCliAgent, getCliAgentStatus, stopCliAgent,
@@ -173,7 +193,7 @@ export class ToolRegistryService {
   private toEntry(tool: object): RegisteredToolEntry {
     const opts = this.reflector.get<ToolOptions>(TOOL_METADATA, tool.constructor as NewableFunction);
     const defaultRequiresConfirmation = opts.requiresConfirmation ?? false;
-    return {
+    const entry: RegisteredToolEntry = {
       defaultRequiresConfirmation,
       meta: {
         name: opts.name,
@@ -184,5 +204,12 @@ export class ToolRegistryService {
       },
       execute: (req: ToolCallRequest) => (tool as HasExecute).execute(req),
     };
+    const identity = HOST_DISPATCH_IDENTITIES.get(opts.name);
+    if (identity) Object.defineProperties(entry, {
+      catalogEntryId: { value: identity[0], enumerable: true },
+      executorImplementationId: { value: identity[1], enumerable: true },
+      executorImplementationVersion: { value: identity[2], enumerable: true },
+    });
+    return entry;
   }
 }

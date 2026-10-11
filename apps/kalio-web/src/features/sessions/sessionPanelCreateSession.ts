@@ -1,7 +1,6 @@
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
-import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
-import { createPendingHostSession } from '../chat/pendingHostSession';
+import { persistActiveConversationSessionId } from '../chat/activeConversationSession';
 
 interface StartPendingSessionFromPanelParams {
   personaId: string;
@@ -16,41 +15,15 @@ interface StartPendingSessionFromPanelParams {
 }
 
 export async function startPendingSessionFromPanel({
-  personaId,
-  previousActiveSessionId,
-  addSession,
   setActiveSession,
   setMessages,
   setAgentTurns,
-  removeSession,
-  getActiveSessionId,
   onSelect,
 }: StartPendingSessionFromPanelParams): Promise<void> {
-  const pendingSession = createPendingHostSession({ personaId, title: 'New Chat' });
-  addSession(pendingSession);
-  setActiveSession(pendingSession.id);
-  setMessages([], pendingSession.id);
-  setAgentTurns([], pendingSession.id);
+  // A new conversation has no durable identity until its first submit.
+  setActiveSession(null);
+  setMessages([]);
+  setAgentTurns([]);
+  persistActiveConversationSessionId(null);
   onSelect?.();
-
-  try {
-    await createAndActivateEmptyHostSession({
-      personaId,
-      title: 'New Chat',
-      addSession,
-      setActiveSession,
-      setMessages,
-      setAgentTurns,
-      canActivate: () => getActiveSessionId() === pendingSession.id,
-      reason: 'select',
-    });
-    removeSession(pendingSession.id);
-  } catch (err) {
-    const shouldRestorePreviousSession = getActiveSessionId() === pendingSession.id;
-    removeSession(pendingSession.id);
-    if (shouldRestorePreviousSession) {
-      setActiveSession(previousActiveSessionId);
-    }
-    throw err;
-  }
 }

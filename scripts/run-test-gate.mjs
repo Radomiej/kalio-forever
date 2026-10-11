@@ -52,7 +52,11 @@ const scriptTests = await run(process.execPath, [
   './scripts/release-experienced-qa.test.mjs',
   './scripts/code-audit/audit-scripts.test.mjs',
   './scripts/agentflow-paid-readiness.test.mjs',
+  './scripts/devin-session-readiness.test.mjs',
   './scripts/activate-live-credential.test.mjs',
+  './apps/kalio-web/decision-auth.proxy.test.mjs',
+  './scripts/bench-embedding-retrieval.test.mjs',
+  './scripts/bench-home-site-dataset.test.mjs',
 ]);
 
 if (scriptTests.code !== 0) {

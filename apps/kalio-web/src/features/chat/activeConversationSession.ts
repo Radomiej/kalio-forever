@@ -47,6 +47,7 @@ interface ActivateConversationSessionParams {
 
 interface CreateAndActivateEmptyHostSessionParams {
   personaId: string;
+  executionProfileId?: string;
   title?: string;
   projectId?: string;
   projectPathOverride?: string | null;
@@ -147,6 +148,7 @@ export async function activateConversationSession({
 
 export async function createAndActivateEmptyHostSession({
   personaId,
+  executionProfileId,
   title,
   projectId,
   projectPathOverride,
@@ -169,6 +171,7 @@ export async function createAndActivateEmptyHostSession({
   };
   const session = await createAndActivateHostSession({
     personaId,
+    ...(executionProfileId?.trim() ? { executionProfileId: executionProfileId.trim() } : {}),
     ...(title ? { title } : {}),
     ...(projectId ? { projectId } : {}),
     ...(projectPathOverride !== undefined ? { projectPathOverride } : {}),

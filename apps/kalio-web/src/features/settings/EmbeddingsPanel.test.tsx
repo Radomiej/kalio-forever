@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { EmbeddingCredential, EmbeddingStatus } from '@kalio/types';
 import { EmbeddingsPanel } from './EmbeddingsPanel';
@@ -58,6 +58,37 @@ describe('EmbeddingsPanel', () => {
     vi.restoreAllMocks();
   });
 
+  it.each(['local', 'db'] as const)('shows the selected %s model above existing controls', async (source) => {
+    const status: EmbeddingStatus = source === 'local' ? LOCAL_STATUS : {
+      ...LOCAL_STATUS, source: 'db', provider: 'openai-compatible',
+      model: 'text-embedding-3-small', dimensions: 1536,
+      activeCredentialId: 'remote', activeCredentialName: 'Remote',
+    };
+    installFetchQueue({
+      'GET /api/memory/embedding-credentials': [[{
+        id: 'remote', name: 'Remote', provider: 'openai',
+        baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small',
+        dimensions: 1536, createdAt: 0,
+      }]],
+      'GET /api/memory/status/embedding': [status],
+      'GET /api/memory/embedding-local': [{ enabled: true, model: LOCAL_STATUS.model, dimensions: 384, backend: 'cpu' }],
+      'POST /api/memory/embedding-local/availability': [{ status: 'missing', installed: false, model: LOCAL_STATUS.model, dimensions: 384, backend: 'cpu', message: null }],
+    });
+    render(<EmbeddingsPanel />);
+    const summary = await screen.findByTestId('embedding-env-card');
+    expect(within(summary).getByRole('heading', { name: 'Selected embedding model' })).toBeInTheDocument();
+    await waitFor(() => expect(summary).toHaveTextContent(status.model));
+    for (const control of [screen.getByTestId('embedding-credential-card'), screen.getByTestId('embedding-local-config')]) {
+      expect(summary.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    if (source === 'local') {
+      expect(summary).toHaveTextContent('Not installed · install below');
+      expect(summary).not.toHaveTextContent('ready to use');
+    }
+    expect(within(summary).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('embedding-env-card')).toHaveLength(1);
+  });
+
   it('renders local embedding status and saves local settings as cpu', async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchQueue({
@@ -100,7 +131,7 @@ describe('EmbeddingsPanel', () => {
     render(<EmbeddingsPanel />);
 
     const statusCard = await screen.findByTestId('embedding-env-card');
-    expect(statusCard).toHaveTextContent('Mock embeddings');
+    await waitFor(() => expect(statusCard).toHaveTextContent('Mock embeddings'));
     expect(statusCard).toHaveTextContent('Deterministic test provider; no remote model is used.');
     expect(statusCard).not.toHaveTextContent('Local embeddings');
   });
@@ -145,7 +176,7 @@ describe('EmbeddingsPanel', () => {
       const call = fetchMock.mock.calls.find(([url, init]) => url === '/api/memory/embedding-local' && init?.method === 'PUT');
       expect(call).toBeDefined();
       expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ enabled: false });
-      expect(screen.getByText('disabled')).toBeInTheDocument();
+      expect(within(screen.getByTestId('embedding-env-card')).getByRole('status')).toHaveTextContent('Disabled');
     });
   });
 

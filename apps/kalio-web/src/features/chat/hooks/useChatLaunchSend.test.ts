@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
+import type { ChatSession } from '@kalio/types';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { useChatLaunchSend } from './useChatLaunchSend';
 
@@ -18,6 +19,51 @@ describe('landing chat launch', () => {
     mocks.create.mockResolvedValue(session);
     mocks.persist.mockResolvedValue(session);
     mocks.activate.mockResolvedValue(undefined);
+  });
+  it('does not materialize a draft for an empty submit', async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useChatLaunchSend({ activeSession: null, projectId: 'home', projectPath: '', send, onError: vi.fn() }));
+    await act(() => result.current('  \n ', 'default', 'devin-swe-2'));
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.persist).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('guards double submit during first session creation and sends one first message', async () => {
+    let resolveCreate!: () => void;
+    mocks.create.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveCreate = () => resolve(session);
+    }));
+    const send = vi.fn();
+    const { result } = renderHook(() => useChatLaunchSend({ activeSession: null, projectId: 'home', projectPath: '', send, onError: vi.fn() }));
+    await act(async () => {
+      const first = result.current('First message', 'default', 'devin-swe-2');
+      await result.current('Duplicate message', 'default', 'devin-swe-2');
+      expect(mocks.create).toHaveBeenCalledOnce();
+      expect(send).not.toHaveBeenCalled();
+      resolveCreate();
+      await first;
+    });
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(mocks.activate).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledExactlyOnceWith('First message', 'default');
+  });
+  it('creates a separate conversation after returning from a submitted chat to New Chat', async () => {
+    const { result, rerender } = renderHook(({ activeSession }: { activeSession: ChatSession | null }) => useChatLaunchSend({ activeSession, projectId: 'home', projectPath: '', send: vi.fn(), onError: vi.fn() }), { initialProps: { activeSession: null } as { activeSession: ChatSession | null } });
+    await act(() => result.current('First message', 'default', 'devin-swe-2'));
+    rerender({ activeSession: session });
+    rerender({ activeSession: null });
+    await act(() => result.current('Different conversation', 'default', 'devin-swe-2'));
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+  });
+  it('keeps a created first attempt available when send fails and retries without a second session', async () => {
+    const send = vi.fn().mockImplementationOnce(() => { throw new Error('send failed'); });
+    const onError = vi.fn();
+    const { result } = renderHook(() => useChatLaunchSend({ activeSession: null, projectId: 'home', projectPath: '', send, onError }));
+    await act(() => result.current('First message', 'default', 'devin-swe-2'));
+    expect(onError).toHaveBeenCalledWith('send failed');
+    await act(() => result.current('Retry message', 'default', 'devin-swe-2'));
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenLastCalledWith('Retry message', 'default');
   });
   it('creates a scoped session, saves the model, activates then sends once', async () => {
     const send = vi.fn();

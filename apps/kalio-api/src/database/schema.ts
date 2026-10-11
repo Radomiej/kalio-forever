@@ -1,4 +1,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+export { architectureGoalStates } from './schema.architecture-goal';
+export { hostDispatchReceipts } from './schema.host-dispatch';
+export { goalLaunchReservations } from './schema.goal-launch-reservation';
 import type {
   AgentFlowRun,
   AgentFlowPhase,

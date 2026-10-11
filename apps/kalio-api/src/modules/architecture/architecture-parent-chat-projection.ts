@@ -18,10 +18,14 @@ export function buildArchitectureParentChatMessages(
   now: number,
 ): ChatMessage[] {
   const rootSessionId = run.rootSessionId ?? parentSessionId;
-  const turnId = `architecture-turn-${run.id}`;
+  const parentTurnId = run.context?.['parentTurnId'];
+  const turnId = run.context?.['parentSessionId'] === parentSessionId
+    && typeof parentTurnId === 'string' && parentTurnId.trim().length > 0
+    ? parentTurnId : `architecture-turn-${run.id}`;
   const promptMessageId = getArchitecturePromptMessageId(run.context) ?? `architecture:${run.id}:user`;
   const messages: ChatMessage[] = [{
-    id: promptMessageId,
+    // A source reference is not the identity of this technical projection message.
+    id: `architecture:${run.id}:user`,
     sessionId: parentSessionId,
     role: 'user',
     content: run.prompt,

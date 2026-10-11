@@ -9,6 +9,7 @@ import type {
   ArchitectureSchemaEdge,
 } from '@kalio/types';
 import { layoutMissingNodePositions } from './ArchitectGraphLayout';
+import { readAutoRoutingConfig, validateArchitectAutoRouting } from './architect.auto-routing';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -70,7 +71,7 @@ function readBoolean(record: Record<string, unknown>, key: string, fallback: boo
 }
 
 function readNodeKind(value: string | undefined): ArchitectureNodeKind {
-  if (value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact') {
+  if (value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router') {
     return value;
   }
   return 'role';
@@ -226,6 +227,7 @@ function normalizeNode(raw: unknown, index: number): ArchitectNode {
     maxToolAttempts: hasFiniteNumber(raw, 'maxToolAttempts') ? readNumber(raw, 'maxToolAttempts', 0) : undefined,
     toolOverride: readNodeToolOverride(raw),
     behavior: readNodeBehavior(raw),
+    autoRouting: readAutoRoutingConfig(raw['autoRouting']),
     personaId: readString(raw, ['personaId', 'persona', 'defaultPersonaId'], undefined),
     description: readString(raw, ['description', 'summary'], undefined),
     x: readNumber(raw, 'x', 120 + (index % 4) * 180),
@@ -273,7 +275,7 @@ function applyTopLevelEdges(schema: ArchitectSchema, raw: Record<string, unknown
 }
 
 function readEdgeSelection(value: string | undefined): ArchitectureSchemaEdge['selection'] | undefined {
-  if (value === 'default' || value === 'converge' || value === 'continuation') {
+  if (value === 'default' || value === 'converge' || value === 'continuation' || value === 'choice') {
     return value;
   }
   return undefined;
@@ -341,6 +343,7 @@ export function normalizeArchitectureSchema(raw: unknown, index = 0): ArchitectS
   };
 
   const schemaWithEdges = applyTopLevelEdges(schema, raw);
+  validateArchitectAutoRouting(schemaWithEdges);
   return {
     ...schemaWithEdges,
     nodes: layoutMissingNodePositions(schemaWithEdges.nodes, schemaWithEdges.edges, missingPositionIds),

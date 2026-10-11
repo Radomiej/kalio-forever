@@ -3546,7 +3546,7 @@ describe('ArchitectureRuntimeService', () => {
     expect(semantic.at(-1)?.type).not.toBe('final_artifact');
   });
 
-  it('can enforce one visible Goal Master continuation before finalization', async () => {
+  it('rejects unsupported Goal Master completion until the typed visit bound', async () => {
     const { service, executor, audit } = createService();
     const baseSchema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!baseSchema) throw new Error('Expected Goal Master schema');
@@ -3587,24 +3587,27 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
     const goalDecisions = semantic.filter((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
 
-    expect(goalDecisions).toHaveLength(2);
-    expect(goalDecisions[0]?.route).toMatchObject({
-      source: 'runtime_fallback',
-      selectedNodeIds: ['implementer'],
-      response: expect.stringContaining('Runtime Goal Master guard required one visible continuation'),
-    });
-    expect(goalDecisions[0]?.data).toMatchObject({
-      runtimeGuard: expect.stringContaining('Runtime Goal Master guard required one visible continuation'),
-    });
-    expect(goalDecisions[1]?.route?.selectedNodeIds).toEqual(['final-artifact']);
-    expect(semantic.filter((event) => event.nodeId === 'implementer' && event.type === 'participant_output')).toHaveLength(2);
-    expect(semantic.filter((event) => event.nodeId === 'tester' && event.type === 'participant_output')).toHaveLength(2);
-    expect(semantic.at(-1)?.type).toBe('final_artifact');
+    expect(goalDecisions).toHaveLength(3);
+    for (const decision of goalDecisions) {
+      expect(decision.route).toMatchObject({
+        source: 'runtime_fallback',
+        selectedNodeIds: ['implementer'],
+        response: 'Goal completion requires successful workflow tool evidence.',
+      });
+      expect(decision.data).toMatchObject({
+        runtimeGuard: 'Goal completion requires successful workflow tool evidence.',
+      });
+    }
+    expect(semantic.filter((event) => event.nodeId === 'implementer' && event.type === 'participant_output')).toHaveLength(3);
+    expect(semantic.filter((event) => event.nodeId === 'tester' && event.type === 'participant_output')).toHaveLength(3);
+    expect(semantic.some((event) => event.type === 'final_artifact')).toBe(false);
+    expect(run.status).toBe('failed');
+    expect(service.getEvents(run.id)).toContainEqual(expect.objectContaining({ reasonCode: 'max_node_visits' }));
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
       type: 'architecture_event',
       label: expect.stringContaining('architecture_event:router_decision:goal-master'),
       data: expect.objectContaining({
-        runtimeGuard: expect.stringContaining('Runtime Goal Master guard required one visible continuation'),
+        runtimeGuard: 'Goal completion requires successful workflow tool evidence.',
       }),
     }));
   });

@@ -5,6 +5,7 @@ import type { ChatQueuedPayload, ChatRunPhase, ChatRunSnapshot, ChatRunStatus } 
 import { DrizzleService } from '../../database/drizzle.service';
 import { chatRuns, type ChatRunRow } from '../../database/schema';
 import { hasNoNewerAdmittedTurn } from './run-journal-recovery.helpers';
+import { completeRunRequired, notifyRequiredCompletion } from './run-journal-completion';
 
 const ACTIVE_STATUSES: ChatRunStatus[] = ['active'];
 const CURRENT_STATUSES: ChatRunStatus[] = ['active', 'waiting_for_human', 'interrupted_needs_retry'];
@@ -259,6 +260,12 @@ export class RunJournalService implements OnModuleInit {
   subscribeCompleted(listener: (run: ChatRunSnapshot) => void | Promise<void>): () => void {
     this.completedListeners.add(listener);
     return () => this.completedListeners.delete(listener);
+  }
+
+  async completeRequired(id: string, expectedRevision: number, outcome: NonNullable<ChatRunSnapshot['outcome']>): Promise<ChatRunSnapshot> {
+    const completed = this.toSnapshot(completeRunRequired(this.drizzle.db, id, expectedRevision, outcome));
+    notifyRequiredCompletion(this.completedListeners, completed, this.logger);
+    return completed;
   }
 
   async getCompletedTurn(sessionId: string, turnId: string): Promise<ChatRunSnapshot | null> {

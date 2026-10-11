@@ -276,6 +276,36 @@ describe('TerminalService', () => {
   // ── waitForExit() ─────────────────────────────────────────────────────────
 
   describe('waitForExit()', () => {
+    it.each(['already exited', 'close listener', 'registration recheck'])('never converts unknown exit into success: %s', async (path) => {
+      const session = await service.spawn('node', [], '/project');
+      if (path === 'already exited') proc.emit('close', null, 'SIGTERM');
+      if (path === 'registration recheck') {
+        const originalOn = proc.on.bind(proc);
+        vi.spyOn(proc, 'on').mockImplementation((event, listener) => {
+          if (event === 'close') proc.emit('close', null, 'SIGTERM');
+          return originalOn(event, listener);
+        });
+      }
+      const waiting = service.waitForExit(session.id, 1000);
+      if (path === 'close listener') proc.emit('close', null, 'SIGTERM');
+      expect(await waiting).toEqual({ output: '', exitCode: -1 });
+    });
+
+    it.each([0, 7])('preserves known natural exit %s', async (code) => {
+      const session = await service.spawn('node', [], '/project');
+      const waiting = service.waitForExit(session.id, 1000);
+      proc.emit('close', code);
+      expect((await waiting).exitCode).toBe(code);
+    });
+
+    it('does not report a killed process as successful even when close supplies zero', async () => {
+      const session = await service.spawn('node', [], '/project');
+      const waiting = service.waitForExit(session.id, 1000);
+      service.kill(session.id);
+      proc.emit('close', 0);
+      expect((await waiting).exitCode).toBe(-1);
+    });
+
     it('rejects immediately for an unknown session id', async () => {
       await expect(service.waitForExit('nope', 1000)).rejects.toThrow('Terminal session not found');
     });

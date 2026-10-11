@@ -32,27 +32,26 @@ function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
 }
 
 describe('ExecutionProfileCombobox', () => {
-  it('explains the Codex-only refresh scope when Devin is selected', async () => {
+  it('refreshes quietly when opened without catalog marketing or a recheck button', async () => {
     await act(async () => { render(<ExecutionProfileCombobox profiles={[
       profile({ id: 'devin', kind: 'devin-cli-acp', model: 'swe-2' }),
       profile({ id: 'codex', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.6' }),
     ]} value="devin" onChange={vi.fn()} />); });
-    expect(screen.getByText('Codex catalog only — all connected Codex accounts. Does not refresh Devin.')).toBeInTheDocument();
+    expect(screen.queryByText(/Codex catalog only/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Recheck Codex models/ })).not.toBeInTheDocument();
     const devinChecks = vi.mocked(getDevinCliStatus).mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: 'Recheck Codex models' }));
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
     await waitFor(() => expect(getCodexModels).toHaveBeenLastCalledWith('account', true));
     expect(vi.mocked(getDevinCliStatus).mock.calls.length).toBe(devinChecks);
   });
-  it('does not advertise unchecked Codex profiles or start discovery without an explicit recheck', async () => {
+  it('keeps unavailable saved models explained and discovers quietly on opening', async () => {
     vi.mocked(getCodexModels).mockClear().mockResolvedValue(null);
     const saved = profile({ id: 'old', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.4' });
     await act(async () => { render(<ExecutionProfileCombobox profiles={[saved]} value="" onChange={vi.fn()} />); });
-    fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
-    expect(screen.queryByRole('option', { name: /Codex/ })).not.toBeInTheDocument();
     expect(getCodexModels).toHaveBeenCalledTimes(1);
     expect(getCodexModels).toHaveBeenCalledWith('account');
     vi.mocked(getCodexModels).mockResolvedValue(['gpt-6-luna']);
-    fireEvent.click(screen.getByRole('button', { name: 'Recheck Codex models' }));
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
     await screen.findByRole('option', { name: /Codex · gpt-6-luna/ });
     expect(getCodexModels).toHaveBeenLastCalledWith('account', true);
   });
@@ -63,12 +62,14 @@ describe('ExecutionProfileCombobox', () => {
     render(<ExecutionProfileCombobox profiles={[profile({ id: 'old', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-5.4' })]} value="" onChange={onChange} />);
     fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
     const option = await screen.findByRole('option', { name: /Codex · gpt-6-luna/ });
-    expect(screen.queryByRole('option', { name: /gpt-5.4/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /gpt-5.4/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /gpt-5.4/ })).toHaveTextContent('Model unavailable');
     fireEvent.click(option);
     await waitFor(() => expect(resolveCodexExecutionProfile).toHaveBeenCalledWith('account', 'gpt-6-luna'));
     await waitFor(() => expect(onChange).toHaveBeenCalledWith('new-codex'));
   });
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(getCodexModels).mockResolvedValue(['gpt-5.6']);
     vi.mocked(getDevinCliStatus).mockResolvedValue({
       executable: 'devin.exe', version: 'test', authenticated: true, acp: true, probeChecked: true,
@@ -124,7 +125,7 @@ describe('ExecutionProfileCombobox', () => {
     const input = screen.getByRole('combobox', { name: 'Provider and model' });
     fireEvent.focus(input);
     await screen.findByRole('option', { name: /Codex · gpt-5.6/ });
-    const options = screen.getAllByRole('option');
+    const options = within(screen.getByRole('listbox')).getAllByRole('option');
     expect(options.map((option) => option.querySelector('.font-medium')?.textContent)).toEqual([
       'Devin CLI · swe-2',
       'Codex · gpt-5.6',
@@ -161,21 +162,94 @@ describe('ExecutionProfileCombobox', () => {
     fireEvent.focus(input);
     const option = await screen.findByRole('option', { name: /Devin CLI · swe-2-high/ });
     expect(vi.mocked(getDevinCliStatus).mock.calls.length).toBeGreaterThan(checksBeforeOpening);
-    expect(within(option).getByText('Free · Pro+ · Oct 16')).toBeInTheDocument();
+    expect(option).toHaveTextContent(/^Devin CLI · swe-2-high$/);
     fireEvent.click(option);
 
     expect(resolveDevinCliExecutionProfile).toHaveBeenCalledWith('swe-2-high');
     await waitFor(() => expect(onChange).toHaveBeenCalledWith('devin-swe-2'));
     const selectedProfile = profile({ id: 'devin-swe-2', name: 'Devin · swe-2-high', kind: 'devin-cli-acp', provider: undefined, model: 'swe-2-high' });
     render(<ExecutionProfileCombobox profiles={[selectedProfile]} value="devin-swe-2" onChange={vi.fn()} />);
-    expect(screen.getByTestId('selected-model-cost-note')).toHaveTextContent(/free in Devin Desktop and CLI on Pro or higher through October 16, 2026/i);
+    expect(screen.queryByTestId('selected-model-cost-note')).not.toBeInTheDocument();
   });
 
-  it('identifies Devin SWE-1.7 as the model listed for the Free plan', () => {
-    render(<ExecutionProfileCombobox
-      profiles={[profile({ id: 'devin-free', kind: 'devin-cli-acp', provider: undefined, model: 'swe-1.7' })]}
+  it('omits generic cost copy and free claims when no current-plan entitlement is supplied', async () => {
+    await act(async () => { render(<ExecutionProfileCombobox
+      profiles={[
+        profile({ id: 'devin-free', kind: 'devin-cli-acp', provider: undefined, model: 'swe-1.7' }),
+        profile({ id: 'devin-swe2', kind: 'devin-cli-acp', provider: undefined, model: 'swe-2' }),
+      ]}
       value="devin-free" onChange={vi.fn()}
-    />);
-    expect(screen.getByTestId('selected-model-cost-note')).toHaveTextContent(/unlimited on its Free plan/i);
+    />); });
+    fireEvent.focus(screen.getByRole('combobox'));
+    expect(screen.queryAllByText(/Usage per plan|unlimited|Free ·|Devin pricing/)).toHaveLength(0);
+    const swe2 = screen.getByRole('option', { name: 'Devin CLI · swe-2' });
+    expect(swe2).toHaveTextContent(/^Devin CLI · swe-2$/);
+    expect(swe2.querySelector('.text-xs')).toBeNull();
+  });
+
+  it('combines provider filtering and search without changing the selection', async () => {
+    const onChange = vi.fn();
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'one', provider: 'openai', model: 'shared-model' }),
+      profile({ id: 'two', provider: 'openrouter', model: 'shared-model' }),
+    ]} value="one" onChange={onChange} />); });
+    const input = screen.getByRole('combobox', { name: 'Provider and model' });
+    fireEvent.focus(input);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter by provider' }), { target: { value: 'openrouter' } });
+    fireEvent.change(input, { target: { value: 'shared' } });
+    expect(screen.getAllByRole('option').filter(option => option.tagName === 'BUTTON')).toHaveLength(1);
+    expect(screen.getByRole('listbox')).toHaveTextContent('openrouter · shared-model');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input).toHaveValue('openai · shared-model');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('does not select a disabled profile with Enter and explains why', async () => {
+    const onChange = vi.fn();
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[profile({ enabled: false })]} value="profile" onChange={onChange} />); });
+    const input = screen.getByRole('combobox');
+    fireEvent.focus(input);
+    expect(screen.getByRole('option')).toBeDisabled();
+    expect(screen.getByRole('option')).toHaveTextContent('Profile disabled');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('returns focus with Escape from keyboard rows and closes when focus leaves', async () => {
+    await act(async () => { render(<><ExecutionProfileCombobox profiles={[profile({})]} value="profile" onChange={vi.fn()} /><button>Outside</button></>); });
+    const input = screen.getByRole('combobox');
+    act(() => input.focus());
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(screen.getByRole('option')).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('option'), { key: 'Escape' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    expect(input).toHaveValue('openai · gpt-4.1');
+    fireEvent.change(input, { target: { value: 'missing' } });
+    expect(screen.getByRole('status')).toHaveTextContent('No provider or model matches this search.');
+    act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('shows empty catalogs and keeps existing choices usable after a discovery error', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(getDevinCliStatus).mockRejectedValue(new Error('offline'));
+    const { rerender } = render(<ExecutionProfileCombobox profiles={[]} value="" onChange={vi.fn()} />);
+    await screen.findByRole('alert');
+    fireEvent.focus(screen.getByRole('combobox'));
+    expect(screen.getByRole('status')).toHaveTextContent('No connected providers');
+    rerender(<ExecutionProfileCombobox profiles={[profile({})]} value="profile" onChange={vi.fn()} />);
+    expect(screen.getByRole('option')).toBeEnabled();
+    await act(async () => undefined);
+    log.mockRestore();
+  });
+
+  it('prevents a disabled picker from opening or changing selection', async () => {
+    const onChange = vi.fn();
+    await act(async () => { render(<ExecutionProfileCombobox disabled profiles={[profile({})]} value="profile" onChange={onChange} />); });
+    expect(screen.getByRole('combobox')).toBeDisabled();
+    expect(screen.getByRole('combobox')).toHaveValue('openai · gpt-4.1');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

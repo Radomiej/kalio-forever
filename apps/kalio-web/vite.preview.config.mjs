@@ -1,11 +1,13 @@
 // Built serving needs no React/Tailwind transforms or TypeScript config runner.
 // Keep runtime-config behavior aligned with vite.config.ts (manual DEV).
+import { decisionProtectedProxy } from './decision-auth.proxy.mjs';
 const apiOrigin = process.env.VITE_API_URL ?? 'http://127.0.0.1:3016';
 const wsOrigin = process.env.VITE_WS_URL ?? apiOrigin;
 
 export default {
   preview: {
     proxy: {
+      ...decisionProtectedProxy(apiOrigin),
       '/api': { target: apiOrigin, changeOrigin: true },
       '/socket.io': { target: wsOrigin, changeOrigin: true, ws: true },
     },

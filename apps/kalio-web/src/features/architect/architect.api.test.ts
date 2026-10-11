@@ -9,6 +9,7 @@ import {
   startGoalGuardAgentFlowRun,
 } from './architect.api';
 import type { ArchitectSchema, ExternalQualityGateInput } from './architect.types';
+import { normalizeArchitectureSchema } from './architect.schema';
 
 const { apiGet, apiPost } = vi.hoisted(() => ({
   apiGet: vi.fn(),
@@ -36,6 +37,46 @@ vi.mock('../../services/apiClient', () => ({
 }));
 
 describe('startArchitectureRun', () => {
+  it('posts an explicit profile at the top level without changing the callback position', async () => {
+    apiPost.mockResolvedValueOnce({ data: { id: 'profile-run', status: 'completed' } });
+    apiGet.mockResolvedValue({ data: {} });
+    const update = vi.fn();
+    await startArchitectureRun('schema', 'Task', {}, 'subagent_execution', undefined, { projectPath: 'sandbox' }, update, 'devin-swe-2');
+    expect(apiPost).toHaveBeenCalledWith('/api/architecture-runs/async', expect.objectContaining({ executionProfileId: 'devin-swe-2' }));
+    expect(apiPost.mock.calls[0]![1].context).not.toHaveProperty('executionProfileId');
+    expect(update).toHaveBeenCalledOnce();
+  });
+  it('omits a profile when the caller intentionally uses the runtime default', async () => {
+    apiPost.mockResolvedValueOnce({ data: { id: 'default-run', status: 'completed' } });
+    apiGet.mockResolvedValue({ data: {} });
+    await startArchitectureRun('schema', 'Task', {}, 'subagent_execution');
+    expect(apiPost.mock.calls[0]![1]).not.toHaveProperty('executionProfileId');
+  });
+  it('preserves auto-routing settings in posted schemas and blocks invalid topology before HTTP', async () => {
+    const schema = normalizeArchitectureSchema({
+      id: 'auto-schema', name: 'Auto',
+      nodes: [
+        { id: 'auto', label: 'Auto', kind: 'auto_router', autoRouting: { confidenceThreshold: 0.8, instructions: 'Choose.' } },
+        { id: 'left', label: 'Left', kind: 'parallel' },
+        { id: 'right', label: 'Right', kind: 'parallel' },
+      ],
+      edges: [
+        { id: 'choice', fromNodeId: 'auto', toNodeId: 'left', selection: 'choice' },
+        { id: 'default', fromNodeId: 'auto', toNodeId: 'right', selection: 'default' },
+      ],
+    });
+    apiPost.mockResolvedValueOnce({ data: { id: 'auto-run', status: 'completed' } });
+    apiGet.mockResolvedValue({ data: {} });
+    await startArchitectureRun(schema.id, 'Route', {}, 'subagent_execution', schema);
+    const posted = apiPost.mock.calls[0]![1] as { schema: ArchitectSchema };
+    expect(posted.schema.nodes[0]?.autoRouting).toEqual(schema.nodes[0]?.autoRouting);
+    expect(posted.schema.nodes[0]?.autoRouting).not.toBe(schema.nodes[0]?.autoRouting);
+    expect(posted.schema.edges[0]?.selection).toBe('choice');
+    apiPost.mockClear();
+    schema.edges.pop();
+    await expect(startArchitectureRun(schema.id, 'Route', {}, 'subagent_execution', schema)).rejects.toThrow('exactly one default');
+    expect(apiPost).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

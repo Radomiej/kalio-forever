@@ -7,7 +7,9 @@ import type {
 import { SessionsService } from '../chat/sessions.service';
 import { AuditService, type AuditLogEntry } from '../chat/audit.service';
 import { architectureActionFieldsForEvent } from './architecture-action-summary';
+import { ArchitectureGoalRepository, type ArchitectureGoalState } from './architecture-goal.repository';
 import {
+  architectureAuditAutoRoutingData,
   architectureAuditEventActionField,
   architectureAuditExecutionMode,
   architectureAuditNumberField,
@@ -27,8 +29,8 @@ import {
 } from './architecture-runtime-audit-recovery.utils';
 
 export interface ArchitectureRuntimeAuditRecovery {
-  reconstructRun(runId: string): Promise<ArchitectureRun | null>;
-  reconstructEvents(runId: string): Promise<ArchitectureExecutionEvent[]>;
+  reconstructRun(runId: string, sessionId?: string): Promise<ArchitectureRun | null>;
+  reconstructEvents(runId: string, sessionId?: string): Promise<ArchitectureExecutionEvent[]>;
 }
 
 @Injectable()
@@ -36,25 +38,34 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
   constructor(
     private readonly sessions: SessionsService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly goals?: ArchitectureGoalRepository,
   ) {}
 
-  async reconstructRun(runId: string): Promise<ArchitectureRun | null> {
-    const rows = await this.auditRowsForRun(runId);
+  async reconstructRun(runId: string, sessionId?: string): Promise<ArchitectureRun | null> {
+    const rows = await this.auditRowsForRun(runId, sessionId);
+    return this.reconstructRunFromRows(runId, rows);
+  }
+
+  private async reconstructRunFromRows(runId: string, rows: AuditLogEntry[]): Promise<ArchitectureRun | null> {
     if (rows.length === 0) {
       return null;
     }
 
     const records = rows.map((row) => this.auditData(row));
+    // Presence is authoritative even though goal_protocol is not a lifecycle event type.
+    const goalMarkers = records.filter(record => record.eventType === 'goal_protocol');
     const summary = records.find((record) => record.kind === 'architecture_runtime');
     const error = records.find((record) => record.kind === 'architecture_error');
     const firstEvent = records.find((record) => record.kind === 'architecture_event');
     const source = summary ?? error ?? firstEvent;
     if (!source) {
+      if (goalMarkers.length) throw new Error('GOAL_RECOVERY_MARKER_INVALID');
       return null;
     }
 
     const schemaId = architectureAuditStringField(source, 'schemaId');
     if (!schemaId) {
+      if (goalMarkers.length) throw new Error('GOAL_RECOVERY_MARKER_INVALID');
       return null;
     }
 
@@ -86,16 +97,27 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
     const executionMode = architectureAuditExecutionMode(source);
     const candidateRootSessionId = architectureAuditStringField(source, 'rootSessionId') ?? rows.find((row) => row.sessionId)?.sessionId ?? undefined;
     const auditedBranchSessionIds = architectureAuditStringRecordField(source, 'branchSessionIds');
-    const recoveredOwnership = auditedBranchSessionIds && Object.keys(auditedBranchSessionIds).length > 0
-      ? { rootSessionId: candidateRootSessionId, branchSessionIds: auditedBranchSessionIds }
-      : await this.reconstructSessionOwnership(runId, candidateRootSessionId);
+    let recoveredOwnership: { rootSessionId?: string; branchSessionIds?: Record<string, string> };
+    try {
+      recoveredOwnership = auditedBranchSessionIds && Object.keys(auditedBranchSessionIds).length > 0
+        ? { rootSessionId: candidateRootSessionId, branchSessionIds: auditedBranchSessionIds }
+        : await this.reconstructSessionOwnership(runId, candidateRootSessionId);
+    } catch (error) {
+      if (goalMarkers.length) throw new Error('GOAL_RECOVERY_OWNERSHIP_INVALID', { cause: error });
+      throw error;
+    }
     const rootSessionId = recoveredOwnership.rootSessionId ?? candidateRootSessionId;
     const branchSessionIds = recoveredOwnership.branchSessionIds;
+    const goalState = goalMarkers.length ? this.recoverGoalState(runId, rootSessionId, schemaId, goalMarkers) : undefined;
+    // Generic final artifacts and accepted projections are not durable goal-completion authorization.
+    if (goalState && status === 'completed') throw new Error('GOAL_RECOVERY_COMPLETION_UNVERIFIED');
 
     return {
       id: runId,
       schemaId,
-      prompt: architectureAuditPromptFromRecords(records) ?? `Recovered architecture run ${runId}`,
+      prompt: goalState ? goalState.packet.original.content
+        : architectureAuditPromptFromRecords(records) ?? `Recovered architecture run ${runId}`,
+      ...(goalState ? { goalPacket: goalState.packet } : {}),
       executionMode,
       rootSessionId,
       branchSessionIds,
@@ -106,8 +128,11 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
     };
   }
 
-  async reconstructEvents(runId: string): Promise<ArchitectureExecutionEvent[]> {
-    const rows = await this.auditRowsForRun(runId);
+  async reconstructEvents(runId: string, sessionId?: string): Promise<ArchitectureExecutionEvent[]> {
+    const rows = await this.auditRowsForRun(runId, sessionId);
+    if (rows.some(row => this.auditData(row).eventType === 'goal_protocol')) {
+      await this.reconstructRunFromRows(runId, rows);
+    }
     const eventRows = rows
       .map((row) => ({ row, data: this.auditData(row) }))
       .filter(({ data }) =>
@@ -130,7 +155,7 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
         detail: architectureAuditStringField(data, 'detail'),
         route,
         routerOutput,
-        data,
+        data: architectureAuditAutoRoutingData(data),
       });
       return {
         id: eventId,
@@ -150,10 +175,37 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
         failure: architectureAuditWorkflowFailureField(data, 'failure'),
         evidence: architectureAuditWorkflowEvidenceArrayField(data, 'evidence'),
         runtimeDecision: architectureAuditWorkflowRuntimeDecisionField(data, 'runtimeDecision'),
-        data,
+        data: architectureAuditAutoRoutingData(data),
         createdAt: row.createdAt,
       };
     });
+  }
+
+  private recoverGoalState(runId: string, rootSessionId: string | undefined, schemaId: string,
+    markers: Record<string, unknown>[]): ArchitectureGoalState {
+    if (!rootSessionId) throw new Error('GOAL_RECOVERY_ROOT_MISSING');
+    for (const marker of markers) {
+      if (marker.schemaVersion !== 1 || marker.runId !== runId || marker.rootSessionId !== rootSessionId
+        || marker.schemaId !== schemaId || typeof marker.stateRevision !== 'number'
+        || !Number.isSafeInteger(marker.stateRevision) || marker.stateRevision < 1
+        || typeof marker.sourceVersion !== 'number' || !Number.isSafeInteger(marker.sourceVersion)
+        || marker.sourceVersion < 1) throw new Error('GOAL_RECOVERY_MARKER_INVALID');
+    }
+    if (!this.goals) throw new Error('GOAL_RECOVERY_STORE_UNAVAILABLE');
+    let state: ArchitectureGoalState | null;
+    try {
+      state = this.goals.load(runId, rootSessionId);
+    } catch {
+      throw new Error('GOAL_RECOVERY_STATE_INVALID');
+    }
+    if (!state) throw new Error('GOAL_RECOVERY_STATE_MISSING');
+    if (state.runId !== runId || state.rootSessionId !== rootSessionId) throw new Error('GOAL_RECOVERY_STATE_MISMATCH');
+    for (const marker of markers) {
+      if ((marker.stateRevision as number) > state.stateRevision || (marker.sourceVersion as number) > state.packet.version) {
+        throw new Error('GOAL_RECOVERY_MARKER_FUTURE');
+      }
+    }
+    return state;
   }
 
   private async reconstructSessionOwnership(
@@ -197,19 +249,28 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
     return pairs.length > 0 ? Object.fromEntries(pairs) : undefined;
   }
 
-  private async auditRowsForRun(runId: string): Promise<AuditLogEntry[]> {
+  private async auditRowsForRun(runId: string, sessionId?: string): Promise<AuditLogEntry[]> {
     if (!this.audit) {
       return [];
+    }
+    if (!runId.trim() || (sessionId !== undefined && !sessionId.trim())) {
+      throw new Error('Durable recovery requires a non-empty run/session scope.');
     }
     const rows = await this.audit.listEntries({
       limit: 5000,
       source: 'all',
       runId,
+      ...(sessionId !== undefined ? { sessionId } : {}),
     });
+    // AuditService has no pagination cursor; never accept a potentially truncated replay.
+    if (rows.length >= 5000) throw new Error('Durable audit recovery limit reached; history may be truncated.');
     return rows
       .filter((row) => {
         const data = this.auditData(row);
-        return data.runId === runId || data.architectureRunId === runId;
+        const matches = (data.runId === runId || data.architectureRunId === runId)
+          && (sessionId === undefined || row.sessionId === sessionId);
+        if (matches && data.kind === 'architecture_event') architectureAuditAutoRoutingData(data);
+        return matches;
       })
       .sort((left, right) => {
         if (left.createdAt !== right.createdAt) {

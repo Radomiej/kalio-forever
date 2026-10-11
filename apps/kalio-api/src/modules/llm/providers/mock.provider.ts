@@ -200,7 +200,7 @@ export class MockLLMProvider implements ILLMProvider {
         emitText(options, `run_raapp completed for ${runRaappLaunchId}.`);
         return [];
       }
-      const toolCall = createRunRaappToolCall(runRaappLaunchId);
+      const toolCall = createRunRaappToolCall(runRaappLaunchId, lastMessage);
       emitMockToolArgProgress(options, toolCall);
       return [toolCall];
     }

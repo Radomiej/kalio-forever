@@ -23,6 +23,7 @@ import type { SessionMessagePage } from './interfaces/message-repository.interfa
 import { ActiveSessionRegistry } from './active-session-registry.service';
 import { PersonaService } from '../persona/persona.service';
 import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
+import { DefaultExecutionProfileService } from '../agent-runtime/default-execution-profile.service';
 import { resolveExecutionProfileId } from '../agent-runtime/execution-profile.utils';
 import { resolvePersonaExecutionProfileChange } from './session-profile-binding.utils';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
@@ -61,6 +62,7 @@ export class SessionsService {
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() private readonly personas?: PersonaService,
     @Optional() private readonly executionProfiles?: ExecutionProfileService,
+    @Optional() private readonly defaultExecutionProfile?: DefaultExecutionProfileService,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -393,6 +395,7 @@ export class SessionsService {
     const personaProfileId = parent
       ? undefined
       : (await this.personas?.getSessionConfig(dto.personaId))?.executionProfileId;
+    const defaultProfileId = parent ? undefined : await this.defaultExecutionProfile?.getId();
     if (projectId === SYSTEM_PROJECT_IDS.none) {
       if (requestedProjectId === SYSTEM_PROJECT_IDS.none && dto.projectPathOverride?.trim()) {
         throw new BadRequestException('The no-project session cannot have a path override.');
@@ -401,7 +404,7 @@ export class SessionsService {
         projectId,
         executionProfileId: resolveExecutionProfileId({
           explicitProfileId: parentProfileId ?? explicitProfileId,
-          personaProfileId,
+          personaProfileId: defaultProfileId ?? personaProfileId,
           projectProfileId: 'local-direct-default',
         }),
         runtimeContext: requestedProjectId === SYSTEM_PROJECT_IDS.none
@@ -419,7 +422,7 @@ export class SessionsService {
       projectId,
       executionProfileId: resolveExecutionProfileId({
         explicitProfileId: parentProfileId ?? explicitProfileId,
-        personaProfileId,
+        personaProfileId: defaultProfileId ?? personaProfileId,
         projectProfileId: project.defaultExecutionProfileId,
       }),
       runtimeContext: this.applyProjectPath(dto.runtimeContext, path),

@@ -1,6 +1,6 @@
 id: qa-interactive
 name: Interactive Q&A
-version: "1.1.0"
+version: "1.1.1"
 description: Presents a question with clickable answer options. User selects an answer which is sent back to the conversation.
 author: kalio-core
 input_schema:
@@ -27,11 +27,11 @@ tags:
   - interactive
   - survey
 ui:
-  render_as: gui
+  render_as: interactive
 expose_as_tool: true
 tool_description: Interactive Q&A with predefined options and custom answer support
 execution:
   timeout_ms: 10000
   requires_user_approval: false
   is_deterministic: true
-  render_as: gui
+  render_as: interactive

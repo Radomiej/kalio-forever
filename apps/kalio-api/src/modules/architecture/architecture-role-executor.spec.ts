@@ -4,6 +4,98 @@ import type { RunSubagentRequest, SubagentRuntimePort } from '../tool/subagent-r
 import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-policy';
 import { ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
+import { createGoalPacket, appendGoalSource } from './architecture-goal-source';
+
+describe('RoleExecutor host goal proposal purpose', () => {
+  const packet = () => createGoalPacket({ messageId: 'prompt', sessionId: 'host', turnId: 'turn', content: 'Build feature', createdAt: 1 });
+  const output = { sourceVersion: 1, criteria: [{ text: 'Build feature', sourceQuotes: [{ messageId: 'prompt', quote: 'Build feature' }], supersedes: [] }] };
+  function fixture(structuredOutput: unknown = output, status: 'completed' | 'failed' | 'cancelled' = 'completed') {
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async () => ({ result: 'Do not parse this prose', structuredOutput, status, taskId: 'task', childSessionId: 'branch', parentSessionId: 'root', vfsMode: 'shared', vfsSessionId: 'root', copiedFiles: [], durationMs: 1 }));
+    const service = new ArchitectureRoleExecutorService({ runSubagent });
+    const schema = getSchema();
+    const input = { schema, run: createRun('subagent_execution'), slot: schema.roleSlots[0]!, branchSessionId: 'branch', personaId: 'dev',
+      node: { id: 'proposal', kind: 'role' as const, label: 'Proposal', toolOverride: { allowedToolNames: ['vfs_read', 'fs_list', 'vfs_write', 'terminal_spawn', 'run_subagent', 'spawn_cli_agent'] } },
+      purpose: { kind: 'goal_proposal' as const, packet: packet() }, resumeChildTurnId: 'prior-turn' };
+    return { service, runSubagent, input };
+  }
+  it('forwards host schema/read policy and replay turn; returns validated structured output intact', async () => {
+    const { service, runSubagent, input } = fixture();
+    const result = await service.execute(input);
+    expect(result.structuredOutput).toEqual(output);
+    expect(runSubagent).toHaveBeenCalledWith(expect.objectContaining({ resumeTurnId: 'prior-turn', childSessionId: 'branch', copyOutputs: false,
+      auditContext: expect.objectContaining({ purpose: 'goal_proposal', goalSourceVersion: 1, goalSourceFingerprint: input.purpose.packet.sourceFingerprint }),
+      slotPolicy: { allowedToolNames: ['vfs_read', 'fs_list'] }, autoApproveTools: [], structuredOutput: expect.objectContaining({ name: 'architecture_goal_proposal', strict: true }) }));
+    expect(runSubagent.mock.calls[0]![0].objective).toContain('Build feature');
+    expect(result.data['route_to']).toBeUndefined();
+  });
+  it.each([undefined, { status: 'accepted', answer: 'Prior implementation' }, { ...output, sourceVersion: 99 }])('rejects invalid ordinary replay output (%j)', async raw => {
+    const { service, runSubagent, input } = fixture(raw);
+    if (raw === undefined) runSubagent.mockResolvedValueOnce({ result: JSON.stringify(output), taskId: 'old', childSessionId: 'branch', parentSessionId: 'root', status: 'completed', vfsMode: 'shared', vfsSessionId: 'root', copiedFiles: [], durationMs: 0 });
+    await expect(service.execute(input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+  });
+  it.each(['failed', 'cancelled'] as const)('rejects %s child status even with valid-looking output', async status => {
+    const { service, input } = fixture(output, status);
+    await expect(service.execute(input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+  });
+  it('does not activate purpose from model/context and requires real runtime/execution mode', async () => {
+    const { input } = fixture();
+    await expect(new ArchitectureRoleExecutorService().execute(input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+    const f = fixture();
+    f.input.run.executionMode = 'session_branches';
+    await expect(f.service.execute(f.input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+    expect(f.runSubagent).not.toHaveBeenCalled();
+    const legacy = fixture();
+    legacy.input.run.context = { purpose: { kind: 'goal_proposal', packet: packet() } };
+    const { purpose: _purpose, ...ordinary } = legacy.input;
+    await legacy.service.execute(ordinary);
+    expect(legacy.runSubagent.mock.calls[0]![0].structuredOutput).toBeUndefined();
+  });
+  it('snapshots the source and rejects packet changes during the asynchronous child call', async () => {
+    const { service, input, runSubagent } = fixture();
+    const base = runSubagent.getMockImplementation()!;
+    runSubagent.mockImplementation(async request => {
+      input.purpose.packet = appendGoalSource(input.purpose.packet, { ...input.purpose.packet.original, messageId: 'next', turnId: 'next-turn', content: 'Changed source' });
+      return base(request);
+    });
+    await expect(service.execute(input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+  });
+  it('does not accept journal replay from an older source version even with ordinary completed status', async () => {
+    const { service, input } = fixture(output);
+    input.purpose.packet = appendGoalSource(input.purpose.packet, { ...input.purpose.packet.original, messageId: 'next', turnId: 'next-turn', content: 'Add another requirement' });
+    await expect(service.execute(input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+  });
+  it('does not recover a proposal child failure into routing success after read evidence', async () => {
+    const { service, input, runSubagent } = fixture();
+    runSubagent.mockImplementation(async request => {
+      request.emit?.('tool:start', { callId: 'read-before-failure', toolName: 'vfs_read', args: { path: 'evidence.txt' }, sessionId: 'branch', agentRun: undefined as never });
+      throw new Error('provider secret canonical content');
+    });
+    await expect(service.execute(input)).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION', message: 'Goal proposal worker failed.' });
+  });
+});
+
+describe('RoleExecutor host receipt capability', () => {
+  it('forwards the exact host object without serializing it into context or audit', async () => {
+    const observer = { admit: vi.fn(), commit: vi.fn(), drain: vi.fn(), journalComplete: vi.fn(), toJSON: () => { throw new Error('capability serialized'); } };
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async () => ({ result: 'ok', taskId: 'task', childSessionId: 'branch', parentSessionId: 'root', vfsMode: 'shared', vfsSessionId: 'root', copiedFiles: [], durationMs: 1 }));
+    const schema = getSchema();
+    await new ArchitectureRoleExecutorService({ runSubagent }).execute({ schema, run: createRun('subagent_execution'), slot: schema.roleSlots[0]!, branchSessionId: 'branch', personaId: 'dev', hostRuntimeReceiptObserver: observer });
+    const request = runSubagent.mock.calls[0]![0];
+    expect(request.hostRuntimeReceiptObserver).toBe(observer);
+    expect(JSON.stringify({ context: request.architectureContext, audit: request.auditContext, objective: request.objective })).not.toContain('hostRuntimeReceiptObserver');
+  });
+
+  it('propagates observed failures unchanged even after partial tool evidence', async () => {
+    const observer = { admit: vi.fn(), commit: vi.fn(), drain: vi.fn(), journalComplete: vi.fn() };
+    const failure = new Error('receipt admission rejected');
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async request => {
+      request.emit?.('tool:start', { callId: 'read', toolName: 'vfs_read', args: {}, sessionId: 'branch', agentRun: undefined as never });
+      throw failure;
+    });
+    const schema = getSchema();
+    await expect(new ArchitectureRoleExecutorService({ runSubagent }).execute({ schema, run: createRun('subagent_execution'), slot: schema.roleSlots[0]!, branchSessionId: 'branch', personaId: 'dev', hostRuntimeReceiptObserver: observer })).rejects.toBe(failure);
+  });
+});
 
 function slotToolNames(call: RunSubagentRequest | undefined): string[] {
   return call?.slotPolicy?.allowedToolNames ?? [];

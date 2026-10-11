@@ -7,6 +7,7 @@ import { envSchema } from './config/env.schema';
 import { EmbeddedUiModule } from './runtime/embedded-ui.module';
 import { KalioConfigModule } from './config/kalio-config.module';
 import { DatabaseModule } from './database/database.module';
+import { DecisionSettingsModule } from './common/decision-settings.module';
 import { LLMModule } from './modules/llm/llm.module';
 import { PersonaModule } from './modules/persona/persona.module';
 import { ToolModule } from './modules/tool/tool.module';
@@ -64,6 +65,7 @@ const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.htm
     LLMModule,
     PersonaModule,
     CredentialsModule,
+    DecisionSettingsModule,
     VFSModule,
     ToolModule,
     MCPModule,

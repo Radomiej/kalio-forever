@@ -21,6 +21,30 @@ This command checks the managed Kalio API, live LLM provider state, saved/active
 
 ## Cost-bounded release commands
 
+### Explicit local Codex conversation prelaunch
+
+For an authorized single-chat launch, check the exact profile rather than unrelated global direct-LLM credentials:
+
+```powershell
+node scripts/agentflow-paid-readiness.mjs --api http://127.0.0.1:3316/api --static-only --codex-profile <profile-id> --persona <persona-id> --expected-model <model-id> --expected-project-path E:/Projekty/home-site
+```
+
+This GET-only snapshot requires an enabled strict Codex profile, one online idle account host, disabled inherited MCP, a model catalog refreshed within five minutes with a known matching process epoch, a unique workspace, the six approved Kalio tools and manual HITL. Refresh the catalog explicitly through Recheck when stale; the gate does not refresh or generate automatically.
+
+PASS proves configuration only, not account authentication during generation, session binding, filesystem enforcement or successful execution. Launch through the UI and verify the persisted exact profile, response, tools and reload separately. This branch does not waive paid AgentFlow release gates.
+
+### Explicit local Devin conversation
+
+For an already authorized **single chat** bound to exact local Devin ACP `swe-2`, use the profile-specific equivalent instead of testing unrelated global direct-LLM credentials:
+
+```powershell
+node scripts/agentflow-paid-readiness.mjs --api http://127.0.0.1:3316/api --static-only --devin-session <session-id> --expected-project-path E:\Projekty\home-site
+```
+
+This fail-closed GET-only snapshot checks session/profile/project identity, exact execution path, strict approval, manual HITL with pause fallback, uniquely registered approved tools, write/spawn confirmations, local configured bridge, native filesystem/terminal denial, refreshed authenticated ACP catalog and absent hosts/current run/children. Persona recommendations do not override the explicit session profile. The path comparison is textual; runtime VFS must still enforce filesystem access.
+
+Passing does not send a prompt, resume, approve a tool, establish pricing, or grant execution authority. Recheck immediately before an authorized UI action; runtime admission/locking and per-tool approval are still required. Existing children fail closed and need separate inspection. The default paid-provider checks and paid/AgentFlow canary gates remain unchanged. Do not use this branch to waive a failed paid-provider gate.
+
 Run the comprehensive workflow/edge suite for free against a fresh mock stack:
 
 ```powershell

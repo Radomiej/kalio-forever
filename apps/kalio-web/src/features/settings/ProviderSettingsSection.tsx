@@ -4,6 +4,7 @@ import type { Credential } from '@kalio/types';
 import type { AddForm, ProviderTestState } from './llm-panel.types';
 import { ProviderCard } from './ProviderCard';
 import { ALL_PROVIDER_TYPES, PROVIDER_LABELS } from './llm-provider-settings';
+import { RuntimeProviderChoices } from './RuntimeProviderChoices';
 
 interface EnvProviderCardProps {
   isActive: boolean;
@@ -175,9 +176,11 @@ export function ProviderSettingsSection({
       <div>
         <h3 className="text-sm font-semibold mb-1">Providers</h3>
         <p className="text-xs text-base-content/60">
-          Saved provider credentials. Activate one here to make it the active runtime provider.
+          Choose a connected agent for new conversations, or configure API providers below.
         </p>
       </div>
+
+      <RuntimeProviderChoices />
 
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-base-content/50 py-4">

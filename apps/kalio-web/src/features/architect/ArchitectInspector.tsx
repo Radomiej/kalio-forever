@@ -9,6 +9,7 @@ import type {
 } from '@kalio/types';
 import type { ArchitectSchema } from './architect.types';
 import { ArchitectBehaviorControls } from './ArchitectBehaviorControls';
+import { ArchitectAutoRoutingControls } from './ArchitectAutoRoutingControls';
 
 interface ArchitectInspectorProps {
   node: ArchitectNode | null;
@@ -20,6 +21,7 @@ interface ArchitectInspectorProps {
   onPersonaOverride: (nodeId: string, personaId: string) => void;
   onNodeKindOverride: (nodeId: string, kind: ArchitectureNodeKind) => void;
   onNodeBehaviorOverride: (nodeId: string, behavior: NonNullable<ArchitectureSchemaNode['behavior']>) => void;
+  onAutoRoutingOverride?: (nodeId: string, autoRouting: NonNullable<ArchitectureSchemaNode['autoRouting']>) => void;
   onNodeMaxToolAttemptsOverride: (nodeId: string, maxToolAttempts?: number) => void;
   onNodeToolOverride: (nodeId: string, toolOverride?: NonNullable<ArchitectureSchemaNode['toolOverride']>) => void;
   onEdgeSelectionOverride: (fromNodeId: string, toNodeId: string, selection?: ArchitectureSchemaEdgeSelection) => void;
@@ -32,11 +34,12 @@ const NODE_KIND_OPTIONS: ReadonlyArray<{ value: ArchitectureNodeKind; label: str
   { value: 'parallel', label: 'Parallel' },
   { value: 'role', label: 'Role' },
   { value: 'router', label: 'Router' },
+  { value: 'auto_router', label: 'Auto-routing' },
   { value: 'artifact', label: 'Artifact' },
 ];
 
 function edgeSelectionFromValue(value: string): ArchitectureSchemaEdgeSelection | undefined {
-  if (value === 'default' || value === 'converge' || value === 'continuation') {
+  if (value === 'default' || value === 'converge' || value === 'continuation' || value === 'choice') {
     return value;
   }
   return undefined;
@@ -66,6 +69,7 @@ export function ArchitectInspector({
   onPersonaOverride,
   onNodeKindOverride,
   onNodeBehaviorOverride,
+  onAutoRoutingOverride,
   onNodeMaxToolAttemptsOverride,
   onNodeToolOverride,
   onEdgeSelectionOverride,
@@ -274,6 +278,10 @@ export function ArchitectInspector({
                 />
               )}
 
+              {selectedNodeKind === 'auto_router' && (
+                <ArchitectAutoRoutingControls nodeId={node.id} value={node.autoRouting} onChange={onAutoRoutingOverride} />
+              )}
+
               {outgoingEdges.length > 0 && (
                 <section className="mt-4 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-base-content/55">Outgoing edge roles</div>
@@ -298,6 +306,7 @@ export function ArchitectInspector({
                           >
                             <option value="">Normal transition</option>
                             <option value="default">Default route</option>
+                            <option value="choice">Choice route</option>
                             <option value="converge">Converge route</option>
                             <option value="continuation">Continuation route</option>
                           </select>
@@ -402,6 +411,7 @@ export function ArchitectInspector({
 }
 
 const NODE_KIND_LABELS: Record<ArchitectureNodeKind, string> = {
+  auto_router: 'Auto-routing',
   artifact: 'Artifact',
   parallel: 'Parallel',
   role: 'Role',

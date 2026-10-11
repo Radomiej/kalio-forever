@@ -333,13 +333,45 @@ async function waitForAuditEntry(
   return match;
 }
 
-async function createParentSession(request: APIRequestContext, title: string): Promise<string> {
+async function createParentSession(request: APIRequestContext, title: string, initializeConversation = false): Promise<string> {
+  if (!process.env['DATABASE_PATH']?.replaceAll('\\', '/').includes('playwright-stack/')) {
+    throw new Error('Goal Guard mock fixture requires the isolated Playwright database');
+  }
+  const profileResponse = await request.post(`${API_BASE}/runtime/profiles`, {
+    data: { name: `Goal Guard mock fixture ${title}`, kind: 'direct-llm', provider: 'mock', model: 'mock' },
+  });
+  expect(profileResponse.ok()).toBeTruthy();
+  const profile = await profileResponse.json() as { id: string };
   const response = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId: 'default' },
+    data: { title, personaId: 'default', executionProfileId: profile.id },
   });
   expect(response.ok()).toBeTruthy();
   const session = await response.json();
   expect(session.id).toBeTruthy();
+  if (initializeConversation) {
+    const socket = io(API_BASE.replace(/\/api$/, ''), {
+      transports: ['websocket'], query: { sessionId: session.id }, autoConnect: false,
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Goal Guard fixture initialization timed out')), 10_000);
+        const finish = (error?: Error) => {
+          clearTimeout(timer);
+          if (error) reject(error); else resolve();
+        };
+        socket.once('connect_error', finish);
+        socket.once('chat:error', (error: { message?: string }) => finish(new Error(error.message ?? 'Fixture initialization failed')));
+        socket.once('chat:complete', () => finish());
+        socket.once('connect', () => socket.emit('chat:send', {
+          sessionId: session.id, personaId: 'default', executionProfileId: profile.id,
+          content: 'Initialize this explicit mock-only Goal Guard test conversation. Do not run tools.',
+        }));
+        socket.connect();
+      });
+    } finally {
+      socket.disconnect();
+    }
+  }
   return session.id;
 }
 
@@ -436,8 +468,9 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Guard');
       await expect(page.getByTestId('execution-graph-view')).toContainText('waiting_on_orchestrator');
     } finally {
-      await deleteSessionIfExists(request, fixture.sessionId);
-      await deleteSessionIfExists(request, fixture.childSessionId);
+      // Parent deletion owns the collected child tree; do not delete the child twice.
+      const cleanup = await request.delete(`${API_BASE}/sessions/${fixture.sessionId}`);
+      expect(cleanup.ok()).toBe(true);
     }
   });
 
@@ -446,7 +479,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     test.skip(!(await isMockLlm(request)), 'Goal Guard AgentFlow E2E requires the mock LLM stack.');
 
     const title = `Talk-started AgentFlow ${Date.now()}`;
-    const sessionId = await createParentSession(request, title);
+    const sessionId = await createParentSession(request, title, true);
     let childSessionId: string | undefined;
 
     try {
@@ -461,7 +494,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
-      const liveBubble = page.getByTestId('agent-turn-bubble').first();
+      const liveBubble = page.getByTestId('agent-turn-bubble').filter({ has: page.getByTestId('confirmation-confirm-btn') }).last();
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
       await expect(liveBubble.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
@@ -492,10 +525,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('execution-graph-view')).toContainText(/Goal Guard|AgentFlow/i);
       await expect(page.getByTestId('execution-graph-view')).not.toContainText('Five Minds');
     } finally {
-      await deleteSessionIfExists(request, sessionId);
-      if (childSessionId) {
-        await deleteSessionIfExists(request, childSessionId);
-      }
+      const cleanup = await request.delete(`${API_BASE}/sessions/${sessionId}`);
+      expect(cleanup.ok()).toBe(true);
     }
   });
 
@@ -504,7 +535,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
     test.skip(!(await isMockLlm(request)), 'Goal Guard AgentFlow E2E requires the mock LLM stack.');
 
     const title = `Talk durable Goal Guard reload ${Date.now()}`;
-    const sessionId = await createParentSession(request, title);
+    const sessionId = await createParentSession(request, title, true);
     let childSessionId: string | undefined;
     let runId: string | undefined;
 
@@ -520,7 +551,7 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
         '[[mock:goal-guard-vfs-success]]',
       ].join('\n'));
 
-      const liveBubble = page.getByTestId('agent-turn-bubble').first();
+      const liveBubble = page.getByTestId('agent-turn-bubble').filter({ has: page.getByTestId('confirmation-confirm-btn') }).last();
       await expect(liveBubble).toBeVisible({ timeout: 10_000 });
       await expect(liveBubble.getByTestId('confirmation-confirm-btn')).toBeVisible({ timeout: 20_000 });
       await liveBubble.getByTestId('confirmation-confirm-btn').click();
@@ -563,10 +594,8 @@ test.describe('Goal Guard AgentFlow from Architect UI', () => {
       await expect(page.getByTestId('execution-graph-view')).toContainText('Goal Master Delivery Loop / completed', { timeout: 20_000 });
       await expect(page.getByTestId('execution-graph-view')).toContainText('Final response', { timeout: 20_000 });
     } finally {
-      await deleteSessionIfExists(request, sessionId);
-      if (childSessionId) {
-        await deleteSessionIfExists(request, childSessionId);
-      }
+      const cleanup = await request.delete(`${API_BASE}/sessions/${sessionId}`);
+      expect(cleanup.ok()).toBe(true);
     }
   });
 

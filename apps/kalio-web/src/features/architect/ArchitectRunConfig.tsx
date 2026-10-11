@@ -2,8 +2,16 @@ import { useState } from 'react';
 import { AlertTriangle, BarChart3, Loader2, Play } from 'lucide-react';
 import type { ArchitectExecutionMode, ArchitectSchema, PersonaOverrideMap } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
+import type { ExecutionProfile } from '@kalio/types';
+import { ExecutionProfileCombobox } from '../chat/launch/ExecutionProfileCombobox';
+import { AuditFact, NumberField, RunMetric, ToggleField } from './ArchitectRunConfig.Fields';
 
 interface ArchitectRunConfigProps {
+  executionProfileId?: string;
+  executionProfiles?: ExecutionProfile[];
+  profilesLoading?: boolean;
+  profilesError?: string | null;
+  onExecutionProfileChange?: (id: string) => void;
   activeCredentialId: string | null;
   llmConfig: LLMConfigWithSource | null;
   maxNodeVisits: number;
@@ -38,6 +46,7 @@ interface ArchitectRunConfigProps {
 }
 
 export function ArchitectRunConfig({
+  executionProfileId = '', executionProfiles = [], profilesLoading = false, profilesError = null, onExecutionProfileChange,
   activeCredentialId,
   llmConfig,
   maxNodeVisits,
@@ -78,6 +87,7 @@ export function ArchitectRunConfig({
   const [showRunAudit, setShowRunAudit] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [runMode, setRunMode] = useState<'standard' | 'goalGuard'>('standard');
+  const [profileBlocked, setProfileBlocked] = useState(false);
   const useVfsSandbox = !projectPath.trim() && !autoApproveProjectWrites && !autoApproveTerminal;
   const canStartStandardRun = Boolean(schema) && !running && taskPrompt.trim().length > 0;
   const canStartGoalGuard = !running && taskPrompt.trim().length > 0;
@@ -189,6 +199,21 @@ export function ArchitectRunConfig({
           </div>
 
           <div className="grid gap-4 p-4 lg:grid-cols-2">
+            <div className="lg:col-span-2 space-y-2">
+              <p className="text-xs font-semibold">Provider / model</p>
+              <button type="button" className="btn btn-sm btn-ghost" aria-pressed={!executionProfileId}
+                disabled={running || !onExecutionProfileChange} onClick={() => onExecutionProfileChange?.('')}>
+                Use runtime default
+              </button>
+              <ExecutionProfileCombobox profiles={executionProfiles} value={executionProfileId}
+                onChange={(id) => onExecutionProfileChange?.(id)} disabled={running || profilesLoading || !onExecutionProfileChange}
+                testId="architect-execution-profile" />
+              {!executionProfileId && <p className="text-xs">Runtime default: {llmConfig ? `${llmConfig.provider} / ${llmConfig.model}` : 'loading'}</p>}
+              {profilesLoading && <p role="status">Loading execution profiles…</p>}
+              {profilesError && <p role="alert">{profilesError}</p>}
+              {executionProfileId && (profileBlocked || runMode === 'goalGuard' || schema?.id === 'goal-master-delivery-loop') &&
+                <p role="alert">Goal Guard cannot forward an explicit execution profile yet. Choose runtime default or a standard architecture.</p>}
+            </div>
             <div className="rounded-md border border-base-300 bg-base-200/45 p-3">
               <p className="text-[10px] font-bold uppercase tracking-wide text-base-content/65">Flow</p>
               <div className="mt-2 grid grid-cols-2 gap-2">
@@ -316,6 +341,7 @@ export function ArchitectRunConfig({
               type="button"
               className="btn btn-primary btn-sm gap-2"
               onClick={() => {
+                if (executionProfileId && schema?.id === 'goal-master-delivery-loop') { setProfileBlocked(true); return; }
                 onStartRun();
                 setShowRunModal(false);
               }}
@@ -329,6 +355,7 @@ export function ArchitectRunConfig({
               type="button"
               className="btn btn-secondary btn-sm gap-2"
               onClick={() => {
+                if (executionProfileId) { setProfileBlocked(true); return; }
                 onStartGoalGuardFlow();
                 setShowRunModal(false);
               }}
@@ -433,92 +460,4 @@ export function estimateArchitectureBudget(
     estimatedCalls,
     estimatedLlmTurns,
   };
-}
-
-function AuditFact({ label, testId, value }: { label: string; testId?: string; value: string }) {
-  return (
-    <p className="min-w-0" data-testid={testId}>
-      <span className="font-semibold text-base-content">{label}</span>
-      <span className="text-base-content/55"> = </span>
-      <span>{value}</span>
-    </p>
-  );
-}
-
-function NumberField({
-  label,
-  min,
-  max,
-  onChange,
-  testId,
-  value,
-}: {
-  label: string;
-  min: number;
-  max?: number;
-  onChange: (value: number) => void;
-  testId: string;
-  value: number;
-}) {
-  return (
-    <label className="flex shrink-0 items-center gap-1 rounded-md border border-base-300 bg-base-100/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-base-content/65">
-      {label}
-      <input
-        className="h-6 w-12 rounded border border-base-300 bg-base-100 px-1.5 text-xs font-semibold text-base-content outline-none"
-        type="number"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(event) => {
-          const parsed = Number.parseInt(event.target.value, 10);
-          if (Number.isFinite(parsed) && parsed >= min && (max === undefined || parsed <= max)) {
-            onChange(parsed);
-          }
-        }}
-        data-testid={testId}
-      />
-    </label>
-  );
-}
-
-function ToggleField({
-  checked,
-  disabled = false,
-  label,
-  onChange,
-  testId,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  label: string;
-  onChange: (value: boolean) => void;
-  testId: string;
-}) {
-  return (
-    <label className="flex min-h-10 items-center justify-between gap-3 rounded-md border border-base-300 bg-base-100/70 px-2 py-1.5" data-testid={testId}>
-      <span className="font-semibold text-base-content/75">{label}</span>
-      <input
-        type="checkbox"
-        className="toggle toggle-info min-h-11 min-w-14"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
-  );
-}
-
-function RunMetric({ label, tone = 'ok', value }: { label: string; tone?: 'ok' | 'warning' | 'danger'; value: string }) {
-  return (
-    <div className={`min-w-12 rounded-md border px-2 py-1 ${
-      tone === 'danger'
-        ? 'border-error/40 bg-error/10'
-        : tone === 'warning'
-          ? 'border-warning/40 bg-warning/10'
-          : 'border-base-300 bg-base-100/60'
-    }`}>
-      <div className="text-[11px] font-semibold text-base-content">{value}</div>
-      <div className="text-[9px] uppercase tracking-wide text-base-content/60">{label}</div>
-    </div>
-  );
 }

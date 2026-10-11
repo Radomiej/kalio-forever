@@ -1,4 +1,4 @@
-import { ImagePlus, Loader2, X } from 'lucide-react';
+import { ImagePlus, Loader2, Settings, X } from 'lucide-react';
 import { tileColorFromId } from './tileColors';
 
 interface AppTileProps {
@@ -17,9 +17,10 @@ interface AppTileProps {
   onGenerateIcon?: () => void;
   /** Called when user clicks the "remove icon" button */
   onRemoveIcon?: () => void;
+  onModelSettings?: () => void;
 }
 
-export function AppTile({ id, name, description, size, onClick, index, iconUrl, isGenerating, onGenerateIcon, onRemoveIcon }: AppTileProps) {
+export function AppTile({ id, name, description, size, onClick, index, iconUrl, isGenerating, onGenerateIcon, onRemoveIcon, onModelSettings }: AppTileProps) {
   const color = tileColorFromId(id);
   const firstLetter = name.charAt(0).toUpperCase();
 
@@ -63,6 +64,13 @@ export function AppTile({ id, name, description, size, onClick, index, iconUrl, 
       )}
 
       {/* Generate / Remove icon buttons — top-right, visible on hover/focus */}
+      {onModelSettings && (
+        <button type="button" className="absolute bottom-2 right-2 z-20 inline-flex h-11 w-11 items-center justify-center rounded-md bg-black/45 text-white opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80"
+          aria-label={`Model settings for ${name}`} aria-haspopup="dialog"
+          onClick={(event) => { event.stopPropagation(); onModelSettings(); }}>
+          <Settings size={18} />
+        </button>
+      )}
       <div
         className="absolute top-2 right-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
         role="group"

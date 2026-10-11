@@ -218,6 +218,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     await resolveToolConfirmation({
       payload,
+      gatewaySocketId: client.id,
       toolDispatch: this.toolDispatch,
       chatService: this.chatService,
       emit: ((event, data) => client.emit(event, data)) as EmitFn,

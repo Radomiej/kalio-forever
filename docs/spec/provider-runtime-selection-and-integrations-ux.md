@@ -1,7 +1,7 @@
 # Provider, runtime and integration UX
 
 Status: accepted product direction; implementation slice deployed to local stable QA and browser-verified; production migration/release pending
-Last updated: 2026-10-02
+Last updated: 2026-10-04
 Source: user walkthrough of the local stable QA UI, followed by read-only inspection.
 
 ## Goal
@@ -21,6 +21,7 @@ Make it obvious which connected service will execute a chat/run, which model is 
 9. Disabled permissions explain why, what state is missing, and how to resolve it. Do not render a bare unavailable toggle as though it were a user-controlled setting.
 10. Run controls provide immediate pending/success/error feedback and show the project/workspace, persona, runtime/provider, and model that will be used. The selected provider/model remains legible through completion/reconnect.
 11. Provider form actions use clear visual hierarchy: primary Add/Save action, visibly secondary Cancel action, with accessible focus/disabled states.
+12. Desktop (viewport width >=1024px, `lg`) uses one creation screen with persona, provider/model and prompt visible together; there is no Next/Back navigation or step indicator. Mobile/tablet compact viewports (<1024px) alone use a sequential configuration -> prompt wizard. Back/Next preserves selections and the unsent draft. This is a viewport rule, not device detection.
 
 ## Scope from the walkthrough
 
@@ -75,6 +76,15 @@ These are reports from the walkthrough and are not all independently reproduced.
 
 ## Acceptance criteria
 
+### Live QA additions (run 26)
+
+- UX-12: Below 1024px, conversation selection and the conversation/creation surface are sequential, not simultaneous panes. Creation uses configuration then prompt, with Back/Next preserving all selections and draft. At >=1024px, persona, provider/model and prompt are simultaneously visible on one screen, without Next/Back or a step indicator.
+- UX-13: One owner renders pending activity. Once assistant text/thinking is materialized, do not duplicate its contents in a placeholder. A historical thinking section stops animating when answer text starts and remains manually collapsible.
+- UX-14: Chat lists provider-owned and Kalio MCP tool activity with explicit provenance, requested/running/waiting/completed/failed states and approval outcome. ACP completion is not automatically Kalio execution success. Timeline and sidebar must agree with durable run state after F5/reconnect.
+- UX-15: Host loss/reboot cannot leave a run silently thinking forever or count an unfinished homepage build as success. Recovery must distinguish cancelled, interrupted and safe resumable work and must not replay writes without fresh confirmation.
+
+Run 26 dispatched exact swe-2 through Devin ACP against E:/Projekty/home-site. Bridge reads and an approved App.jsx write were observed. Reboot interrupted the CSS approval/build phase; the homepage is not yet QA-complete. These facts supersede only the previous live-execution boundary, not the earlier UI-selection evidence.
+
 | ID | Acceptance |
 |---|---|
 | UX-01 | Each connected execution choice identifies service, runtime/profile, model, credential source, connection/readiness and permission boundary; no silent substitution. |
@@ -92,6 +102,20 @@ These are reports from the walkthrough and are not all independently reproduced.
 
 ## Open questions / explicit boundaries
 
+### QA80 layout evidence — 2026-10-03
+
+Existing QA80 screenshots were reviewed against `apps/kalio-web/src/features/chat/launch/NewChatScreen.tsx` and the parent-owned `apps/e2e/tests/qa-live-launch-wizard.spec.ts`. The source uses `hidden lg:contents` to restore both groups on desktop and `lg:hidden` for step navigation/indicators. The supplied breakpoint is `lg` = 1024px.
+
+- Desktop: `docs/raports/qa-run-80/assets/launch-desktop-1440.png` (1440x900) shows all three fields together and no Next/Back. The provider/model field is empty in this capture; selected desktop SWE-2 is not proven by this image.
+- Compact configuration: `docs/raports/qa-run-80/assets/launch-config-320.png`, `launch-config-390.png`, `launch-config-820.png` in the same assets directory show configuration and Next, with `Default` persona and `Devin CLI · swe-2`.
+- Compact prompt: `docs/raports/qa-run-80/assets/launch-prompt-320.png`, `launch-prompt-390.png`, `launch-prompt-820.png` in the same assets directory show Back, an unsent QA80 draft and Run. Each compact capture is 900px high.
+
+The parent reports PASS in 3.6s on fixed local QA `http://localhost:5288/`; this sidecar inspected the test and all seven PNGs but did not rerun it. The test asserts desktop field visibility and Next/Back absence, then compact SWE-2/header agreement, no document horizontal overflow, Run enabled, and model/draft retention through Back/Next. It reuses an empty session and never clicks Run. Persona retention after Back is not explicitly asserted; project retention, F5/reconnect, launch, and real Devin execution are outside this test. QA79 commit `8aad6e4` is prior narrow proof supplied in the handoff, not the revision of QA80's served bundle.
+
+Verdict: CONDITIONAL for the reviewed launch-layout slice; no desktop layout discrepancy found. Exact 1023/1024/1025px transition, desktop selected-pair interaction, keyboard/touch/zoom, and served build revision remain unverified. Real Devin execution remains the parent's top-priority gate. See `docs/raports/qa-run-80/desktop-review.md`; this evidence does not close the full provider/runtime goal or establish production readiness.
+
+- MCP approval waiting must not be cancelled by the proxy's ordinary request deadline. Transport progress is permitted only while an actual confirmation is pending; it is not approval or execution progress. Propagate cancellation end-to-end and retain normal timeout semantics outside the approval wait. Genuine Devin compatibility beyond 60 seconds remains a required acceptance gate (QA run 28).
+
 - Resolve the intended product behind “Comet” before adding a named provider.
 - Decide whether user-level default provider is separate from chat-level override; default must never override an explicit chat choice.
 - Confirm which legacy persona profile/model fields remain editable during a migration period and when they can be retired.
@@ -103,3 +127,15 @@ These are reports from the walkthrough and are not all independently reproduced.
 - `docs/cto/provider-runtime-selection-and-integrations-ux.md` — CTO decision/risk brief.
 - `docs/superpowers/plans/2026-10-02-provider-runtime-selection-ux.md` — implementation and proof plan.
 - `docs/raports/qa-run-24/report.md` — prior stable QA / Devin SWE-2 evidence and limits.
+
+## Current verification reconciliation — 2026-10-04
+
+Earlier run-26/80 incomplete statements are historical, not the current HomeSite execution boundary. Real exact SWE-2 completed a manually approved HomeSite build (QA144, exitCode0); current preview was restored through one approved Kalio terminal_spawn (QA164) and the React demo passed responsive/keyboard/form checks (QA161). This does not make the fictional company/demo form a production site.
+
+Devin queue/F5 (QA145), Stop/follow-up (QA138/141), command denial/follow-up (QA149), host reset with partial history/F5 and recovery (QA158), and historical user-only interruption display (QA163) are proven for their exact scenarios. ChatGPT/Codex queue (QA146), Stop (QA147), command denial (QA151), and post-backend-restart recovery plus warm follow-up (QA160) are likewise scenario-specific proof.
+
+Desktop-to-compact draft retention was reproduced failing in QA154, then passed on rebuilt QA156, including 1024/1023 boundaries and selected SWE-2/draft. This supersedes the corresponding unverified QA80 transition, not all accessibility or launch-selection requirements.
+
+QA162's unavailable processes coincided with confirmed Windows shutdown/start events, documented in QA164; it is not established as an application crash. QA uses the preserved AppData database. Credentials/settings/profile hashes were unchanged after the QA158 deployment. No autostart policy was added.
+
+Full acceptance remains open. A bounded audited command count is not OS-wide proof against console spam. Settings token generation/opt-in/reconnect, all tool provenance/native policy boundaries, all required surfaces, complete release gates and owned runtime commits require separate evidence. Provider-neutral interruption wording is tested locally but has not yet been deployed. Consolidated scope/evidence matrix: `docs/raports/qa-run-165/report.md`.

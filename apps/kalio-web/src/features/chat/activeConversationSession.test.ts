@@ -143,6 +143,28 @@ describe('activeConversationSession', () => {
     expect(useSessionStore.getState().isSessionHydrated(createdSession.id)).toBe(true);
   });
 
+  it('persists an explicit host profile before activation and preserves activation ownership', async () => {
+    const session = makeSession({ executionProfileId: 'chosen' });
+    mockCreateAndActivateHostSession.mockImplementationOnce(async (params) => {
+      params.setActiveSession(session.id);
+      return session;
+    });
+    const deps = { addSession: vi.fn(), setActiveSession: vi.fn(), setMessages: vi.fn(), setAgentTurns: vi.fn(), onActivated: vi.fn() };
+    await createAndActivateEmptyHostSession({ personaId: 'ra-apps', executionProfileId: 'chosen', reason: 'landing', canActivate: () => false, ...deps });
+    expect(mockCreateAndActivateHostSession).toHaveBeenCalledWith(expect.objectContaining({ personaId: 'ra-apps', executionProfileId: 'chosen', addSession: deps.addSession }));
+    expect(deps.setActiveSession).not.toHaveBeenCalled();
+    expect(deps.onActivated).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().isSessionHydrated(session.id)).toBe(true);
+  });
+
+  it('does not activate a host when explicit profile creation fails', async () => {
+    mockCreateAndActivateHostSession.mockRejectedValueOnce(new Error('Unavailable'));
+    const deps = { addSession: vi.fn(), setActiveSession: vi.fn(), setMessages: vi.fn(), setAgentTurns: vi.fn() };
+    await expect(createAndActivateEmptyHostSession({ personaId: 'ra-apps', executionProfileId: 'chosen', reason: 'landing', ...deps })).rejects.toThrow('Unavailable');
+    expect(deps.addSession).not.toHaveBeenCalled();
+    expect(deps.setActiveSession).not.toHaveBeenCalled();
+  });
+
   it('passes an explicit fetch override through the shared hydration entrypoint', async () => {
     const fetchMessages = vi.fn<() => Promise<ChatMessage[]>>().mockResolvedValue([]);
 

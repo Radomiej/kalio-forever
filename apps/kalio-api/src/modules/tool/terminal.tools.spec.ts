@@ -67,14 +67,18 @@ describe('TerminalSpawnTool', () => {
       makeRequest('terminal_spawn', { command: 'node', args: ['server.js'], cwd: '/projects/app' }),
     );
 
-    expect(svc.spawn).toHaveBeenCalledWith('node', ['server.js'], '/projects/app');
+    expect(svc.spawn).toHaveBeenCalledWith('node', ['server.js'], '/projects/app', false, {
+      sessionId: 'sess-1', turnId: undefined, callId: 'call-1',
+    });
     expect(result).toEqual({ id: 'term-1', pid: 999, command: 'node server.js' });
   });
 
   it('passes empty args array when args not provided', async () => {
     await tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd: '/projects/app' }));
 
-    expect(svc.spawn).toHaveBeenCalledWith('node', [], '/projects/app');
+    expect(svc.spawn).toHaveBeenCalledWith('node', [], '/projects/app', false, {
+      sessionId: 'sess-1', turnId: undefined, callId: 'call-1',
+    });
   });
 
   it('surfaces ForbiddenException from TerminalService when cwd is not allowed', async () => {

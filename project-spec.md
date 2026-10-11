@@ -244,3 +244,52 @@ classDiagram
   MCP server. Clients that only support stdio may use an HTTP-to-stdio adapter;
   managed Devin ACP uses Kalio's compiled `kalio-mcp-bridge-stdio.js` so the
   bearer token stays in the child environment and never in repo-managed config.
+
+## Durable Recovery Supersession (2026-10-02)
+
+- A safe interrupted turn is eligible for current-run projection and automatic
+  child continuation only when no later distinct turn was admitted in that session.
+  UI projection, recovery enumeration and the atomic revision claim share this rule.
+- Admission order is `COALESCE(queue_claimed_at, started_at)` with SQLite `rowid`
+  as a stable tie-breaker. Heartbeats cannot revive an obsolete safe turn.
+  Queue-origin rows count only after being claimed; unclaimed or cancelled queued
+  work does not supersede recovery.
+- Active executions, human waits and unsafe interrupted tools remain unresolved
+  projection candidates. A later completed answer does not prove an old tool had
+  no side effects. Historical journal rows remain stored; `getTurn` is evidence,
+  not authorization to resume. No schema migration or history deletion is needed.
+
+## Embedding Spaces And Resource Indexes (2026-10-08)
+
+- Embedding identity is SHA256-bound to provider/scope/endpoint/model/revision,
+  dimensions/backend and transform versions. Mutable/unresolved revisions are not
+  immutable producer proof; model updates require explicit reindex.
+- Persona memory, conversations and web results are partitioned by current space
+  and resource kind; old databases remain read-only reembed sources.
+- Project assets are explicitly indexed through VFS-scoped bounded snapshots and
+  separate per-type sqlite-vec indexes plus FTS. Binary assets currently index
+  metadata only, never implicitly claim native multimodal understanding.
+- Remote embedding calls require per-operation consent. Resource APIs require the
+  local control-plane capability; search text stays in a JSON body.
+- Project Context opt-in is persisted and default off. Search refreshes the index
+  on demand after opt-in, not on startup or in a background crawler. Users choose
+  the model; backend derives identity without manual digest/scope fields.
+  Loopback Ollama metadata is resolved automatically, but mutable-tag inference
+  is not immutable proof; project indexing remains blocked until a trusted
+  inference binding exists. The catalog-pinned local E5-small CPU/q8 adapter has
+  a trusted inference binding; other unresolved local/remote models stay blocked.
+  Selected model and installation readiness are visible at the top of Embeddings.
+  Confirmed refresh/search
+  tools resolve the project from the durable calling session, not agent arguments.
+  No automatic crawler or implicit prompt-context injection is enabled.
+- Added, modified, removed or newly excluded sources cause refresh before search;
+  unchanged sources reuse the published index without document inference.
+  Concurrent refresh requests coalesce, but consent remains per caller.
+  TS/JS chunking prefers declarations/class members; other languages use bounded
+  line windows. Full path/line labels and optional syntax context count toward
+  the loaded model's actual token budget; oversized inputs never silently truncate.
+  An internal chunking-version marker invalidates old snapshots independently
+  of source hashes. Continuous source mutation is bounded and fails closed;
+  publication validates source freshness and replaces the bounded snapshot in one
+  transaction. This is not an atomic operating-system filesystem snapshot.
+- Details and release boundaries: `docs/spec/embedding-spaces-and-project-resources.md`.

@@ -5,11 +5,13 @@ import { QuickChatWidget } from './QuickChatWidget';
 import { HomeHitlInbox } from './HomeHitlInbox';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
-import { getRAApps, getRAAppGroups } from '../../services/apiClient';
+import { getRAApps, getRAAppGroups, getExecutionProfiles } from '../../services/apiClient';
+import type { ExecutionProfile } from '@kalio/types';
 import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
 import { bucketCatalogApps } from '../raapp/catalog.utils';
 import { buildRAAppLaunchRuntimeContext } from '../raapp/raappLaunchRuntimeContext';
 import { usePendingRaAppApprovals } from '../raapp/usePendingRaAppApprovals';
+import { buildRAAppRunPrompt } from '../raapp/raappExecutionProfile';
 
 interface TileItem {
   id: string;
@@ -40,6 +42,11 @@ interface LandingPageProps {
 export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPageProps) {
   const [tiles, setTiles] = useState<TileItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [executionProfileId, setExecutionProfileId] = useState('');
+  const [profiles, setProfiles] = useState<ExecutionProfile[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const { icons, generating, generateIcon, removeIcon } = useTileIcons('raapp');
   const addSession = useSessionStore((s) => s.addSession);
   const setActiveSession = useSessionStore((s) => s.setActiveSession);
@@ -48,6 +55,18 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
   const setPendingRAAppLaunchIntent = useSessionStore((s) => s.setPendingRAAppLaunchIntent);
   const sessionMessages = useSessionStore((s) => s.sessionMessages);
   const pendingRaAppApprovals = usePendingRaAppApprovals(sessionMessages);
+
+  useEffect(() => {
+    let disposed = false;
+    void getExecutionProfiles().then((items) => {
+      if (!disposed) setProfiles(items.filter((profile) => profile.enabled));
+    }).catch((error: unknown) => {
+      if (!disposed) setProfilesError(`Could not load execution profiles: ${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => {
+      if (!disposed) setProfilesLoading(false);
+    });
+    return () => { disposed = true; };
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -93,8 +112,10 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
 
   const handleTileClick = useCallback(async (tile: TileItem) => {
     try {
+      setLaunchError(null);
       const session = await createAndActivateEmptyHostSession({
         personaId: 'ra-apps',
+        ...(executionProfileId ? { executionProfileId } : {}),
         title: tile.name,
         runtimeContext: buildRAAppLaunchRuntimeContext(tile.id, tile.name, 'home_tile'),
         addSession,
@@ -104,9 +125,7 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
         reason: 'landing',
       });
       console.debug('[Landing] RA-App tile session created', session.id, tile.id);
-      const prompt = `Run the "${tile.name}" RA-App for me.${
-        tile.description ? ` ${tile.description}` : ''
-      } Launch it immediately.`;
+      const prompt = buildRAAppRunPrompt(tile.id, tile.name, tile.description);
       setPendingRAAppLaunchIntent({
         targetSessionId: session.id,
         appId: tile.id,
@@ -122,8 +141,9 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
       onNavigateToChat();
     } catch (err) {
       console.error('[Landing] failed to create session for tile', tile.id, err);
+      setLaunchError(`App launch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [addSession, onNavigateToChat, onOpenSessionInChat, setActiveSession, setAgentTurns, setMessages, setPendingRAAppLaunchIntent]);
+  }, [executionProfileId, addSession, onNavigateToChat, onOpenSessionInChat, setActiveSession, setAgentTurns, setMessages, setPendingRAAppLaunchIntent]);
 
   const handleQuickChatSent = useCallback(() => {
     onNavigateToChat();
@@ -149,6 +169,21 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
       />
 
       {/* Grid: quick-chat widget + app tiles */}
+      <div className="mb-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-base-content/70">App execution profile</span>
+          <select aria-label="App execution profile" className="select select-bordered w-full text-xs"
+            value={executionProfileId} onChange={(event) => setExecutionProfileId(event.target.value)} disabled={profilesLoading}>
+            <option value="">Use saved default execution profile</option>
+            {profiles.map((profile) => <option key={profile.id} value={profile.id}>
+              {profile.name} · {profile.kind}{profile.model ? ` · ${profile.model}` : ''}
+            </option>)}
+          </select>
+        </label>
+        {profilesLoading && <p role="status" className="text-xs">Loading execution profiles…</p>}
+        {profilesError && <p role="alert" className="text-xs text-error">{profilesError}</p>}
+        {launchError && <p role="alert" className="mt-2 text-sm text-error">{launchError}</p>}
+      </div>
       <div className="grid grid-cols-2 gap-3 pb-8 sm:grid-cols-3 lg:grid-cols-4">
 
         {/* Quick Chat — spans full row */}

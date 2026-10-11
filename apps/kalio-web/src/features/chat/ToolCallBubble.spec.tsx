@@ -6,7 +6,7 @@
  * - awaiting_confirmation with no matching store entry renders only the icon (other session)
  * - args collapsed by default, shows truncated preview
  * - expand toggle reveals full scrollable args list
- * - Confirm button calls eventBus.confirmTool + removePendingConfirmation(sessionId, requestId)
+ * - Confirm button sends the request without settling it optimistically
  * - Cancel button calls eventBus.cancelTool + removePendingConfirmation(sessionId, requestId)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -159,16 +159,16 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     expect(screen.queryByTestId('confirmation-actions')).toBeNull();
   });
 
-  it('args are collapsed by default — shows truncated preview, not full list', () => {
+  it('full arguments are visible before approval by default', () => {
     mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
 
-    expect(screen.getByTestId('args-preview')).toBeDefined();
-    expect(screen.queryByTestId('args-expanded')).toBeNull();
+    expect(screen.queryByTestId('args-preview')).toBeNull();
+    expect(screen.getByTestId('args-expanded')).toBeDefined();
   });
 
-  it('clicking expand toggle shows scrollable args container', () => {
+  it('arguments can be collapsed and reopened without approving', () => {
     mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
@@ -176,11 +176,14 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     const toggle = screen.getByTestId('confirmation-args-toggle');
     act(() => { fireEvent.click(toggle); });
 
+    expect(screen.queryByTestId('args-expanded')).toBeNull();
+    act(() => { fireEvent.click(toggle); });
+
     expect(screen.getByTestId('args-expanded')).toBeDefined();
     expect(screen.queryByTestId('args-preview')).toBeNull();
   });
 
-  it('Confirm button calls eventBus.confirmTool and clears confirmation from store', () => {
+  it('Confirm button keeps confirmation visible until the backend settles it', () => {
     mockPendingConfirmations = { 'session-1': [makeConfirmation()] };
 
     render(<LiveToolCallBubble activity={makeActivity()} />);
@@ -188,9 +191,9 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     act(() => { fireEvent.click(screen.getByTestId('confirmation-confirm-btn')); });
 
     expect(mockConfirmTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(mockRemovePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
-    expect(mockUpdateToolActivity).toHaveBeenCalledWith('call-1', expect.objectContaining({ status: 'running' }));
-    expect(screen.queryByTestId('confirmation-confirm-btn')).toBeNull();
+    expect(mockRemovePendingConfirmation).not.toHaveBeenCalled();
+    expect(mockUpdateToolActivity).not.toHaveBeenCalled();
+    expect(screen.getByTestId('confirmation-confirm-btn')).toBeDefined();
   });
 
   it('Cancel button calls eventBus.cancelTool and clears confirmation from store', () => {
@@ -229,7 +232,9 @@ describe('LiveToolCallBubble — awaiting_confirmation', () => {
     act(() => { fireEvent.click(screen.getByTestId('confirmation-confirm-btn')); });
 
     expect(mockConfirmTool).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'child-session' });
-    expect(mockRemovePendingConfirmation).toHaveBeenCalledWith('child-session', 'req-1');
+    expect(mockRemovePendingConfirmation).not.toHaveBeenCalled();
+    expect(mockUpdateToolActivity).not.toHaveBeenCalled();
+    expect(screen.getByTestId('confirmation-confirm-btn')).toBeDefined();
   });
 
   it('activity with no args renders no preview and no toggle', () => {

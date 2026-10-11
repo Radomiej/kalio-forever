@@ -551,7 +551,7 @@ describe('@kalio/types contract shape', () => {
       nodes: Array<{
         id: string;
         label: string;
-        kind: 'parallel' | 'role' | 'router' | 'artifact';
+        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
         roleSlotId?: string;
         maxToolAttempts?: number;
         toolOverride?: {
@@ -564,6 +564,7 @@ describe('@kalio/types contract shape', () => {
           scoringPolicy?: ArchitectureNodeScoringPolicy;
           description?: string;
         };
+        autoRouting?: { confidenceThreshold: number; instructions: string };
         x?: number;
         y?: number;
       }>;
@@ -607,6 +608,7 @@ describe('@kalio/types contract shape', () => {
     expectTypeOf<CreateArchitectureRunDto>().toEqualTypeOf<{
       schemaId: ID;
       prompt: string;
+      executionProfileId?: ID;
       context?: Record<string, unknown>;
       slotOverrides?: Record<string, ID>;
       executionMode?: 'session_branches' | 'subagent_execution';
@@ -621,7 +623,7 @@ describe('@kalio/types contract shape', () => {
       nodes?: Array<{
         id: string;
         label: string;
-        kind: 'parallel' | 'role' | 'router' | 'artifact';
+        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
         roleSlotId?: string;
         maxToolAttempts?: number;
         toolOverride?: {
@@ -634,6 +636,7 @@ describe('@kalio/types contract shape', () => {
           scoringPolicy?: ArchitectureNodeScoringPolicy;
           description?: string;
         };
+        autoRouting?: { confidenceThreshold: number; instructions: string };
         x?: number;
         y?: number;
       }>;
@@ -646,7 +649,7 @@ describe('@kalio/types contract shape', () => {
         returnToOrchestrator?: boolean;
       }>;
     }>();
-    expectTypeOf<ArchitectureSchemaEdgeSelection>().toEqualTypeOf<'default' | 'converge' | 'continuation'>();
+    expectTypeOf<ArchitectureSchemaEdgeSelection>().toEqualTypeOf<'default' | 'converge' | 'continuation' | 'choice'>();
     expectTypeOf<ArchitectureRun['executionMode']>().toEqualTypeOf<'session_branches' | 'subagent_execution'>();
     expectTypeOf<ArchitectureRun['status']>().toEqualTypeOf<'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>();
     expectTypeOf<ArchitectureRun['slotOverrides']>().toEqualTypeOf<Record<string, ID> | undefined>();
@@ -688,7 +691,7 @@ describe('@kalio/types contract shape', () => {
     >();
     expectTypeOf<ArchitectureExecutionEvent['detail']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<ArchitectureRouteDecision>().toEqualTypeOf<{
-      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback';
+      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
       fromNodeId: string;
       selectedNodeIds: string[];
       rejectedNodeIds?: string[];
@@ -696,10 +699,13 @@ describe('@kalio/types contract shape', () => {
       convergeToNodeId?: string;
       mode?: ArchitectureNodeBehaviorMode;
       response?: string;
+      selectedEdgeId?: string;
+      confidence?: number;
+      decisionReason?: string;
     }>();
     expectTypeOf<ArchitectureRouteHop>().toEqualTypeOf<{
       eventId: ID;
-      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback';
+      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
       fromNodeId: string;
       toNodeId: string;
     }>();
@@ -750,7 +756,7 @@ describe('@kalio/types contract shape', () => {
         sessionId?: ID;
         roleSlotId?: string;
         label: string;
-        kind: 'parallel' | 'role' | 'router' | 'artifact';
+        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
         behavior?: ArchitectureSchema['nodes'][number]['behavior'];
         status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
         actionSummary?: string;

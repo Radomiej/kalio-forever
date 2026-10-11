@@ -92,6 +92,75 @@ function toolData(toolEvidence: Record<string, unknown>): Record<string, unknown
 }
 
 describe('architecture graph finalization helpers', () => {
+  const goalContext = { requireGoalMasterLoopProof: true };
+  function buildProof(status: 'passed' | 'failed', exitCode: number): ArchitectureExecutionEvent {
+    return event('participant_output', 'implementer', toolData({
+      toolResultCount: 2, successfulToolNames: ['fs_write', 'fs_read'], targetPaths: ['src/index.ts'],
+    }), [{ kind: 'BUILD_RESULT', status, data: { exitCode } }]);
+  }
+
+  it('blocks goal finalization on a failed build despite successful tools and a complete verdict', () => {
+    expect(blockingFinalizationReason({ schema,
+      runContext: { ...goalContext, externalQualityGate: { source: 'Jev', status: 'passed' } },
+      events: [buildProof('failed', 1)],
+    })).toMatch(/build/i);
+  });
+
+  it('does not let an older passed build mask a newer failed attempt', () => {
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      priorEvents: [buildProof('passed', 0)], events: [buildProof('failed', 1)],
+    })).toMatch(/build/i);
+  });
+
+  it('allows a newer passed build to supersede an old failed attempt', () => {
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      priorEvents: [buildProof('failed', 1)], events: [buildProof('passed', 0)],
+    })).toBeUndefined();
+  });
+
+  it.each([
+    { status: 'passed' as const, data: { exitCode: 1 } },
+    { status: 'failed' as const, data: { exitCode: 0 } },
+    { status: 'unknown' as const, data: { exitCode: 0 } },
+    { status: 'passed' as const, data: {} },
+  ])('rejects an invalid latest build result %j', (build) => {
+    const latest = buildProof('passed', 0);
+    latest.evidence = [{ kind: 'BUILD_RESULT', ...build }];
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      events: [buildProof('passed', 0), latest],
+    })).toMatch(/build/i);
+  });
+
+  it('checks the last typed build row in data evidence as well as top-level evidence', () => {
+    const latest = buildProof('passed', 0);
+    latest.data = { ...latest.data, evidence: [
+      { kind: 'BUILD_RESULT', status: 'passed', data: { exitCode: 0 } },
+      { kind: 'BUILD_RESULT', status: 'failed', data: { exitCode: 1 } },
+    ] };
+    latest.evidence = undefined;
+    expect(blockingFinalizationReason({ schema, runContext: goalContext, events: [latest] })).toMatch(/build/i);
+  });
+
+  it('does not admit a no-op implementer using old passed host proof after a new failed build', () => {
+    const oldProof = buildProof('passed', 0);
+    expect(architectureToolExecutorContract({ schema, runContext: goalContext,
+      slot: implementerSlot, data: {}, incomingEvents: [],
+      priorEvents: [oldProof], events: [buildProof('failed', 1)],
+    })).toEqual({ ok: false, reason: 'implementer did not produce a successful write result' });
+  });
+
+  it('blocks unsupported goal completion even after a prior continuation', () => {
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      events: [event('participant_output', 'implementer', { response: 'done' })],
+    })).toBeDefined();
+  });
+
+  it('keeps generic chat completion unchanged without the goal proof flag', () => {
+    expect(blockingFinalizationReason({ schema, runContext: {},
+      events: [buildProof('failed', 1)],
+    })).toBeUndefined();
+  });
+
   it('blocks finalization on typed external quality gate failure', () => {
     const reason = blockingFinalizationReason({
       schema,

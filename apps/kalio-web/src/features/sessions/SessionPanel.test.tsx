@@ -2399,173 +2399,55 @@ describe('SessionPanel', () => {
     expect(screen.getByText('New Chat')).toBeTruthy();
   });
 
-  it('new session button creates session with title "New Chat"', async () => {
-    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'default', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
-    await act(async () => {
-      render(<SessionPanel />);
-    });
+  it('new session button opens a draft without an API create or history row', async () => {
+    render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
-
-    const newBtn = screen.getByTestId('new-session-btn');
-    fireEvent.click(newBtn);
-
-    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
+    fireEvent.click(screen.getByTestId('new-session-btn'));
+    expect(mockSetActiveSession).toHaveBeenCalledWith(null);
+    expect(mockSetMessages).toHaveBeenCalledWith([]);
+    expect(mockSetAgentTurns).toHaveBeenCalledWith([]);
+    expect(mockApiPost).not.toHaveBeenCalled();
+    expect(mockAddSession).not.toHaveBeenCalled();
+    expect(mockRemoveSession).not.toHaveBeenCalled();
+    expect(mockState.sessions).toEqual(mockSessions);
   });
 
-  it('keeps New Chat available while the full session list is still loading', async () => {
+  it('keeps New usable during list loading without persisting a draft', async () => {
     let resolveSessions!: (value: { data: ChatSession[] }) => void;
     mockApiGet.mockImplementation((url: string) => {
-      if (url === '/api/sessions') {
-        return new Promise((resolve) => {
-          resolveSessions = resolve;
-        });
-      }
+      if (url === '/api/sessions') return new Promise((resolve) => { resolveSessions = resolve; });
       if (url === '/api/personas') return Promise.resolve({ data: mockPersonas });
       return Promise.resolve({ data: [] });
     });
-    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
-
-    render(<SessionPanel />);
-
-    const newBtn = await screen.findByTestId('new-session-btn');
-    expect(newBtn).not.toBeDisabled();
-    fireEvent.click(newBtn);
-
-    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ title: 'New Chat' })));
-    await act(async () => {
-      resolveSessions({ data: mockSessions });
-      await Promise.resolve();
-    });
-  });
-
-  it('keeps New usable while a pending New Chat session is still being persisted', async () => {
-    let resolvePost!: (value: { data: ChatSession }) => void;
-    mockApiPost.mockReturnValue(new Promise((resolve) => {
-      resolvePost = resolve;
-    }));
     const onSelect = vi.fn();
-
     render(<SessionPanel onSelect={onSelect} />);
-
     const newBtn = await screen.findByTestId('new-session-btn');
-    await waitFor(() => expect(newBtn).toHaveAttribute('title', 'New Dev Assistant chat'));
     fireEvent.click(newBtn);
-
+    fireEvent.click(newBtn);
     expect(newBtn).not.toBeDisabled();
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(mockAddSession).toHaveBeenCalledWith(expect.objectContaining({
-      id: expect.stringMatching(/^pending-host-session:/),
-      personaId: 'p1',
-      title: 'New Chat',
-    }));
-
-    const pendingSessionId = mockSetActiveSession.mock.calls.at(-1)?.[0];
-    expect(typeof pendingSessionId).toBe('string');
-    expect(pendingSessionId).toMatch(/^pending-host-session:/);
-    expect(mockState.activeSessionId).toBe(pendingSessionId);
-    expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
-      personaId: 'p1',
-      title: 'New Chat',
-    }));
-    expect(mockSetActiveSession).not.toHaveBeenCalledWith('s3');
-
-    await act(async () => {
-      resolvePost({
-        data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 },
-      });
-      await Promise.resolve();
-    });
-
-    expect(mockSetActiveSession).toHaveBeenCalledWith('s3');
-    expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
+    expect(mockState.activeSessionId).toBeNull();
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(mockApiPost).not.toHaveBeenCalled();
+    await act(async () => { resolveSessions({ data: mockSessions }); });
+    expect(mockState.activeSessionId).toBeNull();
+    expect(mockState.sessions).toEqual(mockSessions);
   });
 
-  it('does not let a delayed New Chat response steal selection after navigation', async () => {
-    let resolvePost!: (value: { data: ChatSession }) => void;
-    mockApiPost.mockReturnValue(new Promise((resolve) => {
-      resolvePost = resolve;
-    }));
-
-    render(<SessionPanel />);
-
-    const newBtn = await screen.findByTestId('new-session-btn');
-    fireEvent.click(newBtn);
-    const pendingSessionId = mockSetActiveSession.mock.calls.at(-1)?.[0];
-    expect(pendingSessionId).toMatch(/^pending-host-session:/);
-
-    act(() => {
-      mockSetActiveSession('s2');
-    });
-
-    await act(async () => {
-      resolvePost({
-        data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 },
-      });
-      await Promise.resolve();
-    });
-
-    expect(mockAddSession).toHaveBeenCalledWith(expect.objectContaining({ id: 's3' }));
-    expect(mockSetActiveSession).not.toHaveBeenCalledWith('s3');
-    expect(mockState.activeSessionId).toBe('s2');
-    expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
-  });
-
-  it('restores the previous active session when pending New Chat creation fails', async () => {
-    const createError = new Error('session create failed');
-    mockApiPost.mockRejectedValue(createError);
-    const onSelect = vi.fn();
-
-    render(<SessionPanel onSelect={onSelect} />);
-
-    const newBtn = await screen.findByTestId('new-session-btn');
-    fireEvent.click(newBtn);
-
-    const pendingSessionId = mockSetActiveSession.mock.calls.at(-1)?.[0];
-    expect(typeof pendingSessionId).toBe('string');
-    expect(pendingSessionId).toMatch(/^pending-host-session:/);
-    expect(mockState.activeSessionId).toBe(pendingSessionId);
-
-    await waitFor(() => {
-      expect(mockRemoveSession).toHaveBeenCalledWith(pendingSessionId);
-      expect(mockSetActiveSession).toHaveBeenCalledWith('s1');
-    });
-
-    expect(mockState.activeSessionId).toBe('s1');
-    expect(mockState.sessions.some((session) => session.id === pendingSessionId)).toBe(false);
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(console.error).toHaveBeenCalledWith('[SessionPanel] create failed', createError);
-  });
-
-  it('new session button uses the first available persona instead of hardcoded default', async () => {
-    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'p1', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
-    render(<SessionPanel />);
-    await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByTestId('new-session-btn'));
-
-    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
-      personaId: 'p1',
-      title: 'New Chat',
-    })));
-  });
-
-  it('falls back to default persona when personas are unavailable during new session creation', async () => {
+  it('opens a draft with no persona available and leaves existing conversations selectable', async () => {
     mockApiGet.mockImplementation((url: string) => {
       if (url === '/api/sessions') return Promise.resolve({ data: mockSessions });
-      if (url === '/api/personas') return Promise.resolve({ data: [] });
       return Promise.resolve({ data: [] });
     });
-    mockApiPost.mockResolvedValue({ data: { id: 's3', personaId: 'default', title: 'New Chat', createdAt: 3000, updatedAt: 3000 } });
-
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalled());
-
     fireEvent.click(screen.getByTestId('new-session-btn'));
-
-    await waitFor(() => expect(mockApiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({
-      personaId: 'default',
-      title: 'New Chat',
-    })));
+    expect(mockState.activeSessionId).toBeNull();
+    act(() => { mockSetActiveSession('s2'); });
+    await act(async () => { await Promise.resolve(); });
+    expect(mockState.activeSessionId).toBe('s2');
+    expect(mockApiPost).not.toHaveBeenCalled();
+    expect(mockAddSession).not.toHaveBeenCalled();
+    expect(mockRemoveSession).not.toHaveBeenCalled();
   });
 
   it('calls onSelect when a session is clicked', async () => {

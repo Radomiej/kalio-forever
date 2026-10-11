@@ -153,6 +153,7 @@ vi.mock('../../../services/apiClient', () => ({
   },
   getSessionVfsFiles: getSessionVfsFilesMock,
   getProjects: getProjectsMock,
+  getExecutionProfiles: vi.fn(() => Promise.resolve([])),
 }));
 
 vi.mock('../../architect/architect.api', async () => {
@@ -1116,7 +1117,9 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Accept tool request' }));
 
     expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(agentState.removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
+    expect(agentState.removePendingConfirmation).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Accept tool request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel tool request' })).toBeInTheDocument();
   });
 
   it('keeps awaiting-confirmation actions reachable from a collapsed tool group', async () => {
@@ -1178,7 +1181,9 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Accept tool request' }));
 
     expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(agentState.removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
+    expect(agentState.removePendingConfirmation).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Accept tool request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel tool request' })).toBeInTheDocument();
   });
 
   it('does not show confirmation actions for a collapsed tool group when no grouped tool needs approval', async () => {

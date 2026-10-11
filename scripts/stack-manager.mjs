@@ -452,6 +452,7 @@ async function startStack() {
     ...baseEnv,
     PORT: String(backendPort),
     CORS_ORIGIN: `${frontendUrl},${frontendLocalhostUrl}`,
+    KALIO_DECISION_FRONTEND_ORIGINS: `${frontendUrl},${frontendLocalhostUrl}`,
   };
   const frontendEnv = {
     ...baseEnv,
