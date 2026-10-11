@@ -15,8 +15,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
+    maxWorkers: 4,
     exclude: [
       ...configDefaults.exclude,
+      'decision-auth.proxy.test.mjs', // Executed by the root Node test gate, not jsdom.
       'dist/**',
       'coverage/**',
       'storybook-static/**',
