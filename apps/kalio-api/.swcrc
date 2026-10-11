@@ -1,8 +1,5 @@
 {
   "jsc": {
-    "baseUrl": ".",
-    "paths": {
-      "@kalio/types": ["../../packages/@kalio/types/dist"]
-    }
+    "baseUrl": "."
   }
 }

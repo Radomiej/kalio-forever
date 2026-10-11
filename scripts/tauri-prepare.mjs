@@ -3,6 +3,7 @@ import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:f
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
+import { stageRuntimeTypes } from './stage-runtime-types.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const resourcesRoot = join(root, 'src-tauri', 'resources');
@@ -372,6 +373,7 @@ await requirePath(bootstrapSource, 'desktop backend bootstrap');
 await requirePath(join(serverRoot, 'node_modules'), 'deployed API dependencies');
 
 await installFlatRuntimeDependencies();
+await stageRuntimeTypes(root, serverRoot);
 await removeBareRuntimePrebuilds();
 await removeMuslSharpPrebuilds();
 await removeMuslClaudeAgentSdk();

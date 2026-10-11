@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
-
+import { stageRuntimeTypes } from './stage-runtime-types.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const platformIndex = args.indexOf('--platform');
@@ -399,6 +399,7 @@ if (getPnpmMajor(pnpm) >= 10) {
 }
 run(pnpm, deployArgs);
 await installFlatRuntimeDependencies();
+await stageRuntimeTypes(root, serverRoot);
 await removeLinuxOptionalArtifacts();
 if (platform === 'linux') await compressClaudeAgentSdkExecutable(join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64'));
 await removeUnneededOnnxRuntimeArtifacts();
