@@ -264,6 +264,8 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Never treat fixed-duration waits as an architecture fix; sleeps are only diagnostic/test fallbacks, while runtime stability must use typed state, drain/ack barriers, or explicit lifecycle events.
 - Treat Data Analyst MCP as a session-scoped, composable data/artifact engine for agents; keep one-click `run_analysis` only as a compatibility facade, not the native agent workflow.
 - At feature completion, inventory the dirty worktree, clean only verified feature-generated scratch (or add narrow `.gitignore` rules when retaining it is useful), then stage and review only feature-owned paths before committing; preserve unrelated changes and verify the committed paths are clean.
+- Embeddings settings must derive model identity in the backend and show the selected model, actual readiness and reindex need; never require users to enter digest or provider-scope fields.
+- Do not push changes directly to `main` except an explicitly approved urgent CI repair. Rebase feature branches onto the latest `origin/main`, resolve conflicts, review the complete diff for secrets and unintended changes, verify required tests/CI, then push and open a PR; leave the PR open for user approval and never merge it without explicit confirmation.
 
 ---
 

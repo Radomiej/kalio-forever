@@ -34,7 +34,7 @@ tool access, durable execution events, and an inspectable result.
 | **Talk** | Streaming chat with a multi-step tool loop, queues, attachments, and session history. |
 | **Architect** | Versioned architecture schemas, role slots, personas, graph nodes, edges, and routing policies. |
 | **Inspect** | Timeline, graph, chat, tool calls, runtime events, and audit evidence for each run. |
-| **Own your data** | Sandboxed session workspaces, semantic memory, SQLite persistence, and encrypted provider secrets. |
+| **Own your data** | Sandboxed workspaces, semantic memory, project context, SQLite persistence, and encrypted provider secrets. |
 
 ## See it in action
 
@@ -57,7 +57,7 @@ flowchart TB
 ~~~
 
 <p align="center">
-  <img src="docs/kalio_module_architecture.svg" alt="Kalio frontend and backend module architecture" />
+  <img src="docs/kalio_module_architecture.svg" alt="Kalio frontend and backend module architecture" width="1280" height="780" />
 </p>
 
 The React client projects session state and runtime activity. The backend owns
@@ -102,6 +102,16 @@ Open **http://127.0.0.1:4016**. The API health endpoint is
 3. Create a session in **Talk**.
 4. Send a message and approve tool calls when the HITL prompt appears.
 
+To update an installed Windows runtime, run:
+
+~~~powershell
+& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
+~~~
+
+The safe update waits while Kalio is running, verifies the downloaded runtime,
+health-checks the new version, and rolls back on failure. User data is preserved.
+For a repair, run the CMD installer again; it will not replace a running runtime.
+
 See the [Windows user guide](docs/quickstart-user.md) for upgrades,
 uninstall, data locations, and troubleshooting.
 
@@ -119,20 +129,6 @@ For the Bun runtime:
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh && bash /tmp/kalio-install.sh --runtime bun
 ~~~
-
-On Windows, an installed runtime can update itself through a separate helper process:
-
-~~~powershell
-& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
-~~~
-
-The safe command defers while Kalio is running. An explicit `--force` request stops
-only this installation's recorded process tree, downloads the matching Node or Bun
-archive, verifies the runtime manifest and SHA-256, switches versions atomically,
-health-checks the new process, and rolls back on failure. User data is preserved.
-
-For an older installation or a repair, run the CMD installer again. It refuses
-to replace a runtime while it is running and preserves the data directory.
 
 ### Optional Tauri/NSIS desktop installer
 
@@ -234,6 +230,7 @@ stack, CI, release, and test command map.
 | **Human-in-the-loop** | Pauses confirmed tools before execution and binds approval/cancel actions to the owning session. |
 | **Virtual File System** | Gives every session a sandboxed workspace for reading, writing, listing, and searching files. |
 | **Semantic memory** | Stores per-persona vector memory with sqlite-vec retrieval. |
+| **Project Context** | Indexes opted-in project code and text for model-specific hybrid search and agent retrieval. |
 | **Personas** | Isolates system prompts, model defaults, MCP policies, skills, and tool access. |
 | **MCP** | Discovers tools from stdio or HTTP servers and exposes them under stable prefixed names. |
 | **RA-Apps** | Renders interactive mini-apps through HTML iframes or a declarative GUI DSL. |
@@ -332,6 +329,7 @@ For image generation, configure IMAGE_PROVIDER and IMAGE_API_KEY separately.
 | --- | --- | --- |
 | SQLite database | $WORKSPACE_ROOT/kalio.db | Sessions, messages, personas, credentials, and audit log. |
 | Semantic memory | $WORKSPACE_ROOT/memory/ | Per-persona vector stores. |
+| Project Context | `$MEMORY_DB_PATH/project-resources/<project-hash>/<embedding-space-hash>.db` | Local per-project, per-model chunks, full text, FTS, and vectors; stored outside the project checkout. Managed QA uses `%LOCALAPPDATA%/kalio-forever-qa/memory/`. |
 | Session files | $WORKSPACE_ROOT/sessions/{id}/ | Sandboxed workspace for one chat session. |
 | Session KV | $WORKSPACE_ROOT/sessions/{id}/_kv.json | Session-scoped key-value state. |
 | RA-App catalog | $WORKSPACE_ROOT/ra-apps or RA_APPS_PATH | Versioned stored apps. |
@@ -393,6 +391,7 @@ files past the repository's 500 LOC limit; split a touched slice first.
 | [Runtime stack](docs/architecture-runtime-stack.md) | Registry, runtime, branch execution, and projections. |
 | [MCP architecture](docs/mcp-architecture.md) | Server discovery, lifecycle, and persona policy. |
 | [RA-App design](docs/raapp-design-current.md) | Inline apps, catalog apps, iframe bridge, and approvals. |
+| [Embedding spaces and Project Context](docs/spec/embedding-spaces-and-project-resources.md) | Model-scoped project indexes, refresh, search, and storage. |
 | [Agent skills index](docs/agent-skills/README.md) | Repo-visible skills for AI-assisted work. |
 | [Scripts overview](scripts/README.md) | Root command surface and helper scripts. |
 | [Code of Conduct](CODE_OF_CONDUCT.md) | Community expectations and reporting path. |
@@ -403,6 +402,7 @@ files past the repository's 500 LOC limit; split a touched slice first.
 
 - Streaming chat with tool execution and HITL confirmation.
 - Sandboxed VFS, semantic memory, personas, and MCP discovery.
+- Opt-in Project Context indexing and model-specific retrieval for registered projects.
 - RA-App rendering, image/vision support, and CLI agent streaming.
 - Architecture Registry, Architecture Runtime, and Execution Graph views.
 
