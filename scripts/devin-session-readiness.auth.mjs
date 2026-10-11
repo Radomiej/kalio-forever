@@ -1,4 +1,10 @@
 // CLI bearer alternative already supported by DecisionAuthService. Never bootstrap or persist a browser cookie.
+export class HitlAuthorizationConfigurationError extends Error {
+  constructor() {
+    super('HITL authorization is not configured: set KALIO_CONTROL_PLANE_TOKEN in both the API and readiness process; no request was sent.');
+  }
+}
+
 export async function fetchProtectedHitlConfig({ apiBase, fetchJson = fetch, env = process.env }) {
   let api;
   try { api = new URL(apiBase); } catch { throw new Error('Scoped HITL read requires a loopback API.'); }
@@ -8,7 +14,7 @@ export async function fetchProtectedHitlConfig({ apiBase, fetchJson = fetch, env
   }
   const token = env.KALIO_CONTROL_PLANE_TOKEN;
   if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) {
-    throw new Error('Scoped HITL read requires configured control-plane authorization.');
+    throw new HitlAuthorizationConfigurationError();
   }
   const url = `${api.origin}/api/hitl/config`;
   const response = await fetchJson(url, {

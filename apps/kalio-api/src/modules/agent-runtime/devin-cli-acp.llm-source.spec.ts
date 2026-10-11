@@ -203,6 +203,7 @@ describe('DevinCliAcpLLMSource', () => {
           },
           options: [],
         });
+        input.onText('Bridge disabled; tool declined.');
         return 'end_turn' as const;
       }),
     };
@@ -291,6 +292,7 @@ describe('DevinCliAcpLLMSource', () => {
           toolCall: { toolCallId: 'ordinary-tool-2' },
         });
         expect(titleSpoofDecision).toBe('decline');
+        input.onText('Permission checks completed.');
         return 'end_turn' as const;
       }),
     };

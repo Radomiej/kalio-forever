@@ -1,5 +1,5 @@
 import { win32 } from 'node:path';
-import { fetchProtectedHitlConfig } from './devin-session-readiness.auth.mjs';
+import { fetchProtectedHitlConfig, HitlAuthorizationConfigurationError } from './devin-session-readiness.auth.mjs';
 
 const baseAllowedTools = ['fs_list', 'fs_read', 'fs_write', 'terminal_spawn', 'terminal_list', 'terminal_output'];
 
@@ -52,7 +52,11 @@ export async function collectDevinSessionReadinessChecks(options = {}) {
       const body = await response.text();
       if (body === '' && empty) return null;
       return JSON.parse(body);
-    } catch {
+    } catch (error) {
+      if (error instanceof HitlAuthorizationConfigurationError) {
+        check(false, new HitlAuthorizationConfigurationError().message);
+        return undefined;
+      }
       // Do not log upstream error/body: either can contain credentials or tokens.
       check(false, `Endpoint unavailable or invalid JSON: ${path.split('?')[0]}`);
       return undefined;

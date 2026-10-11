@@ -85,6 +85,8 @@ test('protected HITL auth fails closed before sending when env bearer is absent 
     const result = await run(fixtures(), { env });
     assert.equal(result.exit, 1);
     assert.ok(!result.requests.some(request => new URL(request.url).pathname === '/api/hitl/config'));
+    assert.ok(result.output.some(line => line.includes('HITL authorization is not configured')));
+    assert.ok(!result.output.some(line => line.includes('Endpoint unavailable or invalid JSON: /hitl/config')));
     assert.ok(!result.output.join('\n').includes('SECRET'));
   }
 });

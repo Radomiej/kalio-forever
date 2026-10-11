@@ -199,13 +199,26 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     finish: (error?: Error) => void,
   ): Promise<void> {
     try {
+      let hasAnswer = false;
       const stopReason = await host.prompt(session.sessionId, buildPrompt(
         params.messages,
         Boolean(params.externalThreadId),
         nativeToolsPolicy,
         DEVIN_KALIO_MCP_SERVER_NAME,
         mcpBridgeEnabled,
-      ), promptInput);
+      ), {
+        ...promptInput,
+        onText: (text) => {
+          hasAnswer ||= Boolean(text.trim());
+          promptInput.onText(text);
+        },
+      });
+      if (stopReason !== 'cancelled' && stopReason !== 'end_turn') {
+        throw new Error('Devin did not complete the turn (limit reached or request refused).');
+      }
+      if (stopReason === 'end_turn' && !hasAnswer) {
+        throw new Error('Devin ended the turn without a user-visible answer. The task is not confirmed complete; please continue or retry.');
+      }
       await this.audit(params, {
         eventName: 'devin-cli-acp.turn.completed',
         status: stopReason === 'cancelled' ? 'cancelled' : 'completed',
