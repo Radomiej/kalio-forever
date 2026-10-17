@@ -25,7 +25,8 @@ tool access, durable execution events, and an inspectable result.
 
 > **Local-first by design.** Kalio sends LLM traffic from your backend to the
 > provider you configure. Session files, memory, credentials, and execution
-> history stay in your local data directory.
+> history are stored in your local data directory. Configured providers and
+> external agent runtimes receive the prompts and context sent to them.
 
 ## At a glance
 
@@ -303,8 +304,9 @@ implementation detail.
 
 ## Providers
 
-Kalio supports OpenAI-compatible providers through the configured backend.
-Use mock for offline development and tests.
+Kalio supports direct LLM API providers and separate agent execution profiles.
+For direct LLM execution, the backend uses the providers below. Use mock for
+offline development and tests.
 
 | Provider | LLM_PROVIDER | Notes |
 | --- | --- | --- |
@@ -322,6 +324,23 @@ Local providers can be saved and tested without a remote API key. Remote
 providers require the credentials expected by that provider.
 
 For image generation, configure IMAGE_PROVIDER and IMAGE_API_KEY separately.
+
+### Agent execution profiles
+
+Agent runtimes are separate from the `LLM_PROVIDER` API setting:
+
+| Runtime | Profile type | Execution boundary |
+| --- | --- | --- |
+| Direct LLM | `direct-llm` | Kalio's tool loop with a configured LLM API provider. |
+| Codex App Server | `codex-app-server` | Local `codex app-server` process with a configured auth profile; Kalio retains session and tool-policy ownership. |
+| Devin CLI | `devin-cli-acp` | Authenticated host CLI over ACP, with models discovered from its catalog and persona-scoped Kalio MCP tools. |
+| Devin Cloud | `devin-api` | Remote REST session; requires `DEVIN_API_KEY`, `DEVIN_ORG_ID`, and `DEVIN_MAX_ACU_LIMIT`. Does not receive local workspace files or Kalio tools. |
+
+Persona instructions and the execution provider/model are separate choices.
+Connect the runtime in Settings, then select the provider/model for the chat.
+Model availability and account access depend on the connected service.
+See the [runtime boundary specification](project-spec.md#agent-runtime-and-codex-boundary)
+for authentication, MCP, and approval boundaries.
 
 ## Data and safety
 
