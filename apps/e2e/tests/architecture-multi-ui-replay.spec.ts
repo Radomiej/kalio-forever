@@ -1,4 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
+import { installMockLaunchProfile, selectMockLaunchProfile } from './helpers/mock-launch-profile';
 import { expect, test, type APIRequestContext, type Browser } from '@playwright/test';
 import {
   API_BASE,
@@ -110,6 +111,7 @@ test.describe('Architecture workflow replay across a new UI session', () => {
     test.setTimeout(420_000);
     let hostSessionId: string | null = null;
     let hostTitle = '';
+    await installMockLaunchProfile(page, request);
 
     try {
       await ensureProjectForPath(request, projectPath);
@@ -117,6 +119,7 @@ test.describe('Architecture workflow replay across a new UI session', () => {
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
+      await selectMockLaunchProfile(page);
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
       await selectProjectInWelcome(page, projectPath);

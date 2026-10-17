@@ -7,9 +7,7 @@ type SeedDb = { prepare: (sql: string) => { run: (...args: unknown[]) => unknown
 const requireBackend = createRequire(resolve(__dirname, '../../kalio-api/package.json'));
 const Database = requireBackend('better-sqlite3') as new (path: string) => SeedDb;
 
-test('native audit reads a real scoped SQLite snapshot and survives F5', async ({ page, request }) => {
-  const reportRun = process.env['KALIO_NATIVE_AUDIT_REPORT_RUN'] ?? '57';
-  if (!/^[1-9]\d*$/.test(reportRun)) throw new Error('A numeric QA report run is required');
+test('native audit reads a real scoped SQLite snapshot and survives F5', async ({ page, request }, testInfo) => {
   const configured = process.env['DATABASE_PATH'];
   if (!configured || !configured.replaceAll('\\', '/').includes('playwright-stack/')) {
     throw new Error('Native audit fixture requires the isolated Playwright database');
@@ -43,7 +41,7 @@ test('native audit reads a real scoped SQLite snapshot and survives F5', async (
     await page.getByTestId('nav-talk').click();
     await selectSession(page, session, title);
     const open = async () => {
-      await page.getByRole('button', { name: 'Devin native tool audit', exact: true }).click();
+      await page.getByRole('button', { name: 'Devin tool permissions', exact: true }).click();
       await expect(page.getByText(/Read blocked fixture.*Native Devin.*blocked by policy/)).toBeVisible();
       await expect(page.getByText(/Read approved fixture.*Native Devin.*approved/)).toBeVisible();
       await expect(page.getByText('Wrong turn fixture')).toHaveCount(0);
@@ -51,12 +49,13 @@ test('native audit reads a real scoped SQLite snapshot and survives F5', async (
     await open();
     await page.reload();
     await open();
-    await page.setViewportSize({ width: 390, height: 844 });
     const hide = page.getByRole('button', { name: 'Hide conversations', exact: true });
-    if (await hide.isVisible()) await hide.click();
+    await hide.click();
+    await expect(page.getByRole('button', { name: 'Show conversations', exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByText(/Read blocked fixture.*Native Devin.*blocked by policy/)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/native-audit-fixture-390.png`), fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath('native-audit-fixture-390.png'), fullPage: true });
   } finally {
     const cleanup = await request.delete(`${API_BASE}/sessions/${session}`);
     expect(cleanup.ok()).toBeTruthy();

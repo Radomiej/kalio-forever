@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test';
+import { hitlFixtureRequest } from './helpers/hitl-fixture-auth';
 import {
   API_BASE,
   ensureEnvMockProvider,
@@ -47,16 +48,12 @@ async function fetchFromNode(
 }
 
 async function restoreHitlConfigFromNode(config: HitlConfig): Promise<void> {
-  const response = await fetchFromNode(
-    `${API_BASE}/hitl/config`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(config),
-    },
-    'restore HITL config',
-  );
-  expect(response.ok).toBeTruthy();
+  const request = await playwrightRequest.newContext();
+  try {
+    await hitlFixtureRequest(request, 'PUT', config);
+  } finally {
+    await request.dispose();
+  }
 }
 
 async function restoreActiveCredentialFromNode(credentialId: string | null): Promise<void> {
@@ -94,7 +91,7 @@ async function saveHitlMode(page: Page, mode: 'manual' | 'bypass'): Promise<void
 }
 
 async function getHitlConfig(request: APIRequestContext): Promise<HitlConfig> {
-  const response = await request.get(`${API_BASE}/hitl/config`);
+  const response = await hitlFixtureRequest(request, 'GET');
   expect(response.ok()).toBeTruthy();
   return response.json() as Promise<HitlConfig>;
 }

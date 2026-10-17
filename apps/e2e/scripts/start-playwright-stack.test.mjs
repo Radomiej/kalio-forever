@@ -120,6 +120,7 @@ server.listen(port, () => {
     'controlPort=' + process.env.KALIO_PLAYWRIGHT_CONTROL_PORT,
     'controlToken=' + (process.env.KALIO_PLAYWRIGHT_CONTROL_TOKEN ? 'set' : 'missing'),
     'model=' + process.env.LLM_MODEL,
+    'decisionOrigins=' + process.env.KALIO_DECISION_FRONTEND_ORIGINS,
   );
 });
 `,
@@ -798,6 +799,9 @@ test('playwright wrapper allocates E2E ports when URLs are not pinned', async ()
       assert.match(fullOutput, /starting backend on http:\/\/127\.0\.0\.1:\d+\b/);
       assert.match(fullOutput, /starting frontend preview on http:\/\/127\.0\.0\.1:\d+\b/);
       assert.match(fullOutput, /\[fake-playwright\] ran with http:\/\/127\.0\.0\.1:\d+\b/);
+      const frontendOrigin = fullOutput.match(/\[fake-playwright\] ran with (http:\/\/127\.0\.0\.1:\d+)\b/)?.[1];
+      assert.ok(frontendOrigin);
+      assert.equal(fullOutput.match(/decisionOrigins=(\S+)/)?.[1], frontendOrigin);
     } finally {
       stopCollecting();
     }

@@ -38,21 +38,17 @@ test.describe('AC-21: Session auto-title', () => {
       await expect(newSessionButton).toBeVisible({ timeout: 5000 });
       await newSessionButton.click();
 
-      await expect
-        .poll(
-          () => page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY),
-          { timeout: 5000 },
-        )
-        .not.toBeNull();
-      sessionId = await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY);
-      const activeSessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
-      const activeSessionTitle = page.getByTestId(`session-title-${sessionId}`);
-      await expect(activeSessionTitle).toHaveText('New Chat', { timeout: 5000 });
+      await expect(page.getByTestId('welcome-screen')).toBeVisible();
+      expect(await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY)).toBeNull();
 
       await page.getByRole('combobox', { name: 'Provider and model', exact: true }).fill(provider.model);
       await page.getByRole('option').filter({ hasText: provider.model }).click();
 
+      const created = page.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/sessions');
       await sendMessageFromComposer(page, prompt);
+      sessionId = (await (await created).json() as { id: string }).id;
+      const activeSessionTitle = page.getByTestId(`session-title-${sessionId}`);
 
       await expect
         .poll(

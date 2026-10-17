@@ -1,5 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { createExistingMockConversation } from './helpers/existing-mock-conversation';
+import { installMockLaunchProfile, selectMockLaunchProfile } from './helpers/mock-launch-profile';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import {
   API_BASE,
@@ -404,8 +405,9 @@ test.describe('Architecture chat turn projection', () => {
   test('renders council branches as sub-agent chips and restores them after reload', async ({ page, request }, testInfo) => {
     test.setTimeout(240_000);
     const title = `Architecture E2E ${Date.now()}`;
+    const profile = await installMockLaunchProfile(page, request);
     const response = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
+      data: { title, personaId: 'default', executionProfileId: profile.id },
     });
     expect(response.ok()).toBeTruthy();
     const session = await response.json() as { id: string };
@@ -685,8 +687,9 @@ test.describe('Architecture chat turn projection', () => {
   test('restores a persisted architecture envelope selection back to the host conversation', async ({ page, request }, testInfo) => {
     test.setTimeout(120_000);
     const title = `Architecture Restore E2E ${Date.now()}`;
+    const profile = await installMockLaunchProfile(page, request);
     const response = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
+      data: { title, personaId: 'default', executionProfileId: profile.id },
     });
     expect(response.ok()).toBeTruthy();
     const session = await response.json() as { id: string };
@@ -731,6 +734,7 @@ test.describe('Architecture chat turn projection', () => {
   test('launches Architecture Debate from the welcome screen with projectPath and keeps child transcripts repo-scoped after reload', async ({ page, request }) => {
     test.setTimeout(420_000);
     const projectPath = requireProjectPath();
+    await installMockLaunchProfile(page, request);
     let sessionId: string | null = null;
     let title = '';
 
@@ -740,7 +744,7 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
-
+      await selectMockLaunchProfile(page);
       await selectArchitectureInComposer(page, 'strategic-decision-council');
       await selectProjectInWelcome(page, projectPath);
       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');

@@ -141,6 +141,7 @@ const backendEnv = {
   WORKSPACE_ROOT: explicitWorkspaceRoot ?? resolve(runStateDir, 'workspaces'),
   MEMORY_DB_PATH: explicitMemoryDbPath ?? resolve(runStateDir, 'memory'),
   CORS_ORIGIN: webUrl.origin,
+  KALIO_DECISION_FRONTEND_ORIGINS: webUrl.origin,
 };
 
 const frontendEnv = {

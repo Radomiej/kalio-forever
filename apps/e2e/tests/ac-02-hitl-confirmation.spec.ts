@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { io } from 'socket.io-client';
+import { hitlFixtureRequest } from './helpers/hitl-fixture-auth';
 import {
   API_BASE,
   deleteSessionIfExists,
@@ -40,15 +41,13 @@ async function saveManualHitlMode(page: Page): Promise<void> {
 }
 
 async function getHitlConfig(request: APIRequestContext): Promise<HitlConfig> {
-  const response = await request.get(`${API_BASE}/hitl/config`);
+  const response = await hitlFixtureRequest(request, 'GET');
   expect(response.ok()).toBeTruthy();
   return response.json() as Promise<HitlConfig>;
 }
 
 async function restoreHitlConfig(request: APIRequestContext, config: HitlConfig): Promise<void> {
-  const response = await request.put(`${API_BASE}/hitl/config`, {
-    data: config,
-  });
+  const response = await hitlFixtureRequest(request, 'PUT', config);
   expect(response.ok()).toBeTruthy();
 }
 
