@@ -195,7 +195,7 @@ export class LLMTurnRuntimeService {
             usage = {
               promptTokens: chunk.promptTokens,
               completionTokens: chunk.completionTokens,
-              totalTokens: chunk.totalTokens,
+              ...(chunk.totalTokens !== undefined ? { totalTokens: chunk.totalTokens } : {}),
             };
             continue;
           }
@@ -316,7 +316,7 @@ export class LLMTurnRuntimeService {
           textLength: state.text.length,
           thinkingLength: state.thinking.length,
           toolCallCount: state.toolCalls.length,
-          usage,
+          ...(usage !== undefined ? { usage } : {}),
           estimatedOutputTokens: estimateTextTokens(state.text) + estimateTextTokens(state.thinking),
           ...(structuredOutputRepairRetried ? { structuredOutputRepairRetry: true } : {}),
         },
