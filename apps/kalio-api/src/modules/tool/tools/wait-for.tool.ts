@@ -178,7 +178,7 @@ export class WaitForTool {
     let lastSnapshot: CLIAgentSessionSnapshot | undefined;
     let lastError: string | undefined;
 
-    while (Date.now() - startedAt <= timeoutMs) {
+    while (Date.now() - startedAt < timeoutMs) {
       try {
         const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
         lastSnapshot = await withTimeout(
@@ -222,7 +222,7 @@ export class WaitForTool {
     const minMessages = boundedNumberArg(request.args, 'minMessages', 1, 1_000);
     let count = 0;
 
-    while (Date.now() - startedAt <= timeoutMs) {
+    while (Date.now() - startedAt < timeoutMs) {
       count = await this.countMessages({ sessionId, role, afterTimestamp });
       if (count >= minMessages) {
         return {
@@ -254,7 +254,7 @@ export class WaitForTool {
     const afterTimestamp = afterTimestampArg(request.args);
     let count = 0;
 
-    while (Date.now() - startedAt <= timeoutMs) {
+    while (Date.now() - startedAt < timeoutMs) {
       count = await this.countMessages({ sessionId, role: 'tool_result', toolCallId, afterTimestamp });
       if (count > 0) {
         return {

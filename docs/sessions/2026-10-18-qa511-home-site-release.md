@@ -63,6 +63,19 @@ Detailed local evidence and screenshots: docs/raports/qa-run-511/report.md
 
 ## Remaining boundary and production closure
 
+### Release CI follow-up
+
+CI 39078212232 at 9e2fd612 exposed a wait_for deadline defect: the hung CLI poll
+test observed two calls instead of one. All three polling loops admitted a
+new query at elapsed time exactly equal to timeout. Deterministic clock-boundary
+regressions reproduced 3 failures (CLI/conversation/tool_result); strict deadline
+checks then passed all 9 focused tests. No timeout increase or assertion removal.
+Fresh parent API tsc/scoped lint/build exit 0; SWC compiled 921 files. Full API
+coverage run exit 0; exact summary retained in .tmp/qa511-wait-full-coverage.log.
+This follow-up requires its own pushed-head CI and QA deployment; the earlier
+9e2fd612 backend CI is failed, not release-green. Existing source/runtime evidence
+above remains scoped to the revision tested.
+
 RAD-14 Done read verified on owner instruction, not a waiver of security
 acceptance criteria. Leave QA/preview running. Push only the feature branch,
 verify fresh CI, and obtain the required PR approval; do not bypass protection,

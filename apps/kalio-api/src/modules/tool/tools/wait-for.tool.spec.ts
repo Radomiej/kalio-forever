@@ -129,13 +129,20 @@ describe('WaitForTool', () => {
       getStatus: vi.fn(() => new Promise(() => undefined)),
     } as unknown as CLIAgentSessionRuntimeService;
     const tool = new WaitForTool(runtime, makeDrizzle([]));
-
-    const result = await tool.execute(makeRequest({
-      targetType: 'cli_agent',
-      childSessionId: 'cli-child-1',
-      timeoutMs: 5,
-      intervalMs: 1,
-    }));
+    // Reaching the deadline exactly must not start a second hanging poll.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(6);
+    for (const timestamp of [0, 0, 0, 5, 5]) clock.mockReturnValueOnce(timestamp);
+    let result: Awaited<ReturnType<WaitForTool['execute']>>;
+    try {
+      result = await tool.execute(makeRequest({
+        targetType: 'cli_agent',
+        childSessionId: 'cli-child-1',
+        timeoutMs: 5,
+        intervalMs: 1,
+      }));
+    } finally {
+      clock.mockRestore();
+    }
 
     expect(runtime.getStatus).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
@@ -143,6 +150,21 @@ describe('WaitForTool', () => {
       targetType: 'cli_agent',
     });
     expect(result.errorMessage).toMatch(/^CLI status poll timed out after \d+ms$/);
+  });
+
+  it.each(['conversation', 'tool_result'])('does not query %s again at the deadline', async (targetType) => {
+    const drizzle = makeDrizzle([0]);
+    const tool = new WaitForTool(makeRuntime(['running']), drizzle);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(6);
+    for (const timestamp of [0, 0, 5]) clock.mockReturnValueOnce(timestamp);
+    let result: Awaited<ReturnType<WaitForTool['execute']>>;
+    try {
+      result = await tool.execute(makeRequest({ targetType, toolCallId: 'call-123', timeoutMs: 5, intervalMs: 1 }));
+    } finally {
+      clock.mockRestore();
+    }
+    expect(drizzle.db.select).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: 'timeout', targetType, messageCount: 0 });
   });
 
   it('waits for a matching tool_result message', async () => {
