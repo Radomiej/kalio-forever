@@ -3,6 +3,7 @@ import { tileSizeForIndex } from './tileColors';
 import { AppTile } from './AppTile';
 import { QuickChatWidget } from './QuickChatWidget';
 import { HomeHitlInbox } from './HomeHitlInbox';
+import { HomeExecutionSettings } from './HomeExecutionSettings';
 import { useTileIcons } from './useTileIcons';
 import { useSessionStore } from '../../store/sessionStore';
 import { getRAApps, getRAAppGroups, getExecutionProfiles } from '../../services/apiClient';
@@ -159,7 +160,21 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
         <span className="text-primary font-black text-3xl drop-shadow-[0_0_12px_oklch(0.60_0.176_232.6/0.7)]">
           KALIO
         </span>
-        <span className="text-base-content/40 text-sm">Your apps at a glance</span>
+        <span className="min-w-0 flex-1 text-base-content/40 text-sm">Your apps at a glance</span>
+        <HomeExecutionSettings>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-base-content/70">App execution profile</span>
+            <select aria-label="App execution profile" className="select select-bordered w-full text-xs"
+              value={executionProfileId} onChange={(event) => setExecutionProfileId(event.target.value)} disabled={profilesLoading}>
+              <option value="">Use saved default execution profile</option>
+              {profiles.map((profile) => <option key={profile.id} value={profile.id}>
+                {profile.name} · {profile.kind}{profile.model ? ` · ${profile.model}` : ''}
+              </option>)}
+            </select>
+          </label>
+          {profilesLoading && <p role="status" className="text-xs">Loading execution profiles…</p>}
+          {profilesError && <p role="alert" className="text-xs text-error">{profilesError}</p>}
+        </HomeExecutionSettings>
       </div>
 
       <HomeHitlInbox
@@ -169,21 +184,7 @@ export function LandingPage({ onNavigateToChat, onOpenSessionInChat }: LandingPa
       />
 
       {/* Grid: quick-chat widget + app tiles */}
-      <div className="mb-4">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-base-content/70">App execution profile</span>
-          <select aria-label="App execution profile" className="select select-bordered w-full text-xs"
-            value={executionProfileId} onChange={(event) => setExecutionProfileId(event.target.value)} disabled={profilesLoading}>
-            <option value="">Use saved default execution profile</option>
-            {profiles.map((profile) => <option key={profile.id} value={profile.id}>
-              {profile.name} · {profile.kind}{profile.model ? ` · ${profile.model}` : ''}
-            </option>)}
-          </select>
-        </label>
-        {profilesLoading && <p role="status" className="text-xs">Loading execution profiles…</p>}
-        {profilesError && <p role="alert" className="text-xs text-error">{profilesError}</p>}
-        {launchError && <p role="alert" className="mt-2 text-sm text-error">{launchError}</p>}
-      </div>
+      {launchError && <p role="alert" className="mb-4 text-sm text-error">{launchError}</p>}
       <div className="grid grid-cols-2 gap-3 pb-8 sm:grid-cols-3 lg:grid-cols-4">
 
         {/* Quick Chat — spans full row */}

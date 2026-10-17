@@ -64,12 +64,21 @@ export function App() {
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
+  const settingsOpenerRef = useRef<HTMLElement | null>(null);
   const [lastTalkActiveAt, setLastTalkActiveAt] = useState<number | null>(() => loadLastTalkActiveAt());
   const [talkSidebarCollapsed, setTalkSidebarCollapsed] = useState(false);
   const [runtimeAttentionNowMs, setRuntimeAttentionNowMs] = useState(() => Date.now());
   const [reviewedRuntimeAttentionKeys, setReviewedRuntimeAttentionKeys] = useState(readReviewedRuntimeAttentionKeys);
 
-  const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
+  const openSettings = (tab?: string, opener?: HTMLElement) => {
+    settingsOpenerRef.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setSettingsInitialTab(tab); setSettingsOpen(true);
+  };
+  useEffect(() => {
+    if (settingsOpen) return;
+    if (settingsOpenerRef.current?.isConnected) settingsOpenerRef.current.focus();
+    settingsOpenerRef.current = null;
+  }, [settingsOpen]);
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
   const { sessions, activeSessionId, sessionMessages, setActiveSession, setSessions } = useSessionStore();
   const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
@@ -279,7 +288,7 @@ export function App() {
         talkAttentionTitle={talkAttentionTitle}
         recentTalkCount={recentTalkCount}
         onGoHome={goHome}
-        onOpenSettings={() => openSettings()}
+        onOpenSettings={(opener) => openSettings(undefined, opener)}
         onSelectSection={setActiveSection}
       />
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">

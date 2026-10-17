@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import type { RuntimeActivitySnapshot, SessionRuntimeContext } from '@kalio/types';
@@ -145,8 +146,8 @@ vi.mock('./features/persona/PersonaPanel', () => ({
   PersonaPanel: () => <div data-testid="persona-panel">Personas</div>,
 }));
 
-vi.mock('./features/settings/SettingsModal', () => ({
-  SettingsModal: () => <div data-testid="settings-modal">Settings</div>,
+vi.mock('./features/settings/registry', () => ({
+  SETTINGS_BLOCKS: [{ id: 'llm', label: 'LLM Settings', icon: null, component: () => <button type="button">Add provider</button> }],
 }));
 
 vi.mock('./features/workspaces/WorkspacePanel', () => ({
@@ -288,7 +289,13 @@ vi.mock('./services/backendHealth', () => ({
 }));
 
 vi.mock('./features/settings/settingsStore', () => ({
-  useSettingsStore: (selector: (state: { setBackendConfig: typeof setBackendConfig }) => unknown) => selector({ setBackendConfig }),
+  useSettingsStore: (selector: (state: {
+    setBackendConfig: typeof setBackendConfig;
+    requestedSettingsTab: null;
+    clearRequestedSettingsTab: () => void;
+    requestRuntimeModelFocus: () => void;
+  }) => unknown) => selector({ setBackendConfig, requestedSettingsTab: null,
+    clearRequestedSettingsTab: () => undefined, requestRuntimeModelFocus: () => undefined }),
 }));
 
 function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
@@ -355,8 +362,37 @@ describe('App view state persistence', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each(['Escape', 'button'])('returns Settings focus to the mounted nav after %s removes the inert app shell', async (method) => {
+    const user = userEvent.setup();
+    const nativeFocus = HTMLElement.prototype.focus;
+    // jsdom does not enforce inertness. Model the browser rule at the DOM boundary,
+    // keeping App, AppNavRail and SettingsModal real so commit ordering is exercised.
+    const blockedFocus = vi.fn();
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (this.closest('[inert]')) { blockedFocus(); return; }
+      nativeFocus.call(this, options);
+    });
+    render(<App />);
+    const opener = screen.getByRole('button', { name: 'Settings' });
+    await user.click(opener);
+    expect(opener.isConnected).toBe(true);
+    expect(opener.closest('[inert]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(screen.getByRole('button', { name: 'Add provider' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
+    if (method === 'Escape') await user.keyboard('{Escape}');
+    else await user.click(screen.getByRole('button', { name: 'Close settings' }));
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(opener.closest('[inert]')).toBeNull();
+    expect(blockedFocus).toHaveBeenCalled();
+    expect(opener).toHaveFocus();
   });
 
   it.each([null, 'session-1'])('preserves the Talk surface across 1024 to 1023 with session %s', (sessionId) => {
