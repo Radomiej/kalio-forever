@@ -4,6 +4,8 @@ import { DrizzleService } from '../../database/drizzle.service';
 import * as schema from '../../database/schema';
 import { createDrizzleDatabase, createSqliteDatabase, type SqliteClient } from '../../database/sqlite-runtime';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { SessionEventsService } from './session-events.service';
+import { createMessageSessions } from './__tests__/message-session.fixture';
 
 describe('DrizzleMessageRepository assistant updates (SQLite)', () => {
   let client: SqliteClient;
@@ -16,6 +18,7 @@ describe('DrizzleMessageRepository assistant updates (SQLite)', () => {
 
   beforeEach(() => {
     client = createSqliteDatabase(':memory:', 'node').client;
+    createMessageSessions(client, ['session-1', 'session-2', 'foreign-session']);
     client.exec(`CREATE TABLE messages (
       id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,
       content TEXT NOT NULL, turn_id TEXT, prompt_message_id TEXT, thinking TEXT,
@@ -23,9 +26,46 @@ describe('DrizzleMessageRepository assistant updates (SQLite)', () => {
     )`);
     const service = Object.assign(Object.create(DrizzleService.prototype) as DrizzleService,
       { db: createDrizzleDatabase(client, 'node', schema) });
-    repository = new DrizzleMessageRepository(service);
+    repository = new DrizzleMessageRepository(service, new SessionEventsService());
   });
   afterEach(() => client.close());
+
+  it('persists nonempty thinking, tool result linkage and VFS attachments on insert', async () => {
+    await repository.saveMessage({
+      ...initial, content: 'Draft response', thinking: 'Inspect the uploaded image',
+      toolCallId: 'source-call',
+      attachments: [{ path: 'uploads/source.png', mimeType: 'image/png' }],
+    });
+
+    expect(await repository.loadHistory('session-1')).toEqual([{
+      id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'Draft response',
+      turnId: 'turn-1', promptMessageId: 'prompt-1', createdAt: 1000,
+      thinking: 'Inspect the uploaded image', toolCallId: 'source-call',
+      toolCalls: [{ id: 'call-1', name: 'fs_read', args: { path: 'App.jsx' } }],
+      attachments: [{ path: 'uploads/source.png', mimeType: 'image/png' }],
+    }]);
+  });
+
+  it('finalizes payload fields while preserving original creation and turn linkage', async () => {
+    await repository.saveMessage({
+      ...initial, thinking: 'Draft analysis', toolCallId: 'draft-call',
+      attachments: [{ path: 'uploads/draft.png', mimeType: 'image/png' }],
+    });
+    await repository.saveMessage({
+      ...initial, content: 'Final response', createdAt: 2000,
+      turnId: undefined, promptMessageId: undefined,
+      thinking: 'Completed analysis', toolCallId: 'final-call',
+      attachments: [{ path: 'uploads/final.pdf', mimeType: 'application/pdf' }],
+    });
+
+    expect(await repository.loadHistory('session-1')).toEqual([{
+      id: 'assistant-1', sessionId: 'session-1', role: 'assistant', content: 'Final response',
+      turnId: 'turn-1', promptMessageId: 'prompt-1', createdAt: 1000,
+      thinking: 'Completed analysis', toolCallId: 'final-call',
+      toolCalls: [{ id: 'call-1', name: 'fs_read', args: { path: 'App.jsx' } }],
+      attachments: [{ path: 'uploads/final.pdf', mimeType: 'application/pdf' }],
+    }]);
+  });
 
   it('updates one assistant row with final text and two calls, preserving creation and turn linkage', async () => {
     await repository.saveMessage(initial);

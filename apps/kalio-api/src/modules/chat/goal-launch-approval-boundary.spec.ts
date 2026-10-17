@@ -6,6 +6,8 @@ import * as schema from '../../database/schema';
 import type { DrizzleService } from '../../database/drizzle.service';
 import { readPersistedGoalLaunchCalls } from '../../common/goal-launch-persisted-call';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { SessionEventsService } from './session-events.service';
+import { createMessageSessions } from './__tests__/message-session.fixture';
 import { SessionManagerService } from './session-manager.service';
 import { RunJournalService } from './run-journal.service';
 import { runCheckpoint } from './chat-input.helpers';
@@ -24,6 +26,7 @@ type AssistantObservation = { id: string; sessionId: string; turnId: string; pro
 
 async function fixture(duplicate: boolean) {
   const client = new Database(':memory:'); clients.push(client);
+  createMessageSessions(client, ['session']);
   // Same SQLite columns as the existing journal/message persistence fixtures;
   // lifecycle values are written only by the actual RunJournalService.
   client.exec(`CREATE TABLE chat_runs (
@@ -41,7 +44,7 @@ async function fixture(duplicate: boolean) {
   const journal = new RunJournalService(provider);
   const started = await journal.startRun({ sessionId:'session',turnId:'turn',runtimeKind:'chat' });
   const checkpoint = runCheckpoint(journal, started.id);
-  const repository = new DrizzleMessageRepository(provider);
+  const repository = new DrizzleMessageRepository(provider, new SessionEventsService());
   await repository.saveMessage({ id:'prompt',sessionId:'session',turnId:'turn',role:'user',content:'fixture goal',createdAt:Date.now() });
   const call: LLMToolCall = { id:'call',name:'run_sub_agentflow',args:{flowId:'fixture',goal:'fixture goal'} };
   if (duplicate) await repository.saveMessage({ id:'other-assistant',sessionId:'session',turnId:'turn',promptMessageId:'prompt',

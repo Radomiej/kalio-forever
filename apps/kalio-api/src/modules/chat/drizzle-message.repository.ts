@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { ChatMessage } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { messages, sessions } from '../../database/schema';
 import type { IMessageRepository, SessionMessagePage, SessionMessagePageOptions } from './interfaces/message-repository.interface';
+import { SessionEventsService } from './session-events.service';
+import { toChatSession } from './session-row';
 
 const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 type MessageCursor = Pick<typeof messages.$inferSelect, 'id' | 'createdAt'>;
@@ -19,7 +21,12 @@ const beforeMessage = (row: MessageCursor) => or(
  */
 @Injectable()
 export class DrizzleMessageRepository implements IMessageRepository {
-  constructor(private readonly drizzle: DrizzleService) {}
+  private readonly logger = new Logger(DrizzleMessageRepository.name);
+
+  constructor(
+    private readonly drizzle: DrizzleService,
+    private readonly sessionEvents: SessionEventsService,
+  ) {}
 
   private toChatMessage(row: typeof messages.$inferSelect): ChatMessage {
     return {
@@ -122,44 +129,59 @@ export class DrizzleMessageRepository implements IMessageRepository {
   }
 
   async saveMessage(msg: ChatMessage): Promise<void> {
-    const insert = this.drizzle.db.insert(messages).values({
-      id: msg.id,
-      sessionId: msg.sessionId,
-      role: msg.role,
-      content: msg.content,
-      turnId: msg.turnId ?? null,
-      promptMessageId: msg.promptMessageId ?? null,
-      thinking: msg.thinking ?? null,
-      toolCalls: msg.toolCalls ?? null,
-      toolCallId: msg.toolCallId ?? null,
-      attachments: msg.attachments ?? null,
-      createdAt: new Date(msg.createdAt),
-    });
-    if (msg.role !== 'assistant') {
-      await insert;
-      return;
-    }
-
-    const result = await insert.onConflictDoUpdate({
-      target: messages.id,
-      set: {
+    const updatedSession = this.drizzle.db.transaction((db) => {
+      const existing = db.select({ id: messages.id }).from(messages).where(eq(messages.id, msg.id)).get();
+      const insert = db.insert(messages).values({
+        id: msg.id,
+        sessionId: msg.sessionId,
+        role: msg.role,
         content: msg.content,
+        turnId: msg.turnId ?? null,
+        promptMessageId: msg.promptMessageId ?? null,
         thinking: msg.thinking ?? null,
         toolCalls: msg.toolCalls ?? null,
         toolCallId: msg.toolCallId ?? null,
         attachments: msg.attachments ?? null,
-        turnId: sql`coalesce(${messages.turnId}, ${msg.turnId ?? null})`,
-        promptMessageId: sql`coalesce(${messages.promptMessageId}, ${msg.promptMessageId ?? null})`,
-      },
-      setWhere: and(
-        eq(messages.sessionId, msg.sessionId),
-        eq(messages.role, 'assistant'),
-        msg.turnId == null ? undefined : or(isNull(messages.turnId), eq(messages.turnId, msg.turnId)),
-        msg.promptMessageId == null ? undefined : or(isNull(messages.promptMessageId), eq(messages.promptMessageId, msg.promptMessageId)),
-      ),
+        createdAt: new Date(msg.createdAt),
+      });
+      if (msg.role !== 'assistant') {
+        insert.run();
+      } else {
+        const result = insert.onConflictDoUpdate({
+          target: messages.id,
+          set: {
+            content: msg.content,
+            thinking: msg.thinking ?? null,
+            toolCalls: msg.toolCalls ?? null,
+            toolCallId: msg.toolCallId ?? null,
+            attachments: msg.attachments ?? null,
+            turnId: sql`coalesce(${messages.turnId}, ${msg.turnId ?? null})`,
+            promptMessageId: sql`coalesce(${messages.promptMessageId}, ${msg.promptMessageId ?? null})`,
+          },
+          setWhere: and(
+            eq(messages.sessionId, msg.sessionId),
+            eq(messages.role, 'assistant'),
+            msg.turnId == null ? undefined : or(isNull(messages.turnId), eq(messages.turnId, msg.turnId)),
+            msg.promptMessageId == null ? undefined : or(isNull(messages.promptMessageId), eq(messages.promptMessageId, msg.promptMessageId)),
+          ),
+        }).run();
+        if (result.changes !== 1) {
+          throw new Error(`Message ${msg.id} conflicts with existing ownership or turn linkage`);
+        }
+      }
+      // Assistant finalization/replay keeps the original message creation time and recency.
+      if (existing) return undefined;
+      const row = db.update(sessions).set({ updatedAt: new Date(msg.createdAt) })
+        .where(and(eq(sessions.id, msg.sessionId), lt(sessions.updatedAt, new Date(msg.createdAt))))
+        .returning().get();
+      return row ? toChatSession(row) : undefined;
     });
-    if (result.changes !== 1) {
-      throw new Error(`Message ${msg.id} conflicts with existing ownership or turn linkage`);
+    if (updatedSession) {
+      try {
+        this.sessionEvents.emitSessionUpdated(updatedSession);
+      } catch {
+        this.logger.warn(`Session update publication failed after commit for session ${updatedSession.id}`);
+      }
     }
   }
 }

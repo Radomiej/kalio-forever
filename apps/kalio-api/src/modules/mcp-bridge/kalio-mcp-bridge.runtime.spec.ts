@@ -11,6 +11,8 @@ import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-con
 import { DevinCliAcpLLMSource } from '../agent-runtime/devin-cli-acp.llm-source';
 import type { DevinAcpPromptInput } from '../agent-runtime/devin-cli-acp.host';
 import { DrizzleMessageRepository } from '../chat/drizzle-message.repository';
+import { SessionEventsService } from '../chat/session-events.service';
+import { createMessageSessions } from '../chat/__tests__/message-session.fixture';
 import { SessionManagerService } from '../chat/session-manager.service';
 import { ToolDispatchService } from '../chat/tool-dispatch.service';
 import { ToolConfirmationService } from '../chat/tool-confirmation.service';
@@ -38,7 +40,8 @@ describe('managed ACP → MCP → durable chat runtime (SQLite)', () => {
     );`);
     const database = new DrizzleService(null as never);
     (database as unknown as { db: unknown }).db = drizzle(sqlite, { schema });
-    const repo = new DrizzleMessageRepository(database);
+    createMessageSessions(sqlite, ['composed-session']);
+    const repo = new DrizzleMessageRepository(database, new SessionEventsService());
     const hitl = new HitlRequestService(database);
     const confirmations = new ToolConfirmationService(null, null, null, hitl);
     const parent = new AbortController();

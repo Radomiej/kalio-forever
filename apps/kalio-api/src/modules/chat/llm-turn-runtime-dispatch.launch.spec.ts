@@ -5,6 +5,8 @@ import type { LLMToolCall } from '@kalio/types';
 import * as schema from '../../database/schema';
 import type { DrizzleService } from '../../database/drizzle.service';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { SessionEventsService } from './session-events.service';
+import { createMessageSessions } from './__tests__/message-session.fixture';
 import { SessionManagerService } from './session-manager.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { ToolConfirmationService } from './tool-confirmation.service';
@@ -26,7 +28,8 @@ function fixture(options: { gate?: Promise<void>; fail?: boolean; transform?: bo
   client.exec(`CREATE TABLE messages (id TEXT PRIMARY KEY,session_id TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,
     turn_id TEXT,prompt_message_id TEXT,thinking TEXT,tool_calls TEXT,tool_call_id TEXT,attachments TEXT,created_at INTEGER NOT NULL);`);
   const database = { db: drizzle(client, { schema }) } as unknown as DrizzleService;
-  const repo = new DrizzleMessageRepository(database);
+  createMessageSessions(client, ['session']);
+  const repo = new DrizzleMessageRepository(database, new SessionEventsService());
   const started = deferred(); const order: string[] = [];
   const save = repo.saveMessage.bind(repo);
   const assistantWrites = vi.fn(async (message: Parameters<typeof repo.saveMessage>[0]) => {

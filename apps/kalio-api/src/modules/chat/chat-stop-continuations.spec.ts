@@ -10,6 +10,7 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { HitlRequestService } from '../hitl/hitl-request.service';
 import { ChatService } from './chat.service';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { SessionEventsService } from './session-events.service';
 import { SessionManagerService } from './session-manager.service';
 import { RunJournalService } from './run-journal.service';
 
@@ -34,7 +35,7 @@ function fixture(path = ':memory:') {
   const service = Object.assign(Object.create(DrizzleService.prototype) as DrizzleService, { db });
   const requests = new HitlRequestService(service);
   const journal = new RunJournalService(service);
-  const repository = new DrizzleMessageRepository(service);
+  const repository = new DrizzleMessageRepository(service, new SessionEventsService());
   const sessionManager = Object.create(SessionManagerService.prototype) as SessionManagerService;
   Object.assign(sessionManager, { repo: repository });
   const chat = Object.create(ChatService.prototype) as ChatService;

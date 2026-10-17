@@ -16,6 +16,7 @@ import { SessionManagerService } from './session-manager.service';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
+import { toChatSession } from './session-row';
 import { LLMService } from '../llm/llm.service';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
@@ -34,7 +35,6 @@ import {
   normalizedUserPrompt as normalizeSessionPrompt,
 } from './sessions-title.utils';
 
-const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
 const DEFAULT_SESSION_TITLE = 'New Chat';
 const MAX_SESSION_LIST_LIMIT = 500;
 interface SessionRuntimeScopeOptions {
@@ -74,7 +74,7 @@ export class SessionsService {
       ? query.orderBy(desc(sessions.updatedAt))
       : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt));
     const rows = await (limit === undefined ? orderedQuery : orderedQuery.limit(limit));
-    return rows.map(this.toChatSession);
+    return rows.map(toChatSession);
   }
 
   async create(dto: CreateSessionDto): Promise<ChatSession> {
@@ -104,14 +104,14 @@ export class SessionsService {
       updatedAt: now,
     };
     await this.drizzle.db.insert(sessions).values(row);
-    const session = this.toChatSession(row);
+    const session = toChatSession(row);
     this.sessionEvents.emitSessionCreated(session);
     return session;
   }
 
   async get(id: string): Promise<ChatSession> {
     const row = await this.getRow(id);
-    return this.toChatSession(row);
+    return toChatSession(row);
   }
 
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
@@ -132,7 +132,7 @@ export class SessionsService {
       .select()
       .from(sessions)
       .where(eq(sessions.parentSessionId, parentSessionId));
-    return rows.map(this.toChatSession);
+    return rows.map(toChatSession);
   }
 
   async delete(id: string): Promise<void> {
@@ -535,38 +535,6 @@ export class SessionsService {
     } catch {
       return undefined;
     }
-  }
-
-  private toChatSession(row: {
-    id: string;
-    personaId: string;
-    title: string;
-    kind?: ChatSessionKind;
-    parentSessionId?: string | null;
-    parentTurnId?: string | null;
-      parentToolCallId?: string | null;
-      projectId?: string | null;
-      executionProfileId?: string | null;
-      externalThreadId?: string | null;
-    runtimeContext?: SessionRuntimeContext | null;
-    createdAt: number | Date;
-    updatedAt: number | Date;
-  }): ChatSession {
-    return {
-      id: row.id,
-      personaId: row.personaId,
-      title: row.title,
-      kind: row.kind ?? 'chat',
-      parentSessionId: row.parentSessionId ?? undefined,
-      parentTurnId: row.parentTurnId ?? undefined,
-      parentToolCallId: row.parentToolCallId ?? undefined,
-      ...(row.projectId ? { projectId: row.projectId } : {}),
-      ...(row.executionProfileId ? { executionProfileId: row.executionProfileId } : {}),
-      ...(row.externalThreadId ? { externalThreadId: row.externalThreadId } : {}),
-      runtimeContext: row.runtimeContext ?? undefined,
-      createdAt: toMs(row.createdAt),
-      updatedAt: toMs(row.updatedAt),
-    };
   }
 }
 

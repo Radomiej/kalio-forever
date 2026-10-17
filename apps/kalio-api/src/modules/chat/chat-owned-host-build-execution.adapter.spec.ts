@@ -14,6 +14,8 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { HitlRequestService } from '../hitl/hitl-request.service';
 import { MCPService } from '../mcp/mcp.service';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { SessionEventsService } from './session-events.service';
+import { createMessageSessions } from './__tests__/message-session.fixture';
 import { HostDispatchReceiptService } from './host-dispatch-receipt.service';
 import type { ToolRegistryEntry } from './interfaces/tool-registry-entry.interface';
 import { PersistedRuntimeEvidenceReader } from './persisted-runtime-evidence-reader';
@@ -58,7 +60,6 @@ const binding: HostBuildExecutionBinding = {
 
 function createTables(client: Database.Database): void {
   client.exec(`
-    CREATE TABLE sessions (id TEXT PRIMARY KEY);
     CREATE TABLE messages (
       id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
       turn_id TEXT, prompt_message_id TEXT, thinking TEXT, tool_calls TEXT, tool_call_id TEXT,
@@ -87,7 +88,6 @@ function createTables(client: Database.Database): void {
       record_json TEXT NOT NULL, record_sha256 TEXT NOT NULL, created_at INTEGER NOT NULL,
       PRIMARY KEY (run_id, session_id, turn_id, prompt_message_id, call_id)
     );
-    INSERT INTO sessions(id) VALUES ('session-1');
   `);
 }
 
@@ -251,10 +251,11 @@ function fixture(options: {
   outputStatus?: 'running' | 'exited' | 'killed';
 } = {}) {
   const client = new Database(':memory:'); clients.push(client); createTables(client);
+  createMessageSessions(client, ['session-1']);
   const drizzleService = new DrizzleService(null as never);
   (drizzleService as unknown as { db: unknown }).db = drizzle(client, { schema });
   const journals = new RunJournalService(drizzleService);
-  const sessions = new SessionManagerService(new DrizzleMessageRepository(drizzleService), null as never, null as never, journals);
+  const sessions = new SessionManagerService(new DrizzleMessageRepository(drizzleService, new SessionEventsService()), null as never, null as never, journals);
   const evidenceReader = new PersistedRuntimeEvidenceReader(drizzleService);
   const hitlRequests = new HitlRequestService(drizzleService);
   const confirmations = new ToolConfirmationService(null, null, null, hitlRequests);

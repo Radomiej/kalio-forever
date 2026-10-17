@@ -4,6 +4,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '../../../database/schema';
 import { DrizzleService } from '../../../database/drizzle.service';
 import { DrizzleMessageRepository } from '../drizzle-message.repository';
+import { SessionEventsService } from '../session-events.service';
+import { createMessageSessions } from './message-session.fixture';
 import { HitlRequestService } from '../../hitl/hitl-request.service';
 import { ToolConfirmationService } from '../tool-confirmation.service';
 import type { ChatMessage, LLMToolCall } from '@kalio/types';
@@ -35,7 +37,8 @@ function fixture(options?: { earlyDone?: boolean; failSaveRole?: ChatMessage['ro
   );`);
   const database = new DrizzleService(null as never);
   (database as unknown as { db: unknown }).db = drizzle(sqlite, { schema });
-  const repo = new DrizzleMessageRepository(database);
+  createMessageSessions(sqlite, ['native-session']);
+  const repo = new DrizzleMessageRepository(database, new SessionEventsService());
   const hitl = new HitlRequestService(database);
   const confirmations = new ToolConfirmationService(null, null, null, hitl);
   const saveMessage = repo.saveMessage.bind(repo);
