@@ -40,7 +40,9 @@ function readRootFile(path) {
   return readFile(join(root, path), 'utf8');
 }
 
-test('v1.0.2 release surfaces stay synchronized across Node, Tauri, Rust, and docs', async () => {
+test('release surfaces stay synchronized across Node, Tauri, Rust, and docs', async () => {
+  const expectedVersion = JSON.parse(await readRootFile('package.json')).version;
+  assert.match(expectedVersion, /^\d+\.\d+\.\d+$/);
   for (const path of workspaceManifestPaths) {
     const manifest = JSON.parse(await readRootFile(path));
     assert.equal(manifest.version, expectedVersion, `${path} has a mismatched release version`);
@@ -57,10 +59,10 @@ test('v1.0.2 release surfaces stay synchronized across Node, Tauri, Rust, and do
   assert.ok(kalioLockEntry, 'Kalio package is missing from Cargo.lock');
   assert.equal(kalioLockEntry[1], expectedVersion);
 
-  assert.match(await readRootFile('README.md'), /Kalio_1\.0\.2_x64-setup\.exe/);
-  assert.match(await readRootFile('docs/desktop-build.md'), /Kalio_1\.0\.2_x64-setup\.exe/);
-  assert.match(await readRootFile('docs/desktop-build.md'), /v1\.0\.2.*version `1\.0\.2`/s);
-  assert.match(await readRootFile('scripts/install.ps1'), /kalio-runtime-1\.0\.2-windows-x64\.zip/);
+  assert.ok((await readRootFile('README.md')).includes(`Kalio_${expectedVersion}_x64-setup.exe`));
+  assert.ok((await readRootFile('docs/desktop-build.md')).includes(`Kalio_${expectedVersion}_x64-setup.exe`));
+  assert.ok((await readRootFile('docs/desktop-build.md')).includes(`v${expectedVersion}`));
+  assert.ok((await readRootFile('scripts/install.ps1')).includes(`kalio-runtime-${expectedVersion}-windows-x64.zip`));
 });
 
 test('tagged desktop release is version-gated and unsigned Windows signing is explicit', async () => {

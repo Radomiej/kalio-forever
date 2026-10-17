@@ -31,10 +31,11 @@ const releaseManifestUrls = [
   '../packages/@kalio/sdk/package.json',
 ];
 
-test('all workspace manifests publish the 1.0.2 release version', () => {
+test('all workspace manifests match the root release version', () => {
+  assert.match(rootPackage.version, /^\d+\.\d+\.\d+$/);
   for (const manifestPath of releaseManifestUrls) {
     const manifest = JSON.parse(readFileSync(new URL(manifestPath, import.meta.url), 'utf8'));
-    assert.equal(manifest.version, '1.0.2', `${manifestPath} has a mismatched release version`);
+    assert.equal(manifest.version, rootPackage.version, `${manifestPath} has a mismatched release version`);
   }
 });
 
