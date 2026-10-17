@@ -52,7 +52,7 @@ describe('DevinAcpHostRegistry status reads', () => {
     });
   });
 
-  it('refreshes the dynamic model catalog on request and serves the snapshot without another probe', async () => {
+  it('caches concrete models without offering the family heading as a selectable model', async () => {
     execFileAsyncMock.mockImplementation(async (_command: string, args: string[]) => {
       const output = args[0] === '--version'
         ? 'devin 3000.11.1 (build)'
@@ -71,14 +71,14 @@ describe('DevinAcpHostRegistry status reads', () => {
       version: '3000.11.1',
       authenticated: true,
       acp: true,
-      models: ['swe-2', 'swe-2-high'],
+      models: ['swe-2-high'],
       modelCatalogStatus: 'ready',
     });
     expect(execFileAsyncMock).toHaveBeenCalledTimes(4);
 
     await expect(registry.getStatus()).resolves.toMatchObject({
       probeChecked: true,
-      models: ['swe-2', 'swe-2-high'],
+      models: ['swe-2-high'],
     });
     expect(execFileAsyncMock).toHaveBeenCalledTimes(4);
   });
