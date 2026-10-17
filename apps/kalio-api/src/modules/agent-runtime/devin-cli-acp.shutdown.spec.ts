@@ -4,8 +4,57 @@ import { stat } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { DevinAcpHost, DevinAcpHostRegistry } from './devin-cli-acp.host';
 import { createDevinCliConfig } from './devin-cli-config';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { DevinCliAcpLifecycle } from './devin-cli-acp.lifecycle';
+
+function attach(host: DevinAcpHost, resources: { child?: unknown; config?: unknown; connection?: unknown }): void {
+  const lifecycle = (host as unknown as { lifecycle: DevinCliAcpLifecycle }).lifecycle;
+  const { child, ...other } = resources;
+  Object.assign(lifecycle, other);
+  if (child) lifecycle.adoptChild(child as ChildProcessWithoutNullStreams, () => undefined);
+}
 
 describe('Devin ACP shutdown', () => {
+  it('retains ownership after a missing close barrier times out and permits reset to retry', async () => {
+    vi.useFakeTimers();
+    const child = Object.assign(new EventEmitter(), { exitCode: 0, signalCode: null, kill: vi.fn(() => true) });
+    const cleanup = vi.fn(async () => undefined);
+    const host = new DevinAcpHost('swe-2');
+    attach(host, { child, config: { cleanup } });
+    try {
+      const rejected = expect(host.close()).rejects.toThrow('did not close');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+      expect(cleanup).not.toHaveBeenCalled();
+      child.emit('close', 0, null);
+      await host.close();
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      child.emit('close', 0, null);
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not delete the overlay after exit until the child close event arrives', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: 0, signalCode: null, kill: vi.fn(() => true),
+    });
+    const cleanup = vi.fn(async () => undefined);
+    const host = new DevinAcpHost('swe-2');
+    attach(host, { child, config: { cleanup } });
+    const closing = host.close();
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      child.emit('close', 0, null);
+      await closing;
+    }
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it('releases a real child cwd before cleaning its ephemeral config', async () => {
     const config = await createDevinCliConfig('swe-2', []);
     const child = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
@@ -13,7 +62,7 @@ describe('Devin ACP shutdown', () => {
     });
     await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
     const host = new DevinAcpHost('swe-2');
-    Object.assign(host, { child, config });
+    attach(host, { child, config });
     try {
       await host.close();
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
@@ -31,7 +80,7 @@ describe('Devin ACP shutdown', () => {
     const script = `const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e',${JSON.stringify(idle)}],{stdio:'ignore',windowsHide:true}); console.log(child.pid); ${idle}`;
     const child = spawn(process.execPath, ['-e', script], { cwd: config.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const host = new DevinAcpHost('swe-2');
-    Object.assign(host, { child, config });
+    attach(host, { child, config });
     try {
       const descendantPid = await new Promise<number>((resolve, reject) => {
         child.stdout.once('data', (data: Buffer) => resolve(Number(data.toString().trim())));
@@ -54,7 +103,7 @@ describe('Devin ACP shutdown', () => {
     const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null, kill: vi.fn(() => true) });
     const cleanup = vi.fn(async () => undefined);
     const host = new DevinAcpHost('swe-2');
-    Object.assign(host, { child, config: { cleanup } });
+    attach(host, { child, config: { cleanup } });
     const first = host.close();
     const second = host.close();
     expect(first).toBe(second);
@@ -67,7 +116,7 @@ describe('Devin ACP shutdown', () => {
     const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null, kill: vi.fn(() => true) });
     const cleanup = vi.fn(async () => undefined);
     const host = new DevinAcpHost('swe-2');
-    Object.assign(host, { child, config: { cleanup }, connection: { close: vi.fn() } });
+    attach(host, { child, config: { cleanup }, connection: { close: vi.fn() } });
 
     const closing = host.close();
     await Promise.resolve();
@@ -81,7 +130,7 @@ describe('Devin ACP shutdown', () => {
   it('retains failed cleanup for a later reset attempt', async () => {
     const cleanup = vi.fn().mockRejectedValueOnce(new Error('locked')).mockResolvedValue(undefined);
     const host = new DevinAcpHost('swe-2');
-    Object.assign(host, { config: { cleanup } });
+    attach(host, { config: { cleanup } });
     await expect(host.close()).rejects.toThrow('locked');
     await host.close();
     expect(cleanup).toHaveBeenCalledTimes(2);

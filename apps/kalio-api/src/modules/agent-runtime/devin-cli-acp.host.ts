@@ -1,11 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { Readable, Transform, Writable } from 'node:stream';
+import { spawn } from 'node:child_process';
+import { Readable, Writable } from 'node:stream';
 import { isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
-import { createDevinCliConfig, type DevinCliConfigHandle } from './devin-cli-config';
+import { createDevinCliConfig } from './devin-cli-config';
 import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
-import { stopDevinChild } from './devin-cli-process-shutdown';
+import { createNdjsonFrameGuard, DevinCliAcpLifecycle } from './devin-cli-acp.lifecycle';
 import { assertDevinSessionModel, bindDevinSessionModel, devinAcpChildEnv } from './devin-cli-acp.model-selection';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
 import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, DEVIN_NATIVE_TOOL_CATEGORIES, type DevinNativeToolsPolicy } from './devin-native-tools';
@@ -24,8 +24,6 @@ import {
   type StopReason,
   type ToolCallContent,
 } from '@agentclientprotocol/sdk';
-
-const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 
 export { parseDevinCliProbe } from './devin-cli-probe.service';
 export type { DevinCliProbe, DevinCliProbeCommand, DevinCliProbeOutput } from './devin-cli-probe.service';
@@ -95,13 +93,13 @@ export class DevinAcpHost {
   private readonly earlyModelUpdates = new Map<string, SessionConfigOption[]>();
   private readonly logger = new Logger(DevinAcpHost.name);
   private readonly sessions = new Map<string, SessionState>();
-  private connection?: ClientConnection;
-  private child?: ChildProcessWithoutNullStreams;
+  private lifecycle = new DevinCliAcpLifecycle();
+  private get connection(): ClientConnection | undefined { return this.lifecycle.connection; }
+  private set connection(value: ClientConnection | undefined) { this.lifecycle.connection = value; }
   private processEpoch?: string;
   private capabilities: AgentCapabilities = {};
   private status: 'starting' | 'online' | 'error' | 'offline' = 'offline';
   private starting?: Promise<void>;
-  private config?: DevinCliConfigHandle;
   private closing = false;
   private closePromise?: Promise<void>;
 
@@ -181,11 +179,10 @@ export class DevinAcpHost {
   private async closeNow(): Promise<void> {
     this.closing = true;
     this.status = 'offline';
-    const child = this.child;
-    if (child && child.exitCode === null && child.signalCode === null) {
-      await stopDevinChild(child);
-    }
-    this.connection?.close();
+    const lifecycle = this.lifecycle;
+    // Interrupt initialize, but never dispose a config while its writes are pending.
+    const stopping = lifecycle.child || lifecycle.connection ? lifecycle.dispose() : undefined;
+    void stopping?.catch(() => { this.logger.warn('Devin ACP shutdown needs a reset retry.'); });
     if (this.starting) {
       try {
         await this.starting;
@@ -193,15 +190,12 @@ export class DevinAcpHost {
         this.logger.debug(`Devin ACP startup stopped during shutdown: ${asError(error, 'Startup interrupted.').message}`);
       }
     }
+    await stopping;
+    await lifecycle.dispose();
     this.status = 'offline';
-    this.connection = undefined;
-    this.child = undefined;
     this.starting = undefined;
     this.sessions.clear();
     this.earlyModelUpdates.clear();
-    const config = this.config;
-    await config?.cleanup();
-    this.config = undefined;
   }
 
   private async ensureConnection(mcpServers: readonly McpServer[] = []): Promise<ClientConnection> {
@@ -210,7 +204,12 @@ export class DevinAcpHost {
       await this.starting;
       return this.requireConnection();
     }
-    if (this.connection && !this.connection.signal.aborted) return this.connection;
+    if (this.lifecycle.disposal) {
+      await this.lifecycle.disposal;
+      return this.ensureConnection(mcpServers);
+    }
+    if (this.lifecycle.usable) return this.requireConnection();
+    if (this.lifecycle.hasResources) throw new Error('Devin ACP cleanup is incomplete; reset the host before continuing.');
     this.closing = false;
     this.status = 'starting';
     this.starting = this.startConnection(mcpServers);
@@ -223,66 +222,60 @@ export class DevinAcpHost {
   }
 
   private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
-    const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
-    const config = await createDevinCliConfig(this.model, mcpServers, this.nativePolicy);
-    this.config = config;
+    const lifecycle = this.lifecycle = new DevinCliAcpLifecycle();
     try {
+      const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
+      const config = await createDevinCliConfig(this.model, mcpServers, this.nativePolicy, handle => { lifecycle.config = handle; });
+      lifecycle.config = config;
       const suppressedCount = await suppressInheritedDevinMcp(spec.command, config, mcpServers.map(server => server.name));
       this.logger.debug(`Devin ACP private MCP overlay verified (${suppressedCount} inherited entries suppressed).`);
-    } catch (error) {
-      this.status = 'error';
-      await config.cleanup();
-      this.config = undefined;
-      throw error;
-    }
-    if (this.closing) {
-      throw new Error('Devin ACP host was closed during startup.');
-    }
-    // Devin 3000.3+ loads project MCP servers from the dedicated
-    // `.devin/mcp_config.local.json`; passing the legacy `--config` file
-    // bypasses that loader, so keep the ephemeral project overlay discoverable
-    // from the child cwd and select only the model on the command line.
-    const child = spawn(spec.command, spec.args, {
-      env: devinAcpChildEnv(process.env),
-      ...(config ? { cwd: config.cwd } : {}),
-      shell: false,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    const guardedStdout = child.stdout.pipe(createNdjsonFrameGuard());
-    const app = client({ name: 'kalio' })
-      .onRequest(methods.client.session.requestPermission, ({ params }) => this.handlePermission(params))
-      .onNotification(methods.client.session.update, ({ params }) => this.handleSessionUpdate(params));
-    const connection = app.connect(ndJsonStream(
-      Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
-      Readable.toWeb(guardedStdout) as unknown as ReadableStream<Uint8Array>,
-    ));
-    this.child = child;
-    this.connection = connection;
-    this.processEpoch = nanoid();
-    const processEpoch = this.processEpoch;
-    this.status = 'starting';
-    child.once('error', (error) => this.handleConnectionClosed(processEpoch, 'error', error));
-    child.once('exit', (code, signal) => this.handleConnectionClosed(processEpoch, 'exit', new Error(`Devin ACP exited (${code ?? 'null'}/${signal ?? 'none'}).`)));
-    void connection.closed.then(() => this.handleConnectionClosed(processEpoch, 'closed', new Error('Devin ACP connection closed.')));
-    try {
-      const response = await connection.agent.request(methods.agent.initialize, {
+      if (this.closing) {
+        throw new Error('Devin ACP host was closed during startup.');
+      }
+      // Devin 3000.3+ loads project MCP servers from the dedicated
+      // `.devin/mcp_config.local.json`; passing the legacy `--config` file
+      // bypasses that loader, so keep the ephemeral project overlay discoverable
+      // from the child cwd and select only the model on the command line.
+      const processEpoch = this.processEpoch = nanoid();
+      const onFailure = (reason: 'exit' | 'error' | 'closed', error: Error): void => this.handleConnectionClosed(lifecycle, processEpoch, reason, error);
+      const child = spawn(spec.command, spec.args, {
+        env: devinAcpChildEnv(process.env),
+        ...(config ? { cwd: config.cwd } : {}),
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      lifecycle.adoptChild(child, onFailure);
+      const guardedStdout = child.stdout.pipe(createNdjsonFrameGuard());
+      guardedStdout.once('error', error => onFailure('error', error));
+      const app = client({ name: 'kalio' })
+        .onRequest(methods.client.session.requestPermission, ({ params }) => this.handlePermission(params))
+        .onNotification(methods.client.session.update, ({ params }) => this.handleSessionUpdate(params));
+      const connection = app.connect(ndJsonStream(
+        Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
+        Readable.toWeb(guardedStdout) as unknown as ReadableStream<Uint8Array>,
+      ));
+      this.connection = connection;
+      this.status = 'starting';
+      void connection.closed.then(() => onFailure('closed', new Error('Devin ACP connection closed.')), () => onFailure('error', new Error('Devin ACP connection failed.')));
+      const response = await lifecycle.initialize(connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {},
         clientInfo: { name: 'kalio', title: 'Kalio', version: '0.1.0' },
-      });
+      }));
+      if (this.closing || !lifecycle.usable) throw new Error('Devin ACP host was closed during startup.');
       this.capabilities = response.agentCapabilities ?? {};
       this.status = 'online';
     } catch (error) {
-      this.status = 'error';
-      connection.close(error);
-      child.kill();
+      if (!this.closing) this.status = 'error';
+      try { await lifecycle.dispose(); }
+      catch { this.logger.warn('Devin ACP startup cleanup is incomplete; reset is required.'); }
       throw asError(error, 'Devin ACP initialization failed.');
     }
   }
 
   private buildSessionWorkspace(cwd: string): DevinSessionWorkspace {
-    const configCwd = this.config?.cwd;
+    const configCwd = this.lifecycle.config?.cwd;
     if (!configCwd) return { cwd };
     return this.capabilities.sessionCapabilities?.additionalDirectories !== undefined
       ? { cwd: configCwd, additionalDirectories: [cwd] }
@@ -395,13 +388,14 @@ export class DevinAcpHost {
     }
   }
 
-  private handleConnectionClosed(processEpoch: string, reason: 'exit' | 'error' | 'closed', error: Error): void {
-    if (processEpoch !== this.processEpoch || this.closing || this.status === 'offline') return;
+  private handleConnectionClosed(lifecycle: DevinCliAcpLifecycle, processEpoch: string, reason: 'exit' | 'error' | 'closed', error: Error): void {
+    if (lifecycle !== this.lifecycle || processEpoch !== this.processEpoch) return;
+    lifecycle.fail(error);
+    if (this.closing || this.status === 'offline') return;
     this.status = 'error';
     this.earlyModelUpdates.clear();
-    this.connection = undefined;
-    this.child = undefined;
     for (const session of this.sessions.values()) session.active?.rejectConnection(error);
+    if (!this.starting) void lifecycle.dispose().catch(() => { this.logger.warn('Devin ACP connection cleanup is incomplete; reset is required.'); });
     this.logger.warn(`Devin ACP host ${this.model} lost its process (${reason}).`);
   }
 
@@ -476,22 +470,6 @@ function normalizeCwd(cwd: string): string {
   return value;
 }
 
-
-function createNdjsonFrameGuard(): Transform {
-  let lineBytes = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback): void {
-      for (const byte of chunk) {
-        lineBytes = byte === 10 ? 0 : lineBytes + 1;
-        if (lineBytes > MAX_NDJSON_LINE_BYTES) {
-          callback(new Error('Devin ACP frame exceeded the maximum size.'));
-          return;
-        }
-      }
-      callback(null, chunk);
-    },
-  });
-}
 
 function asError(error: unknown, fallback: string): Error {
   return error instanceof Error ? error : new Error(fallback);
