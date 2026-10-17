@@ -131,6 +131,20 @@ describe('handleConnectionStateEvent', () => {
 
     expect(result.notices).toEqual([]);
   });
+
+  it.each([false, undefined])('replaces the reconnecting notice after a fresh connection (recovered=%s)', (recovered) => {
+    const result = runConnectionEventSequence(
+      'connected',
+      { hasConnectedOnce: true, hadRealDisconnect: false },
+      [{ status: 'reconnecting' }, { status: 'connected', recovered }],
+    );
+    expect(result.connectionState).toBe('connected');
+    expect(result.notices).toEqual([
+      'Connection dropped. Reconnecting and preserving this session.',
+      'Connection restored.',
+    ]);
+    expect(result.reconnectState).toEqual({ hasConnectedOnce: true, hadRealDisconnect: false });
+  });
 });
 
 describe('mergeRaAppNativeResultIntoMessages', () => {

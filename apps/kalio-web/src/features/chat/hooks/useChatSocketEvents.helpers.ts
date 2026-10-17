@@ -370,12 +370,13 @@ export function handleConnectionStateEvent(
 
   if (state.status === 'connected') {
     if (
-      state.recovered
-      && reconnectUiState.hasConnectedOnce
+      reconnectUiState.hasConnectedOnce
       && reconnectUiState.hadRealDisconnect
       && (previousState === 'reconnecting' || previousState === 'disconnected')
     ) {
-      deps.setRecoveryNotice('Recovered missed stream events after reconnect.');
+      deps.setRecoveryNotice(state.recovered
+        ? 'Recovered missed stream events after reconnect.'
+        : 'Connection restored.');
     }
     deps.setReconnectUiState({
       hasConnectedOnce: true,

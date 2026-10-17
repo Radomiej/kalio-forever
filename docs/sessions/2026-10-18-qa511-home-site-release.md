@@ -72,9 +72,30 @@ regressions reproduced 3 failures (CLI/conversation/tool_result); strict deadlin
 checks then passed all 9 focused tests. No timeout increase or assertion removal.
 Fresh parent API tsc/scoped lint/build exit 0; SWC compiled 921 files. Full API
 coverage run exit 0; exact summary retained in .tmp/qa511-wait-full-coverage.log.
-This follow-up requires its own pushed-head CI and QA deployment; the earlier
-9e2fd612 backend CI is failed, not release-green. Existing source/runtime evidence
-above remains scoped to the revision tested.
+fe7bdf2e was pushed and deployed to QA with provider settings preserved. Protected
+cold preflight passed; real resumed Devin used manual HITL to start preview
+terminal T26vOnIMpU9PU5lbUPr7b (turn z4_SisoZ9F4Ka9SJURi5X). Durable F5 and Graph
+show completed turn, two calls collapsed, final response. CI 39078780026 backend,
+frontend, tests and audit passed; E2E failed workflow deletion with
+ORDINARY_CANCELLATION_CONFLICT in all three attempts. This is an open runtime
+defect under investigation, not a green release or a reason to suppress checks.
+
+### Fresh-connection notice and test-sandbox hygiene
+
+The old QA tab successfully reconnected and ran Devin without F5, but still
+displayed Connection dropped because the notice only changed on recovered=true.
+Two deterministic RED cases (false/omitted recovered) now pass with the truthful
+Connection restored notice. Parent adjacent suite 820/820, final clean full FE
+232 files / 2093 tests, tsc/scoped lint/build exit 0. Built isolated Playwright
+reconnect/hydration 1/1 passed, separate database/random ports; fixed QA config
+restored after confirming unchanged stack state. Baseline jsdom XHR stderr remains.
+
+The first full FE attempt discovered mutation sandbox copies inside app .tmp and
+was explicitly stopped, not reported green. Only that verified Vitest process
+tree was terminated. The exact observer-reentry-sandbox-20261018 directory moved
+recoverably to root outputs/observer-reentry-sandbox-quarantine-20261018; no user
+or QA data deleted. AGENTS now requires mutation copies outside application test
+roots. The subsequent clean full run above is the authoritative result.
 
 RAD-14 Done read verified on owner instruction, not a waiver of security
 acceptance criteria. Leave QA/preview running. Push only the feature branch,
