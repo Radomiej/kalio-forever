@@ -29,7 +29,12 @@ export type KalioDrizzleDatabase = BaseSQLiteDatabase<
   typeof schemaModule
 >;
 
-type SqliteConstructor = new (filename: string) => SqliteClient;
+interface SqliteOpenOptions {
+  readonly?: boolean;
+  fileMustExist?: boolean;
+}
+
+type SqliteConstructor = new (filename: string, options?: SqliteOpenOptions & { create?: boolean }) => SqliteClient;
 
 type DrizzleFactory = (config: { client: unknown; schema: typeof schemaModule }) => unknown;
 type MigrationRunner = (database: unknown, config: { migrationsFolder: string }) => void;
@@ -77,19 +82,23 @@ export function resolveSqliteDriver(requested = process.env.KALIO_SQLITE_DRIVER)
 export function createSqliteDatabase(
   dbPath: string,
   requested?: string,
+  options?: SqliteOpenOptions,
 ): { client: SqliteClient; driver: SqliteDriver } {
   const driver = resolveSqliteDriver(requested);
   if (driver === 'bun') {
     const bunDatabase = readNamedExport(runtimeRequire('bun:sqlite'), 'Database');
     const BunDatabase = readConstructor(bunDatabase, 'bun:sqlite.Database');
     return {
-      client: new BunDatabase(dbPath),
+      client: new BunDatabase(dbPath, options ? {
+        readonly: options.readonly ?? false,
+        create: !options.readonly && !options.fileMustExist,
+      } : undefined),
       driver,
     };
   }
 
   const NodeDatabase = readConstructor(runtimeRequire('better-sqlite3'), 'better-sqlite3');
-  return { client: new NodeDatabase(dbPath), driver };
+  return { client: new NodeDatabase(dbPath, options), driver };
 }
 
 export function createDrizzleDatabase(

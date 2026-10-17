@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { createSqliteDatabase } from '../../database/sqlite-runtime';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { EmbeddingSpace, MemorySearchResult } from '@kalio/types';
@@ -21,7 +21,7 @@ export function partitionPath(base: string, persona: string, profile: string, ki
 
 /** Read text only: never initialize vec0 with the target model's dimensions. */
 export function readMemorySource(dbPath: string): VecEntry[] {
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const db = createSqliteDatabase(dbPath, undefined, { readonly: true, fileMustExist: true }).client;
   try {
     const columns = db.prepare('PRAGMA table_info(memories)').all() as { name: string }[];
     if (!columns.length) return [];
