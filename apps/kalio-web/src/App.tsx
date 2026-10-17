@@ -36,23 +36,15 @@ import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { apiClient } from './services/apiClient';
-import { eventBus } from './services/eventBus';
-import { loadConversationSessions, loadRuntimeWatchlist } from './services/sessionBootstrap';
-import {
-  identifyWatchedSession,
-  replaceBaselineWatchedSessions,
-  resetSessionWatchConnectionEpoch,
-} from './services/sessionWatchRegistry';
+import { useAppSessionBootstrap } from './App.sessionBootstrap';
 import { useSettingsStore } from './features/settings/settingsStore';
 import { activateConversationSession } from './features/chat/activeConversationSession';
-import { preloadRuntimeWatchSessionHistory } from './features/chat/runtimeWatchHistoryBootstrap';
 import { selectRuntimeAttentionItems } from './store/agentRuntimeSelectors';
 import {
   RUNTIME_ATTENTION_REVIEWED_EVENT,
   readReviewedRuntimeAttentionKeys,
   selectRuntimeAttentionNotice,
 } from './store/agentRuntimeAttentionNotice';
-import { mergeSessionsPreservingLocal } from './features/sessions/mergeSessionsPreservingLocal';
 
 export function App() {
   const initialViewState = loadAppViewState();
@@ -80,7 +72,7 @@ export function App() {
     settingsOpenerRef.current = null;
   }, [settingsOpen]);
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const { sessions, activeSessionId, sessionMessages, setActiveSession, setSessions } = useSessionStore();
+  const { sessions, sessionMessages, setActiveSession } = useSessionStore();
   const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
@@ -109,7 +101,7 @@ export function App() {
       : `${talkAttentionCount} attention item${talkAttentionCount === 1 ? '' : 's'} waiting`;
   const hasTalkAttention = talkAttentionCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
-  const bootstrapFetchSeqRef = useRef(0);
+  useAppSessionBootstrap({ isTalkActive: activeSection === 'talk' });
 
   useEffect(() => {
     let wasCompact = window.innerWidth < 1024;
@@ -162,64 +154,6 @@ export function App() {
         console.warn('[App] Failed to load backend LLM config', err);
       });
   }, [setBackendConfig]);
-
-  useEffect(() => {
-    const requestSeq = bootstrapFetchSeqRef.current + 1;
-    bootstrapFetchSeqRef.current = requestSeq;
-    const shouldFetchSessions = useSessionStore.getState().sessions.length === 0;
-
-    void Promise.all([
-      shouldFetchSessions ? loadConversationSessions() : Promise.resolve(useSessionStore.getState().sessions),
-      loadRuntimeWatchlist(),
-    ])
-      .then(([sessionsFromApi, runtimeWatchTargets]) => {
-        if (bootstrapFetchSeqRef.current !== requestSeq) {
-          return;
-        }
-        const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
-        if (shouldFetchSessions) {
-          setSessions(mergedSessions);
-        }
-        replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'bootstrap-watchlist');
-        void preloadRuntimeWatchSessionHistory({
-          sessions: mergedSessions,
-          runtimeWatchTargets,
-        });
-        identifyWatchedSession(useSessionStore.getState().activeSessionId, 'bootstrap-active-session', { sticky: true });
-      })
-      .catch((err: unknown) => {
-        console.warn('[App] Failed to load bootstrap runtime state', err);
-      });
-  }, [setSessions]);
-
-  useEffect(() => {
-    identifyWatchedSession(activeSessionId, 'active-session', { sticky: true });
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    const offReconnect = eventBus.onReconnect(() => {
-      resetSessionWatchConnectionEpoch('socket-reconnect');
-      void Promise.all([
-        loadConversationSessions({ force: true }),
-        loadRuntimeWatchlist({ force: true }),
-      ])
-        .then(([sessionsFromApi, runtimeWatchTargets]) => {
-          const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
-          setSessions(mergedSessions);
-          replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'reconnect-watchlist');
-          void preloadRuntimeWatchSessionHistory({
-            sessions: mergedSessions,
-            runtimeWatchTargets,
-            force: true,
-          });
-          identifyWatchedSession(useSessionStore.getState().activeSessionId, 'reconnect-active-session', { sticky: true });
-        })
-        .catch((err: unknown) => {
-          console.warn('[App] Failed to refresh sessions after reconnect', err);
-        });
-    });
-    return offReconnect;
-  }, [setSessions]);
 
   // Close canvas when navigating away from talk
   useEffect(() => {
