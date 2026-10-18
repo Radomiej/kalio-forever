@@ -441,8 +441,9 @@ export class ProjectIdeRuntimeManager implements OnModuleDestroy {
       const descriptor = await waitForConnection(connectionFile, rootPath, port, child);
       return this.attachRuntime(projectId, rootPath, runtimeDir, descriptor, lease, child);
     } catch (error) {
-      try { await terminateManagedProcess(lease, rootHash, rootPath); } catch (terminationError) { this.emitAudit('runtime.failed', projectId, undefined, undefined, 'IDE_PROCESS_OWNERSHIP_UNVERIFIED'); if (terminationError instanceof Error) error = new Error(`${error instanceof Error ? error.message : String(error)}; ${terminationError.message}`); }
-      const typed = error instanceof CodeIntelligenceError ? error : new CodeIntelligenceError('IDE_START_TIMEOUT', 'Managed VS Code Bridge did not become ready before the deadline.');
+      let startupError = error;
+      try { await terminateManagedProcess(lease, rootHash, rootPath); } catch (terminationError) { this.emitAudit('runtime.failed', projectId, undefined, undefined, 'IDE_PROCESS_OWNERSHIP_UNVERIFIED'); if (terminationError instanceof Error) startupError = new Error(`${error instanceof Error ? error.message : String(error)}; ${terminationError.message}`); }
+      const typed = startupError instanceof CodeIntelligenceError ? startupError : new CodeIntelligenceError('IDE_START_TIMEOUT', 'Managed VS Code Bridge did not become ready before the deadline.');
       const safeMessage = redactSecrets(typed.message);
       const safeError = new CodeIntelligenceError(typed.code, safeMessage);
       this.failures.set(projectId, { code: safeError.code, message: safeError.message });

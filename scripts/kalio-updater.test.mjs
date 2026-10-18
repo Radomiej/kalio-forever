@@ -63,3 +63,14 @@ test('runtime manifest signs and verifies its exact payload with Ed25519', async
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Linux force-stop ownership is case-sensitive and rejects another installation', { skip: process.platform !== 'linux' }, () => {
+  assert.equal(isRuntimeProcessOwned('/tmp/Kalio', {
+    ExecutablePath: '/tmp/kalio/app/versions/1.0.0/bin/kalio-node',
+    CommandLine: '/tmp/kalio/app/versions/1.0.0/bin/kalio-node /tmp/kalio/app/versions/1.0.0/bin/kalio-cli.mjs serve',
+  }), false);
+  assert.equal(isRuntimeProcessOwned('/tmp/Kalio', {
+    ExecutablePath: '/tmp/Kalio/app/versions/1.0.0/bin/kalio-node',
+    CommandLine: '/tmp/Kalio/app/versions/1.0.0/bin/kalio-node /tmp/Kalio/app/versions/1.0.0/bin/kalio-cli.mjs serve',
+  }), true);
+});

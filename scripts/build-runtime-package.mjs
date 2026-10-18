@@ -2,6 +2,7 @@ import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:f
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRuntimeDependencies } from './runtime-dependencies.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -123,35 +124,21 @@ function getPnpm() {
   return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 }
 
-function getPnpmMajor(pnpm) {
-  const result = spawnSync(pnpm, ['--version'], {
-    cwd: root,
-    encoding: 'utf8',
-    shell: process.platform === 'win32' && pnpm.endsWith('.cmd'),
-    windowsHide: true,
-  });
-  if (result.error || result.status !== 0) {
-    throw result.error ?? new Error('Unable to resolve pnpm version');
-  }
-  const major = Number.parseInt(result.stdout.trim().split('.')[0] ?? '', 10);
-  if (!Number.isInteger(major)) {
-    throw new Error('Unable to parse pnpm version: ' + result.stdout.trim());
-  }
-  return major;
-}
-
 async function installFlatRuntimeDependencies() {
   const packageJsonPath = join(serverRoot, 'package.json');
   const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8'));
-  const runtimeDependencies = Object.fromEntries(
-    Object.entries(manifest.dependencies ?? {}).filter(([name]) => (
-      name !== '@kalio/types' && (runtime !== 'bun' || name !== 'better-sqlite3')
-    )),
-  );
+  const workspace = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  const installedVersions = {};
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    if (name === '@kalio/types' || (runtime === 'bun' && name === 'better-sqlite3')) continue;
+    installedVersions[name] = JSON.parse(await readFile(join(root, 'apps/kalio-api/node_modules', name, 'package.json'), 'utf8')).version;
+  }
+  const runtimeDependencies = createRuntimeDependencies(manifest.dependencies ?? {}, installedVersions, runtime);
   await writeFile(packageJsonPath, JSON.stringify({
     name: 'kalio-runtime-server',
     version,
     private: true,
+    packageManager: workspace.packageManager,
     dependencies: runtimeDependencies,
   }, null, 2) + '\n', 'utf8');
   await rm(join(serverRoot, 'node_modules'), { recursive: true, force: true });
@@ -274,19 +261,7 @@ await mkdir(outputRoot, { recursive: true });
 await requirePath(join(apiDist, 'main.js'), 'API build');
 await requirePath(join(webDist, 'index.html'), 'web build');
 
-const deployArgs = [
-  '--config.virtual-store-dir-max-length=40',
-  '--filter',
-  'kalio-api',
-  'deploy',
-  '--prod',
-  serverRoot,
-];
-const pnpm = getPnpm();
-if (getPnpmMajor(pnpm) >= 10) {
-  deployArgs.splice(deployArgs.length - 1, 0, '--legacy');
-}
-run(pnpm, deployArgs);
+await cp(join(root, 'apps/kalio-api/package.json'), join(serverRoot, 'package.json'));
 await installFlatRuntimeDependencies();
 await removeLinuxOptionalArtifacts();
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });

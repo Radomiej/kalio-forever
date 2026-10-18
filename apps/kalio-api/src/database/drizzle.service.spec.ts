@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -145,7 +146,9 @@ describe('DrizzleService fail-fast migrations', () => {
       const journalRows = sqlite.prepare(
         'SELECT hash, created_at AS createdAt FROM "__drizzle_migrations" ORDER BY id ASC',
       ).all() as Array<{ hash: string; createdAt: number }>;
-      expect(journalRows).toHaveLength(28);
+      expect(journalRows.map((row) => row.hash)).toEqual(
+        readMigrationFiles({ migrationsFolder }).map((migration) => migration.hash),
+      );
       expect(sqlite.prepare(
         'SELECT 1 FROM sqlite_master WHERE type = \'index\' AND name = \'messages_session_tool_result_unique\'',
       ).get()).toBeTruthy();
