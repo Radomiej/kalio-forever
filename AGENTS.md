@@ -267,6 +267,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Keep mutation-test sandbox copies outside application roots (for example root `outputs/`); Git-ignored app `.tmp/` copies can still be discovered as tests by Vitest. Quarantine verified copies before final gates.
 - Embeddings settings must derive model identity in the backend and show the selected model, actual readiness and reindex need; never require users to enter digest or provider-scope fields.
 - Do not push changes directly to `main` except an explicitly approved urgent CI repair. Rebase feature branches onto the latest `origin/main`, resolve conflicts, review the complete diff for secrets and unintended changes, verify required tests/CI, then push and open a PR; leave the PR open for user approval and never merge it without explicit confirmation.
+- Before declaring a PR blocked only on approval, enumerate and validate its inline review threads as well as review submissions; a green CI or a short review summary does not close unresolved findings.
 
 ---
 
