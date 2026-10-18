@@ -79,6 +79,13 @@ export function ProjectContextCard({ status, onApplied }: { status: EmbeddingSta
         if (!mounted.current || current !== generation.current) return;
         setSaved(settings); setDraft(settings); setIndexStatus(null);
         await onApplied?.();
+        if (!mounted.current || current !== generation.current) return;
+        const id = selectedProject.current;
+        if (settings.enabled && id) {
+          const index = await projectContextTransport.getStatus(id);
+          if (!mounted.current || current !== generation.current || id !== selectedProject.current) return;
+          setIndexStatus(index);
+        }
         if (mounted.current && current === generation.current) setMessage('Project context settings applied.');
       } else if (action === 'refresh') {
         const result = await projectContextTransport.refresh(projectId, allowRemote);

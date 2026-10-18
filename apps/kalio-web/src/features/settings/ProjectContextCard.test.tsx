@@ -19,6 +19,108 @@ async function ready(status = local) {
 }
 
 describe('ProjectContextCard', () => {
+  it('enables first search after applying indexing to an already selected project', async () => {
+    const { createProjectContextTransport } = await vi.importActual<typeof import('./project-context.transport')>('./project-context.transport');
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('[]'));
+    api.search.mockImplementation(createProjectContextTransport(fetcher).search);
+    api.getStatus.mockResolvedValue({ projectId: 'q', space, indexedChunks: 0, indexedAt: null });
+    const user = userEvent.setup(); await ready();
+    await user.selectOptions(screen.getByLabelText('Project'), 'q');
+    await screen.findByText(/Not indexed/);
+    await user.type(screen.getByLabelText('Search project context'), '  contact  ');
+    await user.click(screen.getByRole('checkbox', { name: 'Allow project indexing' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await screen.findByText('Project context settings applied.');
+    expect(screen.getByRole('button', { name: 'Search' })).toBeEnabled();
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
+    expect(api.getStatus).toHaveBeenLastCalledWith('q');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByText('No matching project resources.');
+    expect(api.search).toHaveBeenCalledWith('q', 'contact', false);
+    expect(fetcher).toHaveBeenCalledWith('/api/memory/project-resources/q/search', expect.objectContaining({
+      method: 'PUT', body: JSON.stringify({ query: 'contact', mode: 'hybrid' }),
+    }));
+    expect(api.refresh).not.toHaveBeenCalled();
+  });
+
+  it('discards status requested before Apply and consumes remote consent before the next search', async () => {
+    let finishOldStatus!: (value: unknown) => void;
+    api.getStatus.mockImplementationOnce(() => new Promise(resolve => { finishOldStatus = resolve; }));
+    const user = userEvent.setup(); await ready(remote);
+    await user.selectOptions(screen.getByLabelText('Project'), 'p');
+    await user.type(screen.getByLabelText('Search project context'), 'contact');
+    await user.click(screen.getByRole('checkbox', { name: /Allow remote processing/ }));
+    await user.click(screen.getByRole('checkbox', { name: 'Allow project indexing' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await screen.findByText('Project context settings applied.');
+    await act(async () => { finishOldStatus({ projectId: 'p', space: { model: 'stale-model', modelRevision: 'old' }, indexedChunks: 99, indexedAt: 1000 }); });
+    expect(screen.queryByText(/stale-model/)).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Allow remote processing/ })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+    await user.click(screen.getByRole('checkbox', { name: /Allow remote processing/ }));
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByText('No matching project resources.');
+    expect(api.search).toHaveBeenCalledWith('p', 'contact', true);
+    expect(screen.getByRole('checkbox', { name: /Allow remote processing/ })).not.toBeChecked();
+    expect(api.refresh).not.toHaveBeenCalled();
+  });
+
+  it('leaves a new provider load authoritative when onApplied changes the provider', async () => {
+    let finishApplied!: () => void;
+    const onApplied = vi.fn(() => new Promise<void>(resolve => { finishApplied = resolve; }));
+    const user = userEvent.setup(); const view = render(<ProjectContextCard status={local} onApplied={onApplied} />);
+    await waitFor(() => expect(screen.getByLabelText('Project')).toBeEnabled());
+    await user.selectOptions(screen.getByLabelText('Project'), 'p');
+    await screen.findByText(/Not indexed/);
+    await user.click(screen.getByRole('checkbox', { name: 'Allow project indexing' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    api.getSettings.mockResolvedValue({ ...settings, enabled: true });
+    api.getStatus.mockResolvedValue({ projectId: 'p', space: { model: 'new-model', modelRevision: 'new' }, indexedChunks: 0, indexedAt: null });
+    view.rerender(<ProjectContextCard status={{ ...local, model: 'new-model' }} onApplied={onApplied} />);
+    await screen.findByText(/new-model/);
+    await act(async () => { finishApplied(); });
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/new-model/)).toBeInTheDocument();
+    expect(screen.queryByText('Project context settings applied.')).not.toBeInTheDocument();
+  });
+
+  it('reports a failed status reload after Apply without unlocking search or skipping the callback', async () => {
+    const onApplied = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup(); render(<ProjectContextCard status={local} onApplied={onApplied} />);
+    await waitFor(() => expect(screen.getByLabelText('Project')).toBeEnabled());
+    await user.selectOptions(screen.getByLabelText('Project'), 'p');
+    await screen.findByText(/Not indexed/);
+    api.getStatus.mockRejectedValueOnce(new Error('status unavailable'));
+    await user.type(screen.getByLabelText('Search project context'), 'contact');
+    await user.click(screen.getByRole('checkbox', { name: 'Allow project indexing' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await screen.findByText('status unavailable');
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Search' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Allow project indexing' })).toBeChecked();
+  });
+
+  it.each(['provider change', 'unmount'] as const)('ignores an Apply status response after %s', async boundary => {
+    const user = userEvent.setup(); const view = await ready();
+    await user.selectOptions(screen.getByLabelText('Project'), 'p');
+    await screen.findByText(/Not indexed/);
+    let finishStatus!: (value: unknown) => void;
+    api.getStatus.mockImplementationOnce(() => new Promise(resolve => { finishStatus = resolve; }));
+    await user.click(screen.getByRole('checkbox', { name: 'Allow project indexing' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(api.getStatus).toHaveBeenCalledTimes(2));
+    if (boundary === 'provider change') {
+      api.getStatus.mockResolvedValue({ projectId: 'p', space: { model: 'new-model', modelRevision: 'new' }, indexedChunks: 0, indexedAt: null });
+      view.rerender(<ProjectContextCard status={{ ...local, model: 'new-model' }} />);
+      await screen.findByText(/new-model/);
+    } else view.unmount();
+    await act(async () => { finishStatus({ projectId: 'p', space: { model: 'stale-model', modelRevision: 'old' }, indexedChunks: 99, indexedAt: 1000 }); });
+    expect(screen.queryByText(/stale-model/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Project context settings applied.')).not.toBeInTheDocument();
+    if (boundary === 'provider change') expect(screen.getByText(/new-model/)).toBeInTheDocument();
+  });
+
   it('allows the first search and displays the index created by backend auto-refresh', async () => {
     api.getSettings.mockResolvedValue({ ...settings, enabled: true });
     const user = userEvent.setup(); await ready();
