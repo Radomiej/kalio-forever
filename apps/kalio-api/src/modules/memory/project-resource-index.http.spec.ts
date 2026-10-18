@@ -2,11 +2,11 @@ import 'reflect-metadata';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROJECT_RESOURCE_READER, type EmbeddingSpace } from '@kalio/types';
+import { PROJECT_RESOURCE_READER, PROJECT_RESOURCE_INDEX_STORAGE, type EmbeddingSpace } from '@kalio/types';
+import { ProjectResourceIndexStorage } from '../vfs/project-resource-index-storage';
 import { DecisionAuthService } from '../../common/decision-auth.service';
 import { EmbeddingService } from './embedding.service';
 import { ProjectResourceAuthGuard } from './project-resource-auth.guard';
@@ -33,7 +33,7 @@ describe('resource HTTP to real SQLite', () => {
     const authEnv = { PORT: '0', KALIO_CONTROL_PLANE_TOKEN: token, KALIO_DECISION_FRONTEND_ORIGINS: 'http://localhost:5288' };
     const values = new Map([['project_context_settings', JSON.stringify({ enabled: true, modelRevision: '1', providerScope: 'test' })]]);
     const module = await Test.createTestingModule({ controllers: [ProjectResourceIndexController, ProjectContextSettingsController], providers: [ProjectResourceIndexService, ProjectResourceAuthGuard, ProjectContextSettingsService, ProjectContextSettingsGuard,
-      { provide: ConfigService, useValue: new ConfigService({ MEMORY_DB_PATH: root }) },
+      { provide: PROJECT_RESOURCE_INDEX_STORAGE, useValue: new ProjectResourceIndexStorage(root) },
       { provide: AppSettingsService, useValue: { get: async (key: string) => values.get(key) ?? null,
         set: async (key: string, value: string) => { values.set(key, value); } } },
       { provide: DrizzleService, useValue: {} },

@@ -1,8 +1,7 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
-import { PROJECT_CONTEXT_PORT, PROJECT_RESOURCE_READER, type ProjectContextPort } from '@kalio/types';
+import { PROJECT_CONTEXT_PORT, PROJECT_RESOURCE_READER, PROJECT_RESOURCE_INDEX_STORAGE, type ProjectContextPort } from '@kalio/types';
 import { createDrizzleDatabase, createSqliteDatabase } from '../../database/sqlite-runtime';
 import { DrizzleService } from '../../database/drizzle.service';
 import * as schema from '../../database/schema';
@@ -25,7 +24,10 @@ describe('registered HomeSite shared project context port', () => {
     const module = await Test.createTestingModule({ providers: [ProjectResourceIndexService, ProjectResourceReaderService,
       { provide: PROJECT_CONTEXT_PORT, useExisting: ProjectResourceIndexService },
       { provide: PROJECT_RESOURCE_READER, useExisting: ProjectResourceReaderService },
-      { provide: ConfigService, useValue: new ConfigService() }, { provide: DrizzleService, useValue: drizzle },
+      // This boundary test replaces indexing below; storage allocation must not be reached.
+      { provide: PROJECT_RESOURCE_INDEX_STORAGE, useValue: { exists: () => false,
+        prepare: () => { throw new Error('UNEXPECTED_INDEX_ALLOCATION'); } } },
+      { provide: DrizzleService, useValue: drizzle },
       { provide: EmbeddingService, useValue: {} }, { provide: ProjectContextSettingsService, useValue: {} },
     ] }).compile();
     try {
