@@ -2,6 +2,9 @@ import test from 'node:test';
 import './packaged-types.test.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { basename, isAbsolute, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createWorkflowGateDataRoot } from './workflow-gate-storage.mjs';
 
 const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.meta.url), 'utf8');
 const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
@@ -278,7 +281,12 @@ test('workflow release gate starts a fresh mock QA stack by default', () => {
 });
 
 test('workflow release gate uses an isolated data root for fresh mock QA runs', () => {
-  assert.match(workflowReleaseGateSource, /function createWorkflowGateDataRoot\(\)/);
+  const root = createWorkflowGateDataRoot();
+  assert.ok(isAbsolute(root));
+  assert.ok(!relative(tmpdir(), root).startsWith('..'));
+  assert.equal(basename(root), 'playwright-stack');
+  assert.ok(resolve(root, 'kalio-qa.db').replaceAll('\\', '/').includes('playwright-stack/'),
+    'must satisfy the real launch/provider fixture storage guard');
   assert.match(workflowReleaseGateSource, /'--data-root',\s*createWorkflowGateDataRoot\(\)/s);
 });
 

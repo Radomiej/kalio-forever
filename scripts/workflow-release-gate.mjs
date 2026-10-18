@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createWorkflowGateDataRoot } from './workflow-gate-storage.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
@@ -51,10 +51,6 @@ function normalizedWindowsEnv(baseEnv) {
   const pathValue = baseEnv.PATH ?? baseEnv.Path ?? '';
   env.Path = `${nodeDir};${pathValue}`;
   return env;
-}
-
-function createWorkflowGateDataRoot() {
-  return resolve(tmpdir(), `kalio-workflow-gate-${process.pid}-${Date.now()}`);
 }
 
 function run(command, commandArgs, options) {
