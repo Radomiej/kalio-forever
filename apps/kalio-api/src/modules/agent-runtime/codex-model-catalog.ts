@@ -33,12 +33,10 @@ export async function readCodexModels(connection: Pick<CodexAppServerConnection,
 }
 
 async function requestPage(connection: Pick<CodexAppServerConnection, 'request'>, params: Record<string, unknown>): Promise<unknown> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('Codex model catalog request timed out.')), 15_000);
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('Codex model catalog request timed out.')), 15_000);
   try {
-    return await Promise.race([connection.request('model/list', params), timeout]);
+    return await connection.request('model/list', params, { signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }

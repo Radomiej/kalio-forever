@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { nanoid } from 'nanoid';
+import { sendCodexAppServerRequest } from './codex-app-server-request';
 import { CodexMcpPolicyService } from './codex-mcp-policy.service';
 import { CmdInvocationAuditService } from '../chat/cmd-invocation-audit.service';
 import {
@@ -47,7 +48,7 @@ export type CodexAppServerLifecycleEvent = {
 export interface CodexAppServerConnection {
   readonly processEpoch: string;
   isClosed?(): boolean;
-  request(method: string, params: unknown): Promise<unknown>;
+  request(method: string, params: unknown, options?: { signal?: AbortSignal }): Promise<unknown>;
   notify(method: string, params?: unknown): void;
   respond(id: string | number, result: unknown): void;
   onRequest(listener: (request: CodexServerRequest) => void | Promise<void>): () => void;
@@ -206,19 +207,12 @@ class StdioCodexAppServerConnection implements CodexAppServerConnection {
     return connection;
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, options?: { signal?: AbortSignal }): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error('Codex App Server connection is closed.'));
-    const id = String(this.nextRequestId++);
-    const message = JSON.stringify({ id, method, params });
-    return new Promise((resolve, reject) => {
-      this.router.registerPending(id, { resolve, reject });
-      try {
-        this.child.stdin.write(`${message}\n`);
-      } catch (error) {
-        this.router.removePending(id);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
+    return sendCodexAppServerRequest(
+      this.router, String(this.nextRequestId++), method, params,
+      (message, callback) => this.child.stdin.write(message, callback), options?.signal,
+    );
   }
 
   notify(method: string, params?: unknown): void {

@@ -7,8 +7,8 @@ describe('readCodexModels', () => {
       .mockResolvedValueOnce({ data: [{ model: 'current', hidden: false }, { model: 'hidden', hidden: true }], nextCursor: 'page-2' })
       .mockResolvedValueOnce({ data: [{ model: 'current' }, { model: 'other' }], nextCursor: null });
     await expect(readCodexModels({ request })).resolves.toEqual(['current', 'other']);
-    expect(request).toHaveBeenNthCalledWith(1, 'model/list', { limit: 100, includeHidden: false });
-    expect(request).toHaveBeenNthCalledWith(2, 'model/list', { limit: 100, includeHidden: false, cursor: 'page-2' });
+    expect(request).toHaveBeenNthCalledWith(1, 'model/list', { limit: 100, includeHidden: false }, { signal: expect.any(AbortSignal) });
+    expect(request).toHaveBeenNthCalledWith(2, 'model/list', { limit: 100, includeHidden: false, cursor: 'page-2' }, { signal: expect.any(AbortSignal) });
   });
 
   it('preserves an authoritative empty catalog without configured fallback', async () => {
@@ -32,10 +32,17 @@ describe('readCodexModels', () => {
   it('bounds an unresponsive host request', async () => {
     vi.useFakeTimers();
     try {
-      const read = readCodexModels({ request: vi.fn(() => new Promise<unknown>(() => undefined)) });
+      let signal: AbortSignal | undefined;
+      const read = readCodexModels({ request: (_method, _params, options) => new Promise<unknown>((_resolve, reject) => {
+        signal = options?.signal;
+        signal?.addEventListener('abort', () => reject(signal?.reason), { once: true });
+      }) });
       const rejected = expect(read).rejects.toThrow('timed out');
       await vi.advanceTimersByTimeAsync(15_000);
       await rejected;
+      expect(signal?.aborted).toBe(true);
+      await expect(read).rejects.toBe(signal?.reason);
+      expect(signal?.reason).toEqual(new Error('Codex model catalog request timed out.'));
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
