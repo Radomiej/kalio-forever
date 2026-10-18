@@ -10,6 +10,8 @@ import { ChatService } from './chat.service';
 import { SessionPipelineService } from './session-pipeline.service';
 import { RunJournalService } from './run-journal.service';
 import { ChatGateway } from './chat.gateway';
+import { SessionRuntimeStopService } from './session-runtime-stop.service';
+import { sessionTreeStopAdmission } from '../../database/session-tree-stop-admission';
 import { resolveToolConfirmation } from './chat.runtime-hitl';
 import type { EmitFn, StreamContext } from './interfaces/stream-context.interface';
 import type { LLMTurnRuntimeService } from './llm-turn-runtime.service';
@@ -50,6 +52,7 @@ async function fixture() {
   const emit = vi.fn<EmitFn>();
   const manager = { ensureSession: vi.fn(), persistUserMessage: vi.fn(), saveToolResult: vi.fn().mockResolvedValue(undefined) };
   const sessions = {
+    claimTreeStop: (id: string) => sessionTreeStopAdmission(db).claim(id),
     listChildren: vi.fn().mockResolvedValue([]), getMessages: vi.fn().mockResolvedValue([]),
     get: vi.fn().mockResolvedValue({ id: 'session', personaId: 'persona', projectId: 'project', executionProfileId: 'devin-swe-2', externalThreadId: 'thread' }),
   };
@@ -140,7 +143,8 @@ describe('restored HITL shared admission (isolated SQLite)', () => {
     const gateway = new ChatGateway(f.dispatch as never, f.pipeline, {} as never, f.sessions as never,
       { onSessionCreated: vi.fn(), onSessionUpdated: vi.fn() } as never,
       { getPendingApprovals: vi.fn().mockReturnValue([]) } as never,
-      undefined, undefined, undefined, undefined, undefined, f.requests, f.chat);
+      undefined, undefined, undefined, undefined, f.requests, f.chat,
+      new SessionRuntimeStopService(f.sessions as never, f.pipeline));
     const client = { id: 'socket', emit: vi.fn() };
     gateway.handleConnection(client as never);
     (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions.get('socket')!.add('session');

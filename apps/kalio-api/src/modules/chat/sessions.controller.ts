@@ -130,11 +130,9 @@ export class SessionsController {
 
   @Delete(':id')
   async delete(@Param('id') id: string): Promise<void> {
-    const sessionTree = await this.runtimeStop.stopSessionTree(id);
-    const deleteOrder = [...sessionTree.sessionIds].reverse();
-    for (const sessionId of deleteOrder) {
-      await this.sessions.delete(sessionId);
-    }
+    await this.runtimeStop.withStoppedTree(id, async sessionTree => {
+      for (const sessionId of [...sessionTree.sessionIds].reverse()) await this.sessions.delete(sessionId);
+    });
   }
 
   @Post(':id/archive')

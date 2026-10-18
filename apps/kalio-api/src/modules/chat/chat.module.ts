@@ -188,14 +188,13 @@ export class ChatModule implements OnModuleInit {
     private readonly pipeline: SessionPipelineService,
     private readonly toolDispatch: ToolDispatchService,
     private readonly hitlNotifications: HitlNotificationService,
+    private readonly runtimeStop: SessionRuntimeStopService,
   ) {}
 
   onModuleInit(): void {
     this.telegramRelay.setCommandHandlers({
       stopAll: async () => {
-        for (const id of this.pipeline.getActiveSessionIds()) {
-          this.pipeline.stop(id);
-        }
+        await this.runtimeStop.stopSessionTrees([...this.pipeline.getActiveSessionIds()]);
       },
       getStatus: async () => {
         const ids = this.pipeline.getActiveSessionIds();

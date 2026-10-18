@@ -42,15 +42,15 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
       where: () => ({
         orderBy: () => rowQuery(rows.filter((row) => row.archivedAt == null)),
         limit: (limit: number) => Promise.resolve(rows.slice(0, limit)),
+        get: () => rows[0] ? { id: rows[0].id, parent: rows[0].parentSessionId ?? null } : undefined,
       }),
     }),
   });
   const insert = () => ({
-    values: (row: FakeRow) => {
+    values: (row: FakeRow) => ({ run: () => {
       ops.push('insert');
       rows.push(row);
-      return Promise.resolve();
-    },
+    } }),
   });
   const update = () => ({
     set: (patch: Partial<FakeRow>) => ({

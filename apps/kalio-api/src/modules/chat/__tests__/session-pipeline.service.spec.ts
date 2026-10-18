@@ -712,4 +712,34 @@ describe('SessionPipelineService', () => {
   it('abortAll on idle session (no active turn) is a no-op and does not throw', () => {
     expect(() => svc.abortAll('never-used-session')).not.toThrow();
   });
+
+  it('retains admission past owner settlement and finalization until action release', async () => {
+    let settle!: () => void;
+    const owners = new Promise<void>(resolve => { settle = resolve; });
+    const finalize = vi.fn(async () => undefined);
+    Object.assign(chatHarness.chat, { cancelPendingContinuations: finalize });
+    const lease = svc.acquireStopLease('s1', owners);
+    expect(() => svc.seedActiveTurn('s1', 'too-early')).toThrow('stopping');
+    await flush(); expect(finalize).not.toHaveBeenCalled();
+    settle(); expect(await lease.ready).toEqual({ errors: [] });
+    expect(finalize).toHaveBeenCalledExactlyOnceWith('s1');
+    expect(() => svc.seedActiveTurn('s1', 'action-gap')).toThrow('stopping');
+    lease.release(); await lease.completion;
+    svc.seedActiveTurn('s1', 'next'); svc.clearSeededActiveTurn('s1');
+  });
+
+  it('reports a missing durable queue cancellation ACK before the action phase', async () => {
+    Object.assign(chatHarness.chat, { cancelPendingContinuations: async () => undefined });
+    const active = svc.submit(basePayload('s1', 'active'), makeEmit().emit);
+    await flush();
+    await svc.submit(basePayload('s1', 'queued'), makeEmit().emit);
+    runJournal.cancelQueuedRun.mockResolvedValue(false);
+    const lease = svc.acquireStopLease('s1', Promise.resolve());
+    try {
+      await chatHarness.releaseAll(); await active;
+      const result = await lease.ready;
+      expect(result.errors.map(String).join(';')).toContain('Durable queued chat cancellation failed');
+      expect(() => svc.seedActiveTurn('s1', 'action-gap')).toThrow('stopping');
+    } finally { lease.release(); await lease.completion; }
+  });
 });

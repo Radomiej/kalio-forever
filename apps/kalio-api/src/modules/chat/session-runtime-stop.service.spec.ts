@@ -5,6 +5,7 @@ import type { ArchitectureRuntimeStopPort } from './architecture-runtime-stop.po
 import type { CLIAgentSessionRuntimePort } from '../cli-agent/cli-agent-session-runtime.port';
 import type { SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
+import { SessionExecutionAdmission } from './session-execution-admission';
 
 const rootSession: ChatSession = {
   id: 'root-session',
@@ -13,6 +14,23 @@ const rootSession: ChatSession = {
   createdAt: 1,
   updatedAt: 1,
 };
+
+function makeService(...args: ConstructorParameters<typeof SessionRuntimeStopService>) {
+  Object.assign(args[0], { claimTreeStop: vi.fn(() => ({ release: vi.fn() })) });
+  const pipeline = args[1];
+  const admission = new SessionExecutionAdmission();
+  Object.assign(pipeline, {
+    assertStopLeasesAvailable: (ids: readonly string[]) => ids.forEach(id => admission.assertStopLeaseAvailable(id)),
+    acquireStopLease: (id: string, owners: Promise<void>) => {
+      const drain = pipeline.stopAndDrain(id).then(() => ({ errors: [] as unknown[] }), (error: unknown) => ({ errors: [error] }));
+      return admission.acquireStopLease(id, owners, undefined, async () => {
+        const outcome = await drain;
+        if (outcome.errors.length > 0) throw outcome.errors[0];
+      });
+    },
+  });
+  return new SessionRuntimeStopService(...args);
+}
 
 const branchSession: ChatSession = {
   id: 'branch-session',
@@ -61,7 +79,7 @@ describe('SessionRuntimeStopService', () => {
       }),
     };
     const stopSession = vi.fn(async () => undefined);
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       sessions as never, { stopAndDrain: vi.fn(async () => undefined) } as never,
       undefined, { stopSession } as unknown as CLIAgentSessionRuntimePort,
       { stopRunsForSessions: async () => { removed = true; return []; } },
@@ -73,7 +91,7 @@ describe('SessionRuntimeStopService', () => {
   });
 
   it('still rejects an actual CLI stop failure with collected child ownership', async () => {
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       { listChildren: vi.fn(async (id: string) => id === rootSession.id ? [cliSession] : []),
         get: vi.fn(async (id: string) => id === cliSession.id ? cliSession : rootSession) } as never,
       { stopAndDrain: vi.fn(async () => undefined) } as never,
@@ -89,7 +107,7 @@ describe('SessionRuntimeStopService', () => {
     const drain = new Promise<readonly string[]>(resolve => { release = () => resolve([]); });
     const stopSubagents = vi.fn(async () => undefined);
     const stopPipeline = vi.fn(async () => undefined);
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       { listChildren: vi.fn(async () => []), get: vi.fn(async () => rootSession) } as never,
       { stopAndDrain: stopPipeline } as never,
       undefined, undefined,
@@ -154,7 +172,7 @@ describe('SessionRuntimeStopService', () => {
         updatedAt: Date.now(),
       })),
     };
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       sessions as never,
       pipeline as never,
       agentFlowRuntime as AgentFlowRuntimePort,
@@ -179,8 +197,8 @@ describe('SessionRuntimeStopService', () => {
       'cli-session',
     ]);
     expect(cliRuntime.stopSession).toHaveBeenCalledWith('branch-session', 'cli-session');
-    expect(stopAndDrainSubagents.mock.invocationCallOrder[0]).toBeLessThan(
-      pipeline.stopAndDrain.mock.invocationCallOrder[0],
+    expect(pipeline.stopAndDrain.mock.invocationCallOrder[0]).toBeLessThan(
+      stopAndDrainSubagents.mock.invocationCallOrder[0],
     );
     expect(pipeline.stopAndDrain).toHaveBeenNthCalledWith(1, 'root-session');
     expect(pipeline.stopAndDrain).toHaveBeenNthCalledWith(2, 'branch-session');
@@ -198,7 +216,7 @@ describe('SessionRuntimeStopService', () => {
     const stopAndDrainSubagents = vi.fn(async () => {
       throw new Error('transport down');
     });
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       sessions as never,
       pipeline as never,
       undefined,

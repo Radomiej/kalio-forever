@@ -4,6 +4,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { DrizzleService } from '../../database/drizzle.service';
 import { messages, sessions } from '../../database/schema';
+import { sessionTreeStopAdmission } from '../../database/session-tree-stop-admission';
 
 const toMs = (value: number | Date): number => (value instanceof Date ? value.getTime() : value);
 const CLI_AGENT_METADATA_PREFIX = '__kalio_cli_agent_meta__:';
@@ -48,7 +49,8 @@ export class CLIAgentSessionService {
       updatedAt: now,
     };
 
-    await this.drizzle.db.insert(sessions).values(row);
+    sessionTreeStopAdmission(this.drizzle.db).runIfAdmitted(params.parentSessionId, () =>
+      this.drizzle.db.insert(sessions).values(row).run());
 
     return {
       id: row.id,

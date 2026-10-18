@@ -13,6 +13,24 @@ import type { AgentBudgetApprovalService } from '../agent-budget-approval.servic
 import type { ModuleRef } from '@nestjs/core';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from '../architecture-runtime-stop.port';
 import { SUBAGENT_RUNTIME } from '../../tool/subagent-runtime.port';
+import { SessionRuntimeStopService } from '../session-runtime-stop.service';
+
+type GatewayArgs = ConstructorParameters<typeof ChatGateway>;
+type GatewayTestArgs = [GatewayArgs[0], GatewayArgs[1], GatewayArgs[2], GatewayArgs[3], GatewayArgs[4], GatewayArgs[5],
+  GatewayArgs[6]?, GatewayArgs[7]?, ArchitectureRuntimeStopPort?, GatewayArgs[8]?, GatewayArgs[9]?, GatewayArgs[10]?, GatewayArgs[11]?];
+
+function makeGateway(...args: GatewayTestArgs) {
+  const pipeline = args[1];
+  Object.assign(args[3], { claimTreeStop: vi.fn(() => ({ release: vi.fn() })) });
+  Object.assign(pipeline, { assertStopLeasesAvailable: () => undefined, acquireStopLease: (id: string, owners: Promise<void>) => ({
+    ready: pipeline.stopAndDrain(id).then(async () => { await owners; return { errors: [] }; },
+      async error => { await owners; return { errors: [error] }; }),
+    completion: Promise.resolve(), release: () => undefined,
+  }) });
+  const stop = new SessionRuntimeStopService(args[3], pipeline, args[6], args[7], args[8], args[10], args[9]);
+  return new ChatGateway(args[0], pipeline, args[2], args[3], args[4], args[5], args[6], args[7],
+    args[9], args[10], args[11], args[12], stop);
+}
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 type SessionCreatedHandler = (event: { session: ChatSession }) => void;
@@ -116,7 +134,7 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(
+    gateway = makeGateway(
       toolDispatch,
       pipeline,
       raappHITL,
@@ -497,7 +515,7 @@ describe('ChatGateway', () => {
         return undefined;
       }),
     } as unknown as ModuleRef;
-    gateway = new ChatGateway(
+    gateway = makeGateway(
       toolDispatch,
       pipeline,
       raappHITL,
@@ -855,7 +873,7 @@ describe('ChatGateway', () => {
 
   it('REGRESSION: stopping a parent session delegates descendant cli-agent children through the CLI runtime', async () => {
     (sessions.listChildren as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce([{ id: 'cli-child-1' }])
+      .mockResolvedValueOnce([sessionFixture({ id: 'cli-child-1', kind: 'cli-agent', parentSessionId: 'session-1' })])
       .mockResolvedValueOnce([]);
     vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
       if (sessionId === 'cli-child-1') {
@@ -1010,7 +1028,7 @@ describe('ChatGateway', () => {
       findByParentSessionId,
       stop: vi.fn().mockResolvedValue(null),
     } as unknown as AgentFlowRuntimePort;
-    gateway = new ChatGateway(
+    gateway = makeGateway(
       toolDispatch,
       pipeline,
       raappHITL,
@@ -1145,7 +1163,7 @@ describe('ChatGateway', () => {
         toolName: 'fs_write', args: { path: 'report.md' }, timeoutMs: 0,
       };
       const hitlRequests = { listPendingToolConfirmations: vi.fn().mockResolvedValue([pending]) };
-      gateway = new ChatGateway(
+      gateway = makeGateway(
         toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
         agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
         hitlRequests,
@@ -1349,7 +1367,7 @@ describe('ChatGateway', () => {
         cancelPendingTool: vi.fn().mockResolvedValue(false),
       };
       (toolDispatch.resolveConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
-      gateway = new ChatGateway(
+      gateway = makeGateway(
         toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
         agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
         undefined, chatService,
@@ -1411,7 +1429,7 @@ describe('ChatGateway', () => {
         cancelPendingTool: vi.fn().mockResolvedValue(true),
       };
       (toolDispatch.cancelConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
-      gateway = new ChatGateway(
+      gateway = makeGateway(
         toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
         agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
         undefined, chatService,

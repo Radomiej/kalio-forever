@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-08-22
+Last updated: 2026-10-18
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -67,6 +67,9 @@ flowchart LR
 - The latest active/terminal turn influences the chat status, but chat-level recovery may retry transport/provider failures through typed policy.
 - Workflow nodes call child chat sessions; child sessions execute turns. Nodes and connections orchestrate at a higher level and must consume child typed states, not child transcript prose.
 - CLI agents, subagents, and AgentFlow children are one child-execution family for lifecycle, visibility, stop, replay, and status projection.
+- Socket Stop, session DELETE and Telegram Stop use one session-tree coordinator. A single-process, database-identity topology claim freezes child creation before tree discovery; guarded session/CLI inserts and the claim execute synchronously. Parent links remain immutable. Same/ancestor/descendant Stop overlap is an explicit conflict; disjoint trees may stop concurrently.
+- Every discovered session receives a retained execution fence before external cancellation owners start. Ordinary continuation cancellation runs only after local workers and external journal writers quiesce; existing CAS and protected-goal checks remain authoritative. Readiness includes every required owner/cleanup/finalization error. DELETE executes under the retained fences, and all claims/fences release in `finally`; no success snapshot is published after a required Stop failure.
+- Cleanup release acknowledgement is not Stop success. Follow-ups and coalesced Stop callers waiting on a retained lease receive its semantic failure, including owner or DELETE-action failure, before any admission/dispatch. A later fresh request may retry after release; the first release outcome cannot be overwritten.
 - Terminal events are scoped to their `runId` and `turnId`; a terminal event for an older turn must not complete or clear a newer turn.
 
 ```mermaid

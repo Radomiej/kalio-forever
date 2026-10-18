@@ -25,12 +25,9 @@ import {
   CLI_AGENT_SESSION_RUNTIME,
   type CLIAgentSessionRuntimePort,
 } from '../cli-agent/cli-agent-session-runtime.port';
-import {
-  ARCHITECTURE_RUNTIME_STOP,
-  type ArchitectureRuntimeStopPort,
-} from './architecture-runtime-stop.port';
 import { SUBAGENT_RUNTIME, type SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { ChatGatewayRuntime, nextApprovedBudgetLimit } from './chat.gateway.runtime';
+import { SessionRuntimeStopService } from './session-runtime-stop.service';
 import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
 import {
@@ -66,16 +63,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly agentBudgetApprovals: AgentBudgetApprovalService,
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort,
     @Optional() @Inject(CLI_AGENT_SESSION_RUNTIME) private readonly cliAgentSessionRuntime?: CLIAgentSessionRuntimePort,
-    @Optional() @Inject(ARCHITECTURE_RUNTIME_STOP) private readonly architectureRuntimeStop?: ArchitectureRuntimeStopPort,
     @Optional() private readonly moduleRef?: ModuleRef,
     @Optional() @Inject(SUBAGENT_RUNTIME) private readonly subagentRuntime?: SubagentRuntimePort,
     @Optional() @Inject(HitlRequestService) private readonly hitlRequests?: Pick<HitlRequestService, 'listPendingToolConfirmations'>,
     @Optional() @Inject(ChatService) private readonly chatService?: Pick<ChatService, 'approveAndResumeTool' | 'cancelPendingTool'> & Partial<Pick<ChatService, 'hasPendingToolConfirmation'>>,
+    @Inject(SessionRuntimeStopService) private readonly runtimeStop?: SessionRuntimeStopService,
   ) {
     this.runtime = new ChatGatewayRuntime({
-      sessionsService: this.sessionsService, logger: this.logger, moduleRef: this.moduleRef,
+      logger: this.logger, moduleRef: this.moduleRef,
       agentFlowRuntime: this.agentFlowRuntime, cliAgentSessionRuntime: this.cliAgentSessionRuntime,
-      architectureRuntimeStop: this.architectureRuntimeStop, subagentRuntime: this.subagentRuntime,
+      subagentRuntime: this.subagentRuntime,
       emit: (initiator, sessionId, event, data) => this.emitToInitiatorAndSessionSubscribers(initiator, sessionId, event, data),
     });
     this.sessionEvents.onSessionCreated(({ session }) => {
@@ -195,14 +192,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const sessionTree = await this.collectRuntimeSnapshotSessionTree(payload.sessionId);
-    const descendantSessionIds = sessionTree.descendantIdsBySessionId[payload.sessionId] ?? [];
-    const stoppedSessionIds = [payload.sessionId, ...descendantSessionIds];
-
-    await this.runtime.stopAndDrainSessions(
-      client.id, stoppedSessionIds, (sessionId) => this.pipeline.stopAndDrain(sessionId),
-    );
-
+    if (!this.runtimeStop) throw new Error('Session runtime stop coordinator is required');
+    const sessionTree = await this.runtimeStop.stopSessionTree(payload.sessionId,
+      (id, parent) => this.runtime.cliStopEmitter(client.id, id, parent));
     const snapshotBatch = await this.buildRuntimeActivitySnapshots(payload.sessionId, sessionTree);
     this.emitRuntimeActivitySnapshotBatch(client.id, snapshotBatch);
   }

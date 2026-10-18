@@ -6,7 +6,6 @@ import type {
   AssignSessionProjectDto,
   ChatSession,
   ChatMessage,
-  ChatSessionKind,
   CreateSessionDto,
   SessionRuntimeContext,
 } from '@kalio/types';
@@ -17,6 +16,9 @@ import type { IMessageRepository } from './interfaces/message-repository.interfa
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
 import { toChatSession } from './session-row';
+import { DEFAULT_SESSION_TITLE, insertSessionRecord, runtimeProjectPath } from './session-creation';
+import { sessionDescendantIds } from './session-tree.utils';
+import { sessionTreeStopAdmission, type SessionTreeStopClaim } from '../../database/session-tree-stop-admission';
 import { LLMService } from '../llm/llm.service';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
@@ -35,7 +37,6 @@ import {
   normalizedUserPrompt as normalizeSessionPrompt,
 } from './sessions-title.utils';
 
-const DEFAULT_SESSION_TITLE = 'New Chat';
 const MAX_SESSION_LIST_LIMIT = 500;
 interface SessionRuntimeScopeOptions {
   registerRuntimeProjectPath?: boolean;
@@ -88,23 +89,7 @@ export class SessionsService {
   ): Promise<ChatSession> {
     const scope = await this.resolveProjectScope(dto);
     await this.registerRuntimeProjectPathIfRequested(scope.runtimeContext ?? undefined, options);
-    const now = new Date();
-    const row = {
-      id,
-      personaId: dto.personaId ?? 'default',
-      title: dto.title ?? DEFAULT_SESSION_TITLE,
-      kind: dto.kind ?? 'chat',
-      parentSessionId: dto.parentSessionId ?? null,
-      parentTurnId: dto.parentTurnId ?? null,
-      parentToolCallId: dto.parentToolCallId ?? null,
-      projectId: scope.projectId,
-      executionProfileId: scope.executionProfileId,
-      runtimeContext: scope.runtimeContext ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.drizzle.db.insert(sessions).values(row);
-    const session = toChatSession(row);
+    const session = insertSessionRecord(this.drizzle.db, id, dto, scope);
     this.sessionEvents.emitSessionCreated(session);
     return session;
   }
@@ -112,6 +97,10 @@ export class SessionsService {
   async get(id: string): Promise<ChatSession> {
     const row = await this.getRow(id);
     return toChatSession(row);
+  }
+
+  claimTreeStop(id: string): SessionTreeStopClaim {
+    return sessionTreeStopAdmission(this.drizzle.db).claim(id);
   }
 
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
@@ -462,46 +451,14 @@ export class SessionsService {
     const rows = await this.drizzle.db
       .select({ id: sessions.id, parentSessionId: sessions.parentSessionId })
       .from(sessions);
-    const childrenByParent = new Map<string, string[]>();
-    for (const row of rows) {
-      if (!row.parentSessionId) continue;
-      childrenByParent.set(row.parentSessionId, [
-        ...(childrenByParent.get(row.parentSessionId) ?? []),
-        row.id,
-      ]);
-    }
-    const result: string[] = [];
-    const pending = [id];
-    const visited = new Set<string>();
-    while (pending.length > 0) {
-      const currentId = pending.shift();
-      if (!currentId || visited.has(currentId)) continue;
-      visited.add(currentId);
-      result.push(currentId);
-      pending.push(...(childrenByParent.get(currentId) ?? []));
-    }
-    return result;
+    return sessionDescendantIds(id, rows);
   }
 
   private async assertExists(id: string): Promise<void> {
     await this.getRow(id);
   }
 
-  private async getRow(id: string): Promise<{
-    id: string;
-    personaId: string;
-    title: string;
-    kind?: ChatSessionKind;
-    parentSessionId?: string | null;
-    parentTurnId?: string | null;
-    parentToolCallId?: string | null;
-    projectId?: string | null;
-    executionProfileId?: string | null;
-    externalThreadId?: string | null;
-    runtimeContext?: SessionRuntimeContext | null;
-    createdAt: number | Date;
-    updatedAt: number | Date;
-  }> {
+  private async getRow(id: string): Promise<Parameters<typeof toChatSession>[0]> {
     const [row] = await this.drizzle.db
       .select()
       .from(sessions)
@@ -518,11 +475,7 @@ export class SessionsService {
     if (!options.registerRuntimeProjectPath) {
       return;
     }
-    const projectPathValue = runtimeContext?.architectureContext?.['projectPath'];
-    const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
-    const projectPath = typeof projectPathValue === 'string' && projectPathValue.trim().length > 0
-      ? projectPathValue.trim()
-      : typeof executionCwd === 'string' && executionCwd.trim().length > 0 ? executionCwd.trim() : undefined;
+    const projectPath = runtimeProjectPath(runtimeContext);
     if (!projectPath) {
       return;
     }

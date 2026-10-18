@@ -77,13 +77,14 @@ function makeContextPreviewService() {
 }
 
 function makeRuntimeStop() {
+  const stopSessionTree = vi.fn().mockResolvedValue({
+    rootSessionId: 'sess-1', sessionIds: ['sess-1'], directChildIdsBySessionId: {},
+    descendantIdsBySessionId: {}, childSessionsById: {},
+  });
   return {
-    stopSessionTree: vi.fn().mockResolvedValue({
-      rootSessionId: 'sess-1',
-      sessionIds: ['sess-1'],
-      directChildIdsBySessionId: { 'sess-1': [] },
-      descendantIdsBySessionId: { 'sess-1': [] },
-      childSessionsById: {},
+    stopSessionTree,
+    withStoppedTree: vi.fn(async (id: string, action: (tree: Awaited<ReturnType<typeof stopSessionTree>>) => Promise<void>) => {
+      await action(await stopSessionTree(id));
     }),
   };
 }

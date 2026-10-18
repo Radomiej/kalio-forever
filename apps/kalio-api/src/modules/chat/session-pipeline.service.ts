@@ -6,7 +6,7 @@ import type { EmitFn } from './interfaces/stream-context.interface';
 import { PerKeyMutex } from './per-key-mutex';
 import { RunJournalService } from './run-journal.service';
 import { ActiveSessionRegistry } from './active-session-registry.service';
-import { SessionExecutionAdmission, type SessionExecutionReservation } from './session-execution-admission';
+import { SessionExecutionAdmission, type SessionExecutionReservation, type SessionStopLease } from './session-execution-admission';
 import {
   claimQueuedDispatchItem,
   persistQueuedChatRun,
@@ -27,22 +27,7 @@ export interface SessionRuntimeStatus {
   run?: ChatRunSnapshot;
 }
 
-/**
- * Per-session FSM that sits between the gateway and ChatService.
- *
- * Responsibilities:
- *  - Serialise turns within a single session (no overlapping
- *    `agent:start`/`agent:done` brackets).
- *  - Enqueue follow-up `chat:send` payloads that arrive while a turn is
- *    in-flight; drain the queue head-first after each `agent:done`.
- *  - Honour `interrupt: true` by aborting the current turn (at the next
- *    iteration boundary) and dispatching the interrupting payload itself
- *    once the abort settles.
- *  - Provide `abortAll(sessionId)` for disconnect cleanup.
- *
- * Different sessions are independent — running session A does NOT block
- * session B.
- */
+/** Serializes session turns and retains admission fences while Stop drains. */
 @Injectable()
 export class SessionPipelineService {
   private readonly logger = new Logger(SessionPipelineService.name);
@@ -276,6 +261,21 @@ export class SessionPipelineService {
     if (!this.active.has(sessionId)) this.activeSessionRegistry?.markInactive(sessionId);
   }
 
+  assertStopLeasesAvailable(sessionIds: readonly string[]): void {
+    sessionIds.forEach(id => this.active.assertStopLeaseAvailable(id));
+  }
+
+  acquireStopLease(sessionId: string, ownersSettled: Promise<void>): SessionStopLease {
+    const lease = this.active.acquireStopLease(sessionId, ownersSettled,
+      () => this.mutex.runExclusive(sessionId, () => this.dropQueuedItems(sessionId)),
+      async () => {
+        await this.chat.cancelPendingContinuations(sessionId);
+        if (!this.active.has(sessionId)) this.activeSessionRegistry?.markInactive(sessionId);
+      });
+    this.chat.abort(sessionId);
+    return lease;
+  }
+
   getActiveSessionIds(): ReadonlySet<string> {
     return new Set(this.active.keys());
   }
@@ -328,13 +328,17 @@ export class SessionPipelineService {
     }
 
     this.queues.delete(sessionId);
+    const errors: unknown[] = [];
     for (const item of queue) {
       if (item.runId) {
         try {
-          await this.runJournal?.cancelQueuedRun(item.runId);
+          if (!this.runJournal || !await this.runJournal.cancelQueuedRun(item.runId)) {
+            throw new Error('QUEUED_CANCELLATION_CONFLICT');
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.error(`Unable to cancel queued chat run ${item.runId} for session ${sessionId}: ${message}`);
+          errors.push(err);
         }
       }
       item.emit('chat:error', {
@@ -344,6 +348,7 @@ export class SessionPipelineService {
         hadContent: false,
       });
     }
+    if (errors.length > 0) throw new AggregateError(errors, 'Durable queued chat cancellation failed');
   }
 
   private async runWithDrain(initial: DispatchItem): Promise<void> {
