@@ -10,6 +10,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const requireApi = createRequire(path.join(ROOT, 'apps/kalio-api/package.json'));
 const apiModule = (name) => requireApi(path.join(ROOT, 'apps/kalio-api/dist/modules/memory', name));
 const { ProjectResourceIndexStore } = apiModule('project-resource-index.store.js');
+const { ProjectResourceIndexStorage } = requireApi(path.join(ROOT, 'apps/kalio-api/dist/modules/vfs/project-resource-index-storage.js'));
 const { chunkProjectResourceContent } = apiModule('project-resource-chunks.js');
 const identity = apiModule('embedding-identity.js');
 const localProviderModule = apiModule('local-transformers-embedding.provider.js');
@@ -175,13 +176,13 @@ function buildShards(corpus) {
 }
 function verifyStorePath(root, projectId, space) {
   const dbPath = databasePath(root, projectId, space.id);
-  const probe = new ProjectResourceIndexStore(root, projectId, space);
+  const probe = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(root), projectId, space);
   try {
     probe.replace([{ id: '__store_path_probe__', path: '__benchmark_store_path_probe__', resourceType: 'text',
       representation: 'content', content: 'benchmark storage path preflight', contentHash: sha('benchmark storage path preflight'),
       embedding: Array(space.dimensions).fill(0.01) }], Date.now());
   } finally { probe.close(); }
-  const reopened = new ProjectResourceIndexStore(root, projectId, space);
+  const reopened = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(root), projectId, space);
   try {
     if (reopened.status().indexedChunks !== 1 || !reopened.hasCurrentChunking()) throw new Error('SQLITE_STORE_PATH_PREFLIGHT_FAILED');
   } finally { reopened.close(); }
@@ -248,10 +249,10 @@ function modelStore(corpus, vectors, root, space) {
     const shardRoot = path.join(root, shardName);
     const shardProjectId = `${PROJECT_ID}-${shardName}`;
     const rows = shard.map(chunk => ({ ...chunk, embedding: vectors[vectorOffset++] }));
-    const store = new ProjectResourceIndexStore(shardRoot, shardProjectId, space);
+    const store = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(shardRoot), shardProjectId, space);
     try { store.replace(rows, Date.now()); }
     finally { store.close(); }
-    const reopened = new ProjectResourceIndexStore(shardRoot, shardProjectId, space);
+    const reopened = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(shardRoot), shardProjectId, space);
     try {
       const status = reopened.status();
       const refs = reopened.sourceReferences();
@@ -284,7 +285,7 @@ function searchShards(root, space, item, vector, mode, shards) {
   const selectedTypes = item.type === 'code' ? ['code'] : item.type === 'text' ? ['text'] : [...BINARY_EXTENSIONS.values()];
   for (let shardIndex = 0; shardIndex < shards.length; shardIndex++) {
     const shardName = `s${shardIndex + 1}`;
-    const store = new ProjectResourceIndexStore(path.join(root, shardName), `${PROJECT_ID}-${shardName}`, space);
+    const store = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(path.join(root, shardName)), `${PROJECT_ID}-${shardName}`, space);
     try { results.push(store.search(item.query, vector, selectedTypes, 5, mode)); }
     finally { store.close(); }
   }

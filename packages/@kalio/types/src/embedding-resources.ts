@@ -48,6 +48,14 @@ export const PROJECT_RESOURCE_READER = Symbol('PROJECT_RESOURCE_READER');
 export interface ProjectResourceReaderPort {
   readProject(projectId: string, signal?: AbortSignal): Promise<ProjectResourceSnapshot>;
 }
+export const PROJECT_RESOURCE_INDEX_STORAGE = Symbol('PROJECT_RESOURCE_INDEX_STORAGE');
+/** VFS owns index path allocation; the common database runtime owns SQLite connections. */
+export interface ProjectResourceIndexStoragePort {
+  /** Observational only: never creates storage. */
+  exists(projectId: string, spaceId: string): boolean;
+  /** Returns the bounded, backend-configured path after checking storage quotas. */
+  prepare(projectId: string, spaceId: string): string;
+}
 export interface ProjectResourceIndexRequest {
   /** Explicit consent for this operation only; never stored as global consent. */
   allowRemoteProcessing?: boolean;

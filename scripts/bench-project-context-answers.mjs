@@ -47,6 +47,7 @@ const QUESTIONS = [
 const requireApi = createRequire(path.join(ROOT, 'apps', 'kalio-api', 'package.json'));
 const apiModule = name => requireApi(path.join(ROOT, 'apps', 'kalio-api', 'dist', 'modules', 'memory', name));
 const { ProjectResourceIndexStore } = apiModule('project-resource-index.store.js');
+const { ProjectResourceIndexStorage } = requireApi(path.join(ROOT, 'apps/kalio-api/dist/modules/vfs/project-resource-index-storage.js'));
 const identity = apiModule('embedding-identity.js');
 const localProviderModule = apiModule('local-transformers-embedding.provider.js');
 const originalReport = JSON.parse(readFileSync(path.join(RUN_DIR, 'report.json'), 'utf8'));
@@ -70,7 +71,7 @@ function dbDigests(model) {
 function verifyIndex(model) {
   if (!model?.space || !Array.isArray(model.sourceIndex?.shards) || model.sourceIndex.indexedChunks !== 26314) fail('BENCHMARK_INDEX_MISSING');
   const stores = model.sourceIndex.shards.map(shard => {
-    const store = new ProjectResourceIndexStore(shardRoot(shard), shard.projectId, model.space);
+    const store = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(shardRoot(shard)), shard.projectId, model.space);
     try {
       const status = store.status();
       if (status.indexedChunks !== shard.indexedChunks || !store.hasCurrentChunking()) fail(`INDEX_STATUS_MISMATCH:${model.model}:${shard.shard}`);
@@ -83,7 +84,7 @@ function mergeShardResults(item, vector, mode, model) {
   const selectedTypes = item.type === 'code' ? ['code'] : ['text'];
   const merged = new Map();
   for (const { shard } of model.sourceIndex.shards.map(shard => ({ shard }))) {
-    const store = new ProjectResourceIndexStore(shardRoot(shard), shard.projectId, model.space);
+    const store = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(shardRoot(shard)), shard.projectId, model.space);
     try {
       for (const result of store.search(item.query, vector, selectedTypes, 5, mode)) {
         const prior = merged.get(result.id);

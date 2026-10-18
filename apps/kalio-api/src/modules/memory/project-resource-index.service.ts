@@ -1,7 +1,6 @@
-import { ConfigService } from '@nestjs/config';
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { extname } from 'node:path';
+import { basename, extname } from 'node:path';
 import { PROJECT_RESOURCE_READER, type EmbeddingSpace, type ProjectResourceReaderPort, type ProjectResourceIndexRequest,
   type ProjectResourceIndexResult, type ProjectResourceSearchRequest, type ProjectResourceSearchResult,
   type ProjectResourceFile, type ProjectResourceSnapshot, type ResourceModality, type ResourceRepresentation } from '@kalio/types';
@@ -12,18 +11,22 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { ProjectContextSettingsService } from './project-context-settings.service';
 import { chunkProjectResourceContent } from './project-resource-chunks';
+import { PROJECT_RESOURCE_INDEX_STORAGE, type ProjectResourceIndexStoragePort } from '@kalio/types';
 
-const CODE = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.py', '.cs', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.css', '.scss', '.html', '.sh', '.ps1', '.sql', '.vue', '.svelte']);
-const TEXT = new Set(['.txt', '.md', '.mdx', '.json', '.yaml', '.yml', '.toml', '.csv', '.xml']);
+// Keep format coverage aligned with VFS ProjectResourceReaderService; exercised by the reader → index parity test.
+const CODE = new Set(('.html .htm .css .scss .sass .less .js .jsx .ts .tsx .mts .cts .mjs .cjs .vue .svelte .py .rb .go .rs .java .kt .kts .cs .c .h .cpp .hpp .sql .sh .ps1 .bat .cmd .lua .luau .php .swift .dart').split(' '));
+const TEXT = new Set(('.txt .md .mdx .rst .csv .tsv .json .jsonc .yaml .yml .toml .xml').split(' '));
+const TEXT_NAMES = new Set(['readme', 'license', 'licence', 'dockerfile', 'makefile']);
 const BINARY: Record<string, ResourceModality> = {
-  '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.gif': 'image', '.webp': 'image', '.svg': 'image',
-  '.pdf': 'pdf', '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.ogg': 'audio', '.m4a': 'audio',
-  '.mp4': 'video', '.webm': 'video', '.mov': 'video',
+  '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.gif': 'image', '.webp': 'image', '.svg': 'image', '.ico': 'image', '.bmp': 'image', '.avif': 'image',
+  '.pdf': 'pdf', '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.ogg': 'audio', '.m4a': 'audio', '.aac': 'audio',
+  '.mp4': 'video', '.webm': 'video', '.mov': 'video', '.mkv': 'video',
 };
 function digest(value: string | Uint8Array): string { return createHash('sha256').update(value).digest('hex'); }
 function readResource(file: ProjectResourceFile) {
   const extension = extname(file.path).toLowerCase();
-  const type: ResourceModality | undefined = CODE.has(extension) ? 'code' : TEXT.has(extension) ? 'text' : BINARY[extension];
+  const type: ResourceModality | undefined = CODE.has(extension) ? 'code'
+    : TEXT.has(extension) || TEXT_NAMES.has(basename(file.path).toLowerCase()) ? 'text' : BINARY[extension];
   if (!type) return undefined;
   const representation: ResourceRepresentation = type === 'text' || type === 'code' ? 'content' : 'metadata';
   const content = representation === 'metadata'
@@ -81,13 +84,11 @@ function matchesReferences(parsed: ParsedSnapshot, refs: Array<{ path: string; c
 export class ProjectResourceIndexService {
   private readonly indexing = new Set<string>();
   private readonly autoRefreshes = new Map<string, Promise<void>>();
-  private readonly root: string;
-  constructor(config: ConfigService, private readonly embeddings: EmbeddingService,
+  constructor(@Inject(PROJECT_RESOURCE_INDEX_STORAGE) private readonly storage: ProjectResourceIndexStoragePort,
+    private readonly embeddings: EmbeddingService,
     @Inject(PROJECT_RESOURCE_READER) private readonly reader: ProjectResourceReaderPort,
     private readonly settings: ProjectContextSettingsService,
-    private readonly drizzle: DrizzleService) {
-    this.root = config.get<string>('MEMORY_DB_PATH', './data/memory');
-  }
+    private readonly drizzle: DrizzleService) {}
 
   async index(project: string, request: ProjectResourceIndexRequest, signal?: AbortSignal): Promise<ProjectResourceIndexResult> {
     return this.indexSnapshot(project, request, signal);
@@ -140,7 +141,7 @@ export class ProjectResourceIndexService {
       await this.embeddings.ensureCurrentIdentity();
       await this.settings.assertEnabled();
       this.assertCurrent(space);
-      const store = new ProjectResourceIndexStore(this.root, project, space);
+      const store = new ProjectResourceIndexStore(this.storage, project, space);
       try { store.replace(chunks, indexedAt); } finally { store.close(); }
       return { projectId: project, space, indexedFiles, indexedChunks: chunks.length, skipped, indexedAt };
     } finally { this.indexing.delete(project); }
@@ -163,7 +164,7 @@ export class ProjectResourceIndexService {
       await this.ensureFreshIndex(project, request, space, parsed);
       parsed = await this.readSnapshot(project, space);
       await this.settings.assertEnabled(); this.assertCurrent(space);
-      const store = new ProjectResourceIndexStore(this.root, project, space);
+      const store = new ProjectResourceIndexStore(this.storage, project, space);
       try {
         const generation = store.generation();
         const refs = store.sourceReferences();
@@ -196,8 +197,8 @@ export class ProjectResourceIndexService {
     space: EmbeddingSpace, parsed: ParsedSnapshot): Promise<void> {
     await this.settings.assertEnabled(); this.assertCurrent(space);
     let fresh = false;
-    if (ProjectResourceIndexStore.exists(this.root, project, space.id)) {
-      const store = new ProjectResourceIndexStore(this.root, project, space);
+    if (this.storage.exists(project, space.id)) {
+      const store = new ProjectResourceIndexStore(this.storage, project, space);
       try { fresh = store.status().indexedAt !== null && store.hasCurrentChunking() && matchesReferences(parsed, store.sourceReferences()); }
       finally { store.close(); }
     }
@@ -217,8 +218,8 @@ export class ProjectResourceIndexService {
 
   async status(project: string): Promise<{ projectId: string; space: EmbeddingSpace; indexedChunks: number; indexedAt: number | null }> {
     this.assertProjectId(project); await this.embeddings.ensureCurrentIdentity(); const space = this.embeddings.captureSpace();
-    if (!ProjectResourceIndexStore.exists(this.root, project, space.id)) return { projectId: project, space, indexedChunks: 0, indexedAt: null };
-    const store = new ProjectResourceIndexStore(this.root, project, space);
+    if (!this.storage.exists(project, space.id)) return { projectId: project, space, indexedChunks: 0, indexedAt: null };
+    const store = new ProjectResourceIndexStore(this.storage, project, space);
     try { return { projectId: project, space, ...store.status() }; } finally { store.close(); }
   }
   async refreshForSession(sessionId: string, request: ProjectResourceIndexRequest): Promise<ProjectResourceIndexResult> {

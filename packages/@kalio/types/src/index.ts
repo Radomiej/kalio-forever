@@ -1631,10 +1631,10 @@ export interface CLIAgentConfig {
 
 // ─── Memory (Hybrid: Vector + BM25) ─────────────────────────────────────────
 export type MemorySearchMode = 'vector' | 'fts' | 'hybrid';
-export { PROJECT_RESOURCE_READER } from './embedding-resources';
+export { PROJECT_RESOURCE_READER, PROJECT_RESOURCE_INDEX_STORAGE } from './embedding-resources';
 export type {
   EmbeddingSpace, ResourceModality, ResourceRepresentation, ProjectResourceFile,
-  ProjectResourceSnapshot, ProjectResourceReaderPort, ProjectResourceIndexRequest,
+  ProjectResourceSnapshot, ProjectResourceReaderPort, ProjectResourceIndexStoragePort, ProjectResourceIndexRequest,
   ProjectResourceIndexResult, ProjectResourceSearchRequest, ProjectResourceSearchResult,
 } from './embedding-resources';
 

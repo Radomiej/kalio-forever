@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { createSqliteDatabase } from '../../database/sqlite-runtime';
 import type { EmbeddingSpace } from '@kalio/types';
 import { buildEmbeddingSpace } from './embedding-identity';
 import { ProjectResourceIndexStore, type IndexedResourceChunk } from './project-resource-index.store';
+import { ProjectResourceIndexStorage } from '../vfs/project-resource-index-storage';
 
 const space: EmbeddingSpace = buildEmbeddingSpace({ provider: 'mock', providerScope: 'test', backend: '', baseUrl: 'mock', model: 'a', modelRevision: '1', dimensions: 2,
   promptVersion: '1', documentPromptVersion: '1', queryPromptVersion: '1', codeQueryPromptVersion: '1', normalizationVersion: '1' });
@@ -15,7 +16,7 @@ const stores: ProjectResourceIndexStore[] = [];
 function open(projectId = 'one', modelSpace = space, root?: string) {
   const dir = root ?? mkdtempSync(join(tmpdir(), 'kalio-resource-index-'));
   if (!root) roots.push(dir);
-  const store = new ProjectResourceIndexStore(dir, projectId, modelSpace);
+  const store = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(dir), projectId, modelSpace);
   stores.push(store); return { store, dir };
 }
 function chunk(id: string, resourceType: IndexedResourceChunk['resourceType'] = 'code', vector = [1, 0]): IndexedResourceChunk {
@@ -23,6 +24,13 @@ function chunk(id: string, resourceType: IndexedResourceChunk['resourceType'] = 
 }
 afterEach(() => { for (const s of stores.splice(0)) s.close(); for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
 describe('project resource partitioned SQLite index', () => {
+  it('validates embedding identity before asking storage to prepare a database', () => {
+    const storage = { exists: vi.fn(() => false), prepare: vi.fn(() => { throw new Error('PREPARE_CALLED'); }) };
+    expect(() => new ProjectResourceIndexStore(storage, 'one', { ...space, model: 'tampered' })).toThrow('INVALID_EMBEDDING_SPACE');
+    expect(storage.prepare).not.toHaveBeenCalled();
+    expect(() => new ProjectResourceIndexStore(storage, 'one', space)).toThrow('PREPARE_CALLED');
+    expect(storage.prepare).toHaveBeenCalledWith('one', space.id);
+  });
   it('marks legacy chunking stale without deleting its previously published rows', () => {
     const { store, dir } = open(); store.replace([chunk('retained')], 1);
     expect(store.hasCurrentChunking()).toBe(true);

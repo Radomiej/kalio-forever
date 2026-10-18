@@ -1,7 +1,4 @@
-import type { EmbeddingSpace, MemorySearchMode, ProjectResourceSearchResult, ResourceModality, ResourceRepresentation } from '@kalio/types';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import type { EmbeddingSpace, MemorySearchMode, ProjectResourceIndexStoragePort, ProjectResourceSearchResult, ResourceModality, ResourceRepresentation } from '@kalio/types';
 import { createSqliteDatabase, loadSqliteVec, type SqliteClient } from '../../database/sqlite-runtime';
 import { verifyEmbeddingSpaceIdentity } from './embedding-identity';
 
@@ -15,7 +12,6 @@ interface ResourceRow {
   id: string; path: string; resource_type: ResourceModality; representation: ResourceRepresentation;
   content: string; content_hash: string; created_at: number;
 }
-function hash(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 function validType(type: string): asserts type is ResourceModality {
   if (!RESOURCE_TYPES.includes(type as ResourceModality)) throw new Error('INVALID_RESOURCE_TYPE');
 }
@@ -28,33 +24,15 @@ function validateVector(vector: number[], dimensions: number): void {
 
 /** One database per project/space, separate vec0 indexes per resource type. */
 export class ProjectResourceIndexStore {
-  static exists(root: string, projectId: string, spaceId: string): boolean {
-    return existsSync(join(root, 'project-resources', hash(projectId), `${hash(spaceId)}.db`));
-  }
   private readonly db: SqliteClient;
   private closed = false;
   private readonly space: EmbeddingSpace;
-  constructor(root: string, private readonly projectId: string, space: EmbeddingSpace) {
+  constructor(storage: ProjectResourceIndexStoragePort, private readonly projectId: string, space: EmbeddingSpace) {
     if (!projectId || !verifyEmbeddingSpaceIdentity(space) || space.dimensions > 4096) {
       throw new Error('INVALID_EMBEDDING_SPACE');
     }
     this.space = { ...space };
-    const base = join(root, 'project-resources');
-    const dir = join(base, hash(projectId));
-    const filename = join(dir, `${hash(space.id)}.db`);
-    if (!existsSync(filename) && existsSync(base)) {
-      const projects = readdirSync(base, { withFileTypes: true });
-      if (projects.length > 32) throw new Error('PROJECT_RESOURCE_STORAGE_LIMIT');
-      let databases = 0;
-      for (const project of projects) {
-        if (!project.isDirectory() || project.isSymbolicLink() || !/^[a-f0-9]{64}$/.test(project.name)) throw new Error('PROJECT_RESOURCE_STORAGE_LIMIT');
-        const files = readdirSync(join(base, project.name));
-        if (files.length > 64) throw new Error('PROJECT_RESOURCE_STORAGE_LIMIT');
-        databases += files.filter(file => file.endsWith('.db')).length;
-      }
-      if (databases >= 16) throw new Error('PROJECT_RESOURCE_STORAGE_LIMIT');
-    }
-    mkdirSync(dir, { recursive: true });
+    const filename = storage.prepare(projectId, space.id);
     this.db = createSqliteDatabase(filename).client;
     try {
       loadSqliteVec(this.db);

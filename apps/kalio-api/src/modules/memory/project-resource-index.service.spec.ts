@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
-import { ConfigService } from '@nestjs/config';
 import type { EmbeddingSpace, ProjectResourceReaderPort, ProjectResourceSnapshot } from '@kalio/types';
 import { ProjectResourceIndexService } from './project-resource-index.service';
 import type { EmbeddingService } from './embedding.service';
@@ -12,6 +11,7 @@ import { buildEmbeddingSpace } from './embedding-identity';
 import type { ProjectContextSettingsService } from './project-context-settings.service';
 import type { DrizzleService } from '../../database/drizzle.service';
 import { ProjectResourceIndexStore } from './project-resource-index.store';
+import { ProjectResourceIndexStorage } from '../vfs/project-resource-index-storage';
 
 const roots: string[] = [];
 const space: EmbeddingSpace = buildEmbeddingSpace({ provider: 'mock', providerScope: 'test', backend: '', baseUrl: 'mock', model: 'a', modelRevision: '1', dimensions: 2,
@@ -31,7 +31,7 @@ function fixture() {
   let projectId: string | undefined = 'project';
   const drizzle = { db: { select: () => ({ from: () => ({ where: () => ({ get: () => projectId === undefined ? undefined : { projectId } }) }) }) } };
   return { root, embeddings, reader, setSessionProject: (value: string | undefined) => { projectId = value; }, setEnabled: (value: boolean) => { enabled = value; }, setSnapshot: (s: ProjectResourceSnapshot) => { snapshot = s; },
-    service: new ProjectResourceIndexService(new ConfigService({ MEMORY_DB_PATH: root }), embeddings as unknown as EmbeddingService, reader,
+    service: new ProjectResourceIndexService(new ProjectResourceIndexStorage(root), embeddings as unknown as EmbeddingService, reader,
       settings as ProjectContextSettingsService, drizzle as unknown as DrizzleService) };
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -79,14 +79,14 @@ describe('project indexing workflow', () => {
     const db = new Database(join(f.root, 'project-resources', hash('project'), `${hash(space.id)}.db`));
     try { db.prepare("UPDATE resource_manifest SET chunking_version='' WHERE id=1").run(); }
     finally { db.close(); }
-    const before = new ProjectResourceIndexStore(f.root, 'project', space);
+    const before = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(f.root), 'project', space);
     let refs: ReturnType<ProjectResourceIndexStore['sourceReferences']>;
     try { expect(before.hasCurrentChunking()).toBe(false); refs = before.sourceReferences(); }
     finally { before.close(); }
     f.embeddings.embedPinned.mockClear();
     expect(await f.service.search('project', { query: 'approveBuild', mode, resourceTypes: ['code'] })).toHaveLength(1);
     expect(f.embeddings.embedPinned.mock.calls.filter(call => call[2] === 'document')).toHaveLength(1);
-    const after = new ProjectResourceIndexStore(f.root, 'project', space);
+    const after = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(f.root), 'project', space);
     try { expect(after.hasCurrentChunking()).toBe(true); expect(after.sourceReferences()).toEqual(refs); }
     finally { after.close(); }
     f.embeddings.embedPinned.mockClear();
