@@ -9,6 +9,7 @@ import { ChatService } from './chat.service';
 import { RunJournalService } from './run-journal.service';
 import { HitlRequestService } from '../hitl/hitl-request.service';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
@@ -36,7 +37,7 @@ function fixture() {
   const chat = Object.create(ChatService.prototype) as ChatService;
   Object.assign(chat, { hitlRequests: new HitlRequestService(database), runJournal: journal,
     abortControllers: new Map<string, AbortController>() });
-  const pipeline = new SessionPipelineService(chat, journal);
+  const pipeline = new SessionPipelineService(chat, journal, undefined, new SessionProfileAdmissionService());
   const coordinator = new SessionRuntimeStopService(sessions, pipeline);
   return { client, sessions, journal, chat, pipeline, coordinator };
 }

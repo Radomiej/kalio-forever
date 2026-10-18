@@ -8,6 +8,7 @@ import { DrizzleService } from '../../database/drizzle.service';
 import { HitlRequestService } from '../hitl/hitl-request.service';
 import { ChatService } from './chat.service';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { RunJournalService } from './run-journal.service';
 import { ChatGateway } from './chat.gateway';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
@@ -76,7 +77,7 @@ async function fixture() {
     manager as never, {} as never, { log: vi.fn() } as never, loop as never, {} as never, sessions as never,
     journal as never, context as never, dispatch as never, requests, scheduler as never, profiles as never,
   );
-  const pipeline = new SessionPipelineService(chat, journal as never);
+  const pipeline = new SessionPipelineService(chat, journal as never, undefined, new SessionProfileAdmissionService());
   const approve = () => chat.approveAndResumeTool('approval', 'session', 'approved', emit);
   return { sqlite, requests, chat, pipeline, approve, emit, manager, sessions, context, profiles, profile, assembled, dispatch, toolResult, loop, loopResult, journal, durableJournal, scheduler, lease };
 }

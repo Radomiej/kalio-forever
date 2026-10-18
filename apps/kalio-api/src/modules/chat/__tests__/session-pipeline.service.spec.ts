@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionPipelineService } from '../session-pipeline.service';
+import { SessionProfileAdmissionService } from '../session-profile-admission.service';
 import type { ChatService } from '../chat.service';
 import type { RunJournalService } from '../run-journal.service';
 import type { ChatQueuedPayload, ChatRunSnapshot, SocketEvents } from '@kalio/types';
@@ -219,6 +220,7 @@ describe('SessionPipelineService', () => {
     svc = new SessionPipelineService(
       chatHarness.chat as ChatService,
       runJournal as unknown as RunJournalService,
+      undefined, new SessionProfileAdmissionService(),
     );
   });
 

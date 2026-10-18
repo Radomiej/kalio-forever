@@ -7,6 +7,7 @@ import * as schema from '../../database/schema';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessionTreeStopAdmission } from '../../database/session-tree-stop-admission';
 import { CLIAgentSessionService } from '../cli-agent/cli-agent-session.service';
+import { resolveExecutionProfileId } from '../agent-runtime/execution-profile.utils';
 import { SessionEventsService } from './session-events.service';
 import { SessionsService } from './sessions.service';
 
@@ -25,6 +26,7 @@ function fixture() {
   const chat = Object.create(SessionsService.prototype) as SessionsService;
   Object.assign(chat, {
     drizzle: database, sessionEvents: new SessionEventsService(),
+    executionProfiles: { getDefaultId: async () => null, resolveId: resolveExecutionProfileId },
   });
   const cli = new CLIAgentSessionService(database);
   return { client, db, chat, cli };

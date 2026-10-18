@@ -8,7 +8,9 @@ import type {
   ChatMessage,
   CreateSessionDto,
   SessionRuntimeContext,
+  ExecutionProfileLookupPort,
 } from '@kalio/types';
+import { EXECUTION_PROFILE_LOOKUP } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
@@ -25,10 +27,8 @@ import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
 import { ActiveSessionRegistry } from './active-session-registry.service';
 import { PersonaService } from '../persona/persona.service';
-import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
-import { DefaultExecutionProfileService } from '../agent-runtime/default-execution-profile.service';
-import { resolveExecutionProfileId } from '../agent-runtime/execution-profile.utils';
-import { resolvePersonaExecutionProfileChange } from './session-profile-binding.utils';
+import { prepareSessionProfileUpdate } from './session-profile-update';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
 import {
   buildTitlePrompt as buildSessionTitlePrompt,
@@ -59,11 +59,11 @@ export class SessionsService {
     private readonly llm: LLMService,
     private readonly allowedPaths: AllowedPathsService,
     private readonly projects: ProjectsService,
-    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
-    @Optional() private readonly moduleRef?: ModuleRef,
-    @Optional() private readonly personas?: PersonaService,
-    @Optional() private readonly executionProfiles?: ExecutionProfileService,
-    @Optional() private readonly defaultExecutionProfile?: DefaultExecutionProfileService,
+    @Optional() @Inject(ActiveSessionRegistry) private readonly activeSessionRegistry: ActiveSessionRegistry | undefined,
+    @Optional() @Inject(ModuleRef) private readonly moduleRef: ModuleRef | undefined,
+    @Optional() @Inject(PersonaService) private readonly personas: PersonaService | undefined,
+    @Optional() @Inject(EXECUTION_PROFILE_LOOKUP) private readonly executionProfiles: ExecutionProfileLookupPort | undefined,
+    private readonly profileAdmission: SessionProfileAdmissionService,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -228,45 +228,33 @@ export class SessionsService {
     patch: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext },
     options: SessionRuntimeScopeOptions = {},
   ): Promise<void> {
-    await this.assertExists(id);
-    const current = await this.get(id);
-    let nextExecutionProfileId: string | undefined;
-    if (patch.executionProfileId !== undefined && patch.executionProfileId !== current.executionProfileId) {
-      if (current.parentSessionId) throw new ConflictException('A child session must use its host execution profile.');
-      if (this.activeSessionRegistry?.isActive(id)) {
-        throw new ConflictException('Execution profile cannot change while this conversation is generating.');
-      }
-      if ((await this.repo.loadHistory(id)).length > 0) {
-        throw new ConflictException('Execution profile cannot change after a conversation has started. Create a new chat to choose another provider/model.');
-      }
-      if (!this.executionProfiles) throw new ConflictException('Execution profile selection is unavailable.');
-      const selectedProfile = await this.executionProfiles.assertEnabled(patch.executionProfileId);
-      if (selectedProfile.kind === 'direct-llm' && selectedProfile.provider === 'mock') {
-        throw new ConflictException('Mock execution profiles are not available for user conversations.');
-      }
-      nextExecutionProfileId = selectedProfile.id;
-    }
-    if (patch.executionProfileId === undefined && patch.personaId !== undefined && patch.personaId !== current.personaId) {
-      const personaConfig = await this.personas?.getSessionConfig(patch.personaId);
-      const nextProfileId = personaConfig?.executionProfileId;
-      nextExecutionProfileId = await resolvePersonaExecutionProfileChange(
-        this.repo,
-        id,
-        current.executionProfileId,
-        nextProfileId,
-      );
-    }
-    const hasPatch = patch.title !== undefined || patch.personaId !== undefined || nextExecutionProfileId !== undefined || patch.runtimeContext !== undefined;
-    if (hasPatch) {
-      await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
+    // Path registration may notify other consumers; keep it outside admission.
+    await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
+    const updated = await this.profileAdmission.runMutation(id, async assertNotStopped => {
+      const current = await this.get(id);
+      const assertMutable = () => {
+        assertNotStopped();
+        if (this.activeSessionRegistry?.isActive(id)) {
+          throw new ConflictException('Execution profile cannot change while this conversation is generating.');
+        }
+      };
+      const nextExecutionProfileId = await prepareSessionProfileUpdate({
+        current, patch, repository: this.repo, profiles: this.executionProfiles,
+        personaProfile: async personaId => (await this.personas?.getSessionConfig(personaId))?.executionProfileId,
+        assertMutable,
+      });
+      const hasPatch = patch.title !== undefined || patch.personaId !== undefined || nextExecutionProfileId !== undefined || patch.runtimeContext !== undefined;
+      if (!hasPatch) return undefined;
+      if (nextExecutionProfileId !== undefined) assertMutable();
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.title !== undefined) set.title = patch.title;
       if (patch.personaId !== undefined) set.personaId = patch.personaId;
       if (nextExecutionProfileId !== undefined) set.executionProfileId = nextExecutionProfileId;
       if (patch.runtimeContext !== undefined) set.runtimeContext = patch.runtimeContext;
-      await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
-      this.sessionEvents.emitSessionUpdated(await this.get(id));
-    }
+      this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id)).run();
+      return this.get(id);
+    });
+    if (updated) this.sessionEvents.emitSessionUpdated(updated);
   }
 
   async updateRuntimeContext(
@@ -384,14 +372,14 @@ export class SessionsService {
     const personaProfileId = parent
       ? undefined
       : (await this.personas?.getSessionConfig(dto.personaId))?.executionProfileId;
-    const defaultProfileId = parent ? undefined : await this.defaultExecutionProfile?.getId();
+    const defaultProfileId = parent ? undefined : await this.executionProfiles?.getDefaultId();
     if (projectId === SYSTEM_PROJECT_IDS.none) {
       if (requestedProjectId === SYSTEM_PROJECT_IDS.none && dto.projectPathOverride?.trim()) {
         throw new BadRequestException('The no-project session cannot have a path override.');
       }
       return {
         projectId,
-        executionProfileId: resolveExecutionProfileId({
+        executionProfileId: this.resolveProfileId({
           explicitProfileId: parentProfileId ?? explicitProfileId,
           personaProfileId: defaultProfileId ?? personaProfileId,
           projectProfileId: 'local-direct-default',
@@ -409,13 +397,18 @@ export class SessionsService {
     }
     return {
       projectId,
-      executionProfileId: resolveExecutionProfileId({
+      executionProfileId: this.resolveProfileId({
         explicitProfileId: parentProfileId ?? explicitProfileId,
         personaProfileId: defaultProfileId ?? personaProfileId,
         projectProfileId: project.defaultExecutionProfileId,
       }),
       runtimeContext: this.applyProjectPath(dto.runtimeContext, path),
     };
+  }
+
+  private resolveProfileId(selection: Parameters<ExecutionProfileLookupPort['resolveId']>[0]): string {
+    if (!this.executionProfiles) throw new ConflictException('Execution profile selection is unavailable.');
+    return this.executionProfiles.resolveId(selection);
   }
 
   private applyProjectPath(

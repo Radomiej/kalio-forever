@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { EXECUTION_PROFILE_LOOKUP } from '@kalio/types';
+import { EXECUTION_PROFILE_LOOKUP, type ExecutionProfileLookupPort } from '@kalio/types';
 import { DatabaseModule } from '../../database/database.module';
 import { CLIAgentModule } from '../cli-agent/cli-agent.module';
 import { CredentialsModule } from '../credentials/credentials.module';
@@ -25,12 +25,23 @@ import { KalioMcpBridgeContextModule } from '../../common/kalio-mcp-bridge-conte
 import { AuditModule } from '../chat/audit.module';
 import { DefaultExecutionProfileService } from './default-execution-profile.service';
 import { DefaultExecutionProfileController } from './default-execution-profile.controller';
+import { resolveExecutionProfileId } from './execution-profile.utils';
+
+export const executionProfileLookupProvider = {
+  provide: EXECUTION_PROFILE_LOOKUP,
+  inject: [ExecutionProfileService, DefaultExecutionProfileService],
+  useFactory: (profiles: ExecutionProfileService, defaults: DefaultExecutionProfileService): ExecutionProfileLookupPort => ({
+    assertEnabled: id => profiles.assertEnabled(id),
+    getDefaultId: () => defaults.getId(),
+    resolveId: resolveExecutionProfileId,
+  }),
+};
 
 @Module({
   imports: [DatabaseModule, AuditModule, CLIAgentModule, CredentialsModule, KalioMcpBridgeContextModule],
   controllers: [DefaultExecutionProfileController, ExecutionProfileController, NativeCliIntegrationController, DevinIntegrationController, DevinCliIntegrationController],
   // Cross-module readers consume the shared identity port, not this service class.
-  providers: [{ provide: EXECUTION_PROFILE_LOOKUP, useExisting: ExecutionProfileService }, DefaultExecutionProfileService, ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliModelCatalogService, DevinCliCommandQueueService, DevinCliProbeService, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
+  providers: [executionProfileLookupProvider, DefaultExecutionProfileService, ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliModelCatalogService, DevinCliCommandQueueService, DevinCliProbeService, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
   exports: [EXECUTION_PROFILE_LOOKUP, DefaultExecutionProfileService, ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliModelCatalogService, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
 })
 export class AgentRuntimeModule {}

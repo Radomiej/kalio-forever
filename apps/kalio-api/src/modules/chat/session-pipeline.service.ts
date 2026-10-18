@@ -1,9 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type { ChatRunSnapshot, SocketEvents } from '@kalio/types';
 import { ChatService } from './chat.service';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { PerKeyMutex } from './per-key-mutex';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { RunJournalService } from './run-journal.service';
 import { ActiveSessionRegistry } from './active-session-registry.service';
 import { SessionExecutionAdmission, type SessionExecutionReservation, type SessionStopLease } from './session-execution-admission';
@@ -37,8 +38,9 @@ export class SessionPipelineService {
 
   constructor(
     private readonly chat: ChatService,
-    @Optional() private readonly runJournal?: RunJournalService,
-    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
+    @Optional() @Inject(RunJournalService) private readonly runJournal: RunJournalService | undefined,
+    @Optional() @Inject(ActiveSessionRegistry) private readonly activeSessionRegistry: ActiveSessionRegistry | undefined,
+    private readonly profileAdmission: SessionProfileAdmissionService,
   ) {
     this.chat.setContinuationAdmission?.({
       capture: () => this.active.capture(),
@@ -54,6 +56,14 @@ export class SessionPipelineService {
     return slot;
   }
 
+  private async admit<T>(id: string, work: () => Promise<T>, effects: (() => void)[] = []): Promise<T> {
+    try {
+      return await this.profileAdmission.runExclusive(id, () => this.mutex.runExclusive(id, work));
+    } finally {
+      effects.forEach(effect => effect());
+    }
+  }
+
   private deleteActive(sessionId: string, slot: SessionExecutionReservation): void {
     if (this.active.get(sessionId) !== slot) return;
     this.active.release(sessionId, slot);
@@ -61,7 +71,7 @@ export class SessionPipelineService {
   }
 
   async runContinuation(sessionId: string, turnId: string, worker: (controller: AbortController) => Promise<boolean>, version?: number): Promise<boolean> {
-    const slot = await this.mutex.runExclusive(sessionId, async () => {
+    const slot = await this.admit(sessionId, async () => {
       const existing = this.active.get(sessionId);
       if (this.active.isStopping(sessionId) || (version !== undefined && this.active.wasStopped(sessionId, version))) return null;
       if (existing && (!existing.seeded || existing.turnId !== turnId)) return null;
@@ -79,7 +89,9 @@ export class SessionPipelineService {
     }
   }
 
-  async submit(payload: ChatSendPayload, emit: EmitFn): Promise<void> {
+  async submit(payload: ChatSendPayload, send: EmitFn): Promise<void> {
+    const effects: (() => void)[] = [];
+    const emit: EmitFn = (event, data) => { effects.push(() => send(event, data)); };
     const sid = payload.sessionId;
     const version = this.active.capture();
     const isInterrupt = payload.interrupt === true;
@@ -93,7 +105,7 @@ export class SessionPipelineService {
     //
     // Interrupts enter the head of the same queue; only the current owner's
     // cleanup can transfer admission to the next turn.
-    const decision = await this.mutex.runExclusive<
+    const decision = await this.admit<
       | { kind: 'dispatch'; turnId: string }
       | { kind: 'queued' }
       | { kind: 'rejected' }
@@ -106,8 +118,11 @@ export class SessionPipelineService {
       const barrier = this.active.waitForStop(sid);
       if (barrier) return { kind: 'stopping', barrier };
       if (isInterrupt && this.active.has(sid)) {
-        this.active.get(sid)?.controller.abort();
-        this.chat.abort(sid);
+        const interrupted = this.active.get(sid)!;
+        effects.push(() => {
+          interrupted.controller.abort();
+          if (this.active.get(sid) === interrupted) this.chat.abort(sid);
+        });
         if (payload.content.trim().length === 0) return { kind: 'rejected' };
       }
       if (this.active.has(sid)) {
@@ -140,7 +155,7 @@ export class SessionPipelineService {
             sessionId: sid,
             turnId,
             payload,
-            emit,
+            emit: send,
           });
           if (persistence.kind === 'duplicate') {
             emit('chat:queued', {
@@ -163,7 +178,7 @@ export class SessionPipelineService {
           queuedItem = persistence.item;
         } else {
           queuedItem = {
-            emit,
+            emit: send,
             turnId,
             payload,
           };
@@ -183,18 +198,18 @@ export class SessionPipelineService {
       const turnId = nanoid();
       this.setActive(sid, turnId);
       return { kind: 'dispatch', turnId };
-    });
+    }, effects);
 
     if (decision.kind === 'queued' || decision.kind === 'rejected') return;
 
     if (decision.kind === 'stopping') {
       await decision.barrier;
-      return this.submit(payload, emit);
+      return this.submit(payload, send);
     }
 
     await this.runWithDrain({
       payload,
-      emit,
+      emit: send,
       turnId: decision.turnId,
     });
   }
@@ -202,7 +217,7 @@ export class SessionPipelineService {
   async resumeQueuedSession(sessionId: string, emit: EmitFn): Promise<void> {
     if (!this.runJournal) return;
 
-    const first = await this.mutex.runExclusive<QueuedItem | null>(sessionId, async () => {
+    const first = await this.admit<QueuedItem | null>(sessionId, async () => {
       if (this.active.has(sessionId) || this.active.isStopping(sessionId)) return null;
       const durableQueue = await this.runJournal!.listQueuedRuns(sessionId);
       if (durableQueue.length === 0) return null;
@@ -253,12 +268,14 @@ export class SessionPipelineService {
    * removal.
    */
   async stopAndDrain(sessionId: string): Promise<void> {
+    return this.profileAdmission.duringStop(sessionId, async () => {
     const drain = this.active.stopAndDrain(sessionId, () => this.mutex.runExclusive(sessionId, async () => {
       await this.dropQueuedItems(sessionId);
     }), async () => { await this.chat.cancelPendingContinuations?.(sessionId); });
     this.chat.abort(sessionId);
     await drain;
     if (!this.active.has(sessionId)) this.activeSessionRegistry?.markInactive(sessionId);
+    });
   }
 
   assertStopLeasesAvailable(sessionIds: readonly string[]): void {
@@ -266,12 +283,12 @@ export class SessionPipelineService {
   }
 
   acquireStopLease(sessionId: string, ownersSettled: Promise<void>): SessionStopLease {
-    const lease = this.active.acquireStopLease(sessionId, ownersSettled,
+    const lease = this.profileAdmission.fenceStop(sessionId, () => this.active.acquireStopLease(sessionId, ownersSettled,
       () => this.mutex.runExclusive(sessionId, () => this.dropQueuedItems(sessionId)),
       async () => {
         await this.chat.cancelPendingContinuations(sessionId);
         if (!this.active.has(sessionId)) this.activeSessionRegistry?.markInactive(sessionId);
-      });
+      }));
     this.chat.abort(sessionId);
     return lease;
   }
@@ -301,7 +318,7 @@ export class SessionPipelineService {
   }
 
   seedActiveTurn(sessionId: string, turnId: string): void {
-    this.setActive(sessionId, turnId, true);
+    this.profileAdmission.tryRunExclusive(sessionId, () => this.setActive(sessionId, turnId, true));
   }
 
   clearSeededActiveTurn(sessionId: string): void {
@@ -365,7 +382,8 @@ export class SessionPipelineService {
   }
 
   private advance(sid: string, slot: SessionExecutionReservation): Promise<DispatchItem | null> {
-    return this.mutex.runExclusive<DispatchItem | null>(sid, async () => {
+    const effects: (() => void)[] = [];
+    return this.admit<DispatchItem | null>(sid, async () => {
         if (this.active.get(sid) !== slot) return null;
         this.deleteActive(sid, slot);
         if (this.active.isStopping(sid)) return null;
@@ -378,7 +396,7 @@ export class SessionPipelineService {
           const nextSlot = this.setActive(sid, next.turnId);
           let dispatch: DispatchItem | null;
           try {
-            dispatch = await this.toDispatchItem(sid, next);
+            dispatch = await this.toDispatchItem(sid, next, effects);
           } catch (error) {
             this.deleteActive(sid, nextSlot);
             throw error;
@@ -393,16 +411,24 @@ export class SessionPipelineService {
         }
         this.queues.delete(sid);
         return null;
-      });
+      }, effects);
   }
 
-  private async toDispatchItem(sessionId: string, queued: QueuedItem): Promise<DispatchItem | null> {
-    return claimQueuedDispatchItem({
+  private async toDispatchItem(sessionId: string, queued: QueuedItem, effects?: (() => void)[]): Promise<DispatchItem | null> {
+    const emit: EmitFn = (event, data) => {
+      if (effects) effects.push(() => queued.emit(event, data));
+      else queued.emit(event, data);
+    };
+    const item = await claimQueuedDispatchItem({
       sessionId,
-      queued,
+      queued: { ...queued, emit },
       runJournal: this.runJournal,
-      onError: (message) => this.logger.error(message),
+      onError: (message) => {
+        if (effects) effects.push(() => this.logger.error(message));
+        else this.logger.error(message);
+      },
     });
+    return item ? { ...item, emit: queued.emit } : null;
   }
 
   private async runOne(current: DispatchItem, slot: SessionExecutionReservation): Promise<void> {

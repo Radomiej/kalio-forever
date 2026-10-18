@@ -6,8 +6,9 @@ import { ArchitectureRunPreparationService } from './architecture-run-preparatio
 import { validateArchitectureCreateRunDto } from './architecture-runtime-schema.utils';
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { EXECUTION_PROFILE_LOOKUP } from '@kalio/types';
-import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
+import { AgentRuntimeModule, executionProfileLookupProvider } from '../agent-runtime/agent-runtime.module';
 import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
+import { DefaultExecutionProfileService } from '../agent-runtime/default-execution-profile.service';
 
 const dto = { schemaId: 'strategic-decision-council', prompt: 'Review the page', executionProfileId: 'devin-swe-2' };
 function fixture(parentProfile = 'devin-swe-2', unavailable = false) {
@@ -27,11 +28,22 @@ function fixture(parentProfile = 'devin-swe-2', unavailable = false) {
 }
 
 describe('architecture explicit root execution profile', () => {
-  it('exports the read-only lookup bound to the existing profile service', () => {
-    expect(Reflect.getMetadata(MODULE_METADATA.PROVIDERS, AgentRuntimeModule)).toContainEqual({
-      provide: EXECUTION_PROFILE_LOOKUP, useExisting: ExecutionProfileService,
-    });
+  it('exports the read-only lookup backed by the existing profile and saved-default services', async () => {
+    expect(Reflect.getMetadata(MODULE_METADATA.PROVIDERS, AgentRuntimeModule)).toContain(executionProfileLookupProvider);
     expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, AgentRuntimeModule)).toContain(EXECUTION_PROFILE_LOOKUP);
+    expect(executionProfileLookupProvider.inject).toEqual([ExecutionProfileService, DefaultExecutionProfileService]);
+    const profiles = { assertEnabled: vi.fn(async () => ({ id: 'enabled' })) };
+    const defaults = { getId: vi.fn(async () => 'saved') };
+    const port = executionProfileLookupProvider.useFactory(profiles as unknown as ExecutionProfileService,
+      defaults as unknown as DefaultExecutionProfileService);
+    await expect(port.assertEnabled('enabled')).resolves.toEqual({ id: 'enabled' });
+    expect(profiles.assertEnabled).toHaveBeenCalledWith('enabled');
+    await expect(port.getDefaultId()).resolves.toBe('saved');
+    expect(defaults.getId).toHaveBeenCalledOnce();
+    expect(port.resolveId({ explicitProfileId: ' explicit ', personaProfileId: 'persona', projectProfileId: 'project' })).toBe('explicit');
+    expect(port.resolveId({ personaProfileId: 'persona', projectProfileId: 'project' })).toBe('persona');
+    expect(port.resolveId({ projectProfileId: 'project' })).toBe('project');
+    expect(() => port.resolveId({})).toThrow('Execution profile is required');
   });
   it('rejects oversized profile IDs', () => {
     expect(() => validateArchitectureCreateRunDto({ ...dto, executionProfileId: 'x'.repeat(129) })).toThrow();

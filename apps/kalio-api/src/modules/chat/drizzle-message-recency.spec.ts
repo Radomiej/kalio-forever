@@ -8,6 +8,7 @@ import { createMessageSessions } from './__tests__/message-session.fixture';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
 import { SessionEventsService } from './session-events.service';
 import { SessionsService } from './sessions.service';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { SessionsController } from './sessions.controller';
 
 describe('message recency and existing session lifecycle events (real SQLite)', () => {
@@ -54,7 +55,8 @@ describe('message recency and existing session lifecycle events (real SQLite)', 
     });
     repository = new DrizzleMessageRepository(service, events);
     const sessions = new SessionsService(service, null as never, events, repository,
-      null as never, null as never, null as never);
+      null as never, null as never, null as never, undefined, undefined, undefined, undefined,
+      new SessionProfileAdmissionService());
     controller = new SessionsController(sessions, null as never, null as never, null as never, null as never);
   });
   afterEach(() => {

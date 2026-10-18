@@ -10,6 +10,7 @@ import { HitlRequestService } from '../hitl/hitl-request.service';
 import { ChatService } from './chat.service';
 import { RunJournalService } from './run-journal.service';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
 import { ActiveSubagentRunRegistry } from './subagent-runtime.support';
 import { sessionTreeStopAdmission } from '../../database/session-tree-stop-admission';
@@ -99,7 +100,7 @@ describe('ordinary Stop versus independent journal owner (migrated SQLite)', () 
       }
       return snapshot;
     });
-    const pipeline = new SessionPipelineService(f.chat, f.journal);
+    const pipeline = new SessionPipelineService(f.chat, f.journal, undefined, new SessionProfileAdmissionService());
     const stop = new SessionRuntimeStopService({
       claimTreeStop: (id: string) => sessionTreeStopAdmission(f.db).claim(id),
       listChildren: async () => [],

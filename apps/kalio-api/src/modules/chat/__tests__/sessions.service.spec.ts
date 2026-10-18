@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { SessionsService } from '../sessions.service';
+import { SessionProfileAdmissionService } from '../session-profile-admission.service';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { SessionManagerService } from '../session-manager.service';
@@ -98,7 +99,7 @@ describe('SessionsService', () => {
   let projects: { assertAssignable: ReturnType<typeof vi.fn> };
   let personas: { getSessionConfig: ReturnType<typeof vi.fn> };
   let activeSessionRegistry: { isActive: ReturnType<typeof vi.fn> };
-  let executionProfiles: { assertEnabled: ReturnType<typeof vi.fn> };
+  let executionProfiles: { assertEnabled: ReturnType<typeof vi.fn>; getDefaultId: ReturnType<typeof vi.fn>; resolveId: ReturnType<typeof vi.fn> };
   let rows: FakeRow[];
   let ops: string[];
 
@@ -147,9 +148,12 @@ describe('SessionsService', () => {
     personas = { getSessionConfig: vi.fn().mockResolvedValue({ executionProfileId: 'persona-profile' }) };
     activeSessionRegistry = { isActive: vi.fn().mockReturnValue(false) };
     executionProfiles = {
-      assertEnabled: vi.fn().mockResolvedValue({
-        id: 'selected-profile', kind: 'devin-cli-acp', model: 'swe-2', enabled: true,
-      }),
+      getDefaultId: vi.fn().mockResolvedValue(null),
+      resolveId: vi.fn().mockImplementation(selection =>
+        selection.explicitProfileId ?? selection.personaProfileId ?? selection.projectProfileId),
+      assertEnabled: vi.fn().mockImplementation(async (id: string) => ({
+        id, kind: 'devin-cli-acp', model: 'swe-2', enabled: true,
+      })),
     };
     service = new SessionsService(
       fixture.drizzle,
@@ -163,16 +167,17 @@ describe('SessionsService', () => {
       undefined,
       personas as unknown as PersonaService,
       executionProfiles as never,
+      new SessionProfileAdmissionService(),
     );
   });
 
   describe('create', () => {
     it('uses the saved default agent for new top-level sessions but preserves explicit choices', async () => {
-      const defaults = { getId: vi.fn().mockResolvedValue('devin-swe-2') };
+      executionProfiles.getDefaultId.mockResolvedValue('devin-swe-2');
       const withDefault = new SessionsService(
         makeDrizzle(rows).drizzle, {} as SessionManagerService, sessionEvents, repo, llm, allowedPaths,
         projects as never, activeSessionRegistry as never, undefined,
-        personas as unknown as PersonaService, executionProfiles as never, defaults as never,
+        personas as unknown as PersonaService, executionProfiles as never, new SessionProfileAdmissionService(),
       );
       expect((await withDefault.create({ personaId: 'p1' })).executionProfileId).toBe('devin-swe-2');
       expect((await withDefault.create({ personaId: 'p1', executionProfileId: 'explicit' })).executionProfileId).toBe('explicit');

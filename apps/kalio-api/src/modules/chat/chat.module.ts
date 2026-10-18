@@ -19,6 +19,7 @@ import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
 import { ProjectsController } from './projects.controller';
@@ -129,6 +130,7 @@ import {
     RuntimeAuditLogger,
     ChatService,
     SessionPipelineService,
+    SessionProfileAdmissionService,
     ChatGateway,
     DrizzleMessageRepository,
     LLMServiceAdapter,
