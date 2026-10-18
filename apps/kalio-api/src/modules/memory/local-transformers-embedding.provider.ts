@@ -190,7 +190,7 @@ export class LocalTransformersEmbeddingProvider implements IEmbeddingProvider {
 
   getModelIdentity(): { modelRevision: string; providerScope: string } | undefined {
     const effectiveBackend = this.config.backend === 'auto' && process.platform === 'win32' ? 'cpu' : this.config.backend;
-    const modelRevision = this.config.model === DEFAULT_LOCAL_EMBEDDING_MODEL && this.config.backend === 'cpu'
+    const modelRevision = this.config.model === DEFAULT_LOCAL_EMBEDDING_MODEL && effectiveBackend === 'cpu'
       ? DEFAULT_LOCAL_MODEL_REVISION
       : this.config.model === GEMMA2_LOCAL_EMBEDDING_MODEL && effectiveBackend === 'cpu'
         ? GEMMA2_LOCAL_EMBEDDING_REVISION

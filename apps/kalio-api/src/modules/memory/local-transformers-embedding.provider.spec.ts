@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_LOCAL_EMBEDDING_BACKEND,
   DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
@@ -54,6 +54,10 @@ beforeEach(() => {
   mockedHuggingFaceEnv.cacheDir = '';
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('LocalTransformersEmbeddingProvider', () => {
   it('sizes the complete input with the loaded tokenizer without truncation', async () => {
     const tokenizer = vi.fn((text: string) => ({ input_ids: { size: text.length } }));
@@ -104,8 +108,29 @@ describe('LocalTransformersEmbeddingProvider', () => {
     });
     expect(mockedHuggingFaceEnv.localModelPath).toBe('./models/');
   });
-  it('does not claim pinned identity for unknown models or automatic backend fallback', () => {
+  it('pins Windows auto to the same default CPU identity and isolates cache scopes', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const identity = makeProvider('auto').getModelIdentity();
+    expect(identity).toEqual({
+      modelRevision: '761b726dd34fb83930e26aab4e9ac3899aa1fa78',
+      providerScope: expect.stringMatching(/^scope-/),
+    });
+    expect(identity).toEqual(makeProvider('cpu').getModelIdentity());
+    const separateIdentity = new LocalTransformersEmbeddingProvider({
+      model: DEFAULT_LOCAL_EMBEDDING_MODEL, dimensions: 384,
+      cacheDir: './data/separate-cache', backend: 'auto',
+    }).getModelIdentity();
+    expect(separateIdentity?.modelRevision).toBe(identity?.modelRevision);
+    expect(separateIdentity?.providerScope).toMatch(/^scope-/);
+    expect(separateIdentity?.providerScope).not.toBe(identity?.providerScope);
+    expect(makeProvider('webgpu').getModelIdentity()).toBeUndefined();
+  });
+  it.each(['linux', 'darwin'] as const)('does not claim pinned auto identity on %s', platform => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
     expect(makeProvider('auto').getModelIdentity()).toBeUndefined();
+    expect(makeProvider('webgpu').getModelIdentity()).toBeUndefined();
+  });
+  it('does not claim pinned identity for unknown models', () => {
     expect(new LocalTransformersEmbeddingProvider({ model: 'custom/model', dimensions: 384,
       cacheDir: './data/embeddings-cache', backend: 'cpu' }).getModelIdentity()).toBeUndefined();
   });
@@ -212,7 +237,8 @@ describe('LocalTransformersEmbeddingProvider', () => {
     await provider.dispose();
   });
 
-  it('pins Gemma auto mode to CPU identity on Windows and refuses untested GPU identity', () => {
+  it.each(['win32', 'linux', 'darwin'] as const)('preserves Gemma backend identity on %s', platform => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
     const makeGemma = (backend: 'auto' | 'webgpu' | 'cpu') => new LocalTransformersEmbeddingProvider({
       model: GEMMA2_LOCAL_EMBEDDING_MODEL, dimensions: 768, cacheDir: './data/embeddings-cache', backend,
     });
