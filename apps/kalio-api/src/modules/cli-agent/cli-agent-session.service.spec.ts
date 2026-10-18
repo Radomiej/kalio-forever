@@ -39,6 +39,7 @@ describe('CLIAgentSessionService metadata contract', () => {
         path text,
         normalized_path text,
         kind text not null,
+        default_execution_profile_id text not null default 'local-direct-default',
         is_system integer not null default false,
         created_at integer not null,
         updated_at integer not null

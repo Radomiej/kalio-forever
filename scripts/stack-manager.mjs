@@ -848,6 +848,7 @@ function killProcessTree(pid) {
   process.kill(pid, 'SIGTERM');
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
+      clearInterval(check);
       try {
         process.kill(pid, 'SIGKILL');
       } catch (error) {

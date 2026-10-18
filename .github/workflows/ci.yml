@@ -11,6 +11,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -38,6 +41,9 @@ jobs:
 
       - name: Run Playwright launcher tests
         run: pnpm --filter @kalio/e2e test
+
+      - name: Linux installer, updater and local-model harness regressions
+        run: node --test scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs scripts/local-model-benchmark.test.mjs scripts/runtime-dependencies.test.mjs scripts/corepack-path.test.mjs
 
   backend:
     runs-on: ubuntu-latest
@@ -150,6 +156,36 @@ jobs:
       - name: Smoke E2E gate
         run: pnpm --filter @kalio/e2e test:e2e -- --project=chromium
 
+  linux-runtime:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the application
+        run: pnpm build
+      - name: Package Linux Node runtime
+        run: node scripts/build-runtime-package.mjs --platform linux --runtime node --output release
+      - name: Install, start, exercise VFS and restart the packaged runtime
+        shell: bash
+        run: |
+          archive=$(find release -maxdepth 1 -name 'kalio-runtime-*-linux-x64.tar.gz' -print -quit)
+          test -n "$archive"
+          node scripts/smoke-linux-runtime.mjs --archive "$archive" --output output/linux-runtime-smoke.json
+      - name: Upload the runtime smoke receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-runtime-smoke
+          path: output/linux-runtime-smoke.json
+          if-no-files-found: warn
+
   quality-gate:
     runs-on: ubuntu-latest
     needs:
@@ -158,6 +194,7 @@ jobs:
       - frontend
       - audit
       - e2e
+      - linux-runtime
     steps:
       - name: Quality gate passed
         run: echo 'All required quality gates passed.'

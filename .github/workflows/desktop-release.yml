@@ -180,6 +180,8 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-24.04
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -236,12 +238,21 @@ jobs:
           node scripts/build-runtime-package.mjs --platform linux --output release --runtime node
           node scripts/build-runtime-package.mjs --platform linux --output release --runtime bun
 
+      - name: Smoke test the packaged Linux Node runtime
+        shell: bash
+        run: |
+          archive=$(find release -maxdepth 1 -name 'kalio-runtime-*-linux-x64.tar.gz' ! -name '*-bun-linux-x64.tar.gz' -print -quit)
+          test -n "$archive"
+          node scripts/smoke-linux-runtime.mjs --archive "$archive" --output release/linux-node-smoke.json
+
       - name: Upload Linux runtime archives
         uses: actions/upload-artifact@v4
         with:
           name: kalio-linux-runtime
           if-no-files-found: error
-          path: release/kalio-runtime-*-linux-x64.tar.gz
+          path: |
+            release/kalio-runtime-*-linux-x64.tar.gz
+            release/linux-node-smoke.json
 
       - name: Split Linux Bun runtime archive for manual verification
         shell: bash

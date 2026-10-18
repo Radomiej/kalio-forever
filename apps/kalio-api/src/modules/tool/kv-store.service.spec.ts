@@ -35,6 +35,7 @@ function makeTestDrizzle(): DrizzleService {
       path TEXT,
       normalized_path TEXT,
       kind TEXT NOT NULL,
+      default_execution_profile_id TEXT NOT NULL DEFAULT 'local-direct-default',
       is_system INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL

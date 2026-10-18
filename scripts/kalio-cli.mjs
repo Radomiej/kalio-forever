@@ -155,6 +155,11 @@ async function runServer(openUi) {
     stdio: 'inherit',
     windowsHide: false,
   });
+  let stopping = false;
+  const onInterrupt = () => { stopping = true; child.kill('SIGINT'); };
+  const onTerminate = () => { stopping = true; child.kill('SIGTERM'); };
+  process.once('SIGINT', onInterrupt);
+  process.once('SIGTERM', onTerminate);
 
   if (openUi) {
     openBrowser('http://127.0.0.1:' + port);
@@ -166,12 +171,14 @@ async function runServer(openUi) {
       resolveExit(1);
     });
     child.once('exit', (code, signal) => {
-      if (signal) {
+      if (signal && !stopping) {
         console.error('[kalio] runtime exited with signal ' + signal);
       }
-      resolveExit(code ?? 1);
+      resolveExit(code ?? (stopping ? 0 : 1));
     });
   });
+  process.off('SIGINT', onInterrupt);
+  process.off('SIGTERM', onTerminate);
   await releaseLock(lock);
   process.exitCode = exitCode;
 }
