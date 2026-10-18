@@ -97,6 +97,73 @@ recoverably to root outputs/observer-reentry-sandbox-quarantine-20261018; no use
 or QA data deleted. AGENTS now requires mutation copies outside application test
 roots. The subsequent clean full run above is the authoritative result.
 
+### Stop/Delete release regression — verification checkpoint
+
+The CI deletion failure reproduced in a fresh built stack. Ordinary cancellation
+read an active revision while an external role owner concurrently wrote its
+terminal revision. The strict SQLite CAS correctly rejected that stale snapshot.
+The repair retains per-session admission leases and a database-scoped topology
+claim: freeze discovery, fence every discovered session synchronously, settle all
+external owners, finalize ordinary cancellation, perform DELETE, then release.
+Socket Stop, HTTP DELETE and Telegram use the same coordinator. Child insertion
+is guarded at both production insert boundaries; parent links remain immutable.
+No timeout, protected-goal condition or CAS check was weakened.
+
+Parent local gates at this checkpoint: root tests exit 0 (scripts 161, shared
+types 126, FE 2093, API 6111 plus four conditional skips, launcher 15); API tsc,
+scoped lint and build exit 0 (928 compiled files). API coverage: statements
+89.42%, branches 85.25%, functions 92.48%. Built isolated Stop/Delete browser
+regressions: 2/2 PASS. Scoped topology mutation: 43 killed, three instrumented
+hit-limit timeouts, two survivors, zero no-coverage/final errors, 95.83%; this
+is not whole-app mutation coverage or universal equivalence proof.
+
+The wider workflow release gate passed all groups, including Goal Guard, HITL,
+child visibility, replay and ordinary chat. Its first attempt failed the fixture
+storage safety check before running a workflow. The generated temporary root
+now includes the existing playwright-stack marker; an executable path regression
+passes without weakening that guard. Stable QA was restored afterward: UI 200,
+effective saved OpenRouter/openai/gpt-4o-mini unchanged, protected Devin cold
+static preflight PASS. The preview terminal did not survive backend maintenance
+and must be restarted through the approved Devin UI before final live handoff.
+
+Final review found a further failure-path gap: the retained lease's completion
+promise acknowledges cleanup, not successful Stop. Twelve deterministic cases
+reproduced waiting submissions proceeding after owner/DELETE failures. A separate
+semantic waiter now propagates the exact coordinated error (including falsy
+throws); release ACK remains fulfilled and the first release outcome wins.
+Real pipeline/SQLite and controller regressions cover root/child submissions,
+coalesced Stop, local finalizer failure, blocked action and fresh recovery.
+Independent final root gate exit 0: API 6131 PASS / four conditional skips,
+FE 2093, shared types 126, scripts 161, launcher 15. Final changed-path ESLint,
+API typecheck/build exit 0 (928 files), isolated built Stop/Delete 2/2 PASS.
+
+Commits: da385864 fixes workflow fixture storage; 8b512ad4 contains the retained
+Stop repair and semantic failure propagation. Stable QA was redeployed from
+these compiled source bytes without resetting saved providers: HTTP 200,
+OpenRouter/openai/gpt-4o-mini source=db unchanged, protected Devin cold static
+preflight PASS. Final real UI Devin swe-2-high run used one manually approved
+terminal_spawn and terminal_output. Actual output binds terminal
+KiGNvU36dDFUAQ3-HLZ3B (pid 49168), turn zd9orRMNoy8ik-3wUnvpF,
+cwd E:/Projekty/home-site and URL http://127.0.0.1:50330/. The server remains
+running. F5 restores the completed answer, collapsed Thinking and no Stop button;
+Graph shows completed turn, two grouped tools and final reply. Headed final
+Home Site audit passes 2/2 across six widths, menu/focus/demo-form/reset and
+320px comma regression, with actual index-CiG0h558.js. No source edits, installs
+or duplicate spawns occurred during this final canary.
+
+### Final acceptance boundary
+
+| Area | Status | Evidence | Remaining |
+| --- | --- | --- | --- |
+| Stop/Delete failure and recovery | PASS locally | Final root gate, actual SQLite regression, built browser 2/2 | Fresh pushed-head CI |
+| Stable QA / providers | PASS | UI 200, saved effective provider unchanged, actual UI reconnect | No production claim |
+| Devin / Home Site | PASS on QA | Exact model, one HITL, actual terminal output, F5/Graph, headed audit 2/2 | Leave QA and preview running |
+| Public release | Pending | PR15 remains approval-gated | Push final head, verify CI/Desktop and obtain human approval |
+
+No main merge, tag or public release has been performed. The unrelated image
+agent remains untouched; task-owned helper agents are closed. Ignored logs,
+screenshots and mutation outputs remain local and are not bundled into the PR.
+
 RAD-14 Done read verified on owner instruction, not a waiver of security
 acceptance criteria. Leave QA/preview running. Push only the feature branch,
 verify fresh CI, and obtain the required PR approval; do not bypass protection,
