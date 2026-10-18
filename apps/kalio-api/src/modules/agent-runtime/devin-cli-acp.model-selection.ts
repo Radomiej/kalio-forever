@@ -4,7 +4,7 @@ type ConfigOptions = SessionConfigOption[] | null | undefined;
 
 function modelDiagnostic(model: string, selector: SessionConfigOption & { type: 'select' }, source: string): string {
   const values = selector.options.flatMap(option => 'group' in option ? option.options : [option]);
-  const clean = (value: string) => value.replace(/[^\p{L}\p{N} ._:/+()\-]/gu, '').slice(0, 100);
+  const clean = (value: string) => value.replace(/[^\p{L}\p{N} ._:/+()-]/gu, '').slice(0, 100);
   const candidates = values.filter(option => /swe|glm/i.test(`${option.value} ${option.name}`)).slice(0, 12)
     .map(option => ({ value: clean(option.value), name: clean(option.name) }));
   return JSON.stringify({ source, requested: clean(model), selector: clean(selector.id), current: clean(selector.currentValue),
