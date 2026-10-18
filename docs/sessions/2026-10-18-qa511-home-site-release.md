@@ -164,6 +164,49 @@ No main merge, tag or public release has been performed. The unrelated image
 agent remains untouched; task-owned helper agents are closed. Ignored logs,
 screenshots and mutation outputs remain local and are not bundled into the PR.
 
+### Windows archive corruption — release gate correction
+
+At fd1c0120, main CI 39082671276 completed SUCCESS including E2E/quality gate;
+Desktop 39082671147 passed Linux but failed Windows/Bun archive smoke. Creation
+logged `Can't add archive to itself` for NestJS websockets/exceptions/index.js
+while tar exited zero. Bun then failed to import ./exceptions. The archive was
+outside the staging tree, consistent with upstream Windows libarchive issue
+1630: https://github.com/libarchive/libarchive/issues/1630.
+
+A binary-pipe prototype failed a real Unicode fixture with native tar access
+violation 3221225477. A .NET/Windows PowerShell 5.1 prototype passed small fixtures
+but failed full staging at an existing 260-character transformers model path.
+Neither prototype is shipped. After explicit independent review, Windows ZIP
+creation reuses the declared archiver 7.0.1 dependency already used by VFS;
+Linux retains GNU tar. No dependency or PowerShell prerequisite was added.
+
+The helper treats producer/output errors and skipped-entry warnings as failure,
+waits for finalization plus output close, and publishes an owned temporary file
+with same-directory rename. Failed attempts preserve the previous archive and
+settle owned resources before cleanup. Windows CI explicitly runs the regression
+suite and checks each package-creation exit code before proceeding to smoke.
+
+Final helper tests: 14 PASS / three explicit Linux skips on Windows. They cover
+exact 260-character and >330 Unicode paths, hidden files, binary bytes, empty
+directories, replacement and failure cleanup, late producer errors and close
+acknowledgement. Independent parent release/script suite: 59 PASS / three skips.
+Final full root gate exit 0: scripts 175, types 126, FE 2093, API 6131 plus four
+conditional skips, launcher 15. Syntax checks and owned diff checks pass.
+
+Full preserved Bun staging was rearchived with the final writer and passed the
+existing package smoke: Bun 1.2.18, embedded UI 200, fresh SQLite/bun driver.
+A fresh full Node package build and smoke also passed: UI 200, fresh SQLite/node
+driver. ZIP entry inspection found 11659 Bun entries and 11934 Node entries;
+both include the previously omitted NestJS file and long transformers model
+file. A bounded suspicious-entry-name scan found no matches; this is not a full
+secret/content/history scan. Actual local logs and archives remain ignored in
+.tmp/qa511-archive-fix and .tmp/qa511-archive-*.log.
+
+QA and Home Site still return HTTP 200 and were not restarted for this packaging
+change. Their API source remains the previously proven Stop/Devin revision.
+Fresh pushed-head Windows/Linux CI and approving human review remain required;
+old-head green CI and local package smoke do not substitute for those gates.
+
 RAD-14 Done read verified on owner instruction, not a waiver of security
 acceptance criteria. Leave QA/preview running. Push only the feature branch,
 verify fresh CI, and obtain the required PR approval; do not bypass protection,
