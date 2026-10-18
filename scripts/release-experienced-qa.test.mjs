@@ -1,4 +1,5 @@
 import test from 'node:test';
+import './runtime-archive.test.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';

@@ -68,13 +68,17 @@ jobs:
         env:
           KALIO_RUNTIME_UPDATE_PUBLIC_KEY: ${{ vars.KALIO_RUNTIME_UPDATE_PUBLIC_KEY }}
         run: |
+          node --test scripts/runtime-archive.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime archive regression tests failed' }
           $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source
           $bunPath = (Get-Command bun -CommandType Application | Select-Object -First 1).Source
           $env:KALIO_NODE_BINARY = $nodePath
           $env:KALIO_BUN_BINARY = $bunPath
           New-Item -ItemType Directory -Path release -Force | Out-Null
           node scripts/build-runtime-package.mjs --platform windows --output release --runtime node
+          if ($LASTEXITCODE -ne 0) { throw 'Node runtime archive creation failed' }
           node scripts/build-runtime-package.mjs --platform windows --output release --runtime bun
+          if ($LASTEXITCODE -ne 0) { throw 'Bun runtime archive creation failed' }
 
       - name: Smoke test Windows runtime archives
         shell: pwsh

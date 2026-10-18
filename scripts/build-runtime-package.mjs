@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
 import { stageRuntimeTypes } from './stage-runtime-types.mjs';
+import { createRuntimeArchive } from './runtime-archive.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const platformIndex = args.indexOf('--platform');
@@ -492,9 +493,6 @@ const archive = join(
   outputRoot,
   packageName + (platform === 'windows' ? '.zip' : '.tar.gz'),
 );
-const archiveArgs = platform === 'windows'
-  ? ['-a', '-c', '-f', archive, '-C', stagingParent, packageName]
-  : ['-czf', archive, '-C', stagingParent, packageName];
-run('tar', archiveArgs);
+await createRuntimeArchive({ platform, archive, stagingParent, packageName });
 await rm(stagingParent, { recursive: true, force: true });
 console.log('[kalio] runtime package created: ' + archive);
