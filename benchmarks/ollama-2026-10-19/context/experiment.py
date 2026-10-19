@@ -48,18 +48,23 @@ if(ROOT/'results.jsonl').exists():
  for l in(ROOT/'results.jsonl').read_text().splitlines():
   x=json.loads(l)
   if'error'not in x:done.add((x['model'],x['group'],x['condition'],x['task']))
-for model in sys.argv[1:]or['qwen3.5:2b','lfm2.5:8b']:
- for ctx in [4096,32768]:
+if __name__=='__main__':
+ for model in [arg for arg in sys.argv[1:] if not arg.startswith('--')] or ['qwen3.5:2b','lfm2.5:8b']:
+  if '--focused-only' not in sys.argv:
+   for ctx in [4096,32768]:
+    api('/api/generate',{'model':model,'keep_alive':0})
+    runrow(model,'capacity',str(ctx),'short_pl',[{'role':'user','content':'Zwróć tylko JSON: miasto, data, liczba. Spotkanie w Łodzi: 21 listopada 2026, siedem osób. Data YYYY-MM-DD.'}],{'miasto':'Łódź','data':'2026-11-21','liczba':7},ctx=ctx)
+   for label,tools in [('basic6',schemas(BASIC)),('all62',schemas())]:
+    api('/api/generate',{'model':model,'keep_alive':0})
+    system={'role':'system','content':'Use the appropriate provided tool. Preserve literal values exactly. Do not claim an operation succeeded before its result.'}
+    runrow(model,'tools',label,'write_pl',[system,{'role':'user','content':'Zapisz w VFS plik notes/proba.txt o dokładnej treści: Zażółć gęślą jaźń. Użyj narzędzia zapisu.'}],{'name':'vfs_write','args':{'filePath':'notes/proba.txt','content':'Zażółć gęślą jaźń.'}},tools)
+    runrow(model,'tools',label,'read_en',[system,{'role':'user','content':'Read the file notes/input.txt from the conversation virtual filesystem using its read tool.'}],{'name':'vfs_read','args':{'filePath':'notes/input.txt'}},tools)
+   for n in [40,300,800]:
+    api('/api/generate',{'model':model,'keep_alive':0})
+    system={'role':'system','content':'Answer using only the supplied records. Return only JSON with exactly the requested keys. Do not invent facts.\nRECORDS:\n'+doc(n)}
+    runrow(model,'filled_context',f'{n}_records','recall_pl',[system,{'role':'user','content':'Podaj kody rekordów ALFA, BETA i GAMMA. Klucze JSON: ALFA, BETA, GAMMA.'}],{'ALFA':'K7M9','BETA':'R4Z2','GAMMA':'P8V6'})
+    runrow(model,'filled_context',f'{n}_records','join_en',[system,{'role':'user','content':'Return the sum of units for ALFA and BETA, and the code of GAMMA. JSON keys: total_units, gamma_code.'}],{'total_units':48,'gamma_code':'P8V6'})
+  system={'role':'system','content':'Answer using only the supplied records. Return only JSON with exactly the requested keys. Do not invent facts.\nRECORDS:\n'+doc(3)}
+  runrow(model,'focused_context','oracle_3_records','recall_pl',[system,{'role':'user','content':'Podaj kody rekordów ALFA, BETA i GAMMA. Klucze JSON: ALFA, BETA, GAMMA.'}],{'ALFA':'K7M9','BETA':'R4Z2','GAMMA':'P8V6'})
+  runrow(model,'focused_context','oracle_3_records','join_en',[system,{'role':'user','content':'Return the sum of units for ALFA and BETA, and the code of GAMMA. JSON keys: total_units, gamma_code.'}],{'total_units':48,'gamma_code':'P8V6'})
   api('/api/generate',{'model':model,'keep_alive':0})
-  runrow(model,'capacity',str(ctx),'short_pl',[{'role':'user','content':'Zwróć tylko JSON: miasto, data, liczba. Spotkanie w Łodzi: 21 listopada 2026, siedem osób. Data YYYY-MM-DD.'}],{'miasto':'Łódź','data':'2026-11-21','liczba':7},ctx=ctx)
- for label,tools in [('basic6',schemas(BASIC)),('all62',schemas())]:
-  api('/api/generate',{'model':model,'keep_alive':0})
-  system={'role':'system','content':'Use the appropriate provided tool. Preserve literal values exactly. Do not claim an operation succeeded before its result.'}
-  runrow(model,'tools',label,'write_pl',[system,{'role':'user','content':'Zapisz w VFS plik notes/proba.txt o dokładnej treści: Zażółć gęślą jaźń. Użyj narzędzia zapisu.'}],{'name':'vfs_write','args':{'filePath':'notes/proba.txt','content':'Zażółć gęślą jaźń.'}},tools)
-  runrow(model,'tools',label,'read_en',[system,{'role':'user','content':'Read the file notes/input.txt from the conversation virtual filesystem using its read tool.'}],{'name':'vfs_read','args':{'filePath':'notes/input.txt'}},tools)
- for n in [40,300,800]:
-  api('/api/generate',{'model':model,'keep_alive':0})
-  system={'role':'system','content':'Answer using only the supplied records. Return only JSON with exactly the requested keys. Do not invent facts.\nRECORDS:\n'+doc(n)}
-  runrow(model,'filled_context',f'{n}_records','recall_pl',[system,{'role':'user','content':'Podaj kody rekordów ALFA, BETA i GAMMA. Klucze JSON: ALFA, BETA, GAMMA.'}],{'ALFA':'K7M9','BETA':'R4Z2','GAMMA':'P8V6'})
-  runrow(model,'filled_context',f'{n}_records','join_en',[system,{'role':'user','content':'Return the sum of units for ALFA and BETA, and the code of GAMMA. JSON keys: total_units, gamma_code.'}],{'total_units':48,'gamma_code':'P8V6'})
- api('/api/generate',{'model':model,'keep_alive':0})
