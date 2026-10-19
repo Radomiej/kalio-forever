@@ -134,6 +134,8 @@ test('runtime manifest includes only the tagged archives and detects payload tam
 
 test('updater rejects draft and unsigned releases unless the unsigned path is explicit', async () => {
   await withTempDirectory(async (directory) => {
+    const platform = process.platform === 'win32' ? 'windows' : 'linux';
+    const assetName = `kalio-runtime-${expectedVersion}-${platform}-x64${platform === 'windows' ? '.zip' : '.tar.gz'}`;
     const release = {
       draft: false,
       prerelease: false,
@@ -144,7 +146,7 @@ test('updater rejects draft and unsigned releases unless the unsigned path is ex
           browser_download_url: 'https://updates.test/manifest',
         },
         {
-          name: `kalio-runtime-${expectedVersion}-windows-x64.zip`,
+          name: assetName,
           browser_download_url: 'https://updates.test/runtime.zip',
         },
       ],
@@ -154,9 +156,9 @@ test('updater rejects draft and unsigned releases unless the unsigned path is ex
       tag: `v${expectedVersion}`,
       version: expectedVersion,
       assets: [{
-        name: `kalio-runtime-${expectedVersion}-windows-x64.zip`,
+        name: assetName,
         runtime: 'node',
-        platform: 'windows',
+        platform,
         architecture: 'x64',
         sha256: 'a'.repeat(64),
         size: 12,
