@@ -1290,4 +1290,27 @@ describe('LLMPanel', () => {
     await waitFor(() => expect(screen.getByTestId('provider-row-c-space-name')).toBeInTheDocument());
     expect(getRequestBody<{ name: string }>('POST', '/api/credentials').name).toBe('OpenAI');
   });
+  it('saves LLM request timeout in seconds as a backend millisecond setting', async () => {
+    mockFetch({ ...defaultMap(), 'PUT /api/credentials/settings/tool-timeouts': 204 as const });
+    render(<LLMPanel />);
+    const input = await screen.findByLabelText('LLM request timeout (seconds)');
+    expect(input).toHaveValue(120);
+    fireEvent.change(input, { target: { value: '600' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/credentials/settings/tool-timeouts',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ providerRequestTimeoutMs: 600000 }) }),
+    ));
+  });
+
+  it('restores the saved LLM request timeout and reports failed persistence', async () => {
+    mockFetch(defaultMap());
+    render(<LLMPanel />);
+    const input = await screen.findByLabelText('LLM request timeout (seconds)');
+    fireEvent.change(input, { target: { value: '600' } });
+    fireEvent.blur(input);
+    await screen.findByText(/failed to update tool timeout/i);
+    expect(input).toHaveValue(120);
+  });
+
 });

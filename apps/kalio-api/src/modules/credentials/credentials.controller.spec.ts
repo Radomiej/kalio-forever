@@ -752,4 +752,9 @@ describe('CredentialsController', () => {
       );
     });
   });
+  it('accepts a standalone LLM request timeout update', async () => {
+    await controller.setToolTimeouts({ providerRequestTimeoutMs: 600000 });
+    expect(mockTimeoutSettings.setTimeoutSettings).toHaveBeenCalledWith({ providerRequestTimeoutMs: 600000 });
+  });
+
 });

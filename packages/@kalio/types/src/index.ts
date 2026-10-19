@@ -1105,6 +1105,8 @@ export interface CreateCredentialDto {
 }
 
 export interface ToolTimeoutSettings {
+  /** Timeout for one LLM generation request, including streamed output. */
+  providerRequestTimeoutMs: number;
   webSearchTimeoutMs: number;
   providerLocalTimeoutMs: number;
   providerRemoteTimeoutMs: number;

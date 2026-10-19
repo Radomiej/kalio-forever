@@ -226,10 +226,11 @@ export class LLMService {
       : (provider ?? this.createProvider(effectiveConfig));
     const limiterKey = this.providerLimiterKey(effectiveConfig);
     const maxConcurrent = await this.maxConcurrentStreamsFor(effectiveConfig.provider);
+    const requestTimeoutMs = await this.timeoutSettings.getProviderRequestTimeoutMs();
     return this.streamLimiter.run(
       limiterKey,
       maxConcurrent,
-      () => providerToUse.streamChat(messages, tools, options),
+      () => providerToUse.streamChat(messages, tools, { ...options, requestTimeoutMs }),
     );
   }
 
