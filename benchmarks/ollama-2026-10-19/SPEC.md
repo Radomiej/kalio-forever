@@ -6,13 +6,13 @@ This folder records completed measurements and an exploratory follow-up. Discove
 
 ## Controlled follow-up
 
-Models: qwen3.5:2b and lfm2.5:8b, same installed digests as the main benchmark. Temperature0,seed42,4threads; output budgets384/1536 respectively. Run sequentially to avoid model contention. Native options.num_ctx sets the actual capacity. No application history compactor participates.
+Models: qwen3.5:2b and lfm2.5:8b, same installed digests as the main benchmark. Temperature 0,seed 42,4 threads; output budgets384/1536 respectively. Run sequentially to avoid model contention. Native options.num_ctx sets the actual capacity. No application history compactor participates.
 
-1. Capacity control: identical short Polish extraction at num_ctx4096 and32768. A larger allocation is not itself additional information or evidence of improved reasoning.
+1. Capacity control: identical short Polish extraction at num_ctx=4096 and 32768. A larger allocation is not itself additional information or evidence of improved reasoning.
 2. Tools: identical system text and PL write/EN read tasks. Compare6 relevant/common schemas versus the archived62-tool catalog. Grade exact function and arguments. No filesystem side effects: this measures selection only, not real tool execution. Unload the model before each condition; the second task may benefit from prefix cache. Report first and second tasks separately, not as equally cold samples.
-3. Filled context: fixed32768 capacity;40/300/800 records, with unique target facts at start/middle/end. Polish task retrieves all3codes; English task joins2records and sums units while also retrieving a code. Score exact JSON and field-level correctness. Actual prompt_eval_count, output truncation,TTFT, prefill duration and wall time must accompany scores. Unload before each record count; the second task may reuse cache. This is synthetic retrieval/multi-hop evidence, not general long-document comprehension.
+3. Filled context: fixed32768 capacity;40/300/800 records, with unique target facts at start/middle/end. Polish task retrieves all 3codes; English task joins2 records and sums units while also retrieving a code. Score exact JSON and field-level correctness. Actual prompt_eval_count, output truncation,TTFT, prefill duration and wall time must accompany scores. Unload before each record count; the second task may reuse cache. This is synthetic retrieval/multi-hop evidence, not general long-document comprehension.
 
-4. Focused baseline: the same questions with only the3target records. This is an oracle-selected excerpt baseline, not a measured production retriever or learned compressor; it helps distinguish distractor effects from reasoning errors. Run only this supplement with `python3 experiment.py --focused-only`.
+4. Focused baseline: the same questions with only the 3target records. This is an oracle-selected excerpt baseline, not a measured production retriever or learned compressor; it helps distinguish distractor effects from reasoning errors. Run only this supplement with `python3 experiment.py --focused-only`.
 
 No condition intentionally exceeds capacity. Check prompt counts/logs for truncation. One task/language/condition is exploratory; do not turn small differences into a definitive ranking.
 
