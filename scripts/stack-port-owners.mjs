@@ -48,7 +48,7 @@ export async function resolveListeningPids(ports, { platform = process.platform,
     let result;
     try { result = await run('lsof', ['-tiTCP:' + String(port), '-sTCP:LISTEN']); }
     catch (error) {
-      // lsof is optional on Linux/macOS; its absence leaves listener ownership unknown.
+      // TODO: legacy fallback: lsof is optional on Linux/macOS; its absence leaves listener ownership unknown.
       if (error?.code === 'ENOENT') return new Map();
       throw error;
     }
