@@ -429,6 +429,7 @@ describe('@kalio/types contract shape', () => {
       baseUrl: string;
     }>();
     expectTypeOf<ToolTimeoutSettings>().toEqualTypeOf<{
+      providerRequestTimeoutMs: number;
       webSearchTimeoutMs: number;
       providerLocalTimeoutMs: number;
       providerRemoteTimeoutMs: number;

@@ -12,6 +12,7 @@ export interface KalioRuntimeConfig {
 }
 
 export interface KalioToolTimeoutConfig {
+  provider_request_timeout_ms?: number;
   web_search_timeout_ms?: number;
   provider_local_timeout_ms?: number;
   provider_remote_timeout_ms?: number;

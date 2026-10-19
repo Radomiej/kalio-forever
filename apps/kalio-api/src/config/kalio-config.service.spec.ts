@@ -178,6 +178,7 @@ describe('KalioConfigService', () => {
     vi.spyOn(service, 'getEffectiveConfig').mockResolvedValue({
       config: {
         tool_timeouts: {
+          provider_request_timeout_ms: 600000.4,
           web_search_timeout_ms: 2000.6,
           provider_local_timeout_ms: Number.POSITIVE_INFINITY,
           provider_remote_timeout_ms: 9500.4,
@@ -188,6 +189,7 @@ describe('KalioConfigService', () => {
     });
 
     await expect(service.getToolTimeoutSettings()).resolves.toStrictEqual({
+      providerRequestTimeoutMs: 600000,
       webSearchTimeoutMs: 2001,
       providerRemoteTimeoutMs: 9500,
       providerMaxConcurrentStreams: 2,

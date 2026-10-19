@@ -105,6 +105,7 @@ export class CredentialsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async setToolTimeouts(@Body() body: Partial<ToolTimeoutSettings>): Promise<void> {
     if (
+      body.providerRequestTimeoutMs === undefined &&
       body.webSearchTimeoutMs === undefined &&
       body.providerLocalTimeoutMs === undefined &&
       body.providerRemoteTimeoutMs === undefined &&
@@ -115,7 +116,7 @@ export class CredentialsController {
 
     await this.timeoutSettings.setTimeoutSettings(body);
     this.logger.log(
-      `Tool timeout settings updated via API: web_search=${body.webSearchTimeoutMs ?? '—'} local=${body.providerLocalTimeoutMs ?? '—'} remote=${body.providerRemoteTimeoutMs ?? '—'} max_streams=${body.providerMaxConcurrentStreams ?? '—'}`,
+      `Tool timeout settings updated via API: request=${body.providerRequestTimeoutMs ?? '—'} web_search=${body.webSearchTimeoutMs ?? '—'} local=${body.providerLocalTimeoutMs ?? '—'} remote=${body.providerRemoteTimeoutMs ?? '—'} max_streams=${body.providerMaxConcurrentStreams ?? '—'}`,
     );
   }
 

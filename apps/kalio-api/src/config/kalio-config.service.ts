@@ -124,6 +124,10 @@ export class KalioConfigService {
     }
 
     const result: Partial<ToolTimeoutSettings> = {};
+    if (typeof toolTimeouts.provider_request_timeout_ms === 'number'
+      && Number.isFinite(toolTimeouts.provider_request_timeout_ms)) {
+      result.providerRequestTimeoutMs = Math.round(toolTimeouts.provider_request_timeout_ms);
+    }
 
     if (typeof toolTimeouts.web_search_timeout_ms === 'number' && Number.isFinite(toolTimeouts.web_search_timeout_ms)) {
       result.webSearchTimeoutMs = Math.round(toolTimeouts.web_search_timeout_ms);

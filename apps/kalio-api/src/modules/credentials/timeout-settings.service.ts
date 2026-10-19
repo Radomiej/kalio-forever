@@ -4,6 +4,7 @@ import { AppSettingsService } from '../../database/app-settings.service';
 import { KalioConfigService } from '../../config/kalio-config.service';
 
 const DEFAULT_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
+  providerRequestTimeoutMs: 120_000,
   webSearchTimeoutMs: 120_000,
   providerLocalTimeoutMs: 3_000,
   providerRemoteTimeoutMs: 15_000,
@@ -11,6 +12,7 @@ const DEFAULT_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
 };
 
 const TIMEOUT_BOUNDS: Record<keyof ToolTimeoutSettings, { min: number; max: number }> = {
+  providerRequestTimeoutMs: { min: 1_000, max: 1_800_000 },
   webSearchTimeoutMs: { min: 15_000, max: 600_000 },
   providerLocalTimeoutMs: { min: 1_000, max: 30_000 },
   providerRemoteTimeoutMs: { min: 5_000, max: 120_000 },
@@ -18,6 +20,7 @@ const TIMEOUT_BOUNDS: Record<keyof ToolTimeoutSettings, { min: number; max: numb
 };
 
 const TIMEOUT_SETTING_KEYS: Record<keyof ToolTimeoutSettings, string> = {
+  providerRequestTimeoutMs: 'provider_request_timeout_ms',
   webSearchTimeoutMs: 'tool_timeout_web_search_ms',
   providerLocalTimeoutMs: 'tool_timeout_provider_local_ms',
   providerRemoteTimeoutMs: 'tool_timeout_provider_remote_ms',
@@ -69,7 +72,8 @@ export class TimeoutSettingsService {
 
   async getTimeoutSettings(): Promise<ToolTimeoutSettings> {
     const configuredSettings = await this.getConfiguredTimeoutSettings();
-    const [webSearchTimeoutMs, providerLocalTimeoutMs, providerRemoteTimeoutMs, providerMaxConcurrentStreams] = await Promise.all([
+    const [providerRequestTimeoutMs, webSearchTimeoutMs, providerLocalTimeoutMs, providerRemoteTimeoutMs, providerMaxConcurrentStreams] = await Promise.all([
+      this.getTimeoutSetting('providerRequestTimeoutMs', configuredSettings),
       this.getTimeoutSetting('webSearchTimeoutMs', configuredSettings),
       this.getTimeoutSetting('providerLocalTimeoutMs', configuredSettings),
       this.getTimeoutSetting('providerRemoteTimeoutMs', configuredSettings),
@@ -77,6 +81,7 @@ export class TimeoutSettingsService {
     ]);
 
     return {
+      providerRequestTimeoutMs,
       webSearchTimeoutMs,
       providerLocalTimeoutMs,
       providerRemoteTimeoutMs,
@@ -98,6 +103,13 @@ export class TimeoutSettingsService {
     }
 
     const updates: Promise<void>[] = [];
+
+    if (settings.providerRequestTimeoutMs !== undefined) {
+      updates.push(this.appSettings.set(
+        TIMEOUT_SETTING_KEYS.providerRequestTimeoutMs,
+        String(normalizeTimeout('providerRequestTimeoutMs', settings.providerRequestTimeoutMs)),
+      ));
+    }
 
     if (settings.webSearchTimeoutMs !== undefined) {
       updates.push(
@@ -136,6 +148,10 @@ export class TimeoutSettingsService {
     }
 
     await Promise.all(updates);
+  }
+
+  async getProviderRequestTimeoutMs(): Promise<number> {
+    return this.getTimeoutSetting('providerRequestTimeoutMs', await this.getConfiguredTimeoutSettings());
   }
 
   async getWebSearchTimeoutMs(): Promise<number> {

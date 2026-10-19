@@ -34,25 +34,76 @@ async function readCurrent(home) {
   return { current, versionRoot };
 }
 
-async function acquireLock(home) {
-  const lockPath = join(home, '.runtime.lock');
+function lockOwnerIsAlive(owner, lockPath) {
+  let pid;
   try {
-    const handle = await open(lockPath, 'wx');
+    pid = JSON.parse(owner).pid;
+  } catch (error) {
+    throw new Error(`Cannot verify runtime lock ${lockPath}; inspect it and remove the lock only after confirming Kalio is stopped.`, { cause: error });
+  }
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error(`Cannot verify runtime lock ${lockPath}; inspect it and remove the lock only after confirming Kalio is stopped.`);
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM and unknown errors do not prove that the owner has exited.
+    if (error?.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function createLock(lockPath) {
+  const handle = await open(lockPath, 'wx');
+  try {
     await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + '\n');
     return { handle, lockPath };
   } catch (error) {
-    if (error?.code === 'EEXIST') {
-      let owner = 'unknown';
-      try {
-        owner = (await readFile(lockPath, 'utf8')).trim();
-      } catch (error) {
-        if (error?.code !== 'ENOENT') {
-          throw error;
-        }
-      }
-      throw new Error('Another Kalio runtime appears to be running: ' + owner);
-    }
+    await handle.close();
+    await rm(lockPath, { force: true });
     throw error;
+  }
+}
+
+async function acquireLock(home) {
+  const lockPath = join(home, '.runtime.lock');
+  try {
+    return await createLock(lockPath);
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+  }
+  let owner;
+  try {
+    owner = await readFile(lockPath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return createLock(lockPath);
+    throw error;
+  }
+  if (lockOwnerIsAlive(owner, lockPath)) {
+    throw new Error('Another Kalio runtime appears to be running: ' + owner.trim());
+  }
+
+  // Serialize recovery so a second starter cannot unlink the first starter's new lock.
+  const recoveryPath = lockPath + '.recovery';
+  let recovery;
+  try {
+    recovery = await open(recoveryPath, 'wx');
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    throw new Error(`Runtime lock recovery is already in progress. If it was interrupted, confirm Kalio is stopped before removing ${recoveryPath}.`);
+  }
+  try {
+    await recovery.writeFile(JSON.stringify({ pid: process.pid }) + '\n');
+    const currentOwner = await readFile(lockPath, 'utf8');
+    if (currentOwner !== owner || lockOwnerIsAlive(currentOwner, lockPath)) {
+      throw new Error('Runtime lock changed during recovery; retry after checking the running Kalio instance.');
+    }
+    await rm(lockPath);
+    return await createLock(lockPath);
+  } finally {
+    await recovery.close();
+    await rm(recoveryPath, { force: true });
   }
 }
 
