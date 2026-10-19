@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
 import { stageRuntimeTypes } from './stage-runtime-types.mjs';
 import { createRuntimeArchive } from './runtime-archive.mjs';
+import { copyNativeAddon } from './runtime-native-addon.mjs';
 import { createRuntimeDependencies } from './runtime-dependencies.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -118,7 +119,7 @@ async function ensureNativeSqliteAddon() {
   if (sourcePath) {
     const targetPath = join(targetRoot, 'build', 'Release', 'better_sqlite3.node');
     await mkdir(dirname(targetPath), { recursive: true });
-    await cp(sourcePath, targetPath, { force: true });
+    await copyNativeAddon(sourcePath, targetPath);
     console.log('[kalio] bundled better-sqlite3 native addon: ' + sourcePath);
   }
 }

@@ -48,6 +48,7 @@ const scriptTests = await run(process.execPath, [
   './scripts/linux-updater.test.mjs',
   './scripts/local-model-benchmark.test.mjs',
   './scripts/runtime-dependencies.test.mjs',
+  './scripts/runtime-native-addon.test.mjs',
   './scripts/kalio-updater.test.mjs',
   './scripts/kalio-cli.test.mjs',
   './scripts/runtime-scripts.test.mjs',
