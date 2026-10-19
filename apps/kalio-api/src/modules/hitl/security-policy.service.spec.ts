@@ -26,7 +26,6 @@ function makeTestDrizzle(): DrizzleService {
         avatar_variant TEXT,
         avatar_palette_key TEXT,
         avatar_index INTEGER DEFAULT 0,
-        provider_tool_names TEXT NOT NULL DEFAULT '[]',
         created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
