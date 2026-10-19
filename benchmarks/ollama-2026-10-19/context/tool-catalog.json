@@ -1,0 +1,1869 @@
+[
+  {
+    "name": "vfs_write",
+    "description": "Write content to a relative file path in the conversation VFS sandbox. Do not use absolute host filesystem paths; use fs_write for files in an allowed local project directory.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "filePath",
+        "content"
+      ],
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Relative VFS path only, for example notes/todo.md. Absolute paths like C:\\project\\file.ts are rejected."
+        },
+        "content": {
+          "type": "string",
+          "description": "File content to write"
+        }
+      }
+    },
+    "domain": "vfs",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "vfs_read",
+    "description": "Read the contents of a file from the conversation virtual filesystem.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "filePath"
+      ],
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Path relative to the workspace"
+        }
+      }
+    },
+    "domain": "vfs",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "vfs_list",
+    "description": "List all files in the conversation virtual filesystem, skipping generated directories like node_modules, dist, coverage, and reports.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "domain": "vfs",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "vfs_grep_search",
+    "description": "Search for text matches in files within the conversation virtual filesystem. Generated directories like node_modules, dist, coverage, and reports are skipped by the VFS listing. Returns matching lines with file paths and line numbers.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Text or regex pattern to search for."
+        },
+        "isRegexp": {
+          "type": "boolean",
+          "description": "If true, treat query as a regex. Default: false."
+        },
+        "includePattern": {
+          "type": "string",
+          "description": "Glob pattern to filter files (e.g. \"**/*.ts\"). Default: all files."
+        },
+        "maxResults": {
+          "type": "integer",
+          "description": "Maximum number of results to return. Default: 50."
+        }
+      }
+    },
+    "domain": "vfs",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "vfs_file_search",
+    "description": "Find files matching a glob pattern in the conversation virtual filesystem. Generated directories like node_modules, dist, coverage, and reports are skipped by the VFS listing. Returns relative file paths within the session workspace.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "pattern"
+      ],
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern to match (e.g. \"**/*.ts\", \"notes/*.md\")."
+        },
+        "maxResults": {
+          "type": "integer",
+          "description": "Maximum number of results. Default: 100."
+        }
+      }
+    },
+    "domain": "vfs",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "run_subagent",
+    "description": "Spawn a focused sub-agent to complete a specific task using LLM reasoning. Best for self-contained tasks: summarisation, analysis, drafting content, answering questions. Returns the sub-agent result as text.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "inputPrompt"
+      ],
+      "properties": {
+        "inputPrompt": {
+          "type": "string",
+          "description": "Clear task prompt for the sub-agent. This is the only required input."
+        },
+        "objective": {
+          "type": "string",
+          "description": "Deprecated alias for inputPrompt. Use inputPrompt instead."
+        },
+        "childSessionId": {
+          "type": "string",
+          "description": "Optional existing sub-agent session id. When provided, send the objective as the next user message into that chat instead of creating a new one."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Max execution time in milliseconds. Default: 300000 (5 min). Max: 600000 (10 min)."
+        },
+        "personaId": {
+          "type": "string",
+          "description": "Persona used by the sub-agent. Allowed tools are resolved from this persona. Defaults to default."
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional list of parent VFS paths to copy into the child VFS (isolated mode) before execution."
+        },
+        "vfsMode": {
+          "type": "string",
+          "enum": [
+            "isolated",
+            "shared"
+          ],
+          "description": "VFS mode for the sub-agent. isolated = private child VFS copied back on completion; shared = child reads and writes the parent VFS directly. Use shared when the child must inspect or modify files already present in the parent VFS or produced by earlier child agents."
+        },
+        "copyOutputs": {
+          "type": "boolean",
+          "description": "When true, copy isolated child VFS files back into the master VFS. Default: true."
+        },
+        "autoApproveTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored."
+        }
+      }
+    },
+    "domain": "subagent",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "spawn_subagent",
+    "description": "Spawn a new focused sub-agent chat for a specific task. Use this when you want an explicit new child session rather than continuing an existing one.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "inputPrompt"
+      ],
+      "properties": {
+        "inputPrompt": {
+          "type": "string",
+          "description": "Clear task prompt for the new sub-agent."
+        },
+        "objective": {
+          "type": "string",
+          "description": "Deprecated alias for inputPrompt. Use inputPrompt instead."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Max execution time in milliseconds. Default: 300000 (5 min). Max: 600000 (10 min)."
+        },
+        "personaId": {
+          "type": "string",
+          "description": "Persona used by the sub-agent. Allowed tools are resolved from this persona."
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent VFS paths copied into the child VFS before execution."
+        },
+        "vfsMode": {
+          "type": "string",
+          "enum": [
+            "isolated",
+            "shared"
+          ],
+          "description": "VFS mode for the sub-agent. isolated = private child VFS copied back on completion; shared = child reads and writes the parent VFS directly. Use shared when the child must inspect or modify files already present in the parent VFS or produced by earlier child agents."
+        },
+        "copyOutputs": {
+          "type": "boolean",
+          "description": "When true, copy isolated child VFS files back into the master VFS. Default: true."
+        },
+        "autoApproveTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored."
+        }
+      }
+    },
+    "domain": "subagent",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "message_subagent",
+    "description": "Send the next message into an existing focused sub-agent chat. Use this when you already have a childSessionId and want that same child to continue.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "inputPrompt",
+        "childSessionId"
+      ],
+      "properties": {
+        "inputPrompt": {
+          "type": "string",
+          "description": "Follow-up prompt for the existing sub-agent chat."
+        },
+        "objective": {
+          "type": "string",
+          "description": "Deprecated alias for inputPrompt. Use inputPrompt instead."
+        },
+        "childSessionId": {
+          "type": "string",
+          "description": "Existing sub-agent session id to continue."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Max execution time in milliseconds. Default: 300000 (5 min). Max: 600000 (10 min)."
+        },
+        "personaId": {
+          "type": "string",
+          "description": "Optional persona override for the continued sub-agent turn."
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent VFS paths copied into the child VFS before execution."
+        },
+        "vfsMode": {
+          "type": "string",
+          "enum": [
+            "isolated",
+            "shared"
+          ],
+          "description": "VFS mode for the sub-agent. isolated = private child VFS copied back on completion; shared = child reads and writes the parent VFS directly. Use shared when the child must inspect or modify files already present in the parent VFS or produced by earlier child agents."
+        },
+        "copyOutputs": {
+          "type": "boolean",
+          "description": "When true, copy isolated child VFS files back into the master VFS. Default: true."
+        },
+        "autoApproveTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional isolated-child tool allowlist for narrow auto-approval. Only backend-approved safe tools are honored; unsupported names are ignored."
+        }
+      }
+    },
+    "domain": "subagent",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "fs_read",
+    "description": "Read the contents of a file from the local filesystem. Use this only for files; use fs_list for directories. Path must be inside an allowed directory.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path to read. Must point to a file, not a directory."
+        },
+        "startLine": {
+          "type": "integer",
+          "description": "Optional: 1-based start line (inclusive)."
+        },
+        "endLine": {
+          "type": "integer",
+          "description": "Optional: 1-based end line (inclusive)."
+        }
+      }
+    },
+    "domain": "file_system",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "fs_list",
+    "description": "List files and directories at a path inside an allowed directory. Recursive listings skip heavy generated folders like .git, node_modules, dist, output, reports, and cap results.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative path to list."
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "If true, list recursively (default: false)."
+        }
+      }
+    },
+    "domain": "file_system",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "fs_write",
+    "description": "Write content to a file on the local filesystem. Use this for real project files under allowed directories. Path must be inside an allowed directory.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "path",
+        "content"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path to write."
+        },
+        "content": {
+          "type": "string",
+          "description": "Text content to write."
+        }
+      }
+    },
+    "domain": "file_system",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "kv_write",
+    "description": "Write a key-value pair to the conversation persistent store.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key to write."
+        },
+        "value": {
+          "type": "string",
+          "description": "String value to store."
+        }
+      }
+    },
+    "domain": "key_value",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "kv_read",
+    "description": "Read a value from the conversation persistent store by key.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key to read."
+        }
+      }
+    },
+    "domain": "key_value",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "kv_list",
+    "description": "List all key-value pairs in the conversation persistent store.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "domain": "key_value",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "kv_delete",
+    "description": "Delete a key from the conversation persistent store.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key to delete."
+        }
+      }
+    },
+    "domain": "key_value",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "grep_search",
+    "description": "Search for text matches in files under configured allowed directories. Skips generated directories like node_modules, dist, coverage, and reports, then returns matching lines with file paths and line numbers.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Text or regex pattern to search for."
+        },
+        "isRegexp": {
+          "type": "boolean",
+          "description": "If true, treat query as a regex. Default: false."
+        },
+        "includePattern": {
+          "type": "string",
+          "description": "Glob pattern to filter files (e.g. \"**/*.ts\"). Default: all files."
+        },
+        "path": {
+          "type": "string",
+          "description": "Optional explicit absolute path or session-scoped relative path to narrow the search."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Optional explicit absolute workdir or session-scoped relative path to narrow the search."
+        },
+        "maxResults": {
+          "type": "integer",
+          "description": "Maximum number of results to return. Default: 50."
+        }
+      }
+    },
+    "domain": "file_search",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "file_search",
+    "description": "Find files matching a glob pattern under configured allowed directories. Skips generated directories like node_modules, dist, coverage, and reports, then returns absolute file paths.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "pattern"
+      ],
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern to match (e.g. \"**/*.ts\", \"src/**/*.json\")."
+        },
+        "path": {
+          "type": "string",
+          "description": "Optional explicit absolute path or session-scoped relative path to narrow the search."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Optional explicit absolute workdir or session-scoped relative path to narrow the search."
+        },
+        "maxResults": {
+          "type": "integer",
+          "description": "Maximum number of results. Default: 100."
+        }
+      }
+    },
+    "domain": "file_search",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "terminal_spawn",
+    "description": "Spawn a long-running terminal process in the background. Returns a session ID — use terminal_output to read its stdout/stderr and terminal_kill to stop it. IMPORTANT: cwd must be an absolute path inside an AllowedPaths-registered directory. Split command and args: command=\"node\", args=[\"server.js\"] — NOT command=\"node server.js\".",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "command",
+        "cwd"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Executable name only, no arguments (e.g. \"node\", \"python\", \"npm\"). Arguments go in the args array."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments to pass to the command (e.g. [\"server.js\"] or [\"run\", \"dev\"])."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Absolute path to the working directory. Must be inside an AllowedPaths root. Use fs_list first to confirm the path exists, or check allowed_paths."
+        }
+      }
+    },
+    "domain": "terminal",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "terminal_list",
+    "description": "List all active and recently exited terminal sessions.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "domain": "terminal",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "terminal_output",
+    "description": "Get the buffered output (stdout + stderr) of a terminal session.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Terminal session ID returned by terminal_spawn."
+        }
+      }
+    },
+    "domain": "terminal",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "terminal_kill",
+    "description": "Send SIGTERM to a running terminal session.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Terminal session ID to kill."
+        }
+      }
+    },
+    "domain": "terminal",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "raapp_create",
+    "description": "Create an RA-App block from HTML or GUI DSL content and validate it. Returns a ready block descriptor that can be rendered in the chat UI. For interactive mode (mode=\"interactive\"), the HTML can send user selections back to the conversation using: window.parent.postMessage({ type: \"kalio_send_message\", content: \"user answer\" }, \"*\"). This lets users click buttons or options inside the app and have their choice appear as a chat message. Use this ONLY when building a custom one-off app. For stored apps use run_raapp instead.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "type",
+        "content"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "html",
+            "gui"
+          ],
+          "description": "Block type: \"html\" for raw HTML, \"gui\" for GUI DSL"
+        },
+        "content": {
+          "type": "string",
+          "description": "The HTML string (for type=\"html\") or GUI DSL source (for type=\"gui\"). GUI DSL is a custom text format — NOT YAML or JSON. Syntax: elements use `tag { prop = value child_tag { … } }`. Strings are double-quoted: `text = \"Hello\"`. Booleans are yes/no or true/false: `visible = yes`. Numbers are bare: `value = 42`. Layout tags: window vbox hbox panel container. Content tags: label span title text button icon divider spacer progressbar. Style via Tailwind/DaisyUI: `class = \"btn btn-primary\"`. Example: `window { class = \"p-4\" vbox { label { text = \"Hi\" } button { text = \"Click\" onclick = \"hello\" } } }`"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "display",
+            "interactive"
+          ],
+          "description": "Render mode. Defaults to \"display\"."
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional human-readable app title to store in catalog metadata."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "raapp_compile",
+    "description": "Validate and compile GUI DSL code in a sandboxed VM. Returns the result of executing the DSL or an error with details. Use this to check DSL code before embedding it in the chat.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "GUI DSL JavaScript code to compile and execute in sandbox"
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "run_raapp",
+    "description": "Run a stored RA-App by its ID. The app is rendered in the chat UI as an interactive or display block. Call list_raapps first to discover available app IDs and their descriptions. For apps with input_schema, pass inputs via the \"inputs\" parameter (e.g. for qa-interactive: { question, options, allow_custom }). GUI DSL apps use [output.key] bindings — inputs are passed as { output: { ...your inputs } } automatically.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The stored RA-App ID to run (e.g. \"qa-interactive\")."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Input data for the app (matched to its input_schema). For qa-interactive: { question: string, options: string[], allow_custom?: boolean }"
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "list_raapps",
+    "description": "List all stored RA-Apps with their IDs, names, and descriptions. Use this before run_raapp to find the right ID.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "domain": "raapp",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "design_preview",
+    "description": "Preview an HTML file from the conversation virtual filesystem as an inline RA-App.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "filePath"
+      ],
+      "properties": {
+        "filePath": {
+          "type": "string",
+          "description": "Path to an .html file inside the session VFS"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "display"
+          ],
+          "description": "Preview mode for the VFS-backed inline RA-App. Interactive mode is not supported for VFS previews."
+        }
+      }
+    },
+    "domain": "preview",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "raapp_get",
+    "description": "Retrieve the source files of a stored RA-App by its ID. Returns the raw YAML/DSL content of meta.yml, systems.yml, ui.gui, ui.yml, tests.yml, and components.yml (whichever exist). Use this before raapp_edit to inspect the current state.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The RA-App ID to inspect."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "raapp_edit",
+    "description": "Create or update a VFS working copy for a stored user RA-App. Provide only the files you want to change; unchanged files are preserved in the working copy. The published release is NOT modified in place. After editing, test with raapp_test draft_id and publish with raapp_publish_draft. Core apps (source=core) cannot be edited. Use raapp_get first to fetch the current content before editing.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The RA-App ID to edit."
+        },
+        "meta_yml": {
+          "type": "string",
+          "description": "New meta.yml content (optional)."
+        },
+        "systems_yml": {
+          "type": "string",
+          "description": "New systems.yml content (optional)."
+        },
+        "ui_gui": {
+          "type": "string",
+          "description": "New ui.gui content (optional)."
+        },
+        "ui_yml": {
+          "type": "string",
+          "description": "New ui.yml content (optional)."
+        },
+        "tests_yml": {
+          "type": "string",
+          "description": "New tests.yml content (optional)."
+        },
+        "components_yml": {
+          "type": "string",
+          "description": "New components.yml content (optional)."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "raapp_delete",
+    "description": "Permanently delete a user-uploaded RA-App by its ID. Core apps cannot be deleted. This action is irreversible. Use list_raapps to confirm the ID before deleting.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The RA-App ID to delete."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "raapp_create_draft",
+    "description": "Create a draft RA-App from YAML/DSL source files and store it for user review. The draft is NOT executed immediately — the user must inspect and approve it first, then call raapp_execute_dsl with the returned draft_id. At least one of ui_gui or ui_yml is required. Provide systems_yml if the app uses an effect pipeline or ECS entities. This is the safe creation path — use raapp_create for quick one-off inline apps.",
+    "parameters": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "meta_yml": {
+          "type": "string",
+          "description": "App metadata YAML (id, name, version, description, tags, input_schema, output_type). If omitted a minimal meta block is auto-generated."
+        },
+        "systems_yml": {
+          "type": "string",
+          "description": "Effect pipeline YAML (assign, if, call_native, create_entity, set_field …)."
+        },
+        "ui_gui": {
+          "type": "string",
+          "description": "GUI DSL content (window { … } layout). Preferred over ui_yml for interactive apps."
+        },
+        "ui_yml": {
+          "type": "string",
+          "description": "HTML template YAML (type: html, template: |…). Used when ui_gui is not provided."
+        },
+        "tests_yml": {
+          "type": "string",
+          "description": "Optional test suite YAML (tests: [{name, input, expect}])."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "display",
+            "interactive"
+          ],
+          "description": "Render mode. Defaults to \"display\"."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "raapp_execute_dsl",
+    "description": "Execute a previously approved RA-App draft. Call this ONLY after the user has reviewed and approved the draft produced by raapp_create_draft. The draft_id is returned by raapp_create_draft. Returns a ready RAAppBlock that is rendered in the chat UI.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "draft_id"
+      ],
+      "properties": {
+        "draft_id": {
+          "type": "string",
+          "description": "The draft ID returned by raapp_create_draft."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Optional runtime inputs passed to the systems.yml effect pipeline."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "raapp_publish_draft",
+    "description": "Publish a raw VFS RA-App draft into the versioned release lifecycle. Reads files from drafts/<draft_id>, stores them as a versioned draft ZIP, then promotes them to a release. Use bump_type patch|minor|major for existing apps. New apps publish immediately as the first current release.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "draft_id"
+      ],
+      "properties": {
+        "draft_id": {
+          "type": "string",
+          "description": "The VFS draft ID under drafts/<draft_id>."
+        },
+        "bump_type": {
+          "type": "string",
+          "enum": [
+            "patch",
+            "minor",
+            "major"
+          ],
+          "description": "Version bump to use when promoting over an existing release. Defaults to minor."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "raapp_test",
+    "description": "Run the test suite defined in tests.yml of either a stored RA-App release or a raw VFS draft. Each test provides input data and expected output values. Tests exercise the systems.yml effect pipeline (assign, if, ECS effects) — UI rendering is NOT tested here. Returns a summary of passed/failed tests with actual vs expected values.",
+    "parameters": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The stored RA-App release ID to test."
+        },
+        "draft_id": {
+          "type": "string",
+          "description": "The raw session draft ID to test from drafts/<draft_id> in VFS."
+        },
+        "test_name": {
+          "type": "string",
+          "description": "Run only this specific test by name. If omitted, all tests are run."
+        }
+      }
+    },
+    "domain": "raapp",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "memory_ingest",
+    "description": "Store a text passage in the long-term memory for the active persona. The text is chunked, embedded, and indexed for future retrieval. The persona is resolved automatically from the current session — do not guess it.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Text content to ingest into memory"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional key-value metadata to attach to the memory chunks",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "domain": "memory",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "memory_search",
+    "description": "Search long-term memory for passages related to a query. Returns the most relevant chunks with relevance scores. The persona is resolved automatically from the current session — do not guess it.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Natural language search query"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum number of results to return. Default: 5",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
+    "domain": "memory",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "memory_ingest_conversation",
+    "description": "Ingest an entire conversation (list of messages) into long-term memory for the active persona. Messages are grouped into contextual blocks before embedding. The persona is resolved automatically from the current session — do not guess it.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "messages"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "description": "List of conversation messages to ingest",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "content"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "description": "Message role: user, assistant, system"
+              },
+              "content": {
+                "type": "string",
+                "description": "Message content"
+              }
+            }
+          }
+        }
+      }
+    },
+    "domain": "memory",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "web_search",
+    "description": "Search for current information. By default this checks persona memory first and only calls external web search when no related memory exists. Set offline_search=false to force an external search. External results are saved silently for future memory retrieval.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query - be specific for best results"
+        },
+        "offline_search": {
+          "type": "boolean",
+          "description": "Defaults to true. Set false to bypass memory and force external search."
+        }
+      }
+    },
+    "domain": "web",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "list_tools",
+    "description": "Returns a compact list of all available tools (name + one-line description). Call this at the start of complex tasks to review what you can do. Use get_tool_details to fetch full parameter schemas for specific tools.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": "string",
+          "description": "Optional substring to filter tool names (case-insensitive)"
+        }
+      },
+      "required": []
+    },
+    "domain": "tool_registry",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "get_tool_details",
+    "description": "Returns full parameter schemas for the specified tools. Use after list_tools when you need to know exact parameter names and types before calling a tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "tool_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Names of tools to fetch details for"
+        }
+      },
+      "required": [
+        "tool_names"
+      ]
+    },
+    "domain": "tool_registry",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "spawn_cli_agent",
+    "description": "Start a durable CLI child session in the background and return immediately with a childSessionId and live runtime state. Prefer this over run_cli_agent when an orchestrator needs to monitor, redirect, or stop the CLI session later.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "prompt",
+        "workdir"
+      ],
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "enum": [
+            "copilot",
+            "gemini",
+            "claude",
+            "codex"
+          ],
+          "description": "Which CLI agent to use. Defaults to \"copilot\"."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Initial instruction for the new CLI child session."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Absolute project path. Must be in Allowed Paths."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Deprecated alias for inactivityTimeoutMs. Max 86400000 ms."
+        },
+        "inactivityTimeoutMs": {
+          "type": "integer",
+          "description": "Optional inactivity timeout for the current CLI turn. Max 86400000 ms."
+        },
+        "expectedChangedFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent-orchestrator acceptance hint: relative file paths expected to be changed by this run."
+        },
+        "verificationCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent-orchestrator acceptance hint: commands the CLI agent should run or explicitly report as skipped."
+        }
+      }
+    },
+    "domain": "cli_agent",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "message_cli_agent",
+    "description": "Continue an existing durable CLI child session with a new instruction. Use this to redirect or refine an existing CLI session instead of spawning a new one.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "childSessionId",
+        "prompt"
+      ],
+      "properties": {
+        "childSessionId": {
+          "type": "string",
+          "description": "Existing cli-agent child session id to continue."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "New instruction for the existing CLI child session."
+        },
+        "interruptRunning": {
+          "type": "boolean",
+          "description": "When true, stop the current CLI turn first if the child session is still running. Default: false."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Deprecated alias for inactivityTimeoutMs. Max 86400000 ms."
+        },
+        "inactivityTimeoutMs": {
+          "type": "integer",
+          "description": "Optional inactivity timeout for the next CLI turn. Max 86400000 ms."
+        },
+        "expectedChangedFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent-orchestrator acceptance hint: relative file paths expected to be changed by this turn."
+        },
+        "verificationCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent-orchestrator acceptance hint: commands the CLI agent should run or explicitly report as skipped."
+        }
+      }
+    },
+    "domain": "cli_agent",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "get_cli_agent_status",
+    "description": "Inspect the current runtime state of a durable CLI child session, including whether it is still running and the latest output tail.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "childSessionId"
+      ],
+      "properties": {
+        "childSessionId": {
+          "type": "string",
+          "description": "Existing cli-agent child session id to inspect."
+        }
+      }
+    },
+    "domain": "cli_agent",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "stop_cli_agent",
+    "description": "Stop the current turn of a durable CLI child session and keep the child session available for later follow-up guidance.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "childSessionId"
+      ],
+      "properties": {
+        "childSessionId": {
+          "type": "string",
+          "description": "Existing cli-agent child session id to interrupt."
+        }
+      }
+    },
+    "domain": "cli_agent",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "wait_for",
+    "description": "Wait for an asynchronous target to settle before judging completion. Supports cli_agent child sessions, conversation messages, and tool_result messages.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "targetType"
+      ],
+      "properties": {
+        "targetType": {
+          "type": "string",
+          "enum": [
+            "cli_agent",
+            "conversation",
+            "tool_result"
+          ],
+          "description": "What to wait for."
+        },
+        "childSessionId": {
+          "type": "string",
+          "description": "CLI child session id when targetType is cli_agent."
+        },
+        "parentSessionId": {
+          "type": "string",
+          "description": "Parent session id for cli_agent. Defaults to the current session."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Conversation session id for conversation or tool_result waits. Defaults to the current session."
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "Tool call id to wait for when targetType is tool_result."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "tool_result",
+            "system"
+          ],
+          "description": "Optional role filter for conversation waits."
+        },
+        "afterTimestamp": {
+          "type": "integer",
+          "description": "Only count messages created after this timestamp in milliseconds."
+        },
+        "minMessages": {
+          "type": "integer",
+          "description": "Minimum matching conversation messages. Default: 1."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Maximum wait time. Default 60000 ms, max 900000 ms."
+        },
+        "intervalMs": {
+          "type": "integer",
+          "description": "Polling interval. Default 1000 ms, max 30000 ms."
+        }
+      }
+    },
+    "domain": "agent_workflow",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "run_cli_agent",
+    "description": "Run a CLI coding agent (Copilot, Gemini, Claude Code, Codex) to autonomously complete a coding task in a real project directory. The agent can read, write, and edit files and run shell commands. Use this to delegate implementation tasks, bug fixes, refactors, or test writing. Requires workdir to be in the AllowedPaths list. Returns the full agent output and exit code.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "prompt",
+        "workdir"
+      ],
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "description": "Which CLI agent to use. Supported: \"copilot\" (GitHub Copilot CLI), \"gemini\" (Google Gemini CLI), \"claude\" (Anthropic Claude Code), \"codex\" (OpenAI Codex CLI). Defaults to \"copilot\" if omitted.",
+          "enum": [
+            "copilot",
+            "gemini",
+            "claude",
+            "codex"
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Clear task description for the agent. Include: what to do, which files, acceptance criteria (e.g. \"tests must pass\"). More detail = better results."
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Absolute path to the project directory where the agent will operate. Must be registered in AllowedPaths."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "Deprecated alias for inactivityTimeoutMs. Default: 600000 (10 min). Max: 86400000 (24 h)."
+        },
+        "inactivityTimeoutMs": {
+          "type": "integer",
+          "description": "Preferred max inactivity time in ms. Default: 600000 (10 min). Max: 86400000 (24 h)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional model override for CLI agents that support model selection, such as Gemini, Claude Code, or Codex. Leave empty to use the agent config/default model."
+        },
+        "expectedChangedFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent-orchestrator acceptance hint: relative file paths expected to be changed by this run. Kalio appends a worktree status summary after completion so the parent can quickly spot missing files."
+        },
+        "verificationCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional parent-orchestrator acceptance hint: commands the CLI agent should run or explicitly report as skipped."
+        }
+      }
+    },
+    "domain": "cli_agent",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "run_sub_agentflow",
+    "description": "Launch a bounded child agent flow such as goal_guard_delivery_loop and return one compact summarized result.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "flowId",
+        "goal"
+      ],
+      "properties": {
+        "flowId": {
+          "type": "string",
+          "description": "Flow id to run, for example goal_guard_delivery_loop."
+        },
+        "goal": {
+          "type": "string",
+          "description": "The objective for the child AgentFlow."
+        },
+        "context": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Optional extra context for the child flow."
+        },
+        "startMode": {
+          "type": "string",
+          "enum": [
+            "durable",
+            "blocking"
+          ],
+          "description": "durable starts a long-lived supervisable flow; blocking waits for a compact result."
+        },
+        "vfsMode": {
+          "type": "string",
+          "enum": [
+            "isolated",
+            "shared"
+          ],
+          "description": "VFS mode for the child flow. Defaults to isolated."
+        },
+        "copyBack": {
+          "type": "boolean",
+          "description": "Whether verified child artifacts should be copied back. Defaults to false."
+        },
+        "returnMode": {
+          "type": "string",
+          "enum": [
+            "summary",
+            "full_trace",
+            "artifacts_only"
+          ],
+          "description": "Projection returned to the parent. Defaults to summary."
+        },
+        "maxSteps": {
+          "type": "integer",
+          "description": "Maximum flow steps. Capped at 50."
+        }
+      }
+    },
+    "domain": "agent_workflow",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "image_generate",
+    "description": "Generate an image using AI (CometAPI, OpenAI, or OpenRouter-compatible).\nThe image is saved to the session VFS under the images/ folder and returned inline.\n\nSupported models: flux-schnell (default, fast/cheap), flux-pro, gpt-image-1, dall-e-3, kling-image, mock-stock (free stock placeholder, no API key).\nQuality: low (fast/cheap), medium, high (slow/expensive).\n\nUse edit_image instead when the user provides existing reference images from the VFS for character/style consistency.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Detailed description of the image to generate"
+        },
+        "model": {
+          "type": "string",
+          "description": "Image model name (e.g. \"flux-schnell\", \"gpt-image-1\", \"dall-e-3\"). Default: flux-schnell"
+        },
+        "size": {
+          "type": "string",
+          "description": "Image size (e.g. \"1024x1024\", \"1024x1536\", \"512x512\"). Default: 1024x1024"
+        },
+        "quality": {
+          "type": "string",
+          "description": "Quality level: \"low\" (fast), \"medium\", \"high\" (slow). Default: low"
+        },
+        "output_format": {
+          "type": "string",
+          "description": "Output format: \"png\", \"jpeg\", \"webp\". Default: png"
+        },
+        "filename": {
+          "type": "string",
+          "description": "Optional filename (e.g. \"dragon.png\"). Auto-generated if omitted."
+        }
+      }
+    },
+    "domain": "image",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "image_edit",
+    "description": "Generate or edit images using Gemini (via CometAPI) with VFS reference images.\n\nALWAYS use this tool (not image_generate) when the user:\n- wants to EDIT an existing image (change background, style, add/remove elements)\n- provides character/style references for consistent look\n- wants to iterate on a previously generated image\n\n## IMAGE EDITING\n1. Set refs = [{vfsPath: <source image path>, role: \"base\", label: \"source image\"}]\n2. Set iterationOf = <source image path>\n3. Write prompt as edit instruction: \"Change the background to a lake. Keep the character identical.\"\n\n## NEW GENERATION WITH REFERENCES\n- role=\"character\" — preserve exact appearance\n- role=\"style\" — match visual style\n- role=\"background\" — use as scene/environment\n- role=\"object\" — include this specific object\n\nEach output is auto-versioned in VFS (never overwrites existing files).",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "outputPath",
+        "refs",
+        "prompt"
+      ],
+      "properties": {
+        "outputPath": {
+          "type": "string",
+          "description": "Desired VFS output path, e.g. \"generated/portrait-v1.png\". Auto-versioned."
+        },
+        "refs": {
+          "type": "array",
+          "description": "Reference images from VFS. Max 14. Each: { vfsPath: string, role: \"base\"|\"character\"|\"object\"|\"style\"|\"background\", label: string }.",
+          "items": {
+            "type": "object",
+            "required": [
+              "vfsPath",
+              "role",
+              "label"
+            ],
+            "properties": {
+              "vfsPath": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "character",
+                  "object",
+                  "style",
+                  "background",
+                  "base"
+                ]
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Edit instruction or generation description."
+        },
+        "aspectRatio": {
+          "type": "string",
+          "description": "Aspect ratio: \"1:1\", \"4:5\", \"16:9\", \"9:16\", \"3:4\". Default: \"1:1\""
+        },
+        "imageSize": {
+          "type": "string",
+          "description": "Output resolution: \"512px\", \"1K\", \"2K\", \"4K\". Default: \"1K\""
+        },
+        "model": {
+          "type": "string",
+          "description": "Model: \"flash\" (fast/cheap) or \"pro\" (highest quality). Default: flash"
+        },
+        "thinkingLevel": {
+          "type": "string",
+          "description": "Gemini thinking effort: \"minimal\" or \"high\". Default: minimal"
+        },
+        "iterationOf": {
+          "type": "string",
+          "description": "VFS path of the source image when editing. Required when role=\"base\"."
+        }
+      }
+    },
+    "domain": "image",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "image_view",
+    "description": "View or inspect an image from the session VFS.\nReturns the image as a base64 data URL that vision-capable LLMs can analyze.\nUse this to review generated images, check quality, or analyze image content before further processing.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path in session VFS (e.g. \"images/dragon.png\")"
+        },
+        "quality": {
+          "type": "string",
+          "description": "Detail level for vision: \"low\", \"medium\", \"high\". Default: low"
+        }
+      }
+    },
+    "domain": "image",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "skill_list",
+    "description": "List all skills. Optionally filter by source (\"user\" or \"agent\"). Returns id, name, description, and source for each skill.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ],
+          "description": "Optional filter â€” only return skills created by this source."
+        }
+      }
+    },
+    "domain": "skill",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "skill_read",
+    "description": "Read the full details of a skill including its prompt text. Look up by ID or name. Use this to inspect what instructions a skill injects into the system prompt.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The exact ID of the skill to read. Takes precedence over name."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the skill to read (case-insensitive). Used when id is not provided."
+        }
+      }
+    },
+    "domain": "skill",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "skill_create",
+    "description": "Create a new skill. A skill is a named prompt snippet that gets injected into the system prompt when active. The source will be set to \"agent\" automatically.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "prompt"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Short unique name for the skill (e.g. \"Python Expert\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "One-sentence description of what this skill does."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The prompt text injected into the system prompt when this skill is active."
+        }
+      }
+    },
+    "domain": "skill",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "skill_update",
+    "description": "Update an existing skill by its ID. All fields are optional â€” only provided fields will be changed.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID of the skill to update. Use skill_list to find IDs."
+        },
+        "name": {
+          "type": "string",
+          "description": "New name for the skill."
+        },
+        "description": {
+          "type": "string",
+          "description": "New description for the skill."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "New prompt text for the skill."
+        }
+      }
+    },
+    "domain": "skill",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "skill_delete",
+    "description": "Permanently delete a skill by its ID.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID of the skill to delete. Use skill_list to find IDs."
+        }
+      }
+    },
+    "domain": "skill",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "persona_list",
+    "description": "List all personas. Returns id, name, model, Kalio allowedTools, providerToolNames, skillIds, and mcpPolicy for each.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "domain": "persona",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "persona_create",
+    "description": "Create a new persona. A persona defines an AI identity with its own system prompt, model, and set of available native tools.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "name",
+        "systemPrompt",
+        "model"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name for the persona (e.g. \"Code Reviewer\")."
+        },
+        "systemPrompt": {
+          "type": "string",
+          "description": "The system prompt that defines this persona's behaviour and expertise."
+        },
+        "model": {
+          "type": "string",
+          "description": "LLM model identifier to use for this persona (e.g. \"claude-sonnet-4-6\")."
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional list of provider-native tool names this persona may use. Empty = all provider-native tools disabled. Use provider documentation to discover names."
+        },
+        "providerToolNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional Claude Code built-in tool names enabled for this persona (for example Read or WebSearch). Empty = disabled. Kalio child and external MCP tools are not accepted here."
+        },
+        "skillIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional list of Skill entity IDs whose prompts are injected into the system prompt. Use skill_list to discover skill IDs."
+        },
+        "mcpPolicy": {
+          "type": "string",
+          "enum": [
+            "allow_all",
+            "deny_all",
+            "allow_list"
+          ],
+          "description": "MCP server policy for this persona. Defaults to \"allow_all\"."
+        }
+      }
+    },
+    "domain": "persona",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "persona_update",
+    "description": "Update an existing persona by its ID. All fields are optional — only provided fields will be changed.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID of the persona to update. Use persona_list to find IDs."
+        },
+        "name": {
+          "type": "string",
+          "description": "New display name."
+        },
+        "systemPrompt": {
+          "type": "string",
+          "description": "New system prompt text."
+        },
+        "model": {
+          "type": "string",
+          "description": "New model identifier."
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "New provider-native tool list (replaces existing list entirely). Empty array disables all provider-native tools."
+        },
+        "providerToolNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "New Claude Code built-in tool names (replaces the existing list). Empty array = disabled."
+        },
+        "skillIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "New list of Skill entity IDs whose prompts are injected into the system prompt (replaces existing list)."
+        },
+        "mcpPolicy": {
+          "type": "string",
+          "enum": [
+            "allow_all",
+            "deny_all",
+            "allow_list"
+          ],
+          "description": "New MCP policy."
+        }
+      }
+    },
+    "domain": "persona",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "persona_delete",
+    "description": "Permanently delete a persona by its ID.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID of the persona to delete. Use persona_list to find IDs."
+        }
+      }
+    },
+    "domain": "persona",
+    "requiresConfirmation": true
+  },
+  {
+    "name": "escalate",
+    "description": "Report a critical event to the user immediately. The event is logged in the audit trail and, if Telegram is connected, a message is sent to the user. Use this when something important requires human attention — unexpected errors, blocked progress, or decisions that need human input.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "message"
+      ],
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "Clear description of the critical event to report to the user."
+        }
+      }
+    },
+    "domain": "security_audit",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "ide_query",
+    "description": "Use VS Code language intelligence for definitions, references, symbols, callers, callees, implementations, declarations, type definitions, and hover.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "operation"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "workspace_symbols",
+            "document_symbols",
+            "definition",
+            "declaration",
+            "type_definition",
+            "implementation",
+            "references",
+            "incoming_calls",
+            "outgoing_calls",
+            "hover"
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "column": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "kind": {
+              "type": "string"
+            },
+            "container": {
+              "type": "string"
+            }
+          }
+        },
+        "maxResults": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "domain": "code_intelligence",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "ide_diagnostics",
+    "description": "Read bounded VS Code diagnostics for one project file or the project workspace.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "scope"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "file",
+            "project"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "severities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information"
+            ]
+          }
+        },
+        "maxResults": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "domain": "code_intelligence",
+    "requiresConfirmation": false
+  },
+  {
+    "name": "ide_status",
+    "description": "Report the VS Code code-intelligence backend, project trust, language providers, capabilities, and actionable readiness state.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    },
+    "domain": "code_intelligence",
+    "requiresConfirmation": false
+  }
+]

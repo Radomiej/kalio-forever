@@ -299,3 +299,10 @@ classDiagram
   publication validates source freshness and replaces the bounded snapshot in one
   transaction. This is not an atomic operating-system filesystem snapshot.
 - Details and release boundaries: `docs/spec/embedding-spaces-and-project-resources.md`.
+
+## Local Model Evaluation And Context Budgets
+
+- The versioned [Ollama benchmark](benchmarks/ollama-2026-10-19/README.md) and its [evaluation specification](benchmarks/ollama-2026-10-19/SPEC.md) record measured model behavior, hardware, grading and limits. Model rankings must retain their workload and inference conditions.
+- Kalio's history budget and the provider's actual context capacity are separate limits. A larger history setting must not be presented as enlarging the provider window.
+- The benchmark's proposed tool discovery separates the authorized catalog from schemas currently advertised to a model. Discovery must not broaden persona/MCP permissions or bypass execution validation and HITL.
+- Static profiles, dynamic discovery and semantic compaction remain distinct implementation choices; benchmark proposals must not be described as shipped behavior. Preserve durable source material and measure correctness plus retrieval/recovery cost before adopting lossy compression.

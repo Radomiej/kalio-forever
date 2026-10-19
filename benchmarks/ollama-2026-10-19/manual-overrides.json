@@ -1,0 +1,23 @@
+[
+  {
+    "model": "qwen3.5:4b",
+    "task": "pl_read",
+    "repeat": 1,
+    "passed": false,
+    "reason": "The answer incorrectly says the product was used on the day of delivery; the source says it was used the following day."
+  },
+  {
+    "model": "qwen3.5:4b",
+    "task": "pl_read",
+    "repeat": 2,
+    "passed": false,
+    "reason": "The answer incorrectly says the product was used on the day of delivery; the source says it was used the following day."
+  },
+  {
+    "model": "gemma4:e2b",
+    "repeat": 1,
+    "task": "pl_read",
+    "passed": false,
+    "reason": "The explanation incorrectly claims the 14-day return period expired, whereas only seven days elapsed."
+  }
+]

@@ -1,0 +1,307 @@
+[
+  {
+    "model": "qwen3.5:4b",
+    "trials": 24,
+    "passed": 12,
+    "category": {
+      "pl": {
+        "passed": 2,
+        "trials": 6,
+        "median_s": 3.991094524999916
+      },
+      "en": {
+        "passed": 2,
+        "trials": 6,
+        "median_s": 3.1764113495000004
+      },
+      "tools": {
+        "passed": 6,
+        "trials": 6,
+        "median_s": 13.789268765499997
+      },
+      "code": {
+        "passed": 2,
+        "trials": 6,
+        "median_s": 8.962121990000014
+      }
+    },
+    "median_s": 4.96585556949988,
+    "p95_s": 14.935093711000263,
+    "median_ttft_s": 1.5351478815000164,
+    "generation_tokens_per_s": 12.189499766181836,
+    "errors": [],
+    "memory": {
+      "models": [
+        {
+          "name": "qwen3.5:4b",
+          "model": "qwen3.5:4b",
+          "size": 3146734631,
+          "digest": "d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "4.2B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-19T04:57:39.731395045Z",
+          "size_vram": 0,
+          "context_length": 4096,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    "cold": {
+      "wall_s": 10.804018000999804,
+      "ttft_s": 10.718858367999928,
+      "load_duration": 10124309134
+    }
+  },
+  {
+    "model": "qwen3.5:2b",
+    "trials": 24,
+    "passed": 16,
+    "category": {
+      "pl": {
+        "passed": 4,
+        "trials": 6,
+        "median_s": 2.0210321780000413
+      },
+      "en": {
+        "passed": 4,
+        "trials": 6,
+        "median_s": 1.816926608499898
+      },
+      "tools": {
+        "passed": 6,
+        "trials": 6,
+        "median_s": 7.3004304940002385
+      },
+      "code": {
+        "passed": 2,
+        "trials": 6,
+        "median_s": 5.792271104999827
+      }
+    },
+    "median_s": 3.162557576499694,
+    "p95_s": 8.93473579700003,
+    "median_ttft_s": 0.7419253314999423,
+    "generation_tokens_per_s": 18.107351181348697,
+    "errors": [],
+    "memory": {
+      "models": [
+        {
+          "name": "qwen3.5:2b",
+          "model": "qwen3.5:2b",
+          "size": 2369666414,
+          "digest": "0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "1.9B",
+            "quantization_level": "Q8_0"
+          },
+          "expires_at": "2026-10-19T04:59:36.498448178Z",
+          "size_vram": 0,
+          "context_length": 4096,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    "cold": {
+      "wall_s": 2.887771910000083,
+      "ttft_s": 2.8281356190000224,
+      "load_duration": 2566666002
+    }
+  },
+  {
+    "model": "granite4.2:3b",
+    "trials": 24,
+    "passed": 14,
+    "category": {
+      "pl": {
+        "passed": 2,
+        "trials": 6,
+        "median_s": 3.0961650340000233
+      },
+      "en": {
+        "passed": 3,
+        "trials": 6,
+        "median_s": 1.9719495689998894
+      },
+      "tools": {
+        "passed": 6,
+        "trials": 6,
+        "median_s": 3.960648753500209
+      },
+      "code": {
+        "passed": 3,
+        "trials": 6,
+        "median_s": 5.724580897499891
+      }
+    },
+    "median_s": 3.6909632690001217,
+    "p95_s": 11.647935963000236,
+    "median_ttft_s": 0.7883833695000249,
+    "generation_tokens_per_s": 20.785967569150124,
+    "errors": [],
+    "memory": {
+      "models": [
+        {
+          "name": "granite4.2:3b",
+          "model": "granite4.2:3b",
+          "size": 2657144010,
+          "digest": "40577dc168a3a9ad34e9a1234e0c2570be86097fa75a236d4574ae985705d3c4",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "granite",
+            "families": [
+              "granite"
+            ],
+            "parameter_size": "3.7B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-19T05:13:27.187723729Z",
+          "size_vram": 0,
+          "context_length": 4096,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    "cold": {
+      "wall_s": 3.4634726520002914,
+      "ttft_s": 3.3926893329999075,
+      "load_duration": 3044184242
+    }
+  },
+  {
+    "model": "lfm2.5:8b",
+    "trials": 24,
+    "passed": 18,
+    "category": {
+      "pl": {
+        "passed": 2,
+        "trials": 6,
+        "median_s": 7.769211589999941
+      },
+      "en": {
+        "passed": 4,
+        "trials": 6,
+        "median_s": 4.926950795000039
+      },
+      "tools": {
+        "passed": 6,
+        "trials": 6,
+        "median_s": 13.011631279000085
+      },
+      "code": {
+        "passed": 6,
+        "trials": 6,
+        "median_s": 14.894168124000089
+      }
+    },
+    "median_s": 8.946467691500175,
+    "p95_s": 23.41764287299975,
+    "median_ttft_s": 0.9605144810002457,
+    "generation_tokens_per_s": 32.80737226651198,
+    "errors": [],
+    "memory": {
+      "models": [
+        {
+          "name": "lfm2.5:8b",
+          "model": "lfm2.5:8b",
+          "size": 5267689307,
+          "digest": "9cf756159fc2f3b9128c6a3f544ec90c5e9b8afdbb4179a57b8aea9de589cfb2",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "lfm2moe",
+            "families": [
+              "lfm2moe"
+            ],
+            "parameter_size": "8.5B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-19T05:19:00.122739958Z",
+          "size_vram": 0,
+          "context_length": 4096,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    "cold": {
+      "wall_s": 11.206041118999565,
+      "ttft_s": 7.75272379099988,
+      "load_duration": 7450515413
+    }
+  },
+  {
+    "model": "gemma4:e2b",
+    "trials": 24,
+    "passed": 17,
+    "category": {
+      "pl": {
+        "passed": 3,
+        "trials": 6,
+        "median_s": 4.886140577999868
+      },
+      "en": {
+        "passed": 4,
+        "trials": 6,
+        "median_s": 4.315313091000007
+      },
+      "tools": {
+        "passed": 6,
+        "trials": 6,
+        "median_s": 7.071253968999827
+      },
+      "code": {
+        "passed": 4,
+        "trials": 6,
+        "median_s": 15.199892687999863
+      }
+    },
+    "median_s": 6.640684054499843,
+    "p95_s": 34.98571127900004,
+    "median_ttft_s": 0.7512108490000173,
+    "generation_tokens_per_s": 7.987817495724675,
+    "errors": [],
+    "memory": {
+      "models": [
+        {
+          "name": "gemma4:e2b",
+          "model": "gemma4:e2b",
+          "size": 1083032206,
+          "digest": "b37049369adfe3d2b653af0ab301a062ca5cbe96ace6aa0d3f2559ee9b563fc2",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "gemma4",
+            "families": [
+              "gemma4"
+            ],
+            "parameter_size": "4.6B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-10-19T05:24:46.136020126Z",
+          "size_vram": 0,
+          "context_length": 4096,
+          "runner": "llamacpp"
+        }
+      ]
+    },
+    "cold": {
+      "wall_s": 6.743585678000272,
+      "ttft_s": 6.259196828000313,
+      "load_duration": 5973615723
+    }
+  }
+]
