@@ -14,7 +14,7 @@ Measured 2026-10-19. Hardware: 4 vCPU quota, 16 GiB RAM, no GPU; Ollama 0.40.6. 
 |4|Granite4.2 3B|2/6|3/6|6/6|3/6|14/24|3.69s|11.65s|
 |5|Qwen3.5 4B|2/6|2/6|6/6|2/6|12/24|4.97s|14.94s|
 
-| Model tag | Quantization | Generation tokens/s | Measured runner RSS,4k context |
+| Model tag | Quantization | Generation tokens/s | Ollama process RSS,4k context |
 |---|---|---:|---:|
 |lfm2.5:8b|Q4_K_M|32.81|4.96GiB|
 |gemma4:e2b|Q4_K_M|7.99|4.89GiB|
@@ -24,7 +24,7 @@ Measured 2026-10-19. Hardware: 4 vCPU quota, 16 GiB RAM, no GPU; Ollama 0.40.6. 
 
 Temperature 0, seed 42,4 inference threads, native context 4096. LFM uses thinking with 1536 output tokens; other models use think:false with 384. This is a practical configuration comparison, not an equal-reasoning-budget study. No final main-benchmark transport errors or output truncations were observed. Twelve tasks and two deterministic repetitions are too small for a general language-quality ranking or statistical significance claim.
 
-Memory is runner RSS from the host/container process, not the model's reported /api/ps size; the latter understated Gemma. RSS depends on context, cache and runtime and must not be extrapolated unchanged to32k.
+Memory is the sum of Ollama process RSS from the container, not the model's reported /api/ps size; the latter understated Gemma. RSS depends on context, cache and runtime and must not be extrapolated unchanged to32k.
 
 Recommendation: LFM for code/tool tasks; Qwen2B for responsive Polish conversation; Granite when memory matters; Gemma as an alternative general model. The tested4B Qwen did not justify its additional cost on this sample.
 
@@ -40,7 +40,7 @@ See [specification](SPEC.md), [compression research](compression-research.md), a
 
 ## Reproduction and data
 
-- summary.json, reviewed-results.jsonl and manual-overrides.json contain the reviewed main results. Internal model thinking text is omitted from the public export; its character count and generation metrics remain.
+- summary.json, reviewed-results.jsonl, memory-measured.json and manual-overrides.json contain the reviewed main results. Internal model thinking text is omitted from the public export; its character count and generation metrics remain.
 - benchmark.py contains original prompts, expected answers, tool fixtures and Python assertions. review.py and summarize.py record grading/aggregation.
 - context/experiment.py and context/tool-catalog.json freeze the follow-up protocol and schemas. Native requests use options.num_ctx; model settings in the Kalio UI alone are insufficient.
 - Launch Ollama with enough RAM and run scripts from their directory. The Python assertion runner uses Linux resource limits. Run generated code only in an isolated evaluation environment.

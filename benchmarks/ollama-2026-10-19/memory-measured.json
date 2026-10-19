@@ -1,0 +1,122 @@
+[
+  {
+    "model": "qwen3.5:2b",
+    "processes": [
+      {
+        "pid": 1,
+        "VmHWM_KiB": 28472,
+        "VmRSS_KiB": 28356,
+        "RssAnon_KiB": 13384,
+        "RssFile_KiB": 14972,
+        "RssShmem_KiB": 0
+      },
+      {
+        "pid": 1068,
+        "VmHWM_KiB": 2861360,
+        "VmRSS_KiB": 2844648,
+        "RssAnon_KiB": 2832872,
+        "RssFile_KiB": 11776,
+        "RssShmem_KiB": 0
+      }
+    ],
+    "rss_GiB": 2.739910125732422,
+    "sum_process_peak_rss_GiB": 2.7559585571289062,
+    "scope": "Ollama server and runner RSS after a short warmup, 4k context; not peak full-application memory."
+  },
+  {
+    "model": "qwen3.5:4b",
+    "processes": [
+      {
+        "pid": 1,
+        "VmHWM_KiB": 29940,
+        "VmRSS_KiB": 29272,
+        "RssAnon_KiB": 14284,
+        "RssFile_KiB": 14988,
+        "RssShmem_KiB": 0
+      },
+      {
+        "pid": 1087,
+        "VmHWM_KiB": 3621320,
+        "VmRSS_KiB": 3621320,
+        "RssAnon_KiB": 3609416,
+        "RssFile_KiB": 11904,
+        "RssShmem_KiB": 0
+      }
+    ],
+    "rss_GiB": 3.481475830078125,
+    "sum_process_peak_rss_GiB": 3.4821128845214844,
+    "scope": "Ollama server and runner RSS after a short warmup, 4k context; not peak full-application memory."
+  },
+  {
+    "model": "granite4.2:3b",
+    "processes": [
+      {
+        "pid": 1,
+        "VmHWM_KiB": 29940,
+        "VmRSS_KiB": 28844,
+        "RssAnon_KiB": 13804,
+        "RssFile_KiB": 15040,
+        "RssShmem_KiB": 0
+      },
+      {
+        "pid": 1107,
+        "VmHWM_KiB": 2579368,
+        "VmRSS_KiB": 2579368,
+        "RssAnon_KiB": 2568076,
+        "RssFile_KiB": 11292,
+        "RssShmem_KiB": 0
+      }
+    ],
+    "rss_GiB": 2.487384796142578,
+    "sum_process_peak_rss_GiB": 2.4884300231933594,
+    "scope": "Ollama server and runner RSS after a short warmup, 4k context; not peak full-application memory."
+  },
+  {
+    "model": "gemma4:e2b",
+    "processes": [
+      {
+        "pid": 1,
+        "VmHWM_KiB": 29940,
+        "VmRSS_KiB": 28992,
+        "RssAnon_KiB": 13928,
+        "RssFile_KiB": 15064,
+        "RssShmem_KiB": 0
+      },
+      {
+        "pid": 1127,
+        "VmHWM_KiB": 5095908,
+        "VmRSS_KiB": 5095908,
+        "RssAnon_KiB": 5083972,
+        "RssFile_KiB": 11936,
+        "RssShmem_KiB": 0
+      }
+    ],
+    "rss_GiB": 4.887485504150391,
+    "sum_process_peak_rss_GiB": 4.888389587402344,
+    "scope": "Ollama server and runner RSS after a short warmup, 4k context; not peak full-application memory."
+  },
+  {
+    "model": "lfm2.5:8b",
+    "processes": [
+      {
+        "pid": 1,
+        "VmHWM_KiB": 29940,
+        "VmRSS_KiB": 27716,
+        "RssAnon_KiB": 12620,
+        "RssFile_KiB": 15096,
+        "RssShmem_KiB": 0
+      },
+      {
+        "pid": 1159,
+        "VmHWM_KiB": 5169168,
+        "VmRSS_KiB": 5169168,
+        "RssAnon_KiB": 5157596,
+        "RssFile_KiB": 11572,
+        "RssShmem_KiB": 0
+      }
+    ],
+    "rss_GiB": 4.956134796142578,
+    "sum_process_peak_rss_GiB": 4.958255767822266,
+    "scope": "Ollama server and runner RSS after a short warmup, 4k context; not peak full-application memory."
+  }
+]
