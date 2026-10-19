@@ -1,4 +1,5 @@
 import type { EmbeddingSpace, Project, ProjectContextSettings, ProjectResourceIndexResult, ProjectResourceSearchResult } from '@kalio/types';
+import { createDecisionProtectedFetcher } from './decision-protected-fetch';
 
 export type { ProjectContextSettings } from '@kalio/types';
 export interface ProjectContextIndexStatus {
@@ -19,7 +20,8 @@ async function check(response: Response): Promise<Response> {
   throw new Error(`Project context unavailable (${response.status}: ${code}).`);
 }
 
-export function createProjectContextRequest(fetcher: typeof fetch = (...args) => fetch(...args)) {
+export function createProjectContextRequest(rawFetcher: typeof fetch = (...args) => fetch(...args)) {
+  const fetcher = createDecisionProtectedFetcher(rawFetcher);
   let bootstrap: Promise<void> | undefined;
   return async (path: string, init: RequestInit = {}): Promise<Response> => {
     const method = init.method ?? 'GET';

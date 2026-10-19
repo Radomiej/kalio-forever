@@ -1,4 +1,5 @@
 import type { DecisionSettings, DecisionSettingsPort } from '@kalio/types';
+import { createDecisionProtectedFetcher } from './decision-protected-fetch';
 
 type SettingsPath = '/api/decision/config' | '/api/hitl/config' | '/api/runtime/default-profile';
 type Fetcher = typeof fetch;
@@ -19,7 +20,8 @@ async function check(response: Response): Promise<Response> {
   throw new DecisionSettingsTransportError(response.status, code);
 }
 
-export function createDecisionSettingsRequest(fetcher: Fetcher = (...args) => fetch(...args)) {
+export function createDecisionSettingsRequest(rawFetcher: Fetcher = (...args) => fetch(...args)) {
+  const fetcher = createDecisionProtectedFetcher(rawFetcher);
   let bootstrap: Promise<void> | undefined;
   function authenticate(): Promise<void> {
     if (!bootstrap) {

@@ -1,3 +1,4 @@
+import { createServer } from 'node:net';
 import { execFile } from 'node:child_process';
 import { resolve } from 'node:path';
 
@@ -44,7 +45,13 @@ export async function resolveListeningPids(ports, { platform = process.platform,
   }
 
   for (const port of requested) {
-    const result = await run('lsof', ['-tiTCP:' + String(port), '-sTCP:LISTEN']);
+    let result;
+    try { result = await run('lsof', ['-tiTCP:' + String(port), '-sTCP:LISTEN']); }
+    catch (error) {
+      // lsof is optional on Linux/macOS; its absence leaves listener ownership unknown.
+      if (error?.code === 'ENOENT') return new Map();
+      throw error;
+    }
     if (result.code === 1 && result.stdout.trim() === '') continue;
     if (result.code !== 0) throw new Error('Listener ownership query failed');
     const line = result.stdout.trim().split(/\r?\n/)[0];
@@ -56,4 +63,31 @@ export async function resolveListeningPids(ports, { platform = process.platform,
     owners.set(port, pid);
   }
   return owners;
+}
+
+export async function ensureRequestedPortsAreFree(ports, options) {
+  const owners = await resolveListeningPids(ports, options);
+  const occupied = [];
+  for (const port of ports) {
+    const ownerPid = owners.get(port);
+    if (ownerPid) {
+      occupied.push({ port, pid: ownerPid });
+    }
+  }
+
+  if (occupied.length > 0) {
+    const detail = occupied.map(({ port, pid }) => `${port}=>pid ${pid}`).join(', ');
+    throw new Error(`requested ports already in use by unmanaged listeners: ${detail}`);
+  }
+  // Ownership tools may be unavailable. Binding remains the authoritative conflict check.
+  for (const port of ports) {
+    await new Promise((accept, reject) => {
+      const probe = createServer();
+      probe.once('error', (error) => {
+        if (error.code === 'EADDRINUSE') reject(new Error(`requested port ${port} already in use; listener ownership unknown`));
+        else reject(error);
+      });
+      probe.listen({ port, host: '127.0.0.1', exclusive: true }, () => probe.close((error) => error ? reject(error) : accept()));
+    });
+  }
 }

@@ -7,6 +7,17 @@ import { decisionAuthRequest } from './decision-auth.guard';
 export class DecisionAuthController {
   constructor(private readonly auth: DecisionAuthService) {}
 
+  @Post('desktop-auth')
+  @HttpCode(200)
+  desktopBootstrap(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: unknown): { token: string } {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length) {
+      throw new BadRequestException({ code: 'DECISION_AUTH_BODY_INVALID' });
+    }
+    const token = this.auth.createDesktopSession(decisionAuthRequest(req));
+    res.setHeader('Cache-Control', 'no-store');
+    return { token };
+  }
+
   @Post('auth')
   @HttpCode(204)
   bootstrap(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: unknown): void {

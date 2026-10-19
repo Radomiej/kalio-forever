@@ -7,7 +7,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readStackState, resolveStackPaths } from './stack-state.mjs';
 import { buildStackStatusReport, hasAliveChild, renderEffectiveLlmLine, renderStateProcesses } from './stack-status.mjs';
-import { resolveListeningPids } from './stack-port-owners.mjs';
+import { ensureRequestedPortsAreFree, resolveListeningPids } from './stack-port-owners.mjs';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
@@ -390,22 +390,6 @@ async function refreshStatePortOwners(state) {
   }
 
   return nextState;
-}
-
-async function ensureRequestedPortsAreFree(ports) {
-  const owners = await resolveListeningPids(ports);
-  const occupied = [];
-  for (const port of ports) {
-    const ownerPid = owners.get(port);
-    if (ownerPid) {
-      occupied.push({ port, pid: ownerPid });
-    }
-  }
-
-  if (occupied.length > 0) {
-    const detail = occupied.map(({ port, pid }) => `${port}=>pid ${pid}`).join(', ');
-    throw new Error(`requested ports already in use by unmanaged listeners: ${detail}`);
-  }
 }
 
 async function detectKnownManagedPortConflicts() {

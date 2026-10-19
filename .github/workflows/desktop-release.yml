@@ -156,6 +156,17 @@ jobs:
           if ($null -eq $installer) { throw 'The NSIS installer was not found' }
           $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
           "$hash  $($installer.Name)" | Set-Content -LiteralPath release\SHA256SUMS-windows.txt -Encoding utf8
+          Get-ChildItem -LiteralPath release -Filter 'kalio-runtime-*-windows-x64.zip' -File | ForEach-Object {
+            $runtimeHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            "$runtimeHash  $($_.Name)" | Add-Content -LiteralPath release\SHA256SUMS-windows.txt -Encoding utf8
+          }
+
+      - name: Upload independently reviewable Windows checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-windows-metadata
+          if-no-files-found: error
+          path: release/SHA256SUMS-windows.txt
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -346,8 +357,16 @@ jobs:
           cp COMMERCIAL-LICENSE.md release/COMMERCIAL-LICENSE.md
           cp COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md release/COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md
           node scripts/generate-third-party-notices.mjs --output release/THIRD_PARTY_NOTICES.md
-          find src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' \) -print0 | sort -z | xargs -0 sha256sum > release/SHA256SUMS-linux.txt
+          find src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' \) -print0 | sort -z | xargs -0 sha256sum | sed 's@  .*/@  @' > release/SHA256SUMS-linux.txt
+          (cd release && sha256sum kalio-runtime-*-linux-x64.tar.gz) >> release/SHA256SUMS-linux.txt
           test -s release/SHA256SUMS-linux.txt
+
+      - name: Upload independently reviewable Linux checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-metadata
+          if-no-files-found: error
+          path: release/SHA256SUMS-linux.txt
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4

@@ -96,3 +96,66 @@ test('real Windows lookup identifies two live listeners and observes closure',
       for (const server of servers) if (server.listening) server.close();
     }
   });
+
+for (const platform of ['linux', 'darwin']) {
+  test(`${platform} missing lsof leaves listener ownership unknown`, async () => {
+    const { resolveListeningPids } = await load();
+    assert.equal((await resolveListeningPids([3316], {
+      platform, run: async () => { throw Object.assign(new Error('lsof missing'), { code: 'ENOENT' }); },
+    })).size, 0);
+  });
+}
+
+test('non-Windows query errors other than missing lsof still fail closed', async () => {
+  const { resolveListeningPids } = await load();
+  for (const code of ['EACCES', 'ETIMEDOUT']) {
+    await assert.rejects(resolveListeningPids([3316], {
+      platform: 'linux', run: async () => { throw Object.assign(new Error('query failure'), { code }); },
+    }), { code });
+  }
+  await assert.rejects(resolveListeningPids([3316], {
+    platform: 'linux', run: async () => ({ code: 2, stdout: '' }),
+  }), /ownership query failed/);
+});
+
+test('startup with missing lsof checks real binds and never reuses an unrelated healthy service', async (t) => {
+  const { ensureRequestedPortsAreFree } = await load();
+  const service = createServer(socket => socket.end('healthy unrelated service'));
+  await new Promise(resolve => service.listen(0, '127.0.0.1', resolve));
+  t.after(() => service.close());
+  const port = service.address().port;
+  const options = { platform: 'linux', run: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); } };
+  await assert.rejects(ensureRequestedPortsAreFree([port], options), /already in use; listener ownership unknown/);
+  assert.equal(service.listening, true, 'the existing service must remain untouched');
+  await new Promise(resolve => service.close(resolve));
+  await ensureRequestedPortsAreFree([port], options);
+  await new Promise(resolve => service.listen(port, '127.0.0.1', resolve));
+  assert.equal(service.listening, true, 'the probe must release its listener after checking a free port');
+});
+
+test('actual stack start without lsof refuses an unrelated live service before build or health polling', { skip: process.platform === 'win32', timeout: 10000 }, async (t) => {
+  const { mkdtemp, mkdir, copyFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { spawn } = await import('node:child_process');
+  const root = await mkdtemp(join(tmpdir(), 'kalio-no-lsof-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'scripts'));
+  for (const name of ['stack-manager.mjs', 'stack-port-owners.mjs', 'stack-state.mjs', 'stack-status.mjs']) {
+    await copyFile(new URL(name, import.meta.url), join(root, 'scripts', name));
+  }
+  const server = createServer(socket => socket.end('unrelated healthy service'));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const child = spawn(process.execPath, [join(root, 'scripts/stack-manager.mjs'), 'start', '--backend-port', String(server.address().port), '--frontend-port', '0'], {
+    cwd: root, env: { ...process.env, PATH: root }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+  assert.notEqual(code, 0);
+  assert.match(output, /already in use; listener ownership unknown/);
+  assert.doesNotMatch(output, /ENOENT|Building|is healthy/);
+  assert.equal(server.listening, true);
+});

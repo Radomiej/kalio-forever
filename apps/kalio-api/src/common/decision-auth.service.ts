@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { ForbiddenException, ServiceUnavailableException, UnsupportedMediaTypeException } from '@nestjs/common';
+import { DecisionDesktopAuth, DESKTOP_DECISION_HEADER } from './decision-desktop-auth';
 
 export interface DecisionAuthRequest {
   /** Raw socket peer, never Express trust-proxy IP. */
@@ -20,10 +21,16 @@ export class DecisionAuthService {
   private readonly origins: string[];
   private readonly bearer: Buffer | null;
   private readonly sessions = new Map<string, { token: Buffer; expiresAt: number }>();
+  private readonly desktop: DecisionDesktopAuth;
   readonly cookieName: string;
 
   constructor(private readonly env: NodeJS.ProcessEnv = process.env, private readonly now: () => number = Date.now) {
-    const port = FRONTEND_PORTS[env['PORT'] ?? '3016'];
+    this.desktop = new DecisionDesktopAuth(env, now);
+    const listeningPort = env['PORT'] ?? '3016';
+    // Packaged runtimes serve the UI on the API listener; dev/preview use a Host-preserving proxy.
+    const port = env['KALIO_SERVE_UI'] === 'true'
+      ? (/^[1-9]\d{0,4}$/.test(listeningPort) && Number(listeningPort) <= 65535 ? listeningPort : undefined)
+      : FRONTEND_PORTS[listeningPort];
     const configured = env['KALIO_DECISION_FRONTEND_ORIGINS'];
     const defaults = port ? `http://localhost:${port},http://127.0.0.1:${port}` : '';
     this.origins = (configured ?? defaults).split(',').filter(Boolean);
@@ -58,11 +65,13 @@ export class DecisionAuthService {
   }
 
   requireBrowserOrigin(request: DecisionAuthRequest): void {
+    if (request.headers[DESKTOP_DECISION_HEADER] !== undefined) return this.desktop.requireOrigin(request);
     if (!this.origins.length) throw new ServiceUnavailableException({ code: 'DECISION_AUTH_UNAVAILABLE' });
     if (!this.origin(request)) throw new ForbiddenException({ code: 'DECISION_ORIGIN_DENIED' });
   }
 
   createSession(request: DecisionAuthRequest): string {
+    if (request.headers[DESKTOP_DECISION_HEADER] !== undefined) throw new ForbiddenException({ code: 'DECISION_ORIGIN_DENIED' });
     if (!this.origins.length) throw new ServiceUnavailableException({ code: 'DECISION_AUTH_UNAVAILABLE' });
     if (request.method !== 'POST') throw new ForbiddenException({ code: 'DECISION_ORIGIN_DENIED' });
     const origin = this.origin(request);
@@ -76,6 +85,11 @@ export class DecisionAuthService {
     return session.token.toString('hex');
   }
 
+  createDesktopSession(request: DecisionAuthRequest): string {
+    this.requireJson(request);
+    return this.desktop.createSession(request);
+  }
+
   cookie(request: DecisionAuthRequest, token: string): string {
     const origin = this.origin(request);
     const session = origin ? this.sessions.get(origin) : undefined;
@@ -84,6 +98,7 @@ export class DecisionAuthService {
   }
 
   isAuthorized(request: DecisionAuthRequest): boolean {
+    if (request.headers[DESKTOP_DECISION_HEADER] !== undefined) return this.desktop.isAuthorized(request);
     if (!['GET', 'PUT'].includes(request.method) || !loopback(request.ip)) return false;
     const authorization = request.headers['authorization'];
     if (authorization !== undefined) {
@@ -106,6 +121,10 @@ export class DecisionAuthService {
 
   /** Browser capability prerequisite only; not human/session identity or launch authority. */
   isBrowserDecisionAuthorized(request: DecisionAuthRequest): boolean {
+    if (request.headers[DESKTOP_DECISION_HEADER] !== undefined) {
+      try { this.requireJson(request); } catch { return false; }
+      return request.method === 'PUT' && this.desktop.isAuthorized(request);
+    }
     if (request.method !== 'PUT' || request.headers['authorization'] !== undefined
       || typeof request.headers['origin'] !== 'string' || !this.origin(request)) return false;
     try {

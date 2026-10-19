@@ -6,6 +6,7 @@ import { openSync, closeSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { smokeDecisionSettings } from './runtime-decision-auth-smoke.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -76,6 +77,8 @@ try {
   const page = await (await fetch(origin)).text();
   if (!page.includes('id="root"')) throw new Error('Embedded UI is missing');
   receipt.checks.push('health', 'runtime-info', 'embedded-ui');
+  await smokeDecisionSettings(origin);
+  receipt.checks.push('protected-settings-auth-read-write');
   const session = await json('/api/sessions', { title: 'Linux installer smoke', personaId: 'default' });
   const files = {
     'index.mjs': 'export const sum = (a,b) => a+b;\n',

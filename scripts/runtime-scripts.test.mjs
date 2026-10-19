@@ -208,14 +208,15 @@ test('desktop build contract keeps the bundled backend and AppData paths aligned
 });
 
 test('stack manager refreshes managed PIDs from live port owners and refuses unmanaged port reuse', () => {
-  assert.match(stackManagerSource, /import \{ resolveListeningPids \} from '\.\/stack-port-owners\.mjs'/);
+  assert.match(stackManagerSource, /import \{ ensureRequestedPortsAreFree, resolveListeningPids \} from '\.\/stack-port-owners\.mjs'/);
   assert.match(stackManagerSource, /async function refreshStatePortOwners\(state\)/);
-  assert.match(stackManagerSource, /async function ensureRequestedPortsAreFree\(ports\)/);
+  const portOwnersSource = readFileSync(new URL('./stack-port-owners.mjs', import.meta.url), 'utf8');
+  assert.match(portOwnersSource, /export async function ensureRequestedPortsAreFree\(ports, options\)/);
   assert.match(stackManagerSource, /await ensureRequestedPortsAreFree\(\[backendPort, frontendPort\]\);/);
   assert.match(stackManagerSource, /await refreshStatePortOwners\(readState\(\)\);/);
   assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\)\);/);
   assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\) \?\? readLastState\(\)\);/);
-  assert.match(stackManagerSource, /requested ports already in use by unmanaged listeners/);
+  assert.match(portOwnersSource, /requested ports already in use by unmanaged listeners/);
   assert.match(stackManagerSource, /async function detectKnownManagedPortConflicts\(\)/);
   assert.match(stackManagerSource, /buildStackStatusReport\(\{ status: 'unmanaged listeners'/);
 });

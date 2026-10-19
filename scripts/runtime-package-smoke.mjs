@@ -264,6 +264,8 @@ async function main() {
     const stderr = captureTail(child.stderr);
     const output = () => `stdout:\n${stdout()}\nstderr:\n${stderr()}`;
     const runtimeInfo = await waitForReady(child, port, output);
+    await smokeDecisionSettings(`http://127.0.0.1:${port}`);
+    console.log('[runtime-smoke] protected settings auth/read/write passed');
     await access(databasePath);
     console.log(
       `[runtime-smoke] fresh SQLite database created; runtime=${metadata.runtime} `
@@ -300,3 +302,4 @@ try {
   console.error(`[runtime-smoke] failed: ${formatError(error)}`);
   process.exitCode = 1;
 }
+import { smokeDecisionSettings } from './runtime-decision-auth-smoke.mjs';

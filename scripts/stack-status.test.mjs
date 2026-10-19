@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -109,7 +110,7 @@ test('buildStackStatusReport includes effectiveLlm alongside startup state', asy
     baseUrl: null,
     source: 'db',
   });
-  assert.equal(report.paths.statePath.endsWith('\\.tmp\\qa-stack\\qa-stack-state.json'), true);
+  assert.equal(report.paths.statePath.endsWith(join('.tmp', 'qa-stack', 'qa-stack-state.json')), true);
 });
 
 test('render helpers produce stable operator-facing lines', () => {

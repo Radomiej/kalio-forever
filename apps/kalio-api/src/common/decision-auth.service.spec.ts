@@ -64,6 +64,27 @@ describe('browser-only decision authorization prerequisite', () => {
 });
 
 describe('Decision settings local authorization', () => {
+  it.each(['4016', '4516', '42001'])('supports same-origin packaged UI on its configured runtime port %s', port => {
+    const auth = new DecisionAuthService({ PORT: port, KALIO_SERVE_UI: 'true' });
+    const bootstrap = { ...request, headers: {
+      ...request.headers, host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}`,
+    } };
+    const cookie = auth.cookie(bootstrap, auth.createSession(bootstrap)).split(';')[0];
+    const put = { ...bootstrap, method: 'PUT', headers: { ...bootstrap.headers, cookie } };
+    expect(auth.isBrowserDecisionAuthorized(put)).toBe(true);
+    expect(auth.isAuthorized({ ...put, method: 'GET', headers: { ...put.headers, origin: undefined, 'sec-fetch-site': 'same-origin' } })).toBe(true);
+    for (const origin of ['http://127.0.0.1:6188', 'http://127.0.0.1:5288', 'http://127.0.0.1:5188', 'http://tauri.localhost', 'tauri://localhost']) {
+      expect(auth.isBrowserDecisionAuthorized({ ...put, headers: { ...put.headers, origin } })).toBe(false);
+    }
+    expect(auth.isBrowserDecisionAuthorized({ ...put, headers: { ...put.headers, host: `localhost:${port}` } })).toBe(false);
+    expect(auth.isBrowserDecisionAuthorized({ ...put, ip: '10.0.0.1' })).toBe(false);
+  });
+
+  it.each(['0', '-1', '65536', '4016/evil', '4016,6188'])('fails closed for an invalid packaged listening port %s', port => {
+    const auth = new DecisionAuthService({ PORT: port, KALIO_SERVE_UI: 'true' });
+    expect(() => auth.createSession(request)).toThrow(ServiceUnavailableException);
+  });
+
   it('bootstraps an HttpOnly capability only for the approved loopback origin', () => {
     const auth = new DecisionAuthService({ PORT: '3316' });
     const token = auth.createSession(request);
