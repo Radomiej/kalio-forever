@@ -1,7 +1,9 @@
 import {
   appendFile,
   cp,
+  chmod,
   mkdir,
+  link,
   open,
   readFile,
   readlink,
@@ -381,6 +383,21 @@ async function installArchive(home, archivePath, expected) {
   }
 }
 
+async function ensureLinuxLauncher(home) {
+  if (process.platform !== 'linux') return;
+  const directory = join(home, 'bin');
+  const temporary = join(directory, `.kalio-launcher-${process.pid}`);
+  await mkdir(directory, { recursive: true });
+  try {
+    await writeFile(temporary, "#!/bin/sh\nset -eu\nKALIO_HOME=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\nexport KALIO_HOME\nversion=$(sed -n 's/.*\"version\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$KALIO_HOME/current.json\" | head -n 1)\ncase \"$version\" in\n  \"\"|.|..|*[!A-Za-z0-9._-]*) echo \"[kalio] invalid current runtime version\" >&2; exit 1 ;;\nesac\nexec \"$KALIO_HOME/app/versions/$version/bin/kalio\" \"$@\"\n", { mode: 0o755, flag: 'wx' });
+    await chmod(temporary, 0o755);
+    try { await link(temporary, join(directory, 'kalio')); }
+    catch (error) { if (error?.code !== 'EEXIST') throw error; }
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 async function applyUpdate(options) {
   const home = resolve(options.home);
   const { current, versionRoot } = await readCurrent(home);
@@ -406,6 +423,7 @@ async function applyUpdate(options) {
     }
     await stopRuntime(home, options.force);
     const installed = await installArchive(home, archivePath, expected);
+    await ensureLinuxLauncher(home);
     await writeCurrent(home, installed.current);
     await logMessage(home, `Installed ${installed.current.version} (${installed.current.runtime})`);
     if (!options.noLaunch) {
