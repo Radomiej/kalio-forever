@@ -1,10 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCodexAppServerArgs,
+  buildCodexSpawnSpec,
   parseConfiguredCodexMcpServers,
 } from './codex-app-server-process';
 
 describe('Codex App Server process configuration', () => {
+  it.each(['codex.cmd\nwhoami', 'codex.cmd\rwhoami', 'codex.cmd\0'])('rejects unsafe Windows command paths: %j', (command) => {
+    expect(() => buildCodexSpawnSpec(command, [], 'win32')).toThrow('NUL or line breaks');
+  });
+
+  it.each(['input\nwhoami', 'input\rwhoami', 'input\0', '" & whoami', '" | whoami', '"%PATH%', '"!PATH!'])('rejects unsafe batch shim arguments: %j', (argument) => {
+    expect(() => buildCodexSpawnSpec('codex.cmd', [argument], 'win32')).toThrow();
+  });
+
+  it('keeps ordinary JSON MCP overrides available for Windows shims', () => {
+    const args = buildCodexAppServerArgs([], false, [
+      { id: 'local', transport: { type: 'stdio', command: 'C:\\Tools\\node.exe' } },
+    ]);
+    expect(() => buildCodexSpawnSpec('codex.cmd', args, 'win32')).not.toThrow();
+  });
   it('keeps only enabled MCP transport identities from Codex JSON output', () => {
     const output = JSON.stringify([
       {

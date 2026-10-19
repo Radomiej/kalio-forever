@@ -21,7 +21,7 @@ import { TextDeltaHandler } from '../handlers/text-delta.handler';
 const databases: Database.Database[] = [];
 afterEach(() => { for (const database of databases.splice(0)) database.close(); });
 
-function fixture(options?: { earlyDone?: boolean; failSaveRole?: ChatMessage['role']; failRunningCheckpoint?: boolean; runningGate?: Promise<void> }) {
+function fixture(options?: { earlyDone?: boolean; repairEarlyDone?: boolean; repairThenFail?: boolean; failSaveRole?: ChatMessage['role']; failRunningCheckpoint?: boolean; runningGate?: Promise<void> }) {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
   sqlite.exec(`CREATE TABLE messages (
@@ -82,13 +82,23 @@ function fixture(options?: { earlyDone?: boolean; failSaveRole?: ChatMessage['ro
   };
   const call: LLMToolCall = { id: 'mcp-call', name: 'fs_write', args: { path: 'fixture.css', content: 'demo' } };
   let received: LLMSourceParams | undefined;
+  let attempts = 0;
+  let nativeDrain: Promise<unknown> = Promise.resolve();
   const source: ILLMSource = {
     async *stream(params) {
+      if ((options?.repairThenFail || options?.repairEarlyDone) && attempts++ === 0) {
+        throw Object.assign(new Error('Invalid structured output'), { code: 'LLM_BAD_STRUCTURED_OUTPUT' });
+      }
       received = params;
       const port = params.dispatchNativeTool;
       if (!port) throw new Error('Native tool execution has no durable runtime port');
       const first = port(call, { abortSignal: transport.signal });
       const duplicate = port(call, { abortSignal: transport.signal });
+      if (options?.repairThenFail) {
+        nativeDrain = Promise.allSettled([first, duplicate]);
+        await pending;
+        throw new Error('Repaired provider failed');
+      }
       if (options?.earlyDone) {
         yield { type: 'text_delta', delta: 'Provider finished while approval is pending' };
         yield { type: 'done' };
@@ -108,6 +118,7 @@ function fixture(options?: { earlyDone?: boolean; failSaveRole?: ChatMessage['ro
     promptMessageId: 'native-prompt', firstMessageId: 'native-assistant', personaId: 'persona',
     effectiveSystemPrompt: 'Use Kalio tools', toolMetas: dispatcher.getToolMetas(),
     abortSignal: parent.signal, emit, maxIterations: 1, providerCompletesTurn: true,
+    ...(options?.repairThenFail || options?.repairEarlyDone ? { structuredOutput: { name: 'answer', schema: { type: 'object' } } } : {}),
     callbacks: {
       onToolPending: async () => { lifecycle = 'tool_pending'; },
       onWaitingForHuman: async () => { lifecycle = 'waiting_for_human'; },
@@ -120,14 +131,31 @@ function fixture(options?: { earlyDone?: boolean; failSaveRole?: ChatMessage['ro
     },
   });
   return { repo, hitl, dispatcher, parent, transport, pending, running, providerDone, run, events, runtimeEvents,
+    drainNative: () => nativeDrain,
     get requestId() { return requestId; }, get writes() { return writes; },
     get lifecycle() { return lifecycle; }, get executingState() { return executingState; },
     get received() { return received; } };
 }
 
 describe('native Kalio tool lifecycle through the chat runtime', () => {
-  it('drains an execution after provider completion without overwriting its call with streamed text', async () => {
-    const f = fixture({ earlyDone: true });
+  it('cancels and durably drains pending native tools when a structured-output repair fails', async () => {
+    const f = fixture({ repairThenFail: true });
+    try {
+      await expect(f.run()).rejects.toThrow('Repaired provider failed');
+      expect(f.dispatcher.getPendingConfirmations('native-session')).toEqual([]);
+      expect(f.writes).toBe(0);
+      const results = (await f.repo.loadHistory('native-session')).filter(message => message.role === 'tool_result');
+      expect(results).toHaveLength(1);
+      expect(JSON.parse(results[0]!.content)).toMatchObject({ status: 'cancelled' });
+      expect(f.runtimeEvents.some(({ eventName }) => eventName === 'llm.turn.failed')).toBe(true);
+    } finally {
+      f.transport.abort();
+      await f.drainNative();
+    }
+  });
+
+  it.each([false, true])('drains an execution after provider completion without overwriting its call (repair=%s)', async (repairEarlyDone) => {
+    const f = fixture({ earlyDone: true, repairEarlyDone });
     let settled = false;
     const run = f.run().then((result) => { settled = true; return result; });
     await Promise.race([f.pending, run]);

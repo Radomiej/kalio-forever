@@ -214,66 +214,70 @@ export class LLMTurnRuntimeService {
       };
 
       try {
-        await streamModel(history);
+        try {
+          await streamModel(history);
+        } catch (error) {
+          if (
+            request.structuredOutput
+            && !structuredOutputRepairRetried
+            && !lane.hasExecutions
+            && !request.abortSignal.aborted
+            && isStructuredOutputError(error)
+          ) {
+            structuredOutputRepairRetried = true;
+            state = new TurnState();
+            ctx = { ...ctx, state };
+            chunkCount = 0;
+            usage = undefined;
+            lastAuditUpdate = performance.now();
+            hasStructuredOutput = structuredOutputBeforeAttempt.hasStructuredOutput;
+            latestStructuredOutput = structuredOutputBeforeAttempt.latestStructuredOutput;
+            this.logger.warn(
+              `Structured output failed for session ${request.sessionId} iteration ${iteration}; retrying once with repair instruction`,
+            );
+            await streamModel([
+              ...history,
+              this.structuredOutputRepairMessage(request.structuredOutput, error),
+            ]);
+          } else {
+            throw error;
+          }
+        }
         await lane.drain();
       } catch (error) {
-        if (
-          request.structuredOutput
-          && !structuredOutputRepairRetried
-          && !lane.hasExecutions
-          && !request.abortSignal.aborted
-          && isStructuredOutputError(error)
-        ) {
-          structuredOutputRepairRetried = true;
-          state = new TurnState();
-          ctx = { ...ctx, state };
-          chunkCount = 0;
-          usage = undefined;
-          lastAuditUpdate = performance.now();
-          hasStructuredOutput = structuredOutputBeforeAttempt.hasStructuredOutput;
-          latestStructuredOutput = structuredOutputBeforeAttempt.latestStructuredOutput;
-          this.logger.warn(
-            `Structured output failed for session ${request.sessionId} iteration ${iteration}; retrying once with repair instruction`,
-          );
-          await streamModel([
-            ...history,
-            this.structuredOutputRepairMessage(request.structuredOutput, error),
-          ]);
-        } else {
-          turnFailure.abort(error);
-          let cleanupError: unknown;
-          try { await lane.drain(); } catch (failure) { cleanupError = failure; }
-          // SubagentRuntimeService owns its durable error fallback; do not create a second assistant row.
-          if (auditDomain === 'chat' && (state.text.trim() || state.thinking.trim())) {
-            const partial = new TurnState();
-            partial.text = state.text;
-            partial.thinking = state.thinking;
-            partial.toolCalls.push(...state.toolCalls);
-            try {
-              await this.sessionManager.persistAssistantMessage(request.sessionId, messageId, partial, {
-                turnId: request.turnId, promptMessageId: request.promptMessageId,
-              });
-            } catch (failure) {
-              this.logger.error(`Partial history persistence failed session=${request.sessionId} turn=${request.turnId}: ${errorMessage(failure)}`);
-              cleanupError ??= failure;
-            }
+        turnFailure.abort(error);
+        let cleanupError: unknown;
+        try { await lane.drain(); } catch (failure) { cleanupError = failure; }
+        // SubagentRuntimeService owns its durable error fallback; do not create a second assistant row.
+        if (auditDomain === 'chat' && (state.text.trim() || state.thinking.trim())) {
+          const partial = new TurnState();
+          partial.text = state.text;
+          partial.thinking = state.thinking;
+          partial.toolCalls.push(...state.toolCalls);
+          try {
+            await this.sessionManager.persistAssistantMessage(request.sessionId, messageId, partial, {
+              turnId: request.turnId, promptMessageId: request.promptMessageId,
+            });
+          } catch (failure) {
+            this.logger.error(`Partial history persistence failed session=${request.sessionId} turn=${request.turnId}: ${errorMessage(failure)}`);
+            cleanupError ??= failure;
           }
-          await this.runtimeAudit?.log({
-            eventName: 'llm.turn.failed',
-            sessionId: request.sessionId,
-            turnId: request.turnId,
-            status: 'failed',
-            errorCode: workflowErrorCodeFromThrown(error),
-            durationMs: Math.round(performance.now() - turnStart),
-            data: {
-              runtimeKind: request.runtimeKind,
-              iteration,
-              message: error instanceof Error ? error.message : String(error),
-              ...(cleanupError ? { cleanupFailure: errorMessage(cleanupError).slice(0, 240) } : {}),
-            },
-          });
-          throw error;
         }
+        await this.runtimeAudit?.log({
+          eventName: 'llm.turn.failed',
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          status: 'failed',
+          errorCode: workflowErrorCodeFromThrown(error),
+          durationMs: Math.round(performance.now() - turnStart),
+          data: {
+            runtimeKind: request.runtimeKind,
+            iteration,
+            message: error instanceof Error ? error.message : String(error),
+            ...(cleanupError ? { cleanupFailure: errorMessage(cleanupError).slice(0, 240) } : {}),
+          },
+        });
+        throw error;
       }
 
       if (request.abortSignal.aborted) {

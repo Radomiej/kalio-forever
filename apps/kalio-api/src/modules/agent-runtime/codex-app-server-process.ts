@@ -14,6 +14,20 @@ export function buildCodexSpawnSpec(
   platform: NodeJS.Platform = process.platform,
   comSpec: string = process.env.ComSpec ?? 'cmd.exe',
 ): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
+  if (platform === 'win32') {
+    if (/[\0\r\n]/.test(command)) {
+      throw new Error('Windows command paths cannot contain NUL or line breaks.');
+    }
+    if (/\.(?:cmd|bat)$/i.test(command)) {
+      if (args.some(argument => /[\0\r\n]/.test(argument))) {
+        throw new Error('Windows command shim arguments cannot contain NUL or line breaks.');
+      }
+      // Batch shims re-expand %*: quoting alone cannot safely preserve these combinations.
+      if (args.some(argument => argument.includes('"') && /[&|<>^()%!]/.test(argument))) {
+        throw new Error('Windows command shim arguments cannot combine quotes with shell metacharacters.');
+      }
+    }
+  }
   if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(command)) {
     return { command, args };
   }
