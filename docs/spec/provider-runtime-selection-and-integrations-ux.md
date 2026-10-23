@@ -68,7 +68,7 @@ These are reports from the walkthrough and are not all independently reproduced.
 
 ### Verified after implementation (2026-10-02)
 
-- Rebuilt stable local QA at `http://localhost:5288/` with API at `http://127.0.0.1:3316`; persistent QA data stayed at `C:\Users\Radomiej\AppData\Local\kalio-forever-qa`.
+- Rebuilt stable local QA at `http://localhost:5288/` with API at `http://127.0.0.1:3316`; persistent QA data stayed at `C:\Users\<USER>\AppData\Local\kalio-forever-qa`.
 - One explicit Devin Recheck reported `Online`, `Logged in`, `ACP available`, and `773 discovered` models. The new-chat model picker dynamically included exact `swe-2`, `swe-2-high`, `swe-2-medium`, and `swe-2-max` options.
 - Selecting exact `swe-2` displayed it in the composer and showed: “SWE-2 is free in Devin Desktop and CLI on Pro or higher through October 16, 2026.” This is a conditional promotion, not proof that the account is on an eligible plan.
 - QA settings now separate Agent runtimes from Development environments, do not offer mock as a selectable LLM provider, and identify the QA mock environment fallback explicitly. No token was generated and no Devin run was started.

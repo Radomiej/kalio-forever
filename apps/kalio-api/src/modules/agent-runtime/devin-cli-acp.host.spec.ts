@@ -36,8 +36,8 @@ describe('Devin CLI ACP host contract', () => {
     await expect(result).resolves.toBe(true);
   });
   it('launches exact dynamically discovered model tokens without a shell wrapper', () => {
-    expect(buildDevinCliLaunchSpec('glm-5-2', 'C:\\Users\\Radomiej\\AppData\\Local\\devin\\cli\\bin\\devin.exe')).toEqual({
-      command: 'C:\\Users\\Radomiej\\AppData\\Local\\devin\\cli\\bin\\devin.exe',
+    expect(buildDevinCliLaunchSpec('glm-5-2', 'C:\\Users\\KalioUser\\AppData\\Local\\devin\\cli\\bin\\devin.exe')).toEqual({
+      command: 'C:\\Users\\KalioUser\\AppData\\Local\\devin\\cli\\bin\\devin.exe',
       args: ['--model', 'glm-5-2', 'acp'],
     });
     expect(buildDevinCliLaunchSpec('swe-2-high', 'devin.exe')).toEqual({

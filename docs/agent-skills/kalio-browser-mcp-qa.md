@@ -3,7 +3,7 @@
 Installed skill path:
 
 ```text
-C:\Users\Radomiej\.codex\skills\kalio-browser-mcp-qa\SKILL.md
+C:\Users\<USER>\.codex\skills\kalio-browser-mcp-qa\SKILL.md
 ```
 
 This repository copy records the expected behavior for agents that test Kalio through browser MCP tooling.

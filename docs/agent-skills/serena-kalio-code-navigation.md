@@ -3,7 +3,7 @@
 Installed skill path:
 
 ```text
-C:\Users\Radomiej\.codex\skills\serena-kalio-code-navigation\SKILL.md
+C:\Users\<USER>\.codex\skills\serena-kalio-code-navigation\SKILL.md
 ```
 
 This repository copy records the expected behavior for agents that only read repo docs.
