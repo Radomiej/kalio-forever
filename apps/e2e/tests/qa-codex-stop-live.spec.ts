@@ -39,6 +39,6 @@ test('Codex visible Stop drains and a fresh follow-up completes without host res
     const partial = page.getByTestId('agent-turn-bubble').filter({ hasText: first });
     await expect(partial.getByTestId('turn-error-indicator')).toContainText('Interrupted');
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-    await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-147/assets/codex-stop-followup-after-f5.png') });
+    await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-147/assets/codex-stop-followup-after-f5.png') });
   } finally { if (await stop.isVisible()) await stop.click(); }
 });

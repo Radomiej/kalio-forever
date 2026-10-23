@@ -23,5 +23,5 @@ test('QA217 real Devin read persists as one completed response after reload', as
   await expect(bubble).toContainText('fs_read');
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
   await bubble.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-217/assets/devin-read-after-f5.jpg') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-217/assets/devin-read-after-f5.jpg') });
 });

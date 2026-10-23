@@ -9,7 +9,7 @@ test('real Devin final Markdown remains a heading after tools and F5', async ({ 
   test.setTimeout(180000);
   const api = 'http://127.0.0.1:3316/api';
   const sessionId = 'W4fggLSunrJB41C24MV7C';
-  const screenshot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-88/assets/${name}.png`);
+  const screenshot = (name: string) => resolve(__dirname, `../../../apps/e2e/outputs/qa-run-88/assets/${name}.png`);
   const sessionResponse = await page.request.get(`${api}/sessions/${sessionId}`);
   expect(sessionResponse.ok()).toBe(true);
   const session = await sessionResponse.json();
@@ -62,5 +62,5 @@ test('existing real Devin conversation exposes its execution graph after reload'
   await page.getByRole('button', { name: 'Graf', exact: true }).click();
   await expect(page.getByTestId('execution-graph-view')).toBeVisible();
   console.log((await page.getByTestId('execution-graph-view').ariaSnapshot()).slice(-5500));
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-88/assets/real-execution-graph.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-88/assets/real-execution-graph.png') });
 });

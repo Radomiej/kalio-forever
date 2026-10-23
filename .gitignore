@@ -46,3 +46,8 @@ docs/raports/**/failures/**/trace.zip
 # Keep machine-local QA evidence and user attachments on disk, not in source PRs.
 docs/raports/qa-run-*/
 .codex-remote-attachments/
+docs/raports/
+apps/kalio-api/tmp/
+docs/reports/
+apps/e2e/outputs/
+lcov.info

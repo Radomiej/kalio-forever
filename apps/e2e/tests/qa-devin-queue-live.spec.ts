@@ -34,7 +34,7 @@ test('CLI agent executes a queued follow-up after its active turn and survives F
     await page.getByTestId('chat-input').fill(`Drugi turn testu kolejki. Bez jakichkolwiek narzędzi i zmian. Nie kontynuuj listy. Odpowiedz tylko nagłówkiem ## ${second} i zdaniem: Kolejka została obsłużona.`);
     await page.getByTestId('chat-input').press('Enter');
     await expect(page.getByTestId('chat-queued-badge')).toBeVisible({ timeout: 10_000 });
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${report}/assets/queued-followup.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${report}/assets/queued-followup.png`) });
     await page.reload();
     await expect(page.getByRole('heading', { name: second, exact: true })).toBeVisible({ timeout: 90_000 });
     await expect(stop).toHaveCount(0, { timeout: 30_000 });
@@ -71,7 +71,7 @@ test('CLI agent executes a queued follow-up after its active turn and survives F
       expect(after.hosts).toHaveLength(1);
       expect(after.hosts[0].processEpoch).toBe(beforeHost.hosts[0].processEpoch);
     }
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${report}/assets/queue-drained-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${report}/assets/queue-drained-after-f5.png`) });
   } finally {
     if (await stop.isVisible()) await stop.click();
   }

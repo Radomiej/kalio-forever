@@ -49,7 +49,7 @@ test('long confirmation payload remains fully reviewable on mobile and tablet af
       await expect.poll(() => panel.evaluate((element) => element.scrollTop > 0)).toBe(true);
       await page.screenshot({
         path: reportRun
-          ? resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/full-arguments-fixture-${width}.png`)
+          ? resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/full-arguments-fixture-${width}.png`)
           : testInfo.outputPath(`full-arguments-fixture-${width}.png`),
       });
     }

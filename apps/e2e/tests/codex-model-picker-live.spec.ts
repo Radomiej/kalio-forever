@@ -7,7 +7,7 @@ test('discovers and selects exact Codex account model without sending a prompt',
   const model = process.env['KALIO_CODEX_PICKER_MODEL'] ?? 'gpt-6-luna';
   if (!/^\d+$/.test(reportRun) || !['gpt-6-luna', 'gpt-6-sol'].includes(model)) throw new Error('Invalid bounded picker test configuration');
   const optionName = new RegExp(`^Codex · ${model}`);
-  const shot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/${name}.png`);
+  const shot = (name: string) => resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/${name}.png`);
   const createdChats: string[] = [];
   page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/sessions') createdChats.push(request.url()); });
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -24,6 +24,6 @@ test('real Codex response survives reload without stale thinking', async ({ page
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
     await expect(page.getByText('Kalio is responding.', { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/codex-${qa ? 'qa' : 'dev'}-completed-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/codex-${qa ? 'qa' : 'dev'}-completed-${width}.png`) });
   }
 });

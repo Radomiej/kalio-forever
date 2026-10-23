@@ -40,7 +40,7 @@ test('ChatGPT Codex reads HomeSite through Kalio and retains tool provenance aft
     const turn = page.getByTestId('agent-turn-bubble').filter({ hasText: `${marker}_RESULT` });
     await expect(turn.getByTestId('tool-execution-origin')).toHaveText('Kalio');
     await expect(stop).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/codex-project-read-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/codex-project-read-after-f5.png`) });
     console.log(JSON.stringify({ marker, turnId: prompt!.turnId }));
   } finally {
     if (await stop.isVisible()) await stop.click();

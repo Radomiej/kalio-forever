@@ -47,7 +47,7 @@ test('CLI agent respects a denied Kalio command and continues without host reset
     expect(calls[0].label).toBe('terminal_spawn');
     expect(calls[0].data?.['args']).toEqual({ command: 'npm', args: ['run', 'build'], cwd: 'E:/Projekty/home-site' });
     expect((await audit()).filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/command-awaiting-denial.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/command-awaiting-denial.png`) });
     await cancel.click();
     await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
@@ -68,7 +68,7 @@ test('CLI agent respects a denied Kalio command and continues without host reset
     await expect(page.getByRole('heading', { name: followup, exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/denied-followup-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/denied-followup-after-f5.png`) });
   } finally {
     if (await cancel.isVisible()) await cancel.click();
     const stop = page.getByRole('button', { name: 'Stop agent', exact: true });

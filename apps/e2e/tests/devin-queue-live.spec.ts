@@ -10,7 +10,7 @@ test('queued Devin prompt drains once after the active turn and survives reload'
   const api = 'http://127.0.0.1:3316/api';
   const reportRun = process.env['KALIO_DEVIN_QUEUE_REPORT_RUN'] ?? '97';
   if (!/^\d+$/.test(reportRun)) throw new Error('Report run must be numeric');
-  const shot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/${name}.png`);
+  const shot = (name: string) => resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/${name}.png`);
   await page.goto('http://localhost:5288/');
   await page.getByTestId('nav-talk').click();
   await selectSession(page, session, 'New Chat');

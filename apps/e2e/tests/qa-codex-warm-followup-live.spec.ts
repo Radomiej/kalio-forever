@@ -24,5 +24,5 @@ test('existing Codex thread answers without resetting its host', async ({ page, 
   await page.reload();
   await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible();
   await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-136/assets/codex-warm-followup.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-136/assets/codex-warm-followup.png') });
 });

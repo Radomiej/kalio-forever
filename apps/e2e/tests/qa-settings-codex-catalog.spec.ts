@@ -31,5 +31,5 @@ test('Settings Codex Recheck refreshes catalog without changing host epoch', asy
   }).toBeGreaterThan(Math.max(before.checkedAt, started));
   await expect(card.getByRole('button', { name: 'Recheck', exact: true })).toBeEnabled();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-223/assets/settings-codex-recheck.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-223/assets/settings-codex-recheck.png') });
 });

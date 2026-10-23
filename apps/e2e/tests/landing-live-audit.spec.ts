@@ -22,6 +22,6 @@ test('landing-created real Codex conversation survives F5 at compact and desktop
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
     await expect(page.getByText('Kalio is responding.', { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-85/assets/landing-${qa ? 'qa' : 'dev'}-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-85/assets/landing-${qa ? 'qa' : 'dev'}-${width}.png`) });
   }
 });

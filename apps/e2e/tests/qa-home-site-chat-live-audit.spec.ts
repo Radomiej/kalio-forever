@@ -31,6 +31,6 @@ test('completed real Home Site conversation hydrates without stale thinking on m
     expect(headingWidths.length, 'Inspect actual persisted response headings').toBeGreaterThan(0);
     expect(headingWidths.every(width => width.scroll <= width.client + 1), 'Headings must wrap, not clip internally').toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/completed-real-chat-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/completed-real-chat-${width}.png`) });
   }
 });

@@ -6,7 +6,7 @@ test.skip(process.env['KALIO_DEVIN_STOP_QA90'] !== '1', 'Authorized real SWE-2 s
 test('real Devin Stop cancels a pending command and accepts a read-only follow-up', async ({ page }) => {
   test.setTimeout(180000);
   const sessionId = 'W4fggLSunrJB41C24MV7C';
-  const screenshot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-90/assets/${name}.png`);
+  const screenshot = (name: string) => resolve(__dirname, `../../../apps/e2e/outputs/qa-run-90/assets/${name}.png`);
   await page.goto('http://localhost:5288/');
   await page.getByTestId('nav-talk').click();
   await selectSession(page, sessionId, 'New Chat');

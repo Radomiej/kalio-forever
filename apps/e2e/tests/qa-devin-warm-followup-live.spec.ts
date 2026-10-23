@@ -30,5 +30,5 @@ test('existing SWE-2 thread answers without host reset or tool execution', async
   await page.reload();
   await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible();
   await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-137/assets/devin-warm-followup.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-137/assets/devin-warm-followup.png') });
 });

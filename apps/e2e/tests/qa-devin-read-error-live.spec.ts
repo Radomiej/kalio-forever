@@ -51,7 +51,7 @@ test('SWE-2 reports a missing project file and continues with a successful read'
     await expect(failed).toHaveCount(1);
     await expect(turn.getByTestId('tool-execution-origin')).toHaveText(['Kalio', 'Kalio']);
     await expect(stop).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/error-recovery-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/error-recovery-after-f5.png`) });
     console.log(JSON.stringify({ marker, turnId: prompt!.turnId, failedResult: results[0]!.content }));
   } finally {
     if (!replayMarker && await stop.isVisible()) await stop.click();

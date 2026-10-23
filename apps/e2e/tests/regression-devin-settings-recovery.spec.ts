@@ -32,7 +32,7 @@ for (const action of ['policy', 'token'] as const) {
     await alert.scrollIntoViewIfNeeded();
     await expect(alert).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-60/assets/settings-recovery-${action}-fixture-390.png`), fullPage: true });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-60/assets/settings-recovery-${action}-fixture-390.png`), fullPage: true });
     await page.reload();
     await page.getByTestId('nav-settings').click();
     await page.getByRole('button', { name: 'Agent runtimes', exact: true }).click();

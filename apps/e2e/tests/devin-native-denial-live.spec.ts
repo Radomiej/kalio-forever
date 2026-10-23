@@ -17,7 +17,7 @@ test('real Devin native tool is denied and its evidence survives reload', async 
   const attempt = kind === 'read'
     ? 'Spróbuj dokładnie jeden NATYWNY Devin Read na E:/Projekty/home-site/package.json. Nie używaj terminala. '
     : `Spróbuj dokładnie jeden NATYWNY Devin exec w E:/Projekty/home-site: node -e "process.stdout.write('QA${reportRun}_NATIVE_EXEC_MARKER')". `;
-  const shot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/${name}.png`);
+  const shot = (name: string) => resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/${name}.png`);
   const statusResponse = await page.request.get(`${api}/runtime/devin-cli/status`);
   expect(statusResponse.ok()).toBe(true);
   const status = await statusResponse.json() as Record<string, unknown>;

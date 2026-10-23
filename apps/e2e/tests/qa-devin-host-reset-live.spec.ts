@@ -30,7 +30,7 @@ test('host reset terminates a no-tool turn and the same Devin chat answers again
     const history = await (await request.get(`${API_BASE}/sessions/${session}/messages`)).json() as ChatMessage[];
     const prompt = history.find(message => message.role === 'user' && message.createdAt >= stamp && message.content.includes(partial));
     expect(prompt?.turnId).toBeTruthy();
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/before-host-reset.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/before-host-reset.png`) });
     // Existing settings endpoint resets hosts. Empty payload changes no token or native-tool boolean.
     const reset = await request.patch(`${API_BASE}/runtime/devin-cli/settings`, { data: {} });
     expect(reset.ok()).toBe(true);
@@ -61,7 +61,7 @@ test('host reset terminates a no-tool turn and the same Devin chat answers again
     await page.reload();
     await expect(page.getByRole('heading', { name: final, exact: true })).toBeVisible();
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/recovered-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/recovered-after-f5.png`) });
   } finally {
     if (await stop.isVisible()) await stop.click();
   }

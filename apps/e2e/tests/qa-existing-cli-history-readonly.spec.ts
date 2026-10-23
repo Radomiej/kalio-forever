@@ -26,7 +26,7 @@ for (const conversation of conversations) {
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
     await page.getByText(conversation.result, { exact: true }).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-135/assets/${conversation.agent}-history-1440.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-135/assets/${conversation.agent}-history-1440.png`) });
     await page.setViewportSize({ width: 390, height: 844 });
     const hide = page.getByRole('button', { name: 'Hide conversations', exact: true });
     if (await hide.isVisible()) await hide.click();
@@ -34,6 +34,6 @@ for (const conversation of conversations) {
     await expect(page.getByText(conversation.result, { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-135/assets/${conversation.agent}-history-390.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-135/assets/${conversation.agent}-history-390.png`) });
   });
 }

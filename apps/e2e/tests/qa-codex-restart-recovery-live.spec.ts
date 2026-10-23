@@ -36,7 +36,7 @@ test('existing ChatGPT conversation recovers after backend restart and accepts a
     expect(entries.filter(entry => entry.type === 'tool_call')).toHaveLength(0);
     expect(entries.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
     expect(entries.filter(entry => entry.label === 'llm.turn.completed')).toHaveLength(2);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/codex-recovery-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/codex-recovery-after-f5.png`) });
   } finally {
     if (await stop.isVisible()) await stop.click();
   }

@@ -31,7 +31,7 @@ test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', asy
     expect(calls[0].label).toBe('terminal_spawn');
     expect(calls[0].data?.['args']).toEqual({ command: 'npm', args: ['run', 'build'], cwd: 'E:/Projekty/home-site' });
     expect((await audit()).filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-awaiting-confirmation.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/build-awaiting-confirmation.png`) });
     if (process.env['KALIO_DEVIN_BUILD_PENDING_RELOAD'] === '1') {
       await page.reload();
       await expect(confirm).toBeVisible({ timeout: 30_000 });
@@ -40,7 +40,7 @@ test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', asy
       const reloaded = await audit();
       expect(reloaded.filter(entry => entry.type === 'tool_call')).toEqual(calls);
       expect(reloaded.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
-      await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-pending-after-f5.png`) });
+      await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/build-pending-after-f5.png`) });
     }
     if (process.env['KALIO_DEVIN_BUILD_LONG_APPROVAL'] === '1') {
       const waitingSince = Date.now();
@@ -54,7 +54,7 @@ test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', asy
         expect(waiting.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
       }
       expect(Date.now() - waitingSince).toBeGreaterThanOrEqual(70_000);
-      await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-pending-over-70s.png`) });
+      await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/build-pending-over-70s.png`) });
     }
     await confirm.click();
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible({ timeout: 60_000 });
@@ -74,7 +74,7 @@ test('SWE-2 builds HomeSite once through manually confirmed Kalio terminal', asy
     await page.reload();
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/build-result-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/build-result-after-f5.png`) });
   } finally {
     const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
     if (await cancel.isVisible()) await cancel.click();

@@ -29,5 +29,5 @@ test('the real user-only interrupted Devin turn has an error bubble after F5', a
   await expect(nextBubble.getByTestId('turn-loading-indicator')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
   await nextBubble.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/user-only-error-after-f5.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/user-only-error-after-f5.png`) });
 });

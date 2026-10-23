@@ -17,7 +17,7 @@ test('nested catalog Escape preserves settings and returns focus', async ({ page
   await expect(catalog).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Close settings' })).toBeVisible();
   await expect(opener).toBeFocused();
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-173/assets/settings-after-catalog-escape.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-173/assets/settings-after-catalog-escape.png') });
   await opener.press('Escape');
   await expect(page.getByRole('button', { name: 'Close settings' })).toHaveCount(0);
 });

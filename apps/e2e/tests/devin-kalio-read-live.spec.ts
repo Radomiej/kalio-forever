@@ -47,7 +47,7 @@ test('Kalio read still returns project content after native policy enforcement',
     const audit = await auditResponse.json() as { type: string; label: string }[];
     expect(audit.filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
     expect(audit.filter(entry => entry.type === 'tool_call').map(entry => entry.label)).toEqual(['fs_read']);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/kalio-read-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/kalio-read-after-f5.png`) });
     console.log(JSON.stringify({ turnId: prompt!.turnId, results: results.length }));
   } finally {
     if (await stop.isVisible()) await stop.click();

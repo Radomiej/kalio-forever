@@ -11,7 +11,7 @@ test('real Devin visible generation can stop and a fresh read finishes after rel
   const reportRun = process.env['KALIO_DEVIN_STREAM_REPORT_RUN'] ?? '91';
   if (!/^\d+$/.test(reportRun)) throw new Error('Report run must be numeric');
   const resultHeading = `QA${reportRun}_READ_RESULT`;
-  const screenshot = (name: string) => resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/${name}.png`);
+  const screenshot = (name: string) => resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/${name}.png`);
   await page.goto('http://localhost:5288/');
   await page.getByTestId('nav-talk').click();
   await selectSession(page, sessionId, 'New Chat');

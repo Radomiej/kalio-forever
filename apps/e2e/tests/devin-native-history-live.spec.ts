@@ -26,9 +26,9 @@ test('actual native failure without permission callback remains visible after F5
     await expect(panel).not.toContainText('blocked by policy');
   };
   await open();
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/native-failure-visible.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/native-failure-visible.png`) });
   await page.reload();
   await open();
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/native-failure-after-f5.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/native-failure-after-f5.png`) });
 });

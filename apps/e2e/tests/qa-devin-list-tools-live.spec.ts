@@ -38,7 +38,7 @@ test('SWE-2 lists the approved project and existing terminals through Kalio', as
     const turn = page.getByTestId('agent-turn-bubble').filter({ hasText: `${marker}_RESULT` });
     await expect(turn.getByTestId('tool-execution-origin')).toHaveText(['Kalio', 'Kalio']);
     await expect(stop).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/list-tools-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/list-tools-after-f5.png`) });
     console.log(JSON.stringify({ marker, turnId: prompt!.turnId, results: results.map(message => ({ callId: message.toolCallId, content: message.content })) }));
   } finally {
     if (await stop.isVisible()) await stop.click();

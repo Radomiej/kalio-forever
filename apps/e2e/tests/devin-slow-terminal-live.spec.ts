@@ -30,7 +30,7 @@ test('real SWE-2 observes a delayed process through approved Kalio UI tools', as
   await expect(argumentsRegion).toContainText('12000');
   await expect(argumentsRegion).toContainText('E:/Projekty/home-site');
   await expect(argumentsRegion).toContainText('node');
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/slow-process-approval.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/slow-process-approval.png`) });
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0, { timeout: 90000 });
   await expect(page.getByText('Kalio is responding.', { exact: true })).toHaveCount(0);
@@ -38,7 +38,7 @@ test('real SWE-2 observes a delayed process through approved Kalio UI tools', as
   await expect(page.getByRole('region', { name: 'Full tool arguments', exact: true }).last()).toContainText('30000');
   await expect(page.getByText(/"exitCode": 0/).last()).toBeVisible();
   await expect(page.getByText(/"output":.*QA87_SLOW_OK/).last()).toBeVisible();
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/slow-process-completed.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/slow-process-completed.png`) });
 });
 
 test('restore approved HomeSite preview through the real Devin UI', async ({ page }) => {
@@ -62,7 +62,7 @@ test('restore approved HomeSite preview through the real Devin UI', async ({ pag
   for (const part of ['npm', 'preview', '127.0.0.1', '57868', '--strictPort', 'E:/Projekty/home-site']) {
     await expect(args).toContainText(part);
   }
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/preview-approval.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/preview-approval.png`) });
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
   const response = await page.request.get('http://127.0.0.1:3316/api/sessions/W4fggLSunrJB41C24MV7C/messages');
   expect(response.ok()).toBe(true);
@@ -72,5 +72,5 @@ test('restore approved HomeSite preview through the real Devin UI', async ({ pag
   await inspectCompletedPreviewTurn(page, 'W4fggLSunrJB41C24MV7C', prompt!.turnId!);
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
   await expect.poll(async () => (await page.request.get('http://127.0.0.1:57868/')).status(), { timeout: 30000 }).toBe(200);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/preview-completed.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/preview-completed.png`) });
 });

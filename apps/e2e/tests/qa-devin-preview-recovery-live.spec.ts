@@ -36,7 +36,7 @@ test('SWE-2 restores one approved HomeSite preview and persists its response', a
     expect(calls[0].label).toBe('terminal_spawn');
     expect(calls[0].data?.['args']).toEqual(command);
     expect((await audit()).filter(entry => entry.label === 'process.cmd.invocation')).toHaveLength(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/preview-approval.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/preview-approval.png`) });
     await confirm.click();
     await expect(page.getByRole('heading', { name: resultHeading, exact: true })).toBeVisible({ timeout: 60_000 });
     await expect.poll(async () => (await request.get(preview)).status()).toBe(200);
@@ -48,10 +48,10 @@ test('SWE-2 restores one approved HomeSite preview and persists its response', a
     await expect(page.getByRole('heading', { name: resultHeading, exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/preview-response-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/preview-response-after-f5.png`) });
     await page.goto(preview);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/home-site.png`), fullPage: true });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/home-site.png`), fullPage: true });
   } finally {
     const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
     if (await cancel.isVisible()) await cancel.click();

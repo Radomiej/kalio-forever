@@ -53,7 +53,7 @@ test('thinking stops when the same turn starts answering and stays stopped after
     await expect(thinking.locator('.loading')).toHaveCount(1);
     await expect(page.getByTestId('native-tool-audit-panel')).toHaveCount(0);
     await expect(page.getByTestId('pending-agent-bubble')).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/active-thinking.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/active-thinking.png`) });
 
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(thinking).toHaveCount(1);
@@ -61,7 +61,7 @@ test('thinking stops when the same turn starts answering and stays stopped after
     await expect(page.getByTestId('native-tool-audit-panel')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toBeVisible();
     await expect(page.getByTestId('pending-agent-bubble')).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/answer-streaming.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/answer-streaming.png`) });
 
     const bubble = page.getByTestId('agent-turn-bubble').filter({
       has: page.getByRole('heading', { name: heading, exact: true }),
@@ -75,7 +75,7 @@ test('thinking stops when the same turn starts answering and stays stopped after
     await expect(thinking.locator('.loading, .animate-pulse')).toHaveCount(0);
     await expect(page.getByTestId('pending-agent-bubble')).toHaveCount(0);
     await expect(page.getByTestId('chat-connection-status')).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/final-after-f5.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/final-after-f5.png`) });
   } finally {
     await deleteSessionIfExists(request, session.id);
   }

@@ -37,7 +37,7 @@ test('native audit is scoped to the saved Devin turn and absent from Codex', asy
   expect(auditRequests).toHaveLength(1);
   expect(auditRequests[0].searchParams.get('sessionId')).toBe(session);
   expect(auditRequests[0].searchParams.get('turnId')).toBe(turn);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/devin-scoped-audit.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/devin-scoped-audit.png`) });
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.reload();
@@ -51,5 +51,5 @@ test('native audit is scoped to the saved Devin turn and absent from Codex', asy
   }) });
   await expect(codex).toHaveCount(1);
   await expect(codex.getByTestId('native-tool-audit-panel')).toHaveCount(0);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/codex-no-devin-audit.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/codex-no-devin-audit.png`) });
 });

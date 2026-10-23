@@ -55,7 +55,7 @@ test('new chat preserves SWE-2 selection and draft across the desktop wizard bou
       await expect(back).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/launch-${width}.png`), animations: 'disabled' });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/launch-${width}.png`), animations: 'disabled' });
   }
   await page.setViewportSize({ width: 1024, height: 900 });
   await expect(persona).toBeVisible();

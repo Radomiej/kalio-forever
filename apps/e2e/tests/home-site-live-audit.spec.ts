@@ -28,8 +28,8 @@ test('actual Home Site preview supports responsive keyboard and demo-form flows'
     expect(await page.evaluate(() => innerWidth)).toBe(width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/home-site-${width}.png`), fullPage: true, animations: 'disabled' });
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/home-site-hero-${width}.png`), animations: 'disabled' });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/home-site-${width}.png`), fullPage: true, animations: 'disabled' });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/home-site-hero-${width}.png`), animations: 'disabled' });
   }
   await page.setViewportSize({ width: 390, height: 844 });
   const menu = page.getByRole('button', { name: 'Otwórz menu', exact: true });

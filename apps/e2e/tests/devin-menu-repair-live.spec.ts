@@ -21,7 +21,7 @@ test('approve reviewed CSS repair and review build request', async ({ page }) =>
   await page.getByRole('button', { name: 'Toggle args', exact: true }).last().click();
   const build = page.getByRole('region', { name: 'Full tool arguments', exact: true }).last();
   console.log('QA95_BUILD_ARGS', await build.innerText());
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-95/assets/build-awaiting-approval.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-95/assets/build-awaiting-approval.png') });
 });
 test('approve only the exact HomeSite npm build and wait for completion', async ({ page }) => {
   test.skip(process.env['KALIO_DEVIN_MENU_REPAIR_PHASE'] !== 'build', 'Explicit build review phase required');
@@ -38,13 +38,13 @@ test('approve only the exact HomeSite npm build and wait for completion', async 
   expect(args).toMatch(/command: npm\s/);
   expect(args).toMatch(/cwd: E:\/Projekty\/home-site/);
   expect(args).toMatch(/args: \[\s*"run",\s*"build"\s*\]/);
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-95/assets/build-awaiting-approval.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-95/assets/build-awaiting-approval.png') });
   await confirm.click();
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0, { timeout: 90000 });
   await page.reload();
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
   console.log((await page.locator('body').ariaSnapshot()).slice(-6500));
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-95/assets/repair-completed.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-95/assets/repair-completed.png') });
 });
 test('ask real Devin to repair the mobile menu and pause for reviewed approval', async ({ page }) => {
   test.skip(process.env['KALIO_DEVIN_MENU_REPAIR_PHASE'] !== 'start', 'Explicit prompt phase required');
@@ -71,6 +71,6 @@ test('ask real Devin to repair the mobile menu and pause for reviewed approval',
   const args = page.getByRole('region', { name: 'Full tool arguments', exact: true }).last();
   await expect(args).toContainText('E:/Projekty/home-site');
   console.log('QA95_PENDING_ARGS', await args.innerText());
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-95/assets/repair-awaiting-approval.png') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-95/assets/repair-awaiting-approval.png') });
   // Leave the exact request visible for payload review; this test never approves blindly.
 });

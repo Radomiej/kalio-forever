@@ -21,7 +21,7 @@ test('live launch wizard keeps SWE-2 selection, header and unsent prompt consist
   await expect(page.getByRole('textbox', { name: 'Prompt', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Next — write prompt', exact: true })).not.toBeVisible();
   await expect(page.getByRole('button', { name: 'Back — configuration', exact: true })).not.toBeVisible();
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/launch-desktop-1440.png`), animations: 'disabled' });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/launch-desktop-1440.png`), animations: 'disabled' });
 
   for (const width of [320, 390, 820]) {
     await page.setViewportSize({ width, height: 900 });
@@ -35,7 +35,7 @@ test('live launch wizard keeps SWE-2 selection, header and unsent prompt consist
     await expect(page.getByRole('textbox', { name: 'Prompt', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Hide conversations', exact: true })).not.toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/launch-config-${width}.png`), animations: 'disabled' });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/launch-config-${width}.png`), animations: 'disabled' });
 
     await page.getByRole('button', { name: 'Next — write prompt', exact: true }).click();
     const prompt = page.getByRole('textbox', { name: 'Prompt', exact: true });
@@ -46,7 +46,7 @@ test('live launch wizard keeps SWE-2 selection, header and unsent prompt consist
     await expect(model).toHaveValue('Devin CLI · swe-2');
     await page.getByRole('button', { name: 'Next — write prompt', exact: true }).click();
     await expect(prompt).toHaveValue(`QA${reportRun} unsent wizard draft`);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/launch-prompt-${width}.png`), animations: 'disabled' });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/launch-prompt-${width}.png`), animations: 'disabled' });
     await page.getByRole('button', { name: 'Back — configuration', exact: true }).click();
   }
 });

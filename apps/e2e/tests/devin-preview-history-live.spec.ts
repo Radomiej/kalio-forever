@@ -14,12 +14,12 @@ test('existing preview turn exposes its own Kalio result after reload', async ({
   console.log((await page.locator('body').ariaSnapshot()).slice(-4500));
   const { turn, result, terminalId } = await inspectCompletedPreviewTurn(page, 'W4fggLSunrJB41C24MV7C', 'oG5g6mCaEkYS4zAKawY_R');
   await expect(result).toContainText('57868');
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/current-preview-result.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/current-preview-result.png`) });
   await page.reload();
   await expect(turn).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
   await result.getByRole('button', { name: 'Toggle details', exact: true }).click();
   await expect(result).toContainText(terminalId as string);
   await expect(result).toContainText(/"status":\s*"running"/);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/current-preview-result-after-f5.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/current-preview-result-after-f5.png`) });
 });

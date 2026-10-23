@@ -19,6 +19,6 @@ test('actual fixed QA exposes connected Playwright and does not hide unavailable
     await expect(page.getByText('http://127.0.0.1:3000/mcp', { exact: true })).toBeVisible();
     await expect(page.getByText('fetch failed', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/actual-mcp-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/actual-mcp-${width}.png`) });
   }
 });

@@ -37,7 +37,7 @@ test('saved real Devin read agrees between chat and grouped graph after F5', asy
     if (reload === 0) await page.reload();
   }
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${report}/assets/devin-read-graph-after-f5.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${report}/assets/devin-read-graph-after-f5.png`) });
   const afterResponse = await request.get(`${API_BASE}/sessions/${session}/messages`);
   expect(afterResponse.ok()).toBeTruthy();
   expect(await afterResponse.json()).toEqual(before);

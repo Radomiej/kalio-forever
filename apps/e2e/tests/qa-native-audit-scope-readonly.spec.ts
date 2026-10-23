@@ -15,7 +15,7 @@ test('recorded Codex HomeSite turn does not display Devin native audit after F5'
     await expect(turn.getByTestId('native-tool-audit-panel')).toHaveCount(0);
     if (!reload) await page.reload();
   }
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/codex-without-devin-audit.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/codex-without-devin-audit.png`) });
 });
 test('native audit states its Devin-only scope without claiming absent evidence is no execution', async ({ page }) => {
   const run = process.env['KALIO_NATIVE_AUDIT_SCOPE_RUN'] ?? '186';
@@ -45,5 +45,5 @@ test('native audit states its Devin-only scope without claiming absent evidence 
   const panel = await open();
   await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
   await panel.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${run}/assets/devin-audit-scope.png`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${run}/assets/devin-audit-scope.png`) });
 });

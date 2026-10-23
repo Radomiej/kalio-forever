@@ -24,7 +24,7 @@ test('saved Codex build exposes grouped tool details without a new turn', async 
   await inspector.getByText('terminal_output', { exact: true }).click();
   await expect(inspector.getByRole('region', { name: 'terminal_output result' })).toBeVisible();
   await expect(inspector.getByRole('button', { name: 'Show raw', exact: true })).toBeVisible();
-  await page.screenshot({ path: resolve(__dirname, '../../../docs/raports/qa-run-210/assets/codex-group-details.jpg') });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-210/assets/codex-group-details.jpg') });
   await page.reload();
   await expect(page.getByText('Tool group', { exact: true })).toBeVisible();
   await page.getByText('Tool group', { exact: true }).click();
@@ -69,5 +69,5 @@ test('exact saved Devin build agrees between chat and grouped graph after F5', a
     if (reload === 0) await page.reload();
   }
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
-  await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/devin-group-after-f5.jpg`) });
+  await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/devin-group-after-f5.jpg`) });
 });

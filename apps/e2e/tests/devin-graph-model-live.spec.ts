@@ -21,6 +21,6 @@ test('real Devin graph shows recorded SWE-2 model after F5', async ({ page }) =>
       await expect(graph.getByText(/^QA172_BUILD_/)).toHaveCount(1);
     }
     await expect(page.getByRole('button', { name: 'Stop agent', exact: true })).toHaveCount(0);
-    await page.screenshot({ path: resolve(__dirname, `../../../docs/raports/qa-run-${reportRun}/assets/recorded-model-${width}.png`) });
+    await page.screenshot({ path: resolve(__dirname, `../../../apps/e2e/outputs/qa-run-${reportRun}/assets/recorded-model-${width}.png`) });
   }
 });
