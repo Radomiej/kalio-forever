@@ -87,23 +87,23 @@ describe('createLLMProvider', () => {
       expect(provider).toBeInstanceOf(MockLLMProvider);
     });
 
-    it('should return MockLLMProvider when apiKey is mock', () => {
+    it('should keep the named provider when only apiKey is mock', () => {
       // Arrange
       const config: ProviderConfig = {
-        provider: 'openai',
+        provider: 'ollama',
         apiKey: 'mock',
-        model: 'gpt-4',
-        baseUrl: 'https://api.openai.com',
+        model: 'qwen3.6:latest',
+        baseUrl: 'http://localhost:11434/v1',
       };
 
       // Act
       const provider = createLLMProvider(config);
 
       // Assert
-      expect(provider).toBeInstanceOf(MockLLMProvider);
+      expect(provider).toBeInstanceOf(OllamaProvider);
     });
 
-    it('should return MockLLMProvider when baseUrl is mock', () => {
+    it('should keep the named provider when only baseUrl is mock', () => {
       // Arrange
       const config: ProviderConfig = {
         provider: 'openai',
@@ -116,7 +116,7 @@ describe('createLLMProvider', () => {
       const provider = createLLMProvider(config);
 
       // Assert
-      expect(provider).toBeInstanceOf(MockLLMProvider);
+      expect(provider).toBeInstanceOf(OpenAIProvider);
     });
   });
 
