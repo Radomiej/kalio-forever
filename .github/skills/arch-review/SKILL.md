@@ -229,6 +229,6 @@ After completing the review, create a session log in `docs/sessions/`:
 
 - [AGENTS.md](../../../AGENTS.md) — project conventions and forbidden patterns
 - [copilot-instructions.md](../../copilot-instructions.md) — full stack and architecture description
-- [chat-streaming-tools-architecture.md](../../../docs/chat-streaming-tools-architecture.md) — event flow details
-- [tool-architecture.md](../../../docs/tool-architecture.md) — tool system deep dive
-- [database-schema-diagram.md](../../../docs/database-schema-diagram.md) — ERD
+- [chat-streaming-tools-architecture.md](../../../docs/spec/chat-streaming-tools-architecture.md) — event flow details
+- [tool-architecture.md](../../../docs/spec/tool-architecture.md) — tool system deep dive
+- [database-schema-diagram.md](../../../docs/spec/database-schema-diagram.md) — ERD

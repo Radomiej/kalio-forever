@@ -651,7 +651,7 @@ Expected: all pass and no wheel/passive regression returns.
 - Modify: `apps/kalio-api/src/modules/architecture/architecture-seed-schemas.ts`
 - Modify: `apps/kalio-api/src/modules/architecture/architecture-seed-schemas.deep.ts`
 - Modify: `apps/kalio-api/src/modules/architecture/architecture-registry.service.spec.ts`
-- Modify: `docs/sub-agentflow-target-architecture.md`
+- Modify: `docs/spec/sub-agentflow-target-architecture.md`
 
 - [ ] **Step 1: Add registry tests for alias**
 
@@ -757,13 +757,13 @@ Pass criteria:
 
 **Files:**
 - Modify: `docs/spec/agent-architecture-design.md`
-- Modify: `docs/sub-agentflow-target-architecture.md`
-- Modify: `docs/application-architecture-current.md`
-- Modify: `docs/tool-architecture.md`
+- Modify: `docs/spec/sub-agentflow-target-architecture.md`
+- Modify: `docs/spec/application-architecture-current.md`
+- Modify: `docs/spec/tool-architecture.md`
 
 - [ ] **Step 1: Make canonical docs unambiguous**
 
-`docs/spec/agent-architecture-design.md` should be the source note or product intent. `docs/sub-agentflow-target-architecture.md` should be the implementation mapping. Add a one-line cross-link in both directions.
+`docs/spec/agent-architecture-design.md` should be the source note or product intent. `docs/spec/sub-agentflow-target-architecture.md` should be the implementation mapping. Add a one-line cross-link in both directions.
 
 - [ ] **Step 2: Remove duplicate sections**
 

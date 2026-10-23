@@ -200,7 +200,7 @@ classDiagram
 - `corepack pnpm --filter kalio-api typecheck` passed.
 - `corepack pnpm --filter kalio-web typecheck` passed.
 - `node --test scripts/code-audit/audit-scripts.test.mjs` passed: 9 tests.
-- `npm.cmd run audit:report` passed; `docs/audit/2026-06-28-report.md` totals are CRITICAL 25, HIGH 4, MEDIUM 92, LOW 63. There are no HIGH `string-business-logic` rows; the remaining string-derived runtime-like row is MEDIUM in `pendingHostSession.ts` and is recorded in `docs/bugs.md`.
+- `npm.cmd run audit:report` passed; `docs/audit/2026-06-28-report.md` totals are CRITICAL 25, HIGH 4, MEDIUM 92, LOW 63. There are no HIGH `string-business-logic` rows; the remaining string-derived runtime-like row is MEDIUM in `pendingHostSession.ts` and is recorded in `docs/spec/bugs.md`.
 - Pending host session typed-id hardening:
 - Red: `corepack pnpm --filter kalio-web test -- src/features/chat/pendingHostSession.test.ts` failed because arbitrary `pending-host-session:*` ids were classified as pending.
 - Green: `corepack pnpm --filter kalio-web test -- src/features/chat/pendingHostSession.test.ts src/features/chat/activeConversationSession.test.ts src/features/chat/hooks/useContextPreview.test.ts src/features/chat/hooks/useChatSessionActivation.test.ts src/features/chat/ChatInterface.Parts.test.tsx` passed: 5 files, 47 tests.

@@ -12,7 +12,7 @@
 - [x] Add a repo todo note that records the documentation correction.
 - [x] Update `AGENTS.md` to state that Kalio dev MCP uses `.kalio/config.toml` as source of truth.
 - [x] Add an explicit rule that agents must not diagnose Kalio MCP from `~/.codex/config.toml`.
-- [x] Update `docs/kalio-toml-config.md` to make TOML the canonical local-dev path and UI import legacy/manual only.
+- [x] Update `docs/spec/kalio-toml-config.md` to make TOML the canonical local-dev path and UI import legacy/manual only.
 - [x] Update `docs/agent-skills/kalio-manual-qa.md` to point QA setup at `.kalio/config.toml` first.
 - [x] Confirm `docs/examples/kalio-agent-qa-mcp.config.toml` is described as the canonical dev example.
 - [x] Update other durable repo docs that still described UI import as preferred dev flow.

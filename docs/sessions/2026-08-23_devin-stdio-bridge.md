@@ -71,7 +71,7 @@ HTTP, token Settings i polityka kategorii native tools już istniały.
 3. `DevinCliAcpLLMSource` selects HTTP or stdio and audits the selected
    transport; provider-native tool omission is no longer confused with Kalio
    MCP forwarding.
-4. `project-spec.md`, `docs/mcp-architecture.md` and this session note record
+4. `project-spec.md`, `docs/spec/mcp-architecture.md` and this session note record
    the boundary and proof status.
 
 ## Flow diagram
@@ -98,8 +98,8 @@ Task-owned runtime files:
 - `apps/kalio-api/src/modules/agent-runtime/devin-cli-mcp-bridge.ts`
 - `apps/kalio-api/src/modules/mcp-bridge/kalio-mcp-bridge-stdio.ts`
 - `project-spec.md`
-- `docs/mcp-architecture.md`
-- `docs/technical-documentation-kalio.md`
+- `docs/spec/mcp-architecture.md`
+- `docs/spec/technical-documentation-kalio.md`
 
 Avatar files are in separate commit `f1dc364`. Deploy-owned files were not
 added.

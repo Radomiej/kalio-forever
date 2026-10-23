@@ -24,7 +24,7 @@
 
 **Files:**
 - Modify: `README.md`
-- Read for facts: `package.json`, `scripts/README.md`, `docs/quickstart-user.md`, `docs/local-dev-guide.md`, `CONTRIBUTING.md`, `AGENTS.md`
+- Read for facts: `package.json`, `scripts/README.md`, `docs/quickstart-user.md`, `docs/spec/local-dev-guide.md`, `CONTRIBUTING.md`, `AGENTS.md`
 
 **Interfaces:**
 - Consumes: existing package scripts, URLs, versions, architecture diagrams, and linked docs.
@@ -38,7 +38,7 @@ Run from the repository root:
 Get-Content -LiteralPath package.json
 Get-Content -LiteralPath scripts/README.md
 Get-Content -LiteralPath docs/quickstart-user.md
-Get-Content -LiteralPath docs/local-dev-guide.md
+Get-Content -LiteralPath docs/spec/local-dev-guide.md
 ```
 
 Record only facts needed by the README: Node/pnpm floors, dev/QA/prod ports, installer URL, `mock` provider behavior, root commands, architecture links, and storage/security boundaries.
@@ -52,7 +52,7 @@ Keep the current Kalio identity, MIT badge, CI badge, technology badges, Mermaid
 
 **Local-first runtime for designing, running, and inspecting agent workflows.**
 
-[Install](#quick-start) · [Develop](#for-contributors) · [Architecture](docs/agentflow-architecture-and-workflow.md) · [Docs](#documentation)
+[Install](#quick-start) · [Develop](#for-contributors) · [Architecture](docs/spec/agentflow-architecture-and-workflow.md) · [Docs](#documentation)
 ```
 
 Use these copy boundaries:
@@ -114,7 +114,7 @@ Use for creating, reviewing, or updating the root README or README-facing onboar
 
 ## Source of truth
 
-Verify commands and versions against `package.json` and scripts; verify architecture claims against `AGENTS.md` and the linked architecture docs; verify user setup against `docs/quickstart-user.md` and `docs/local-dev-guide.md`.
+Verify commands and versions against `package.json` and scripts; verify architecture claims against `AGENTS.md` and the linked architecture docs; verify user setup against `docs/quickstart-user.md` and `docs/spec/local-dev-guide.md`.
 
 ## Writing rules
 
@@ -163,7 +163,7 @@ git commit -m "docs: add README maintenance skill"
 ### Task 3: Run documentation verification and review the final scope
 
 **Files:**
-- Read: `README.md`, `docs/agent-skills/README.md`, `docs/agent-skills/kalio-readme-maintainer.md`, `package.json`, `docs/quickstart-user.md`, `docs/local-dev-guide.md`
+- Read: `README.md`, `docs/agent-skills/README.md`, `docs/agent-skills/kalio-readme-maintainer.md`, `package.json`, `docs/quickstart-user.md`, `docs/spec/local-dev-guide.md`
 - Verify: all files changed by Tasks 1 and 2
 
 **Interfaces:**

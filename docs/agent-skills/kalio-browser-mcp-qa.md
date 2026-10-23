@@ -23,7 +23,7 @@ Use this decision rule:
 
 ## Required Setup
 
-1. Read `AGENTS.md`, `docs/local-dev-guide.md`, and `docs/agent-skills/kalio-manual-qa.md`.
+1. Read `AGENTS.md`, `docs/spec/local-dev-guide.md`, and `docs/agent-skills/kalio-manual-qa.md`.
 2. Start the right stack:
    - **Dev hot reload:** `.\start-dev.ps1` -> API `3016`, web `5188`
    - **Built QA fixed ports:** `pnpm qa` or `pnpm qa:rebuild` -> API `3316`, web `5288`

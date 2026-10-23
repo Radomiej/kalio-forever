@@ -14,7 +14,7 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 
 ## Required Setup
 
-1. Read the current checkout's `AGENTS.md` and `docs/local-dev-guide.md`; do not assume the main checkout path when using a worktree.
+1. Read the current checkout's `AGENTS.md` and `docs/spec/local-dev-guide.md`; do not assume the main checkout path when using a worktree.
 2. Inspect dev-servers MCP read-only inventory (`mcp_stack_health`, `managed_service_list`, `dev_session_list`) when available. Never invent or hard-code a service id. The repository's stable QA launcher is not automatically a Windows service or a registered dev-servers managed service; use the documented QA launcher when inventory shows no owned service.
 3. Pick the right stack:
    - **Dev (hot reload):** `pnpm dev` → UI http://localhost:5188, API http://localhost:3016
@@ -46,7 +46,7 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 ## Architecture QA
 
 - If the user asks for the two-agent architecture, test the `Dev/Implementer <-> Goal Guard` loop. Do not substitute Five Minds, Deep Five Minds, or a generic deliberation schema.
-- If the user asks about the target nested architecture, read `docs/sub-agentflow-target-architecture.md`: `sub_agentflow` means a child graph/flow run, not a single child agent.
+- If the user asks about the target nested architecture, read `docs/spec/sub-agentflow-target-architecture.md`: `sub_agentflow` means a child graph/flow run, not a single child agent.
 - Split runtime-flow proof from persona proof:
   - Flow/API/FE E2E tests verify supported transitions, graph routing, durable state, resume, audit/log events, tool evidence, and visibility in Chat/Execution Graph.
   - Persona/agent text behavior is simulated in flow tests and verified separately in stream LLM/provider tests such as `MockLLMProvider` specs.
@@ -62,7 +62,7 @@ Test Kalio like a user, then support the conclusion with API/terminal evidence. 
 Use this checklist when a future agent needs to add a new Kalio workflow instead of just testing an existing one.
 
 1. Start from the current product model, not an ad hoc prompt chain:
-   - Read `docs/sub-agentflow-target-architecture.md`.
+   - Read `docs/spec/sub-agentflow-target-architecture.md`.
    - Use Architect as the authoring surface for schema-driven flows.
    - Reuse an existing preset/variant when the target behavior is only a specialization of an existing flow.
 2. Define the workflow as explicit runtime stages, not one opaque "parallel agents" blob:

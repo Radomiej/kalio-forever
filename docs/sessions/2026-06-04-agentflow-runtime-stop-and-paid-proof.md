@@ -18,7 +18,7 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
 - Added AgentFlow `blocked/finalization_missing` projection when Goal Master accepts host build/git evidence but the runtime fallback cannot produce the final artifact.
 - Added first-class Architecture stop semantics: `ArchitectureRunStatus` now includes `cancelled`, `ArchitectureRuntimeService.stopRun()` appends `run_stopped`, and AgentFlow trace projection maps it to `flow:stopped` / lifecycle `cancelled`.
 - Updated execution graph mapping so direct Architecture runs with status `cancelled` render as terminal error/interruption nodes instead of success.
-- Updated `docs/technical-debt.md` with findings from the paid proof run and remaining runtime/product debt.
+- Updated `docs/spec/technical-debt.md` with findings from the paid proof run and remaining runtime/product debt.
 
 ## QA Evidence
 
@@ -170,7 +170,7 @@ Verify the ordinary conversation-started AgentFlow path for the paid Xiaomi prov
   - `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\artifacts\5e95f793-1a56-49b0-a06e-4d19c0efcc4f\paid-xiaomi-orchestrator-persona-proof-2026-06-04-1780572954649-2e15f19a-60b5-4f39-9a76-493a29e6a3e0.zip`
 - Playwright evidence bundle for clean Talk proof:
   - Snapshot: `C:\Projekty\mcp-playwrigh-master\.local-data\mcp-playwright-orchestrator\snapshots\5e95f793-1a56-49b0-a06e-4d19c0efcc4f--6dc8536f-0e98-4940-bf00-cc602f03ae1c--normal-chat-agentflow-provider-failure-proof\2026-06-04T10-39-41-396Z-aadfc9b3-3cb4-4b9b-af92-8ff6a480dbb7.png`
-  - Finding: canvas/inspector content can sit outside the 1440px viewport; tracked in `docs/technical-debt.md`.
+  - Finding: canvas/inspector content can sit outside the 1440px viewport; tracked in `docs/spec/technical-debt.md`.
 
 ## Live Readiness
 

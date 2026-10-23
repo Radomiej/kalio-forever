@@ -8,7 +8,7 @@
 - [x] Refresh or opening the same workflow in a new UI session restores the active workflow state, node statuses, and child session visibility.
 - [x] User-visible stop on a running workflow drains the active run cleanly and does not leave ghost running state.
 - [x] HITL confirmation is user-visible and actionable on QA, and the resulting state does not resurrect stale confirmations.
-- [x] Confirmed defects discovered during the audit are recorded in `docs/bugs.md`.
+- [x] Confirmed defects discovered during the audit are recorded in `docs/spec/bugs.md`.
 
 ## Current Architecture
 
@@ -62,7 +62,7 @@ erDiagram
 
 - 2026-06-22: This audit starts after the broad runtime/release-gate commit `252145cb`.
 - 2026-06-22: Live gates are already green, but the remaining question is user-visible confidence: dedicated QA startup, real workflow observability, refresh replay, stop, and HITL from the FE.
-- 2026-06-22: Any defect confirmed during the manual audit must be logged in `docs/bugs.md` before claiming release readiness.
+- 2026-06-22: Any defect confirmed during the manual audit must be logged in `docs/spec/bugs.md` before claiming release readiness.
 - 2026-06-22: Verified on rebuilt QA `3316/5288` that workflow launch from Talk UI auto-registers `C:\Projekty\kalio-forever` in `allowed_paths`, all five branch sessions complete successful `fs_*` reads without `ACCESS_DENIED`, and a branch sub-conversation opens with persisted transcript content.
 - 2026-06-22: Reload proof passed on host session `-GTTXQNr1Fdzyy9W0l2Xn`: timeline remained visible, eight completed node badges survived F5, finalizer content was still visible, and branch transcript reopened without the `Waiting for the first persisted message` placeholder.
 - 2026-06-22: Fixed FE ghost-running state after `chat:stop` when the backend only emitted a terminal `session:status` / `session:runtime_snapshot` and no `agent:done`. Shared lifecycle handlers now release stale local active-loop state on terminal snapshots instead of waiting for a separate done event.

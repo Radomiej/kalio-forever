@@ -61,8 +61,8 @@ test('release surfaces stay synchronized across Node, Tauri, Rust, and docs', as
   assert.equal(kalioLockEntry[1], expectedVersion);
 
   assert.ok((await readRootFile('README.md')).includes(`Kalio_${expectedVersion}_x64-setup.exe`));
-  assert.ok((await readRootFile('docs/desktop-build.md')).includes(`Kalio_${expectedVersion}_x64-setup.exe`));
-  assert.ok((await readRootFile('docs/desktop-build.md')).includes(`v${expectedVersion}`));
+  assert.ok((await readRootFile('docs/spec/desktop-build.md')).includes(`Kalio_${expectedVersion}_x64-setup.exe`));
+  assert.ok((await readRootFile('docs/spec/desktop-build.md')).includes(`v${expectedVersion}`));
   assert.ok((await readRootFile('scripts/install.ps1')).includes(`kalio-runtime-${expectedVersion}-windows-x64.zip`));
 });
 

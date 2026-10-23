@@ -105,8 +105,8 @@ classDiagram
   - AgentFlow stop lookup preferred `findAll()` even when scoped `findByParentSessionId()` was available. It now prefers the scoped lookup and keeps `findAll()` as fallback.
 - Added backend regressions in `apps/kalio-api/src/modules/chat/__tests__/chat.gateway.spec.ts` for subscriber terminal stop snapshots and scoped AgentFlow stop lookup.
 - Documentation updates:
-  - `docs/sub-agentflow-target-architecture.md` gap table now separates current gaps from historical implementation notes and no longer lists implemented return modes/copy-back as missing.
-  - `docs/local-dev-guide.md`, `docs/agent-skills/kalio-browser-mcp-qa.md`, and `docs/agent-skills/kalio-manual-qa.md` now clarify `localhost` for ordinary manual QA versus `127.0.0.1` as browser MCP fallback while requiring both origins.
+  - `docs/spec/sub-agentflow-target-architecture.md` gap table now separates current gaps from historical implementation notes and no longer lists implemented return modes/copy-back as missing.
+  - `docs/spec/local-dev-guide.md`, `docs/agent-skills/kalio-browser-mcp-qa.md`, and `docs/agent-skills/kalio-manual-qa.md` now clarify `localhost` for ordinary manual QA versus `127.0.0.1` as browser MCP fallback while requiring both origins.
   - `docs/agent-skills/README.md` records the repo-copy-to-installed-skill sync rule.
 - Installed skill sync completed for:
   - `kalio-manual-qa`

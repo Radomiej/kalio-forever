@@ -19,7 +19,7 @@ Use this skill when the requested proof is a real user journey through Kalio, no
 
 ## Prepare the runtime
 
-1. Read the repository `AGENTS.md`, `docs/local-dev-guide.md`, `docs/agent-skills/kalio-manual-qa.md`, and, for a live CLI/AgentFlow run, `docs/agentflow-paid-run-readiness-checklist.md`.
+1. Read the repository `AGENTS.md`, `docs/spec/local-dev-guide.md`, `docs/agent-skills/kalio-manual-qa.md`, and, for a live CLI/AgentFlow run, `docs/spec/agentflow-paid-run-readiness-checklist.md`.
 2. Record the checkout, `git status --short`, target folder, viewport, and whether the app is mock or live. Do not use production as a QA target.
 3. Choose the QA profile the user requested. For the stable built profile, use the system Node on Windows and preserve its fixed ports and AppData root:
 
@@ -29,7 +29,7 @@ Use this skill when the requested proof is a real user journey through Kalio, no
    ```
 
    Stable QA uses UI/API ports 5288/3316 and data under `%LOCALAPPDATA%\kalio-forever-qa`. Use `pnpm stack:start` with random ports only when a disposable profile is needed or the user requests it; keep its data root separate and record the URLs it returns. Never substitute dev or production ports.
-4. Before any paid/live LLM or CLI-agent run, pass the affected regressions, typechecks/builds, applicable mock E2E, and every hard gate in `docs/agentflow-paid-run-readiness-checklist.md`. Run its `--static-only` readiness check against the exact QA API. A `[Free]` model label alone does not waive the checklist. If a user explicitly authorizes one local free Devin ACP canary despite a red provider gate, do not change Kalio's effective provider or start paid calls; record the failed gate and exact one-run scope, and require fresh authorization for another run.
+4. Before any paid/live LLM or CLI-agent run, pass the affected regressions, typechecks/builds, applicable mock E2E, and every hard gate in `docs/spec/agentflow-paid-run-readiness-checklist.md`. Run its `--static-only` readiness check against the exact QA API. A `[Free]` model label alone does not waive the checklist. If a user explicitly authorizes one local free Devin ACP canary despite a red provider gate, do not change Kalio's effective provider or start paid calls; record the failed gate and exact one-run scope, and require fresh authorization for another run.
 5. Verify `/api/llm/config` and Settings → LLM Settings on the selected QA API. Record provider, model, and source. Mock proves only mock behavior; do not claim a Devin run from model availability alone.
 
 ## Select Devin and a free model

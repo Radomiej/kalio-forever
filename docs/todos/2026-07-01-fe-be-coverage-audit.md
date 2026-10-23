@@ -77,7 +77,7 @@ erDiagram
   - `docs/todos/2026-06-23-workflow-node-qa-coverage.md`
   - Backend: statements `87.62%`, branches `81.29%`, functions `89.38%`, lines `87.62%`.
   - Frontend: statements `84.04%`, branches `76.78%`, functions `84.34%`, lines `85.40%`.
-- Latest architecture/runtime baseline also recorded in `docs/sub-agentflow-target-architecture.md`:
+- Latest architecture/runtime baseline also recorded in `docs/spec/sub-agentflow-target-architecture.md`:
   - Backend: statements `87.64%`, branches `80.94%`, functions `89.45%`, lines `87.64%`.
   - Frontend: statements `80.98%`, branches `73.09%`, functions `79.78%`, lines `82.97%`.
 

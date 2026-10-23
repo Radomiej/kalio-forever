@@ -17,7 +17,7 @@ Domknac frontend do jednego, prostego modelu:
 - [x] Zamknac race condition hydratacji, w ktorej reconnect/select mogl nadpisac live turn pusta historia.
 - [x] Ujednolicic launch path dla `SessionPanel`, `QuickChatWidget`, `useChatComposerActions` i `useExecutionGraphLaunch`.
 - [x] Ujednolicic jeden hydration path dla conversation pane, reconnect, graph i panel reload.
-- [x] Rozszerzyc `docs/technical-documentation-kalio.md` o jawny kontrakt UX dla `New Chat`, live odpowiedzi i stop semantics.
+- [x] Rozszerzyc `docs/spec/technical-documentation-kalio.md` o jawny kontrakt UX dla `New Chat`, live odpowiedzi i stop semantics.
 - [x] Uruchomic focused FE tests po cleanupie launch/hydration.
 - [x] Zrobic manual Browser/Playwright QA na `http://localhost:5188`.
 - [x] Zlapac finalne screenshoty i proof pod demo.

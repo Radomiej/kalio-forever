@@ -10,7 +10,7 @@
 - [x] Treat `Oceń architekturę projektu` on `Architecture Debate` as the baseline release/demo acceptance workflow.
 - [x] Validate stop/drain behavior and follow-up continuity on a live workflow run.
 - [x] Validate HITL behavior on the active stack.
-- [x] Record confirmed defects in `docs/bugs.md`.
+- [x] Record confirmed defects in `docs/spec/bugs.md`.
 - [x] If defects are product bugs rather than environment drift, implement contract-level replay and visibility fixes with tests.
 - [x] Write session note with evidence, readiness, and remaining blockers.
 - [x] Unify managed QA state access so launcher, status, readiness, live credential activation, LLM probe, and AC-13 runner use one `.tmp\qa-stack` contract.

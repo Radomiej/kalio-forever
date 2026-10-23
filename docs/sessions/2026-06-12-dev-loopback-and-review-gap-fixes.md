@@ -47,4 +47,4 @@
 
 - Broader branch work is still in progress outside this fix slice; this note only covers the files and checks listed above.
 - `apps/kalio-web` production build still emits a large-chunk warning (`assets/index-*.js` about 1.98 MB before gzip). That is not introduced by this slice, but it remains a performance debt.
-- `docs/technical-documentation-kalio.md` currently disagrees with the repo on at least one startup command (`pnpm start:dev` vs current `pnpm dev`), so the document still needs a system-truth pass before it becomes the canonical project reference.
+- `docs/spec/technical-documentation-kalio.md` currently disagrees with the repo on at least one startup command (`pnpm start:dev` vs current `pnpm dev`), so the document still needs a system-truth pass before it becomes the canonical project reference.

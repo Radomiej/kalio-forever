@@ -146,7 +146,7 @@ Before using paid/live backends for AgentFlow proof:
 2. Affected app typecheck passes.
 3. Affected app build passes.
 4. Mock FE/E2E or browser proof verifies the user-visible runtime path.
-5. `docs/agentflow-paid-run-readiness-checklist.md` is complete.
+5. `agentflow-paid-run-readiness-checklist.md` is complete.
 
 Related documents:
 

@@ -401,7 +401,7 @@ flowchart TB
 | E2E config | `apps/e2e/playwright.config.ts` |
 | Script map | `scripts/README.md` |
 | Manual QA skill (repo copy) | `docs/agent-skills/kalio-manual-qa.md` |
-| Paid AgentFlow gate | `docs/agentflow-paid-run-readiness-checklist.md` |
+| Paid AgentFlow gate | `agentflow-paid-run-readiness-checklist.md` |
 
 ---
 
@@ -452,10 +452,10 @@ sequenceDiagram
 
 | Doc | Topic |
 |---|---|
-| [README.md](../README.md) | Product overview and quick start |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | TDD workflow and PR rules |
-| [AGENTS.md](../AGENTS.md) | Architecture invariants for agents |
-| [scripts/README.md](../scripts/README.md) | Script command surface |
+| [README.md](../../README.md) | Product overview and quick start |
+| [CONTRIBUTING.md](../../CONTRIBUTING.md) | TDD workflow and PR rules |
+| [AGENTS.md](../../AGENTS.md) | Architecture invariants for agents |
+| [scripts/README.md](../../scripts/README.md) | Script command surface |
 | [docs/agent-skills/kalio-manual-qa.md](./agent-skills/kalio-manual-qa.md) | Manual QA from the UI |
 | [docs/QA/xiaomi-mimo-2.5-manual-qa.md](./QA/xiaomi-mimo-2.5-manual-qa.md) | Live provider QA on managed stack |
-| [docs/agentflow-paid-run-readiness-checklist.md](./agentflow-paid-run-readiness-checklist.md) | Before paid AgentFlow runs |
+| [agentflow-paid-run-readiness-checklist.md](./agentflow-paid-run-readiness-checklist.md) | Before paid AgentFlow runs |

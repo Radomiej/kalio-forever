@@ -14,7 +14,7 @@ Check facts in this order before editing:
 
 1. package.json and the root scripts for commands, versions, and stack profiles.
 2. docs/quickstart-user.md for the Windows install and end-user data flow.
-3. docs/local-dev-guide.md and scripts/README.md for ports, QA modes, and test
+3. docs/spec/local-dev-guide.md and scripts/README.md for ports, QA modes, and test
    entry points.
 4. AGENTS.md, CONTRIBUTING.md, and the linked architecture docs for boundaries,
    workflow rules, and current architecture claims.
