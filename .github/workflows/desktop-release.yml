@@ -1,19 +1,8 @@
 name: Desktop release
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/desktop-release.yml"
-      - "apps/**"
-      - "packages/**"
-      - "scripts/**"
-      - "src-tauri/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "LICENSE"
-      - "COMMERCIAL-LICENSE.md"
-      - "COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md"
+  # Desktop/runtime release builds run only on main pushes, release tags and
+  # manual dispatch — never on pull requests or feature branches.
   push:
     branches:
       - main
