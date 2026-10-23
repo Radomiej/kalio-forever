@@ -36,6 +36,8 @@ const cliSource = join(root, 'scripts', 'kalio-cli.mjs');
 const updaterSource = join(root, 'scripts', 'kalio-updater.mjs');
 const updaterHelpersSource = join(root, 'scripts', 'kalio-updater-helpers.mjs');
 const launcherSource = join(root, 'scripts', 'kalio-launcher.ps1');
+const iconSource = join(root, 'src-tauri', 'icons', platform === 'windows' ? 'icon.ico' : '128x128.png');
+const iconName = platform === 'windows' ? 'kalio.ico' : 'kalio.png';
 
 const PRUNABLE_STAGE_ROOT_DIRECTORIES = [
   '.turbo',
@@ -397,6 +399,7 @@ await cp(updaterHelpersSource, join(stageRoot, 'bin', 'kalio-updater-helpers.mjs
 if (platform === 'windows') {
   await cp(launcherSource, join(stageRoot, 'bin', 'kalio-launcher.ps1'));
 }
+await cp(iconSource, join(stageRoot, 'bin', iconName));
 if (process.env.KALIO_RUNTIME_UPDATE_PUBLIC_KEY?.trim()) {
   await writeFile(
     join(stageRoot, 'bin', 'runtime-update-public-key.pem'),

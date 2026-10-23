@@ -30,6 +30,18 @@ function Remove-AutostartShortcut {
     Remove-Item -LiteralPath (Get-AutostartShortcutPath) -Force -ErrorAction SilentlyContinue
 }
 
+function Get-DesktopShortcutPath {
+    $desktopRoot = [Environment]::GetFolderPath('Desktop')
+    if (-not $desktopRoot) {
+        $desktopRoot = Join-Path $env:USERPROFILE 'Desktop'
+    }
+    return Join-Path $desktopRoot 'Kalio.lnk'
+}
+
+function Remove-DesktopShortcut {
+    Remove-Item -LiteralPath (Get-DesktopShortcutPath) -Force -ErrorAction SilentlyContinue
+}
+
 function Remove-LegacyScheduledTasks {
     $schtasksPath = Join-Path $env:SystemRoot 'System32\schtasks.exe'
     if (-not (Test-Path -LiteralPath $schtasksPath -PathType Leaf)) {
@@ -62,6 +74,7 @@ try {
     }
 
     Remove-AutostartShortcut
+    Remove-DesktopShortcut
     Remove-LegacyScheduledTasks
     $appRoot = Join-Path $InstallRoot 'app'
     $binRoot = Join-Path $InstallRoot 'bin'
