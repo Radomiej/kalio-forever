@@ -15,7 +15,7 @@ As of 2026-05-31, Kalio has the first AgentFlow product boundary:
 - Durable tables: `agent_flow_runs` and `agent_flow_events`.
 - Frontend rendering for `run_sub_agentflow` results and Execution Graph `agent-flow` nodes.
 - External QA evidence can now be passed back through AgentFlow resume context as `externalQualityGate` / `externalQualityGates`; Goal Master finalization is blocked while a failing/high-severity Playwright gate is present.
-- Paid/live AgentFlow runs are gated by `docs/agentflow-paid-run-readiness-checklist.md`; mock E2E, focused regressions, typecheck, affected build, and active provider credential validation must pass before using paid LLM/CLI backends.
+- Paid/live AgentFlow runs are gated by `agentflow-paid-run-readiness-checklist.md`; mock E2E, focused regressions, typecheck, affected build, and active provider credential validation must pass before using paid LLM/CLI backends.
 - Runtime context can now hard-disable CLI-agent tools with `availableCliAgents: []` or `architectureCliAgentsEnabled: false`, so unavailable paid backends are hidden instead of prompt-discouraged.
 - Two-agent Goal Guard proof can opt into strict Implementer write proof with `requireImplementerWriteProof: true`; this fails a prose-only Implementer even if downstream nodes try to compensate.
 - Parent Talk/Canvas projection now reconstructs persisted `run_sub_agentflow` results, identifies the linked child `agent-flow` session, and exposes open-chat/open-graph actions from the parent conversation.

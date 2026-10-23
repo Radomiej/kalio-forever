@@ -60,7 +60,7 @@ Przed zmianą istniały profile direct/Codex/Claude/Devin Cloud oraz osobna ści
 2. Dodano `DevinAcpHost`/`DevinAcpHostRegistry`: proces, NDJSON guard, handshake, session restore, serializację turnów, stream update, permission boundary i lifecycle.
 3. Dodano `DevinCliAcpLLMSource`, routing w `ProfiledLLMSource`, profil seedujący migrację `0034` oraz korelację `externalThreadId`.
 4. Dodano status `GET /api/runtime/devin-cli/status`, wybór modelu w persona selectorze i kartę hostowego Devina w Settings.
-5. Dodano testy kontraktu oraz dokumentację `project-spec.md` i `docs/technical-documentation-kalio.md`.
+5. Dodano testy kontraktu oraz dokumentację `project-spec.md` i `docs/spec/technical-documentation-kalio.md`.
 6. Dodano wspólny kontekst mostu, token w `app_settings` z env fallbackiem oraz personę `devin` (`glm-5-2`, `devin-local-glm-5-2`).
 7. Zarejestrowano hostowy, user-level `kalio` HTTP MCP w Devin CLI z bezpiecznym allow-list `vfs_list` i wykonano interaktywny canary na dwóch turnach.
 

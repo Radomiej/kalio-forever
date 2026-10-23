@@ -3,7 +3,7 @@
 This directory is the repo-visible copy of Kalio-specific Codex skills. Installed skill files live under:
 
 ```text
-C:\Users\Radomiej\.codex\skills\<skill-name>\SKILL.md
+C:\Users\<USER>\.codex\skills\<skill-name>\SKILL.md
 ```
 
 ## Sync Rule

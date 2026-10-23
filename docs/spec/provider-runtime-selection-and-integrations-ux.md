@@ -38,6 +38,7 @@ Make it obvious which connected service will execute a chat/run, which model is 
 - A persona recommendation seeds a new conversation only. Persist the user's explicit conversation choice; if there is no valid recommended or saved choice, require selection. An invalid chosen pair blocks execution and does not fall through to another target.
 - At run acceptance, persist an immutable resolved execution snapshot before dispatch. Retry/resume/reconnect use that snapshot, not current persona recommendations or provider defaults. A one-run override, if later introduced, must not mutate the conversation choice.
 - Keep existing `ExecutionProfile` and persona-bound fields readable while introducing the new selection. Define a deterministic legacy migration/default and preserve old conversations; do not silently reinterpret history.
+- Mock is an explicit provider selection only. The provider factory returns `MockLLMProvider` solely for `provider=mock`; placeholder `mock` values in `apiKey`/`baseUrl`/`model` must not override a named provider. When `LLM_PROVIDER` is unset, the env fallback defaults to `openai` only if a real API key is present, otherwise `mock`.
 - Existing Devin ACP, Codex App Server, hosted Devin, direct LLM providers, MCP policy, credentials, HITL, and project/workspace isolation remain separate boundaries. Do not conflate an LLM API provider with an agent host/runtime.
 - Never expose local tokens/secrets in status responses, UI text, screenshots, or logs. Token generation is a credential mutation and needs explicit user action.
 - “Comet” in the walkthrough is ambiguous: resolve whether this means CometAPI (an OpenAI-compatible LLM provider) or another product before exposing a named choice. Do not treat a browser/assistant product as a model provider by assumption.
@@ -68,7 +69,7 @@ These are reports from the walkthrough and are not all independently reproduced.
 
 ### Verified after implementation (2026-10-02)
 
-- Rebuilt stable local QA at `http://localhost:5288/` with API at `http://127.0.0.1:3316`; persistent QA data stayed at `C:\Users\Radomiej\AppData\Local\kalio-forever-qa`.
+- Rebuilt stable local QA at `http://localhost:5288/` with API at `http://127.0.0.1:3316`; persistent QA data stayed at `C:\Users\<USER>\AppData\Local\kalio-forever-qa`.
 - One explicit Devin Recheck reported `Online`, `Logged in`, `ACP available`, and `773 discovered` models. The new-chat model picker dynamically included exact `swe-2`, `swe-2-high`, `swe-2-medium`, and `swe-2-max` options.
 - Selecting exact `swe-2` displayed it in the composer and showed: “SWE-2 is free in Devin Desktop and CLI on Pro or higher through October 16, 2026.” This is a conditional promotion, not proof that the account is on an eligible plan.
 - QA settings now separate Agent runtimes from Development environments, do not offer mock as a selectable LLM provider, and identify the QA mock environment fallback explicitly. No token was generated and no Devin run was started.

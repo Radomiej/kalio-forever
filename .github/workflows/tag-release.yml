@@ -1,0 +1,60 @@
+name: Tag release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag as vX.Y.Z (leave empty to use package.json version)'
+        required: false
+        type: string
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version files are in sync
+        run: node scripts/bump-version.mjs --check
+
+      - name: Resolve release version
+        id: release
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          VERSION="${INPUT_VERSION:-$PKG_VERSION}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version '$VERSION' is not MAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          if [ "$VERSION" != "$PKG_VERSION" ]; then
+            echo "Requested version '$VERSION' does not match package.json '$PKG_VERSION'." >&2
+            echo "Update versions first: node scripts/bump-version.mjs $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Guard against existing tag
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.release.outputs.version }}" | grep -q .; then
+            echo "Tag v${{ steps.release.outputs.version }} already exists on origin" >&2
+            exit 1
+          fi
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.release.outputs.version }}" -m "Release v${{ steps.release.outputs.version }}"
+          git push origin "v${{ steps.release.outputs.version }}"
+
+      - name: Trigger desktop release pipeline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # GITHUB_TOKEN pushes do not fire push-triggered workflows, so the tag
+        # alone never starts desktop-release — dispatch it on the tag ref.
+        run: gh workflow run desktop-release.yml --ref "v${{ steps.release.outputs.version }}"

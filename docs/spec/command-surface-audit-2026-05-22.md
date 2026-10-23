@@ -43,4 +43,4 @@ The core four commands (`dev`, `build`, `test`, `test:e2e`) are unchanged. Addit
 | `pnpm preflight` / `pnpm repair` | Workspace integrity |
 | `pnpm agentflow:paid-readiness` | Gate before paid AgentFlow runs |
 
-Canonical documentation: **[docs/local-dev-guide.md](./local-dev-guide.md)**.
+Canonical documentation: **[local-dev-guide.md](./local-dev-guide.md)**.

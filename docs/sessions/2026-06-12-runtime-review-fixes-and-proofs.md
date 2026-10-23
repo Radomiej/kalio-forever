@@ -106,7 +106,7 @@
 
 ## Remaining risks
 
-- [`docs/technical-documentation-kalio.md`](/C:/Projekty/kalio-forever/docs/technical-documentation-kalio.md) still disagrees with the repo on launcher matrix, storage topology, runtime kinds, and self-hosted claims; it needs explicit system-truth answers before it can become the canonical project document.
+- [`docs/spec/technical-documentation-kalio.md`](/C:/Projekty/kalio-forever/docs/spec/technical-documentation-kalio.md) still disagrees with the repo on launcher matrix, storage topology, runtime kinds, and self-hosted claims; it needs explicit system-truth answers before it can become the canonical project document.
 - [`docs/ux-workstation-page-redesign.md`](/C:/Projekty/kalio-forever/docs/ux-workstation-page-redesign.md) is currently deleted in the worktree but was not part of this verified slice.
 - `apps/kalio-web` production build still warns about a large JS chunk (`assets/index-*.js` above 2 MB before gzip). This slice did not introduce that debt, but it remains open.
 - Static audit still reports material architecture debt: `docs/audit/2026-06-12-report.md` lists 25 critical oversize files and 2 circular dependencies. The direct silent-error lead in [`EmbeddingsPanel.tsx`](/C:/Projekty/kalio-forever/apps/kalio-web/src/features/settings/EmbeddingsPanel.tsx) is now closed.

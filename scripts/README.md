@@ -2,7 +2,7 @@
 
 This folder contains workspace-level helper scripts. Keep command surface small.
 
-**Full guide:** [docs/local-dev-guide.md](../docs/local-dev-guide.md) — dev vs QA stacks, CI/release, test entry points, and Mermaid diagrams.
+**Full guide:** [docs/spec/local-dev-guide.md](../docs/spec/local-dev-guide.md) — dev vs QA stacks, CI/release, test entry points, and Mermaid diagrams.
 
 ## Core commands (daily)
 

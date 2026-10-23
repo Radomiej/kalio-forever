@@ -55,3 +55,6 @@ tmp/
 tmp-*.json
 .vscode/mcp.json
 .kalio/config.toml
+
+# local working notes (untracked)
+docs/todos/

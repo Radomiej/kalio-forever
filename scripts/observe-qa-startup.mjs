@@ -40,6 +40,8 @@ function launch(command, args, readyText) {
 }
 
 if (process.platform !== 'win32') throw new Error('Windows diagnostic only');
+const qaDataRoot = process.env.KALIO_QA_DATA_ROOT
+  ?? `${process.env.LOCALAPPDATA}/kalio-forever-qa`;
 const timer = setTimeout(() => {
   console.error('Diagnostic timeout: capture incomplete');
   for (const child of children) child.kill();
@@ -53,7 +55,7 @@ try {
   console.log('QA_START_CAPTURE_READY utc=' + new Date().toISOString());
   const launcher = launch(process.execPath, ['scripts/stack-manager.mjs', 'start',
     '--skip-build', '--runtime', 'direct', '--backend-port', '3316', '--frontend-port', '5288',
-    '--data-root', 'C:/Users/Radomiej/AppData/Local/kalio-forever-qa']);
+    '--data-root', qaDataRoot]);
   const results = await Promise.all([launcher.done, windowMonitor.done, processMonitor.done]);
   const capture = results.map((result, index) => ({
     kind: ['qa-launcher', 'window-events', 'process-samples'][index], ...result,

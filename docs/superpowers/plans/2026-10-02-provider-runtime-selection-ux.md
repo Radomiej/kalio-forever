@@ -10,7 +10,7 @@
 
 ## Project Context Protocol
 
-- **PROJECT:** Kalio Forever (`RAD-P-4`, project mapping previously confirmed in Notion); current checkout `C:\Users\Radomiej\.codex\worktrees\5a7e\kalio-forever`.
+- **PROJECT:** Kalio Forever (`RAD-P-4`, project mapping previously confirmed in Notion); current checkout `C:\Users\<USER>\.codex\worktrees\5a7e\kalio-forever`.
 - **GOAL:** Deliver the user-approved provider/runtime and integrations UX direction recorded in `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
 - **LINEAR:** Existing work overlaps RAD-100 (Codex integration), RAD-116 (session/provider/runtime selection), and RAD-101 (UX/runtime audit). Reuse/update the matching issue; do not create a duplicate before rechecking current issue relationships/status.
 - **REPO:** `AGENTS.md`, `project-spec.md`, backend and frontend tests are authoritative for implementation. User worktree is broadly dirty; preserve unrelated changes.

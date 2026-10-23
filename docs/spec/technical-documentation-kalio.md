@@ -7,7 +7,7 @@
 |---|---|
 | Zakres dokumentu | Architektura, komponenty, moduły, workflow agentów, narzędzia, VFS, MCP, RA-App, pamięć, baza danych, bezpieczeństwo, eksploatacja, backup, aktualizacje, generacja kodu wynikowego, monitoring i ryzyka techniczne. |
 | Podstawa opracowania | Aktualny README projektu, dokumentacja architektury narzędzi, logi sesji implementacyjnych Kalio oraz struktura referencyjnej dokumentacji technicznej portalu MK. |
-| Charakter dokumentu | Dokumentacja referencyjna/as-built na poziomie technicznym. Zalecenia implementacyjne dla agentów kodujących są utrzymywane w `AGENTS.md`, a kierunki post-MVP w `docs/post-mvp-plans.md`. |
+| Charakter dokumentu | Dokumentacja referencyjna/as-built na poziomie technicznym. Zalecenia implementacyjne dla agentów kodujących są utrzymywane w `AGENTS.md`, a kierunki post-MVP w `post-mvp-plans.md`. |
 | Status | Wersja robocza gotowa do umieszczenia w repozytorium GitHub jako `docs/technical-documentation.md` lub `docs/kalio-technical-documentation.md`. |
 | Odbiorcy | Autor projektu, contributorzy, agenci kodujący, reviewerzy architektury, przyszli administratorzy lokalnych/self-hosted wdrożeń. |
 
@@ -1242,17 +1242,17 @@ Plan DR powinien definiować:
 | `AGENTS.md` | Reguły dla agentów kodujących. |
 | `CONTRIBUTING.md` | Setup, workflow, PR checklist. |
 | `docs/quickstart-user.md` | Instalacja i uruchomienie lokalnego stacku użytkownika końcowego. |
-| `docs/local-dev-guide.md` | Pełny workflow developerski, stack DEV/QA/PROD local i komendy operacyjne. |
-| `docs/application-architecture-current.md` | Top-level runtime i encje. |
-| `docs/agentflow-architecture-and-workflow.md` | Produktowy widok runtime AgentFlow, delegacji i przepływu FE -> run -> child sessions. |
-| `docs/sub-agentflow-target-architecture.md` | Docelowy model `sub_agentflow`, checkpointów i projekcji runów. |
-| `docs/chat-streaming-tools-architecture.md` | Hot path czatu, streamingu i narzędzi. |
-| `docs/tool-architecture.md` | Rejestracja, filtracja, HITL, dispatch i persystencja tooli. |
-| `docs/mcp-architecture.md` | MCP lifecycle, discovery i policy. |
-| `docs/raapp-design-current.md` | RA-App inline/catalog/sandbox/approvals. |
-| `docs/cli-agent-module-architecture.md` | Adaptery CLI, config, streaming outputu. |
-| `docs/post-mvp-plans.md` | Kierunki post-MVP wyjęte z dokumentacji MVP/as-built. |
-| `docs/database-schema-diagram.md` | ERD i aktualny schemat. |
+| `local-dev-guide.md` | Pełny workflow developerski, stack DEV/QA/PROD local i komendy operacyjne. |
+| `application-architecture-current.md` | Top-level runtime i encje. |
+| `agentflow-architecture-and-workflow.md` | Produktowy widok runtime AgentFlow, delegacji i przepływu FE -> run -> child sessions. |
+| `sub-agentflow-target-architecture.md` | Docelowy model `sub_agentflow`, checkpointów i projekcji runów. |
+| `chat-streaming-tools-architecture.md` | Hot path czatu, streamingu i narzędzi. |
+| `tool-architecture.md` | Rejestracja, filtracja, HITL, dispatch i persystencja tooli. |
+| `mcp-architecture.md` | MCP lifecycle, discovery i policy. |
+| `raapp-design-current.md` | RA-App inline/catalog/sandbox/approvals. |
+| `cli-agent-module-architecture.md` | Adaptery CLI, config, streaming outputu. |
+| `post-mvp-plans.md` | Kierunki post-MVP wyjęte z dokumentacji MVP/as-built. |
+| `database-schema-diagram.md` | ERD i aktualny schemat. |
 | `docs/sessions/` | Chronologiczne logi implementacyjne i decyzje. |
 
 ### 15.6. Proponowana ścieżka dalszego rozwoju dokumentacji

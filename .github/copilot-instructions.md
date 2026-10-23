@@ -15,7 +15,7 @@
 
 ## Commands
 
-See `docs/local-dev-guide.md` for the full dev/QA/CI map.
+See `docs/spec/local-dev-guide.md` for the full dev/QA/CI map.
 
 ```
 pnpm install                      # install from root
@@ -88,12 +88,12 @@ export class MyTool {
 
 Prefer linking to focused architecture docs instead of duplicating long explanations:
 
-- `docs/application-architecture-current.md` (system map)
-- `docs/chat-streaming-tools-architecture.md` (chat + streaming)
-- `docs/tool-architecture.md` (tool registry + execution)
-- `docs/mcp-architecture.md` (MCP integration)
-- `docs/raapp-design-current.md` and `docs/raapp-v2-architecture-current.md` (RA-App pipeline)
-- `docs/database-schema-diagram.md` (DB relationships)
+- `docs/spec/application-architecture-current.md` (system map)
+- `docs/spec/chat-streaming-tools-architecture.md` (chat + streaming)
+- `docs/spec/tool-architecture.md` (tool registry + execution)
+- `docs/spec/mcp-architecture.md` (MCP integration)
+- `docs/spec/raapp-design-current.md` and `docs/spec/raapp-v2-architecture-current.md` (RA-App pipeline)
+- `docs/spec/database-schema-diagram.md` (DB relationships)
 
 ### Socket.IO event flow
 ```

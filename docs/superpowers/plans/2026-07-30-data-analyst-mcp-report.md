@@ -236,7 +236,7 @@ feat(da): add expiring analytical report pages
 - Create: `.kalio/config.toml`
 - Modify: `.env.example`
 - Modify: `README.md` only in a task-owned hunk if it can be staged without user changes
-- Modify: user-local `C:\Users\Radomiej\.codex\config.toml` through `codex mcp add`
+- Modify: user-local `C:\Users\<USER>\.codex\config.toml` through `codex mcp add`
 
 **Interfaces:**
 - Consumes: `http://127.0.0.1:3000/mcp` and `DA_MCP_TOKEN`.

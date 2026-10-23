@@ -16,8 +16,9 @@ export function createRuntimeLLMProvider(config: ProviderConfig): ILLMProvider {
 export function createLLMProvider(config: ProviderConfig): ILLMProvider {
   const { provider, apiKey, model, baseUrl } = config;
 
-  // Handle mock provider
-  if (provider === 'mock' || apiKey === 'mock' || baseUrl === 'mock') {
+  // Mock is an explicit provider choice, not a catch-all: placeholder 'mock'
+  // values in apiKey/baseUrl must not override a named provider.
+  if (provider === 'mock') {
     return new MockLLMProvider();
   }
 

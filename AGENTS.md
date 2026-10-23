@@ -168,10 +168,10 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 - QA (built dist): `pnpm qa` / `pnpm qa:rebuild` (API :3316, web :5288)
 - Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`
 - Prod (built dist): `pnpm prod` / `pnpm prod:rebuild` (API :4016, web :6188)
-- Windows user install: `scripts/install.ps1` → Scheduled Task autostart after reboot
+- Windows user install: `scripts/install.ps1` → per-user Startup shortcut after sign-in; `-NoAutostart` saves `data/autostart-disabled`, `-EnableAutostart` re-enables
 - Release version sync: `node scripts/bump-version.mjs <MAJOR.MINOR.PATCH>` or `node scripts/bump-version.mjs --check`
 
-Full local workflow: `docs/local-dev-guide.md`. User install: `docs/quickstart-user.md`.
+Full local workflow: `docs/spec/local-dev-guide.md`. User install: `docs/quickstart-user.md`.
 
 Prefer single-file or single-test runs during iteration. Full suites are for the final verification pass.
 
@@ -190,6 +190,7 @@ Prefer single-file or single-test runs during iteration. Full suites are for the
 - When diagnosing Kalio MCP state, do not use `~/.codex/config.toml` as evidence; that file configures Codex, not the Kalio app.
 - Backend is the durable runtime source of truth; frontend state for chat/appflow/runtime must stay rebuildable from backend snapshots after F5/reconnect.
 - `project-spec.md` is the durable cross-session product/runtime boundary spec; update it when architecture/runtime decisions or non-negotiable boundaries change.
+- `docs/spec/` is the home for all development specs, architecture docs, and diagrams. When a change alters architecture, runtime contracts, or user-facing behavior, update `project-spec.md` and the affected `docs/spec/*` document in the same change — never land the code and the spec separately.
 - Prefer extending shared runtime contracts and selectors over adding panel-local state channels, duplicated truth maps, or one-off socket event handling.
 - Treat CLI agents, subagents, and AgentFlow children as one child-execution model whenever the UI/runtime needs shared lifecycle handling.
 - For chat/appflow changes, verify FE-first parity across Talk, Session Panel, Canvas, and Execution Graph instead of proving behavior only through API polling.
@@ -235,12 +236,12 @@ When the user corrects your approach, append a one-line rule here before ending 
 - When the user asks to test Devin through Kalio, acceptance requires a real Devin CLI/ACP run driven through Kalio's UI against the exact approved project; mock E2E validates Kalio only and cannot close Devin QA.
 - For important architecture/runtime changes, write or update a `docs/sessions/YYYY-MM-DD-*.md` note with what changed, verification evidence, live-readiness status, and remaining blockers before ending the work slice.
 - For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.
-- Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/sub-agentflow-target-architecture.md before implementing it.
+- Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/spec/sub-agentflow-target-architecture.md before implementing it.
 - Repo copy of the manual QA skill lives at `docs/agent-skills/kalio-manual-qa.md`; keep it aligned with the installed `kalio-manual-qa` skill.
 - Release version is synchronized across all application/workspace `package.json` manifests plus `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`; use `node scripts/bump-version.mjs` and run `--check` in release workflow gates.
 - When testing generated demo output, route QA defects back through Kalio/AgentFlow resume context; do not patch the target repo manually.
 - Before any live LLM/CLI/real-project AgentFlow run, pass the local gate first: focused regression tests, affected app typecheck, and affected app build where a build script exists.
-- Before any paid/live AgentFlow run, complete `docs/agentflow-paid-run-readiness-checklist.md`; mock E2E and local gates are mandatory, not optional.
+- Before any paid/live AgentFlow run, complete `docs/spec/agentflow-paid-run-readiness-checklist.md`; mock E2E and local gates are mandatory, not optional.
 - During critical AgentFlow work, continuously run two BE bug hunters, one FE bug hunter, and one coverage guardian where agent capacity permits; keep them focused on real bugs, meaningful tests, and 80%+ FE/BE coverage rather than superficial line coverage.
 - Manual QA stacks must prove the effective provider at `/api/llm/config`; stack/env overrides must not be shadowed by `.env`, and localhost QA must allow both `localhost` and `127.0.0.1` origins.
 - For AgentFlow MVP release, separate runtime lifecycle proof from generated-project quality; first verify clean start/trace/wait/resume/final-or-block behavior, and defer LLM/persona output quality to a later hardening pass.
@@ -251,10 +252,10 @@ When the user corrects your approach, append a one-line rule here before ending 
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
 - On Windows, run `better-sqlite3`-backed Kalio API tests and rebuilds outside the sandbox with system Node on PATH; sandboxed or non-system Node runs are not valid evidence for SQLite failures.
 - On Windows, run Kalio Playwright/QA stack commands outside the sandbox with system Node on PATH; sandboxed runs can fail on pnpm junctions with `EPERM` or false `MODULE_NOT_FOUND` for declared deps such as `ajv`, and are not valid runtime evidence.
-- Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
+- Keep `docs/spec/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/spec/post-mvp-plans.md`.
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
-- For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
+- For Kalio dev MCP, treat `.kalio/config.toml` as the canonical dev-managed store (gitignored — keep it local, never commit it), keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback (also gitignored), and never infer Kalio state from `~/.codex/config.toml`.
 - For Devin ACP runs through Kalio, reconcile agent prose with `devin-cli-acp.mcp_bridge`, `mcp_approval`, `native_approval`, HITL, and runtime tool counts; `native_approval.decision=decline` alone does not prove a user rejected a tool.
 - For Devin QA readiness, use `--resume-session` only with an already-online host; after resetting to zero hosts use the existing cold-start variant without that flag, even when reusing a persisted conversation. Do not weaken the gate to fix a mismatched invocation.
 - Workspace package scripts invoked by root gates must call local tools directly and never invoke nested `pnpm`/`npm` orchestration; root workspace commands own package order and dependency resolution.

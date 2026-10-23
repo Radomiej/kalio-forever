@@ -25,8 +25,11 @@ export class LLMService {
     private readonly timeoutSettings: TimeoutSettingsService,
     private readonly streamLimiter: ProviderStreamLimiterService,
   ) {
-    const provider = this.config.get<string>('LLM_PROVIDER', 'openai') as LLMProviderType;
     const apiKey = this.config.get<string>('LLM_API_KEY', 'mock');
+    const provider = this.config.get<string>(
+      'LLM_PROVIDER',
+      apiKey === 'mock' ? 'mock' : 'openai',
+    ) as LLMProviderType;
     const configuredBaseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
     const model = this.config.get<string>('LLM_MODEL', 'mock');
     this.forceEnvLlm = this.config.get<string>('KALIO_FORCE_ENV_LLM', '') === '1';
@@ -39,7 +42,7 @@ export class LLMService {
 
     if (this.forceEnvLlm) {
       this.logger.warn('LLM provider forced to env config; active DB credential is ignored');
-    } else if (provider === 'mock' || apiKey === 'mock') {
+    } else if (provider === 'mock') {
       this.logger.warn('Env LLM config incomplete — will use active DB credential if set');
     } else {
       this.logger.log(`LLM provider (env fallback): ${provider} / ${model}`);
