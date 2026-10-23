@@ -53,3 +53,5 @@ apps/e2e/outputs/
 lcov.info
 tmp/
 tmp-*.json
+.vscode/mcp.json
+.kalio/config.toml
