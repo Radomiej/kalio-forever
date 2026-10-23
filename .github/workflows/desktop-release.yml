@@ -1,11 +1,9 @@
 name: Desktop release
 
 on:
-  # Desktop/runtime release builds run only on main pushes, release tags and
-  # manual dispatch — never on pull requests or feature branches.
+  # Desktop/runtime release builds run only on release tags and manual dispatch —
+  # never on pull requests, feature branches or plain main pushes.
   push:
-    branches:
-      - main
     tags:
       - "v*"
   workflow_dispatch:
