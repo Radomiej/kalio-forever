@@ -51,3 +51,5 @@ apps/kalio-api/tmp/
 docs/reports/
 apps/e2e/outputs/
 lcov.info
+tmp/
+tmp-*.json
