@@ -1,18 +1,19 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { DECISION_SETTINGS, type DecisionSettingsPort, type HitlHardRule } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { PersonaService } from '../persona/persona.service';
 import {
   isHitlMode,
   isHitlNotificationChannel,
   isHitlUnattendedFallback,
-  type HitlConfig,
+  type ResolvedHitlConfig,
   type HitlMode,
   type HitlNotificationChannel,
   type HitlUnattendedFallback,
   type UpdateHitlConfigDto,
 } from './hitl.types';
 
-const DEFAULT_HITL_CONFIG: HitlConfig = {
+const DEFAULT_HITL_CONFIG: ResolvedHitlConfig = {
   mode: 'manual',
   autoPersonaId: null,
   unattendedFallback: 'pause',
@@ -21,6 +22,10 @@ const DEFAULT_HITL_CONFIG: HitlConfig = {
   externalPolicyEnabled: false,
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
+  jevInstructions: '',
+  jevApprovalThreshold: 0.95,
+  jevFallbackToPersona: false,
+  rules: [],
 };
 
 const HITL_SETTING_KEYS = {
@@ -32,6 +37,10 @@ const HITL_SETTING_KEYS = {
   externalPolicyEnabled: 'hitl.externalPolicyEnabled',
   externalPolicyPersonaId: 'hitl.externalPolicyPersonaId',
   raAppApprovalTimeoutMs: 'hitl.raAppApprovalTimeoutMs',
+  jevInstructions: 'hitl.jevInstructions',
+  jevApprovalThreshold: 'hitl.jevApprovalThreshold',
+  jevFallbackToPersona: 'hitl.jevFallbackToPersona',
+  rules: 'hitl.rules',
 } as const;
 
 function normalizePersonaId(value: string | null | undefined): string | null {
@@ -44,9 +53,10 @@ export class HitlConfigService {
   constructor(
     private readonly appSettings: AppSettingsService,
     private readonly personaService: PersonaService,
+    @Inject(DECISION_SETTINGS) private readonly decisions: DecisionSettingsPort,
   ) {}
 
-  async getConfig(): Promise<HitlConfig> {
+  async getConfig(): Promise<ResolvedHitlConfig> {
     const [
       storedMode,
       storedPersonaId,
@@ -56,6 +66,10 @@ export class HitlConfigService {
       storedExternalEnabled,
       storedExternalPersonaId,
       storedRaAppApprovalTimeoutMs,
+      storedJevInstructions,
+      storedJevApprovalThreshold,
+      storedJevFallbackToPersona,
+      storedRules,
     ] = await Promise.all([
       this.appSettings.get(HITL_SETTING_KEYS.mode),
       this.appSettings.get(HITL_SETTING_KEYS.autoPersonaId),
@@ -65,6 +79,10 @@ export class HitlConfigService {
       this.appSettings.get(HITL_SETTING_KEYS.externalPolicyEnabled),
       this.appSettings.get(HITL_SETTING_KEYS.externalPolicyPersonaId),
       this.appSettings.get(HITL_SETTING_KEYS.raAppApprovalTimeoutMs),
+      this.appSettings.get(HITL_SETTING_KEYS.jevInstructions),
+      this.appSettings.get(HITL_SETTING_KEYS.jevApprovalThreshold),
+      this.appSettings.get(HITL_SETTING_KEYS.jevFallbackToPersona),
+      this.appSettings.get(HITL_SETTING_KEYS.rules),
     ]);
 
     return {
@@ -80,10 +98,14 @@ export class HitlConfigService {
       externalPolicyEnabled: storedExternalEnabled === 'true',
       externalPolicyPersonaId: normalizePersonaId(storedExternalPersonaId),
       raAppApprovalTimeoutMs: this.parseStoredRaAppApprovalTimeout(storedRaAppApprovalTimeoutMs),
+      jevInstructions: this.normalizeJevInstructions(storedJevInstructions ?? ''),
+      jevApprovalThreshold: this.parseStoredJevApprovalThreshold(storedJevApprovalThreshold),
+      jevFallbackToPersona: this.parseStoredJevFallback(storedJevFallbackToPersona),
+      rules: this.parseStoredRules(storedRules),
     };
   }
 
-  async updateConfig(dto: UpdateHitlConfigDto): Promise<HitlConfig> {
+  async updateConfig(dto: UpdateHitlConfigDto): Promise<ResolvedHitlConfig> {
     const current = await this.getConfig();
     const nextMode = this.normalizeMode(dto.mode);
     const nextAutoPersonaId = dto.autoPersonaId !== undefined
@@ -105,6 +127,23 @@ export class HitlConfigService {
     const nextRaAppApprovalTimeoutMs = dto.raAppApprovalTimeoutMs !== undefined
       ? this.normalizeRaAppApprovalTimeoutMs(dto.raAppApprovalTimeoutMs)
       : current.raAppApprovalTimeoutMs;
+    const nextJevInstructions = dto.jevInstructions !== undefined
+      ? this.normalizeJevInstructions(dto.jevInstructions)
+      : current.jevInstructions;
+    const nextJevApprovalThreshold = dto.jevApprovalThreshold !== undefined
+      ? this.normalizeJevApprovalThreshold(dto.jevApprovalThreshold)
+      : current.jevApprovalThreshold;
+    const nextRules = dto.rules !== undefined
+      ? this.normalizeRules(dto.rules)
+      : current.rules;
+    const nextJevFallbackToPersona = dto.jevFallbackToPersona ?? current.jevFallbackToPersona ?? false;
+    if (typeof nextJevFallbackToPersona !== 'boolean') {
+      throw new BadRequestException('Jev persona fallback must be a boolean.');
+    }
+    if (nextMode === 'jev' && nextJevFallbackToPersona) {
+      if (!nextAutoPersonaId) throw new BadRequestException('Jev persona fallback requires a configured persona.');
+      await this.ensurePersonaExists(nextAutoPersonaId);
+    }
 
     if (nextMode === 'auto' && nextAutoPersonaId === null) {
       throw new BadRequestException('Auto HITL mode requires a configured persona.');
@@ -113,6 +152,8 @@ export class HitlConfigService {
     if (nextMode === 'auto' && nextAutoPersonaId !== null) {
       await this.ensurePersonaExists(nextAutoPersonaId);
     }
+
+    if (nextMode === 'jev') await this.decisions.resolve();
 
     if (nextUnattendedFallback === 'representative' && nextRepresentativePersonaId === null) {
       throw new BadRequestException('Representative HITL fallback requires a configured persona.');
@@ -156,6 +197,10 @@ export class HitlConfigService {
       await this.appSettings.set(HITL_SETTING_KEYS.externalPolicyPersonaId, nextExternalPolicyPersonaId);
     }
     await this.appSettings.set(HITL_SETTING_KEYS.raAppApprovalTimeoutMs, String(nextRaAppApprovalTimeoutMs));
+    await this.appSettings.set(HITL_SETTING_KEYS.jevInstructions, nextJevInstructions);
+    await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
+    await this.appSettings.set(HITL_SETTING_KEYS.jevFallbackToPersona, String(nextJevFallbackToPersona));
+    await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
 
     return {
       mode: nextMode,
@@ -166,6 +211,10 @@ export class HitlConfigService {
       externalPolicyEnabled: nextExternalPolicyEnabled,
       externalPolicyPersonaId: nextExternalPolicyPersonaId,
       raAppApprovalTimeoutMs: nextRaAppApprovalTimeoutMs,
+      jevInstructions: nextJevInstructions,
+      jevApprovalThreshold: nextJevApprovalThreshold,
+      jevFallbackToPersona: nextJevFallbackToPersona,
+      rules: nextRules,
     };
   }
 
@@ -220,6 +269,80 @@ export class HitlConfigService {
     }
 
     return value;
+  }
+
+  private parseStoredJevApprovalThreshold(value: string | null): number {
+    if (value === null) return DEFAULT_HITL_CONFIG.jevApprovalThreshold;
+    return this.normalizeJevApprovalThreshold(Number(value));
+  }
+
+  private parseStoredJevFallback(value: string | null): boolean {
+    if (value === null) return false;
+    if (value !== 'true' && value !== 'false') {
+      throw new BadRequestException('Stored Jev persona fallback must be a boolean.');
+    }
+    return value === 'true';
+  }
+
+  private normalizeJevApprovalThreshold(value: number): number {
+    if (!Number.isFinite(value) || value <= 0.5 || value > 1) {
+      throw new BadRequestException('Jev approval threshold must be greater than 0.5 and at most 1.');
+    }
+    return value;
+  }
+
+  private normalizeJevInstructions(value: string): string {
+    if (typeof value !== 'string' || value.length > 2_000) {
+      throw new BadRequestException('Jev instructions must be text with at most 2000 characters.');
+    }
+    return value.trim();
+  }
+
+  private parseStoredRules(value: string | null): HitlHardRule[] {
+    if (value === null) return [];
+    try {
+      return this.normalizeRules(JSON.parse(value) as unknown);
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('Stored HITL hard rules must be valid JSON.');
+    }
+  }
+
+  private normalizeRules(value: unknown): HitlHardRule[] {
+    if (!Array.isArray(value) || value.length > 100) {
+      throw new BadRequestException('HITL hard rules must be an array with at most 100 entries.');
+    }
+    return value.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new BadRequestException(`HITL hard rule ${index + 1} is invalid.`);
+      }
+      const rule = entry as Record<string, unknown>;
+      const kind = rule['kind'];
+      const name = typeof rule['name'] === 'string' ? rule['name'].trim() : '';
+      const decision = rule['decision'];
+      const executable = typeof rule['executable'] === 'string' ? rule['executable'].trim() : undefined;
+      const argumentsContains = typeof rule['argumentsContains'] === 'string'
+        ? rule['argumentsContains'].trim()
+        : undefined;
+      if ((kind !== '*' && kind !== 'tool' && kind !== 'raapp_native' && kind !== 'external_security')
+        || name.length === 0
+        || (decision !== 'allow' && decision !== 'deny' && decision !== 'ask_user')
+        || (rule['id'] !== undefined && (typeof rule['id'] !== 'string' || rule['id'].trim().length === 0))
+        || (rule['executable'] !== undefined && typeof rule['executable'] !== 'string')
+        || (rule['argumentsContains'] !== undefined && typeof rule['argumentsContains'] !== 'string')
+        || (executable !== undefined && executable.length === 0)
+        || (argumentsContains !== undefined && argumentsContains.length === 0)) {
+        throw new BadRequestException(`HITL hard rule ${index + 1} is invalid.`);
+      }
+      return {
+        id: typeof rule['id'] === 'string' ? rule['id'].trim() : `rule-${index + 1}`,
+        kind,
+        name,
+        decision,
+        ...(executable ? { executable } : {}),
+        ...(argumentsContains ? { argumentsContains } : {}),
+      };
+    });
   }
 
   private async ensurePersonaExists(personaId: string): Promise<void> {

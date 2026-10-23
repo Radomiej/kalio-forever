@@ -85,11 +85,16 @@ export async function resumeAgentFlowWithQualityGate({
   }
 }
 
-function shouldPollAfterResume(result: ArchitectRunResult, gateStatus: ExternalQualityGateInput['status']): boolean {
+export function shouldContinueAgentFlowRun(result: ArchitectRunResult): boolean {
   const status = result.agentFlowStatus ?? result.run.status;
   return status === 'running'
     || status === 'queued'
-    || (gateStatus === 'passed' && status === 'waiting_on_orchestrator');
+    || (status === 'waiting_on_orchestrator' && result.agentFlowAwaitingHumanInput === true);
+}
+
+function shouldPollAfterResume(result: ArchitectRunResult, gateStatus: ExternalQualityGateInput['status']): boolean {
+  return shouldContinueAgentFlowRun(result)
+    || (gateStatus === 'passed' && (result.agentFlowStatus ?? result.run.status) === 'waiting_on_orchestrator');
 }
 
 async function refreshConversationSessionsSafely(

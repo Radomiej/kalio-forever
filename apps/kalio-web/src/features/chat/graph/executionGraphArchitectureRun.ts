@@ -121,9 +121,11 @@ function architectureExecutionStatus(
   streamStatus?: NonNullable<TraceStep['stream']>['status'],
   traceStatus?: TraceStep['status'],
 ) {
-  if (traceStatus === 'failed' || traceStatus === 'cancelled') return 'error' as const;
+  if (traceStatus === 'failed') return 'error' as const;
+  if (traceStatus === 'cancelled') return 'cancelled' as const;
   if (traceStatus === 'done') return 'success' as const;
-  if (runStatus === 'failed' || runStatus === 'cancelled') return 'error' as const;
+  if (runStatus === 'failed') return 'error' as const;
+  if (runStatus === 'cancelled') return 'cancelled' as const;
   if (runStatus === 'completed') return 'success' as const;
   if (runStatus === 'queued') return 'idle' as const;
   if (traceStatus === 'queued') return 'idle' as const;

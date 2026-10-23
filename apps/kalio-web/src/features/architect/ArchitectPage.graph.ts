@@ -17,6 +17,7 @@ export interface GraphDraft {
   nodeBehaviors: NodeBehaviorOverrideMap;
   nodeToolOverrides: NodeToolOverrideMap;
   nodeMaxToolAttempts: Record<string, number | undefined>;
+  nodeAutoRouting?: Record<string, NonNullable<ArchitectureSchemaNode['autoRouting']>>;
   addedNodes: ArchitectNode[];
   edges: ArchitectSchema['edges'] | null;
 }
@@ -81,6 +82,7 @@ export function applyGraphDraft(
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
+      autoRouting: cloneAutoRouting(graphDraft.nodeAutoRouting?.[node.id] ?? node.autoRouting),
     })).concat(graphDraft.addedNodes.map((node) => ({
       ...node,
       ...(graphDraft.nodePositions[node.id] ?? {}),
@@ -88,6 +90,7 @@ export function applyGraphDraft(
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
+      autoRouting: cloneAutoRouting(graphDraft.nodeAutoRouting?.[node.id] ?? node.autoRouting),
     }))),
     edges: graphDraft.edges ?? schema.edges,
     contextPolicy: {
@@ -100,6 +103,10 @@ export function applyGraphDraft(
   };
 }
 
+function cloneAutoRouting(value: ArchitectureSchemaNode['autoRouting']): ArchitectureSchemaNode['autoRouting'] {
+  return value ? { ...value } : undefined;
+}
+
 export function toSchemaNodes(schema: ArchitectSchema): ArchitectureSchemaNode[] {
   return schema.nodes.map((node) => ({
     id: node.id,
@@ -107,8 +114,9 @@ export function toSchemaNodes(schema: ArchitectSchema): ArchitectureSchemaNode[]
     kind: node.kind,
     roleSlotId: node.roleSlotId,
     maxToolAttempts: node.maxToolAttempts,
-    toolOverride: node.toolOverride,
+    toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
     behavior: node.behavior ? { ...node.behavior } : undefined,
+    autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
     x: node.x,
     y: node.y,
   }));
@@ -130,6 +138,13 @@ export function createDraftNode(
     x: Math.round(position.x),
     y: Math.round(position.y),
   };
+  if (kind === 'auto_router') {
+    return {
+      id, label: `Auto-routing ${index}`, kind,
+      autoRouting: { confidenceThreshold: 0.7, instructions: '' },
+      ...roundedPosition, slots: [], connections: [],
+    };
+  }
   if (kind === 'router') {
     return {
       id,

@@ -9,6 +9,32 @@ import { LAB_PRESET_IDS } from './architecture-seed-schemas.lab-presets';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 
 describe('ArchitectureRegistryService', () => {
+  it('saves and reloads auto-routing variants with independently cloned metadata', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'kalio-auto-schema-'));
+    tempDirs.add(directory);
+    const config = { get: () => directory } as unknown as ConfigService;
+    const service = new ArchitectureRegistryService(config);
+    const nodes: ArchitectureSchema['nodes'] = [
+      { id: 'auto', label: 'Auto', kind: 'auto_router', autoRouting: { confidenceThreshold: 0.7, instructions: 'Choose.' } },
+      { id: 'left', label: 'Left', kind: 'parallel' },
+      { id: 'right', label: 'Right', kind: 'parallel' },
+    ];
+    const edges: ArchitectureSchema['edges'] = [
+      { id: 'choice', fromNodeId: 'auto', toNodeId: 'left', selection: 'choice' },
+      { id: 'fallback', fromNodeId: 'auto', toNodeId: 'right', selection: 'default' },
+    ];
+    const variant = await service.createVariant('strategic-decision-council', { nodes, edges });
+    expect(variant?.nodes[0]?.autoRouting).toEqual(nodes[0]?.autoRouting);
+    expect(variant?.nodes[0]?.autoRouting).not.toBe(nodes[0]?.autoRouting);
+    const reloaded = new ArchitectureRegistryService(config);
+    await reloaded.onModuleInit();
+    const copy = reloaded.findOne(variant!.id)!;
+    copy.nodes[0]!.autoRouting!.instructions = 'Changed';
+    expect(reloaded.findOne(variant!.id)?.nodes[0]?.autoRouting?.instructions).toBe('Choose.');
+    await expect(service.createVariant('strategic-decision-council', { nodes, edges: edges.slice(0, 1) })).rejects.toThrow(BadRequestException);
+    nodes[0]!.autoRouting!.confidenceThreshold = Number.NaN;
+    await expect(service.createVariant('strategic-decision-council', { nodes, edges })).rejects.toThrow(BadRequestException);
+  });
   const tempDirs = new Set<string>();
 
   afterEach(async () => {

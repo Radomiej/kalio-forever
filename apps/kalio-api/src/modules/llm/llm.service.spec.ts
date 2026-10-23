@@ -36,6 +36,7 @@ describe('LLMService - DB credential overrides env', () => {
   function buildTimeoutSettingsMock() {
     return {
       getProviderMaxConcurrentStreams: vi.fn().mockResolvedValue(2),
+      getProviderRequestTimeoutMs: vi.fn().mockResolvedValue(120_000),
     };
   }
 
@@ -206,6 +207,23 @@ describe('LLMService - DB credential overrides env', () => {
 
       expect(config1.model).toBe('env-gpt-4');   // env fallback
       expect(config2.model).toBe('gpt-4o-new');  // DB credential picked up immediately
+    });
+  });
+
+  describe('request timeout settings', () => {
+    it('reads the persisted timeout for every request, including explicit token limits', async () => {
+      const settings = moduleRef.get<TimeoutSettingsService>(TimeoutSettingsService);
+      vi.mocked(settings.getProviderRequestTimeoutMs).mockResolvedValueOnce(600_000).mockResolvedValueOnce(300_000);
+      const streamChat = vi.fn().mockResolvedValue([]);
+      vi.spyOn(service, 'createProvider').mockReturnValue({ streamChat });
+      const config = { provider: 'ollama', apiKey: '', model: 'local' };
+      const options = { sessionId: 's', messageId: 'm', onChunk: vi.fn(), maxOutputTokens: 50 };
+
+      await service.streamChatWithConfig(config, [], [], options);
+      await service.streamChatWithConfig(config, [], [], options);
+
+      expect(streamChat.mock.calls[0]?.[2]).toMatchObject({ requestTimeoutMs: 600_000, maxOutputTokens: 50 });
+      expect(streamChat.mock.calls[1]?.[2]).toMatchObject({ requestTimeoutMs: 300_000, maxOutputTokens: 50 });
     });
   });
 

@@ -1,10 +1,11 @@
 import { Logger } from '@nestjs/common';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { MemoryIngestResult, MemorySearchResult } from '@kalio/types';
+import type { EmbeddingSpace, MemoryIngestResult, MemorySearchResult } from '@kalio/types';
 import { EmbeddingService } from './embedding.service';
 import { VectorStoreService } from './vector-store.service';
 import type { WebSearchChunk } from './web-search-chunking';
+import { currentStorageSpace, readMemorySource } from './memory-partitions';
 
 const WEB_RESULTS_DB_NAME = 'web-results.db';
 const RRF_K = 60;
@@ -38,10 +39,11 @@ export class WebResultsMemoryStore {
       return { ids: [], count: 0 };
     }
 
-    const store = this.getStore();
+    const space = this.embeddingService.captureSpace();
     const ids: string[] = [];
-    const embeddingModel = await this.embeddingService.getModelName();
-    const embeddings = await this.embeddingService.embedBatch(chunks.map((chunk) => chunk.content));
+    const embeddingModel = space.model;
+    const embeddings = await this.embeddingService.embedPinned(space, chunks.map((chunk) => chunk.content));
+    const store = this.getStore(space);
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]!;
@@ -76,14 +78,15 @@ export class WebResultsMemoryStore {
       return [];
     }
 
-    const store = this.getStore();
+    const space = this.embeddingService.captureSpace();
+    const store = this.getStore(space);
     if (store.count() === 0) {
       return [];
     }
 
     const fetchLimit = Math.max(limit * 3, 20);
     const [vectorResults, ftsResults] = await Promise.all([
-      (async () => store.search(await this.embeddingService.embedOne(query), fetchLimit))(),
+      (async () => store.search((await this.embeddingService.embedPinned(space, [query], 'query'))[0]!, fetchLimit))(),
       Promise.resolve(store.searchFTS(query, fetchLimit)),
     ]);
 
@@ -138,31 +141,32 @@ export class WebResultsMemoryStore {
     return this.getStore().count();
   }
 
-  async reembed(): Promise<{ count: number; model: string }> {
+  async reembed(pinnedSpace?: EmbeddingSpace): Promise<{ count: number; model: string }> {
     if (!this.embeddingService.getStatus().configured) {
+      if (pinnedSpace) throw new Error('EMBEDDING_SPACE_CHANGED');
       return { count: 0, model: await this.embeddingService.getModelName() };
     }
 
-    const currentProfileId = this.embeddingService.getProfileId();
-    const profileIds = Array.from(new Set([...this.listProfileIds(), currentProfileId]));
+    const space = pinnedSpace ?? this.embeddingService.captureSpace();
+    const profileIds = this.listProfileIds();
     const entriesById = new Map<string, ReturnType<VectorStoreService['getAll']>[number]>();
 
     for (const profileId of profileIds) {
       const dbPath = this.getDbPath(profileId);
-      if (profileId !== currentProfileId && !fs.existsSync(dbPath)) continue;
-      for (const entry of this.getStoreForProfile(profileId).getAll()) {
-        entriesById.set(entry.id, entry);
+      for (const entry of readMemorySource(dbPath)) {
+        const existing = entriesById.get(entry.id);
+        if (!existing || entry.createdAt > existing.createdAt) entriesById.set(entry.id, entry);
       }
     }
 
     const entries = Array.from(entriesById.values());
     if (entries.length === 0) {
-      return { count: 0, model: await this.embeddingService.getModelName() };
+      return { count: 0, model: space.model };
     }
 
-    const store = this.getStoreForProfile(currentProfileId);
-    const model = await this.embeddingService.getModelName();
-    const embeddings = await this.embeddingService.embedBatch(entries.map((entry) => entry.content));
+    const model = space.model;
+    const embeddings = await this.embeddingService.embedPinned(space, entries.map((entry) => entry.content));
+    const store = this.getStore(space);
 
     for (let index = 0; index < entries.length; index++) {
       const entry = entries[index]!;
@@ -174,7 +178,7 @@ export class WebResultsMemoryStore {
   }
 
   getCurrentDbPath(): string {
-    return this.getDbPath(this.embeddingService.getProfileId());
+    return this.getDbPath(currentStorageSpace(this.embeddingService).id);
   }
 
   currentDbExists(): boolean {
@@ -186,7 +190,7 @@ export class WebResultsMemoryStore {
   }
 
   deleteCurrentDbFile(): string {
-    const profileId = this.embeddingService.getProfileId();
+    const profileId = currentStorageSpace(this.embeddingService).id;
     const dbPath = this.getDbPath(profileId);
     this.closeStoreForProfile(profileId);
     this.removeDbArtifact(dbPath);
@@ -219,15 +223,16 @@ export class WebResultsMemoryStore {
     }
   }
 
-  private getStore(): VectorStoreService {
-    return this.getStoreForProfile(this.embeddingService.getProfileId());
+  private getStore(space = currentStorageSpace(this.embeddingService)): VectorStoreService {
+    return this.getStoreForProfile(space);
   }
 
-  private getStoreForProfile(profileId: string): VectorStoreService {
+  private getStoreForProfile(space: Pick<EmbeddingSpace, 'id' | 'dimensions'>): VectorStoreService {
+    const profileId = space.id;
     const existing = this.stores.get(profileId);
     if (existing) return existing;
 
-    const store = new VectorStoreService(this.getDbPath(profileId), this.embeddingService.getDimensions());
+    const store = new VectorStoreService(this.getDbPath(profileId), space.dimensions);
     this.stores.set(profileId, store);
     return store;
   }

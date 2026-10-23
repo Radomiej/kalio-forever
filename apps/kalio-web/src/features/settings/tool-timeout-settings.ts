@@ -5,6 +5,7 @@ export type { ToolTimeoutSettings } from '@kalio/types';
 export type ToolTimeoutKey = keyof ToolTimeoutSettings;
 
 export const DEFAULT_TOOL_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
+  providerRequestTimeoutMs: 120000,
   webSearchTimeoutMs: 120000,
   providerLocalTimeoutMs: 3000,
   providerRemoteTimeoutMs: 15000,
@@ -12,6 +13,7 @@ export const DEFAULT_TOOL_TIMEOUT_SETTINGS: ToolTimeoutSettings = {
 };
 
 const TOOL_TIMEOUT_BOUNDS: Record<ToolTimeoutKey, { min: number; max: number }> = {
+  providerRequestTimeoutMs: { min: 1000, max: 1800000 },
   webSearchTimeoutMs: { min: 15000, max: 600000 },
   providerLocalTimeoutMs: { min: 1000, max: 30000 },
   providerRemoteTimeoutMs: { min: 5000, max: 120000 },

@@ -9,6 +9,7 @@ import { SessionEventsService } from '../session-events.service';
 import { SessionPipelineService } from '../session-pipeline.service';
 import { SessionsService } from '../sessions.service';
 import { ToolDispatchService } from '../tool-dispatch.service';
+import { SessionRuntimeStopService } from '../session-runtime-stop.service';
 
 describe('ChatGateway dependency injection', () => {
   it('injects durable HITL replay and continuation services', async () => {
@@ -17,6 +18,7 @@ describe('ChatGateway dependency injection', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ChatGateway,
+        { provide: SessionRuntimeStopService, useValue: {} },
         { provide: ToolDispatchService, useValue: { getPendingConfirmations: vi.fn().mockReturnValue([]) } },
         { provide: SessionPipelineService, useValue: {} },
         { provide: RAAppHITLService, useValue: {} },

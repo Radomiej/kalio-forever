@@ -1,8 +1,37 @@
-import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import type { ExecutionProfile } from '@kalio/types';
+import { getExecutionProfiles } from '../../services/apiClient';
+import { describe, expect, it, vi } from 'vitest';
 import { useArchitectRunOptions } from './useArchitectRunOptions';
+vi.mock('../../services/apiClient', () => ({ getExecutionProfiles: vi.fn().mockResolvedValue([]) }));
 
 describe('useArchitectRunOptions', () => {
+  it('loads only enabled profiles without replacing an explicit selection', async () => {
+    const profile: ExecutionProfile = { id: 'devin', name: 'Devin', model: 'swe-2', kind: 'devin-cli-acp', enabled: true, approvalMode: 'kalio_strict', capabilitiesVersion: '1', createdAt: 1, updatedAt: 1 };
+    vi.mocked(getExecutionProfiles).mockResolvedValueOnce([profile, { ...profile, id: 'disabled', enabled: false }]);
+    const { result } = renderHook(() => useArchitectRunOptions());
+    act(() => result.current.setExecutionProfileId('explicit-other'));
+    await waitFor(() => expect(result.current.profilesLoading).toBe(false));
+    expect(result.current.executionProfiles).toEqual([profile]);
+    expect(result.current.executionProfileId).toBe('explicit-other');
+  });
+  it('reports catalog failure without silently returning to the default', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(getExecutionProfiles).mockRejectedValueOnce(new Error('offline'));
+    const { result } = renderHook(() => useArchitectRunOptions());
+    act(() => result.current.setExecutionProfileId('devin'));
+    await waitFor(() => expect(result.current.profilesError).toContain('Could not load'));
+    expect(result.current.executionProfileId).toBe('devin');
+    expect(result.current.profilesLoading).toBe(false);
+    log.mockRestore();
+  });
+  it('retains explicit execution selection separately from untrusted context', () => {
+    const { result } = renderHook(() => useArchitectRunOptions());
+    expect(result.current.executionProfileId).toBe('');
+    act(() => result.current.setExecutionProfileId('devin-swe-2'));
+    expect(result.current.executionProfileId).toBe('devin-swe-2');
+    expect(result.current.runContext()).not.toHaveProperty('executionProfileId');
+  });
   it('returns defaults without project-specific execution fields', () => {
     const { result } = renderHook(() => useArchitectRunOptions());
 

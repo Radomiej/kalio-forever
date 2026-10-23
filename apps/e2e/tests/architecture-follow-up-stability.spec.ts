@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { activeSessionAfterSubmit, installMockLaunchProfile, selectMockLaunchProfile } from './helpers/mock-launch-profile';
 import {
   deleteSessionIfExists,
   selectArchitectureInComposer,
@@ -28,6 +29,7 @@ test.describe('Architecture workflow follow-up stability', () => {
   test('keeps the earlier workflow bubble stable, exposes only real branch sessions, and rehydrates after reload', async ({ page, request }) => {
     test.setTimeout(300_000);
     let hostSessionId: string | null = null;
+    await installMockLaunchProfile(page, request);
 
     try {
       await page.addInitScript(() => {
@@ -44,21 +46,13 @@ test.describe('Architecture workflow follow-up stability', () => {
       const newSessionButton = page.getByTestId('new-session-btn');
       await expect(newSessionButton).toBeVisible({ timeout: 30_000 });
       await clickByTestId(page, 'new-session-btn');
-      await expect(page.getByTestId('chat-session-title')).toHaveText('New Chat', { timeout: 30_000 });
-      await expect
-        .poll(
-          () => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')),
-          { timeout: 15_000 },
-        )
-        .not.toBeNull();
-      hostSessionId = await page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id'));
-      const sessionId = hostSessionId;
-      if (!sessionId) {
-        throw new Error('Missing active host session id after creating a new chat.');
-      }
+      await expect(page.getByTestId('welcome-screen')).toBeVisible();
+      await selectMockLaunchProfile(page);
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
       await sendMessageFromComposer(page, 'Assess what this workflow can do in two short bullets.');
+      hostSessionId = await activeSessionAfterSubmit(page);
+      const sessionId = hostSessionId;
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 120_000 });
       const firstBubble = page.getByTestId('agent-turn-bubble').first();
@@ -76,6 +70,8 @@ test.describe('Architecture workflow follow-up stability', () => {
       const hostTitle = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? 'workflow host';
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
 
+      await selectArchitectureInComposer(page, 'strategic-decision-council');
+      await expect(page.getByTestId('chat-architecture-select')).toHaveValue('strategic-decision-council');
       await sendMessageFromComposer(page, 'Repeat the previous conclusion in one short sentence.');
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(2, { timeout: 30_000 });

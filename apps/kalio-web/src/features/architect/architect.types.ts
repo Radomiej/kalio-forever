@@ -34,6 +34,7 @@ export interface ArchitectNode {
   maxToolAttempts?: number;
   toolOverride?: ArchitectureSchemaNode['toolOverride'];
   behavior?: ArchitectureSchemaNode['behavior'];
+  autoRouting?: ArchitectureSchemaNode['autoRouting'];
   personaId?: string;
   description?: string;
   x: number;
@@ -69,6 +70,7 @@ export interface ArchitectRunResult {
   run: ArchitectureRun;
   agentFlowRunId?: string;
   agentFlowStatus?: AgentFlowRunStatus;
+  agentFlowAwaitingHumanInput?: boolean;
   agentFlowSummary?: string;
   events: ArchitectureExecutionEvent[];
   graph: ArchitectureGraphProjection;

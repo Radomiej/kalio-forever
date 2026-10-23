@@ -58,6 +58,20 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+export interface DevinCliStatus {
+  executable: string;
+  version: string | null;
+  authenticated: boolean;
+  acp: boolean;
+  probeChecked: boolean;
+  models: string[];
+  modelCatalogStatus: 'ready' | 'command-failed' | 'unrecognized-output' | 'not-checked';
+  modelCatalogStale: boolean;
+  modelCatalogDiscoveredAt: number | null;
+  hostCount: number;
+  hosts: Array<{ model: string; status: 'starting' | 'online' | 'error' | 'offline'; processEpoch?: string }>;
+}
+
 export async function getProjects(): Promise<Project[]> {
   const { data } = await apiClient.get<Project[]>('/api/projects');
   return data;
@@ -70,6 +84,12 @@ export async function createProject(dto: CreateProjectDto): Promise<Project> {
 
 export async function getExecutionProfiles(): Promise<ExecutionProfile[]> {
   const { data } = await apiClient.get<ExecutionProfile[]>('/api/runtime/profiles');
+  return data;
+}
+
+export async function getDevinCliStatus(refresh = false): Promise<DevinCliStatus> {
+  const url = refresh ? '/api/runtime/devin-cli/status?refresh=true' : '/api/runtime/devin-cli/status';
+  const { data } = await apiClient.get<DevinCliStatus>(url);
   return data;
 }
 
@@ -94,6 +114,11 @@ export async function resolveDirectExecutionProfile(
   dto: ResolveDirectExecutionProfileDto,
 ): Promise<ExecutionProfile> {
   const { data } = await apiClient.post<ExecutionProfile>('/api/runtime/profiles/direct/resolve', dto);
+  return data;
+}
+
+export async function resolveDevinCliExecutionProfile(model: string): Promise<ExecutionProfile> {
+  const { data } = await apiClient.post<ExecutionProfile>('/api/runtime/profiles/devin-cli/resolve', { model });
   return data;
 }
 

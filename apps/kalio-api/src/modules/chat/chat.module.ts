@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { CHAT_DURABLE_EVIDENCE_READER } from '@kalio/types';
 import { TextDeltaHandler } from './handlers/text-delta.handler';
 import { ThinkingDeltaHandler } from './handlers/thinking-delta.handler';
 import { ToolCallHandler } from './handlers/tool-call.handler';
@@ -18,6 +19,7 @@ import { LLMTurnRuntimeService } from './llm-turn-runtime.service';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { SessionPipelineService } from './session-pipeline.service';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { SessionsService } from './sessions.service';
 import { SessionsController } from './sessions.controller';
 import { ProjectsController } from './projects.controller';
@@ -28,6 +30,9 @@ import { ChatTestSupportRaAppController } from './chat-test-support-raapp.contro
 import { AuditModule } from './audit.module';
 import { AuditLogController } from './audit-log.controller';
 import { DrizzleMessageRepository } from './drizzle-message.repository';
+import { PersistedGoalSourceReader } from './persisted-goal-source-reader';
+import { PersistedRuntimeEvidenceReader } from './persisted-runtime-evidence-reader';
+import { HostDispatchReceiptService } from './host-dispatch-receipt.service';
 import { LLMServiceAdapter } from './llm-service.adapter';
 import { ImageHydratorService } from './image-hydrator.service';
 import { SubagentRuntimeService } from './subagent-runtime.service';
@@ -115,12 +120,17 @@ import {
     RuntimeExecutionScheduler,
     ProfiledLLMSource,
     SessionsService,
+    PersistedGoalSourceReader,
+    PersistedRuntimeEvidenceReader,
+    HostDispatchReceiptService,
+    { provide: CHAT_DURABLE_EVIDENCE_READER, useExisting: PersistedRuntimeEvidenceReader },
     ProjectsService,
     ChatTestSupportService,
     RunJournalService,
     RuntimeAuditLogger,
     ChatService,
     SessionPipelineService,
+    SessionProfileAdmissionService,
     ChatGateway,
     DrizzleMessageRepository,
     LLMServiceAdapter,
@@ -172,7 +182,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
+  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, PersistedGoalSourceReader, CHAT_DURABLE_EVIDENCE_READER, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(
@@ -180,14 +190,13 @@ export class ChatModule implements OnModuleInit {
     private readonly pipeline: SessionPipelineService,
     private readonly toolDispatch: ToolDispatchService,
     private readonly hitlNotifications: HitlNotificationService,
+    private readonly runtimeStop: SessionRuntimeStopService,
   ) {}
 
   onModuleInit(): void {
     this.telegramRelay.setCommandHandlers({
       stopAll: async () => {
-        for (const id of this.pipeline.getActiveSessionIds()) {
-          this.pipeline.stop(id);
-        }
+        await this.runtimeStop.stopSessionTrees([...this.pipeline.getActiveSessionIds()]);
       },
       getStatus: async () => {
         const ids = this.pipeline.getActiveSessionIds();

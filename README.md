@@ -25,7 +25,8 @@ tool access, durable execution events, and an inspectable result.
 
 > **Local-first by design.** Kalio sends LLM traffic from your backend to the
 > provider you configure. Session files, memory, credentials, and execution
-> history stay in your local data directory.
+> history are stored in your local data directory. Configured providers and
+> external agent runtimes receive the prompts and context sent to them.
 
 ## At a glance
 
@@ -34,7 +35,7 @@ tool access, durable execution events, and an inspectable result.
 | **Talk** | Streaming chat with a multi-step tool loop, queues, attachments, and session history. |
 | **Architect** | Versioned architecture schemas, role slots, personas, graph nodes, edges, and routing policies. |
 | **Inspect** | Timeline, graph, chat, tool calls, runtime events, and audit evidence for each run. |
-| **Own your data** | Sandboxed session workspaces, semantic memory, SQLite persistence, and encrypted provider secrets. |
+| **Own your data** | Sandboxed workspaces, semantic memory, project context, SQLite persistence, and encrypted provider secrets. |
 
 ## See it in action
 
@@ -57,7 +58,7 @@ flowchart TB
 ~~~
 
 <p align="center">
-  <img src="docs/kalio_module_architecture.svg" alt="Kalio frontend and backend module architecture" />
+  <img src="docs/kalio_module_architecture.svg" alt="Kalio frontend and backend module architecture" width="1280" height="780" />
 </p>
 
 The React client projects session state and runtime activity. The backend owns
@@ -72,17 +73,26 @@ for day-to-day graph editing.
 
 ### Install Kalio on Windows
 
-The fastest first run uses the local production profile and the mock provider;
-no API key is required.
+Open **Command Prompt (`cmd.exe`)** and run this one line. The installer uses the
+local production profile and the mock provider, so no API key is required:
+
+~~~bat
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
+~~~
+
+Autostart after Windows sign-in is enabled by default. To install without it,
+pass `-NoAutostart` to the downloaded CMD wrapper. The opt-out is remembered
+across updates and repairs; pass `-EnableAutostart` to turn it back on. To use Bun instead of the
+default Node runtime, pass `-Runtime bun`.
+
+~~~bat
+curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -Runtime bun && del "%TEMP%\kalio-install.cmd"
+~~~
+
+PowerShell remains available as an alternative:
 
 ~~~powershell
 irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1 | iex
-~~~
-
-To use the Bun runtime instead of the default Node runtime:
-
-~~~powershell
-$script = irm https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.ps1; & ([scriptblock]::Create($script)) -Runtime bun
 ~~~
 
 
@@ -94,10 +104,19 @@ Open **http://127.0.0.1:4016**. The API health endpoint is
 3. Create a session in **Talk**.
 4. Send a message and approve tool calls when the HITL prompt appears.
 
+To update an installed Windows runtime, run:
+
+~~~powershell
+& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
+~~~
+
+The safe update waits while Kalio is running, verifies the downloaded runtime,
+health-checks the new version, and rolls back on failure. User data is preserved.
+For a repair, run the CMD installer again; it will not replace a running runtime.
+
 See the [Windows user guide](docs/quickstart-user.md) for upgrades,
 uninstall, data locations, and troubleshooting.
 
-### Standalone desktop build
 ### Install Kalio on Linux
 
 The command-line installer downloads the latest published runtime archive and keeps
@@ -113,20 +132,10 @@ For the Bun runtime:
 curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh && bash /tmp/kalio-install.sh --runtime bun
 ~~~
 
-On Windows, an installed runtime can update itself through a separate helper process:
+### Optional Tauri/NSIS desktop installer
 
-~~~powershell
-& "$env:LOCALAPPDATA\Kalio\bin\kalio.cmd" update
-~~~
-
-The safe command defers while Kalio is running. An explicit `--force` request stops
-only this installation's recorded process tree, downloads the matching Node or Bun
-archive, verifies the runtime manifest and SHA-256, switches versions atomically,
-health-checks the new process, and rolls back on failure. The Scheduled Task performs
-the same check without force at user sign-in. User data is preserved.
-
-For an older installation or a repair, run the release installer again. It refuses
-to replace a runtime while it is running and preserves the data directory.
+The Tauri/NSIS desktop installer is optional. Use it when you specifically want
+the native desktop shell; the CMD installation above is the primary Windows path.
 
 The Windows desktop build packages the web client, the production API, and a
 Node.js runtime into a per-user Tauri installer. The backend starts on loopback
@@ -143,7 +152,7 @@ pnpm desktop:build
 ~~~
 
 The NSIS installer is written to
-`src-tauri/target/release/bundle/nsis/Kalio_1.0.0_x64-setup.exe`.
+`src-tauri/target/release/bundle/nsis/Kalio_1.0.3_x64-setup.exe`.
 The desktop backend uses `http://127.0.0.1:4516`; this port is reserved for
 the installed desktop app and should not be shared with another local service.
 
@@ -223,6 +232,7 @@ stack, CI, release, and test command map.
 | **Human-in-the-loop** | Pauses confirmed tools before execution and binds approval/cancel actions to the owning session. |
 | **Virtual File System** | Gives every session a sandboxed workspace for reading, writing, listing, and searching files. |
 | **Semantic memory** | Stores per-persona vector memory with sqlite-vec retrieval. |
+| **Project Context** | Indexes opted-in project code and text for model-specific hybrid search and agent retrieval. |
 | **Personas** | Isolates system prompts, model defaults, MCP policies, skills, and tool access. |
 | **MCP** | Discovers tools from stdio or HTTP servers and exposes them under stable prefixed names. |
 | **RA-Apps** | Renders interactive mini-apps through HTML iframes or a declarative GUI DSL. |
@@ -295,8 +305,9 @@ implementation detail.
 
 ## Providers
 
-Kalio supports OpenAI-compatible providers through the configured backend.
-Use mock for offline development and tests.
+Kalio supports direct LLM API providers and separate agent execution profiles.
+For direct LLM execution, the backend uses the providers below. Use mock for
+offline development and tests.
 
 | Provider | LLM_PROVIDER | Notes |
 | --- | --- | --- |
@@ -315,12 +326,30 @@ providers require the credentials expected by that provider.
 
 For image generation, configure IMAGE_PROVIDER and IMAGE_API_KEY separately.
 
+### Agent execution profiles
+
+Agent runtimes are separate from the `LLM_PROVIDER` API setting:
+
+| Runtime | Profile type | Execution boundary |
+| --- | --- | --- |
+| Direct LLM | `direct-llm` | Kalio's tool loop with a configured LLM API provider. |
+| Codex App Server | `codex-app-server` | Local `codex app-server` process with a configured auth profile; Kalio retains session and tool-policy ownership. |
+| Devin CLI | `devin-cli-acp` | Authenticated host CLI over ACP, with models discovered from its catalog and persona-scoped Kalio MCP tools. |
+| Devin Cloud | `devin-api` | Remote REST session; requires `DEVIN_API_KEY`, `DEVIN_ORG_ID`, and `DEVIN_MAX_ACU_LIMIT`. Does not receive local workspace files or Kalio tools. |
+
+Persona instructions and the execution provider/model are separate choices.
+Connect the runtime in Settings, then select the provider/model for the chat.
+Model availability and account access depend on the connected service.
+See the [runtime boundary specification](project-spec.md#agent-runtime-and-codex-boundary)
+for authentication, MCP, and approval boundaries.
+
 ## Data and safety
 
 | Data | Default location | Purpose |
 | --- | --- | --- |
 | SQLite database | $WORKSPACE_ROOT/kalio.db | Sessions, messages, personas, credentials, and audit log. |
 | Semantic memory | $WORKSPACE_ROOT/memory/ | Per-persona vector stores. |
+| Project Context | `$MEMORY_DB_PATH/project-resources/<project-hash>/<embedding-space-hash>.db` | Local per-project, per-model chunks, full text, FTS, and vectors; stored outside the project checkout. Managed QA uses `%LOCALAPPDATA%/kalio-forever-qa/memory/`. |
 | Session files | $WORKSPACE_ROOT/sessions/{id}/ | Sandboxed workspace for one chat session. |
 | Session KV | $WORKSPACE_ROOT/sessions/{id}/_kv.json | Session-scoped key-value state. |
 | RA-App catalog | $WORKSPACE_ROOT/ra-apps or RA_APPS_PATH | Versioned stored apps. |
@@ -377,11 +406,13 @@ files past the repository's 500 LOC limit; split a touched slice first.
 | Document | Purpose |
 | --- | --- |
 | [Quick start for users](docs/quickstart-user.md) | Windows install, autostart, upgrades, uninstall, and troubleshooting. |
+| [Testing Kalio on Windows](docs/testing-kalio.md) | QA stack, manual smoke test, and installed-release checks. |
 | [Local development guide](docs/local-dev-guide.md) | Dev, QA, prod, CI, release, and test entry points. |
 | [AgentFlow architecture](docs/agentflow-architecture-and-workflow.md) | Architecture schemas, workflow execution, and delegation. |
 | [Runtime stack](docs/architecture-runtime-stack.md) | Registry, runtime, branch execution, and projections. |
 | [MCP architecture](docs/mcp-architecture.md) | Server discovery, lifecycle, and persona policy. |
 | [RA-App design](docs/raapp-design-current.md) | Inline apps, catalog apps, iframe bridge, and approvals. |
+| [Embedding spaces and Project Context](docs/spec/embedding-spaces-and-project-resources.md) | Model-scoped project indexes, refresh, search, and storage. |
 | [Agent skills index](docs/agent-skills/README.md) | Repo-visible skills for AI-assisted work. |
 | [Scripts overview](scripts/README.md) | Root command surface and helper scripts. |
 | [Code of Conduct](CODE_OF_CONDUCT.md) | Community expectations and reporting path. |
@@ -392,6 +423,7 @@ files past the repository's 500 LOC limit; split a touched slice first.
 
 - Streaming chat with tool execution and HITL confirmation.
 - Sandboxed VFS, semantic memory, personas, and MCP discovery.
+- Opt-in Project Context indexing and model-specific retrieval for registered projects.
 - RA-App rendering, image/vision support, and CLI agent streaming.
 - Architecture Registry, Architecture Runtime, and Execution Graph views.
 

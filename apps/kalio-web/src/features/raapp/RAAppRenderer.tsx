@@ -11,6 +11,7 @@ import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
 import { resolveLiveTurnState } from '../chat/liveTurnState';
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
+import { validateInteractiveQA } from './qaInteractiveValidation';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -69,6 +70,7 @@ function safeParseJson(value: string): unknown | null {
 
 export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const actionSessionId = sessionId ?? activeSessionId;
   const sessions = useSessionStore((state) => state.sessions);
   const messages = useSessionStore((state) => state.messages);
   const agentTurns = useSessionStore((state) => state.agentTurns);
@@ -81,20 +83,20 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
   const queuedDepthBySession = useAgentStore((state) => state.queuedDepthBySession);
   const runtimeActivitySnapshots = useAgentStore((state) => state.runtimeActivitySnapshots);
   const activeSessionLiveTurn = resolveLiveTurnState({
-    sessionId: activeSessionId,
+    sessionId: actionSessionId,
     sessionMessages: messages,
     agentTurns,
-    activeTurnId: getSessionActiveTurnId(activeSessionId),
+    activeTurnId: getSessionActiveTurnId(actionSessionId),
     isStreaming: false,
     streamingSessionId: null,
     awaitingFirstChunk: false,
-    hasActiveLoop: hasActiveLoopForSession(activeSessionId),
+    hasActiveLoop: hasActiveLoopForSession(actionSessionId),
     queuedDepth: selectQueuedDepth({
-      sessionId: activeSessionId,
+      sessionId: actionSessionId,
       queuedDepthBySession,
       runtimeActivitySnapshots,
     }),
-    activeToolActivities: getToolActivitiesForSession(activeSessionId),
+    activeToolActivities: getToolActivitiesForSession(actionSessionId),
     streamingChunks,
     thinkingChunks,
     chunkSessionIds,
@@ -103,8 +105,8 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
 
   const handleGuiAction = useCallback(
     (action: string) => {
-      if (!activeSessionId) return;
-      const session = sessions.find((s) => s.id === activeSessionId);
+      if (!actionSessionId || actionSessionId !== activeSessionId) return;
+      const session = sessions.find((s) => s.id === actionSessionId);
       if (!session) return;
 
       if (shouldQueueGuiAction) {
@@ -124,7 +126,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       addMessage(userMsg);
       eventBus.sendMessage({ sessionId: activeSessionId, content: action, personaId: session.personaId });
     },
-    [activeSessionId, sessions, shouldQueueGuiAction],
+    [actionSessionId, activeSessionId, sessions, shouldQueueGuiAction],
   );
 
   if (result?.status === 'error') {
@@ -183,6 +185,10 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       typeof (parsed as GuiDslPayload).data === 'object' &&
       (parsed as GuiDslPayload).data !== null
     ) {
+      const validationError = validateInteractiveQA(parsed as GuiDslPayload);
+      if (validationError) {
+        return <div role="alert" data-testid="raapp-error" className="alert alert-error py-2 text-xs">{validationError}</div>;
+      }
       return (
         <>
           <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />

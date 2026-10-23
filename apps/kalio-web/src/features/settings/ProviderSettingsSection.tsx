@@ -4,6 +4,7 @@ import type { Credential } from '@kalio/types';
 import type { AddForm, ProviderTestState } from './llm-panel.types';
 import { ProviderCard } from './ProviderCard';
 import { ALL_PROVIDER_TYPES, PROVIDER_LABELS } from './llm-provider-settings';
+import { RuntimeProviderChoices } from './RuntimeProviderChoices';
 
 interface EnvProviderCardProps {
   isActive: boolean;
@@ -175,9 +176,11 @@ export function ProviderSettingsSection({
       <div>
         <h3 className="text-sm font-semibold mb-1">Providers</h3>
         <p className="text-xs text-base-content/60">
-          Saved provider credentials. Activate one here to make it the active runtime provider.
+          Choose a connected agent for new conversations, or configure API providers below.
         </p>
       </div>
+
+      <RuntimeProviderChoices />
 
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-base-content/50 py-4">
@@ -185,7 +188,11 @@ export function ProviderSettingsSection({
         </div>
       ) : (
         <>
-          {showEnvFallback ? (
+          {showEnvFallback && envFallbackProviderId.toLowerCase() === 'mock' ? (
+            <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm" role="status" data-testid="provider-env-mock">
+              The current QA environment uses a test-only fallback. Mock is not offered as a selectable provider.
+            </div>
+          ) : showEnvFallback ? (
             <EnvProviderCard
               isActive={envFallbackActive}
               isSyncing={syncing === '__env__'}
@@ -302,14 +309,14 @@ export function ProviderSettingsSection({
                 </button>
 
                 <div className="flex gap-2">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={onCancelAdd}>Cancel</button>
+                  <button type="button" className="btn btn-outline btn-error btn-sm" onClick={onCancelAdd}>Cancel</button>
                   <button type="submit" className="btn btn-primary btn-sm" data-testid="add-provider-submit">Add Provider</button>
                 </div>
               </div>
             </form>
           ) : (
             <button
-              className="btn btn-ghost btn-sm gap-2 self-start text-sky-400 hover:text-sky-300"
+              className="btn btn-primary btn-sm gap-2 self-start"
               onClick={onShowAdd}
               data-testid="add-provider-btn"
             >

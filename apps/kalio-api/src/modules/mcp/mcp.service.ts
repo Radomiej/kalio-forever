@@ -16,6 +16,7 @@ import type {
 import { DrizzleService } from '../../database/drizzle.service';
 import { mcpServers } from '../../database/schema';
 import { KalioConfigService } from '../../config/kalio-config.service';
+import { CmdInvocationAuditService } from '../chat/cmd-invocation-audit.service';
 import {
   buildServerKey,
   makeMcpServerId,
@@ -35,6 +36,7 @@ import {
   type ServerHandle,
 } from './mcp-runtime.utils';
 import { rebuildMcpToolNameMap } from './mcp-tool-name-map.utils';
+import { callMcpTool, filterMcpToolDiscoveries, sameMcpHandleConfig } from './mcp-tool-policy.utils';
 
 const HEALTH_CHECK_MS = 30_000;
 const BASE_RESTART_MS = 2_000;
@@ -55,6 +57,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly drizzle: DrizzleService,
     @Optional() private readonly kalioConfig?: KalioConfigService,
+    @Optional() private readonly cmdAudit?: CmdInvocationAuditService,
   ) {}
 
   setGateway(gw: { emitToAll(event: string, data: unknown): void }): void {
@@ -108,7 +111,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   async callTool(serverKey: string, toolName: string, args: Record<string, unknown>): Promise<unknown> {
     const handle = this.handles.get(serverKey);
     if (!handle || handle.status !== 'connected') throw new Error(`MCP server ${serverKey} not connected`);
-    return handle.client.callTool({ name: toolName, arguments: args });
+    return callMcpTool(handle, toolName, args);
   }
 
   async addServer(dto: CreateMCPServerDto): Promise<MCPServer> {
@@ -211,6 +214,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     handle.rawTransport = transport;
 
     try {
+      await this.cmdAudit?.recordInvocation({ command: handle.command, source: 'mcp.stdio.connect', launcher: 'stdio-transport' });
       await client.connect(transport);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -268,7 +272,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
     const MAX_ITERATIONS = 100;
     do {
       const result = await client.listTools(cursor ? { cursor } : undefined);
-      for (const t of result.tools) {
+      for (const t of filterMcpToolDiscoveries(result.tools, this.handles.get(serverKey))) {
         const tool = buildMcpToolPayload(serverKey, t);
         this.toolOriginalNames.set(tool, t.name);
         const ref = { serverKey, originalName: t.name };
@@ -458,10 +462,7 @@ export class MCPService implements OnModuleInit, OnModuleDestroy {
   }
 
   private sameHandleConfig(left: ServerHandle, right: ServerHandle): boolean {
-    return left.signature === right.signature
-      && left.serverKey === right.serverKey
-      && JSON.stringify(left.envVars ?? {}) === JSON.stringify(right.envVars ?? {})
-      && JSON.stringify(left.headers ?? {}) === JSON.stringify(right.headers ?? {});
+    return sameMcpHandleConfig(left, right);
   }
 
   private toMCPServer(entry: MCPResolvedRegistryEntry, row?: MCPServerRow): MCPServer {

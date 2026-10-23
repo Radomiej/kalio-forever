@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionsController } from './sessions.controller';
 import type { ChatSession, ChatMessage, RuntimeWatchTarget } from '@kalio/types';
+import { readPendingRAAppLaunchInputs } from './raapp-launch-intent';
 
 const mockSession: ChatSession = {
   id: 'sess-1',
@@ -43,6 +44,7 @@ function makeService() {
 function makeRunJournal() {
   return {
     getCurrentRun: vi.fn().mockResolvedValue(null),
+    getHistoryTurns: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -75,13 +77,14 @@ function makeContextPreviewService() {
 }
 
 function makeRuntimeStop() {
+  const stopSessionTree = vi.fn().mockResolvedValue({
+    rootSessionId: 'sess-1', sessionIds: ['sess-1'], directChildIdsBySessionId: {},
+    descendantIdsBySessionId: {}, childSessionsById: {},
+  });
   return {
-    stopSessionTree: vi.fn().mockResolvedValue({
-      rootSessionId: 'sess-1',
-      sessionIds: ['sess-1'],
-      directChildIdsBySessionId: { 'sess-1': [] },
-      descendantIdsBySessionId: { 'sess-1': [] },
-      childSessionsById: {},
+    stopSessionTree,
+    withStoppedTree: vi.fn(async (id: string, action: (tree: Awaited<ReturnType<typeof stopSessionTree>>) => Promise<void>) => {
+      await action(await stopSessionTree(id));
     }),
   };
 }
@@ -119,6 +122,12 @@ describe('SessionsController', () => {
   });
 
   describe('list()', () => {
+    it('reads only bounded valid turn IDs in the exact session', async () => {
+      await controller.getHistoryRuns('sess-1', 'valid-1,../other,,valid_2');
+      expect(runJournal.getHistoryTurns).toHaveBeenCalledWith('sess-1', ['valid-1', 'valid_2']);
+      await controller.getHistoryRuns('sess-1', Array.from({ length: 110 }, (_, i) => `turn-${i}`).join(','));
+      expect(runJournal.getHistoryTurns.mock.calls[1][1]).toHaveLength(100);
+    });
     it('returns all sessions', async () => {
       const result = await controller.list();
       expect(svc.list).toHaveBeenCalledWith({ includeArchived: false });
@@ -287,6 +296,54 @@ describe('SessionsController', () => {
     it('restores an archived session', async () => {
       await controller.restore('sess-1');
       expect(svc.restore).toHaveBeenCalledWith('sess-1');
+    });
+  });
+
+  describe('RA-App launch inputs public boundary', () => {
+    for (const method of ['create', 'update'] as const) {
+      it(`${method} preserves exact serialized inputs while stripping private keys`, async () => {
+        const inputs = ' { "question": "Choose?", "options": ["Yes", "No"] } ';
+        const runtimeContext = {
+          runtimeKind: 'chat' as const,
+          explicitToolNames: ['terminal_spawn'],
+          architectureContext: {
+            raAppLaunchId: 'qa-interactive',
+            raAppLaunchName: 'Interactive Q&A',
+            raAppLaunchSource: 'raapp_manager',
+            raAppLaunchInputs: inputs,
+            launchAllowedToolNames: ['terminal_spawn'],
+            privateControl: 'must not survive',
+          },
+        };
+        if (method === 'create') await controller.create({ personaId: 'ra-apps', runtimeContext });
+        else await controller.update('sess-1', { runtimeContext });
+        const expected = { runtimeContext: { runtimeKind: 'chat', architectureContext: {
+          raAppLaunchId: 'qa-interactive', raAppLaunchName: 'Interactive Q&A',
+          raAppLaunchSource: 'raapp_manager', raAppLaunchInputs: inputs,
+        } } };
+        if (method === 'create') expect(svc.create).toHaveBeenCalledWith({ personaId: 'ra-apps', ...expected });
+        else expect(svc.update).toHaveBeenCalledWith('sess-1', expected);
+        expect(readPendingRAAppLaunchInputs(runtimeContext)).toEqual({ question: 'Choose?', options: ['Yes', 'No'] });
+      });
+    }
+
+    it.each([undefined, null, 42, {}, [], '', '   '])('strips non-string/blank launch inputs: %j', async (value) => {
+      await controller.create({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchId: 'qa-interactive', raAppLaunchInputs: value,
+      } } });
+      expect(svc.create).toHaveBeenCalledWith({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchId: 'qa-interactive',
+      } } });
+    });
+
+    it.each(['{broken}', '[]', 'null', '42'])('retains string policy but the existing input reader rejects invalid serialized objects: %s', async (raw) => {
+      await controller.create({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchInputs: raw,
+      } } });
+      expect(svc.create).toHaveBeenCalledWith({ personaId: 'ra-apps', runtimeContext: { runtimeKind: 'chat', architectureContext: {
+        raAppLaunchInputs: raw,
+      } } });
+      expect(readPendingRAAppLaunchInputs({ runtimeKind: 'chat', architectureContext: { raAppLaunchInputs: raw } })).toBeUndefined();
     });
   });
 

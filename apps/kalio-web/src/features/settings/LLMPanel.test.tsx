@@ -160,15 +160,15 @@ describe('LLMPanel', () => {
     expect(screen.getByLabelText('My OpenAI provider active')).toBeInTheDocument();
   });
 
-  it('renders compact provider health from the active runtime config', async () => {
+  it('explains that selected provider and connection verification are separate states', async () => {
     mockFetch(defaultMap({ activeId: CRED.id, credentials: [CRED] }));
     render(<LLMPanel />);
 
     await waitFor(() => expect(screen.getByTestId('provider-health-card')).toBeInTheDocument());
 
-    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('OpenAI');
-    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('gpt-4o-mini');
+    expect(screen.getByTestId('provider-health-card')).toHaveTextContent('Selected as active and successfully tested are separate states.');
     expect(screen.getByTestId('provider-health-card')).toHaveTextContent('Not tested');
+    expect(screen.getByTestId('provider-health-card')).not.toHaveTextContent('gpt-4o-mini');
   });
 
   it('shows the Windows local provider hint when a local provider is selected', async () => {
@@ -266,15 +266,30 @@ describe('LLMPanel', () => {
 
   it('renders runtime mode without the provider management list', async () => {
     mockFetch(defaultMap({ credentials: [CRED], activeId: CRED.id }));
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const fetchImplementation = fetchMock.getMockImplementation()!;
+    let resolveCredentials!: (response: Response) => void;
+    const credentialsResponse = new Promise<Response>((resolve) => {
+      resolveCredentials = resolve;
+    });
+    fetchMock.mockImplementation((...args) => (
+      args[0] === '/api/credentials' ? credentialsResponse : fetchImplementation(...args)
+    ));
     render(<LLMPanel mode="runtime" />);
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Runtime Settings', level: 2 })).toBeInTheDocument(),
     );
 
+    // The heading is visible while provider data is still loading.
+    expect(screen.queryByTestId('runtime-provider-selector')).not.toBeInTheDocument();
+    resolveCredentials(new Response(JSON.stringify([CRED]), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(await screen.findByTestId('runtime-provider-selector')).toHaveValue(CRED.id);
     expect(screen.queryByTestId('add-provider-btn')).not.toBeInTheDocument();
     expect(screen.queryByTestId(`provider-row-${CRED.id}`)).not.toBeInTheDocument();
-    expect(screen.getByTestId('runtime-provider-selector')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { name: 'Runtime Settings' })).toHaveLength(1);
   });
 
@@ -1275,4 +1290,27 @@ describe('LLMPanel', () => {
     await waitFor(() => expect(screen.getByTestId('provider-row-c-space-name')).toBeInTheDocument());
     expect(getRequestBody<{ name: string }>('POST', '/api/credentials').name).toBe('OpenAI');
   });
+  it('saves LLM request timeout in seconds as a backend millisecond setting', async () => {
+    mockFetch({ ...defaultMap(), 'PUT /api/credentials/settings/tool-timeouts': 204 as const });
+    render(<LLMPanel />);
+    const input = await screen.findByLabelText('LLM request timeout (seconds)');
+    expect(input).toHaveValue(120);
+    fireEvent.change(input, { target: { value: '600' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/credentials/settings/tool-timeouts',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ providerRequestTimeoutMs: 600000 }) }),
+    ));
+  });
+
+  it('restores the saved LLM request timeout and reports failed persistence', async () => {
+    mockFetch(defaultMap());
+    render(<LLMPanel />);
+    const input = await screen.findByLabelText('LLM request timeout (seconds)');
+    fireEvent.change(input, { target: { value: '600' } });
+    fireEvent.blur(input);
+    await screen.findByText(/failed to update tool timeout/i);
+    expect(input).toHaveValue(120);
+  });
+
 });

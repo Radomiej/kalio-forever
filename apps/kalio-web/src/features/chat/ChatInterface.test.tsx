@@ -212,9 +212,13 @@ const agentStoreState = {
 };
 
 vi.mock('../../store/agentStore', () => ({
-  useAgentStore: Object.assign(() => agentStoreState, {
-    getState: () => agentStoreState,
-  }),
+  useAgentStore: Object.assign(
+    <T,>(selector?: (state: typeof agentStoreState) => T) => {
+      const state = agentStoreState;
+      return typeof selector === 'function' ? selector(state) : state;
+    },
+    { getState: () => agentStoreState },
+  ),
 }));
 
 // ── sessionStore mock ─────────────────────────────────────────────────────────
@@ -241,8 +245,8 @@ const updateSession = vi.fn((sessionId: string, patch: { title?: string; persona
 
 function createMockSessions(): ChatSession[] {
   return [
-    { id: 'session-1', title: 'Test', personaId: 'p1', createdAt: 0, updatedAt: 0 },
-    { id: 'session-2', title: 'Other', personaId: 'p1', createdAt: 0, updatedAt: 0 },
+    { id: 'session-1', title: 'Test', personaId: 'p1', executionProfileId: 'test-devin-swe-2', createdAt: 0, updatedAt: 0 },
+    { id: 'session-2', title: 'Other', personaId: 'p1', executionProfileId: 'test-devin-swe-2', createdAt: 0, updatedAt: 0 },
     { id: 'session-raapp', title: 'My RA App', personaId: 'ra-apps', createdAt: 0, updatedAt: 0 },
   ];
 }
@@ -390,7 +394,14 @@ vi.mock('../../services/apiClient', () => ({
     patch: vi.fn(() => Promise.resolve({ data: {} })),
   },
   getSessionVfsFiles: vi.fn(() => Promise.resolve({ files: [] })),
-  getExecutionProfiles: vi.fn(() => Promise.resolve([])),
+  getExecutionProfiles: vi.fn(() => Promise.resolve([{
+    id: 'test-devin-swe-2', name: 'Devin SWE-2 test fixture', kind: 'devin-cli-acp',
+    model: 'swe-2', approvalMode: 'kalio_strict', enabled: true,
+    capabilitiesVersion: '1', createdAt: 1, updatedAt: 1,
+  }])),
+  getDevinCliStatus: vi.fn(() => Promise.resolve({
+    modelCatalogStatus: 'ready', modelCatalogStale: false, models: ['swe-2'],
+  })),
 }));
 
 vi.mock('../architect/architect.api', () => ({
@@ -493,6 +504,7 @@ vi.mock('./AgentTurnBubble', () => ({ AgentTurnBubble: () => null }));
   };
   agentStoreState.isStreaming = false;
   agentStoreState.streamingSessionId = null;
+  agentStoreState.pendingConfirmations = {};
   agentStoreState.activeAgentLoops = {};
   agentStoreState.toolActivities = [];
   agentStoreState.sessionStatusSnapshots = {};
@@ -1441,6 +1453,42 @@ describe('ChatInterface event wiring', () => {
         status: 'awaiting_confirmation',
       }),
     );
+  });
+
+  it('renders an ACP confirmation inline when its tool activity has no timeline tool item', async () => {
+    mockMessages = [makeMsg({
+      id: 'prompt-mcp',
+      sessionId: 'session-1',
+      role: 'user',
+      content: 'Write the App component',
+      createdAt: 1,
+    })];
+    getSessionMessages.mockReturnValue(mockMessages);
+    const view = await renderChatInterface();
+
+    agentStoreState.pendingConfirmations = {
+      'session-1': [{
+        requestId: 'req-mcp',
+        toolCallId: 'call-mcp',
+        sessionId: 'session-1',
+        toolName: 'fs_write',
+        args: { path: 'E:/Projekty/home-site/src/App.jsx' },
+        timeoutMs: 30000,
+      }],
+    };
+    agentStoreState.toolActivities = [{
+      callId: 'call-mcp',
+      requestId: 'req-mcp',
+      toolName: 'fs_write',
+      args: { path: 'E:/Projekty/home-site/src/App.jsx' },
+      sessionId: 'session-1',
+      status: 'awaiting_confirmation',
+      startedAt: 1,
+    }];
+    await rerenderChatInterface(view.rerender);
+
+    expect(screen.getByTestId('confirmation-confirm-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('confirmation-cancel-btn')).toBeInTheDocument();
   });
 
   it('REGRESSION: tool:arg_progress updates toolArgProgress in agentStore for the active session', async () => {

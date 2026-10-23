@@ -2908,13 +2908,13 @@ describe('ArchitectureRuntimeService', () => {
     expect(semantic.at(-1)?.type).not.toBe('final_artifact');
   });
 
-  it('allows finalization when later verifier evidence independently proves host files and build output despite a stale CLI child', async () => {
+  it.each(['running', 'completed'] as const)('requires resolved CLI child status (%s) even with independently verified host files and build', async (childStatus) => {
     const { service, executor } = createService();
     vi.mocked(executor.execute).mockImplementation(async ({ branchSessionId, personaId, run, slot }) => ({
       message: slot.id === 'goal_master'
         ? 'Goal Master independently verified files and dist build output. route_to(final-artifact, accepted)'
         : slot.id === 'implementer'
-          ? 'Implementer delegated host writes to a CLI child that is still reported as running.'
+          ? `Implementer delegated host writes to a CLI child reported as ${childStatus}.`
           : slot.id === 'verifier'
             ? 'Verifier confirmed npm build output through terminal and dist reads.'
             : `${slot.label} branch prepared for: ${run.prompt}`,
@@ -2942,7 +2942,7 @@ describe('ArchitectureRuntimeService', () => {
           }
           : {}),
         ...(slot.id === 'implementer'
-          ? { toolEvidence: cliChildToolEvidence('cli-child-stale-after-build', 'running') }
+          ? { toolEvidence: cliChildToolEvidence('cli-child-stale-after-build', childStatus) }
           : slot.id === 'verifier'
             ? {
               evidence: [buildResultEvidence()],
@@ -2966,7 +2966,7 @@ describe('ArchitectureRuntimeService', () => {
 
     const run = await service.createRun({
       schemaId: 'goal-master-delivery-loop',
-      prompt: 'Allow independent verifier build evidence to override stale CLI projection.',
+      prompt: 'Verify host build evidence and reconcile CLI child completion before finalization.',
       executionMode: 'subagent_execution',
       context: {
         requireGoalMasterLoopProof: true,
@@ -2977,12 +2977,25 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
     const goalDecision = semantic.find((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
 
-    expect(run.status).toBe('completed');
-    expect(goalDecision?.route).toMatchObject({
-      selectedNodeIds: ['final-artifact'],
-      rejectedNodeIds: ['implementer'],
-    });
-    expect(semantic.at(-1)?.type).toBe('final_artifact');
+    if (childStatus === 'running') {
+      expect(run.status).toBe('failed');
+      expect(goalDecision?.route).toMatchObject({
+        source: 'runtime_fallback',
+        selectedNodeIds: ['implementer'],
+        rejectedNodeIds: ['final-artifact'],
+      });
+      expect(goalDecision?.data).toMatchObject({
+        runtimeGuard: expect.stringContaining('CLI child implementation is incomplete'),
+      });
+      expect(semantic.some((event) => event.type === 'final_artifact')).toBe(false);
+    } else {
+      expect(run.status).toBe('completed');
+      expect(goalDecision?.route).toMatchObject({
+        selectedNodeIds: ['final-artifact'],
+        rejectedNodeIds: ['implementer'],
+      });
+      expect(semantic.at(-1)?.type).toBe('final_artifact');
+    }
   });
 
   it('does not treat dist target paths as host build proof without typed build evidence', async () => {
@@ -3533,7 +3546,7 @@ describe('ArchitectureRuntimeService', () => {
     expect(semantic.at(-1)?.type).not.toBe('final_artifact');
   });
 
-  it('can enforce one visible Goal Master continuation before finalization', async () => {
+  it('rejects unsupported Goal Master completion until the typed visit bound', async () => {
     const { service, executor, audit } = createService();
     const baseSchema = new ArchitectureRegistryService().findOne('goal-master-delivery-loop');
     if (!baseSchema) throw new Error('Expected Goal Master schema');
@@ -3574,24 +3587,27 @@ describe('ArchitectureRuntimeService', () => {
     const semantic = semanticEvents(service.getEvents(run.id));
     const goalDecisions = semantic.filter((event) => event.nodeId === 'goal-master' && event.type === 'router_decision');
 
-    expect(goalDecisions).toHaveLength(2);
-    expect(goalDecisions[0]?.route).toMatchObject({
-      source: 'runtime_fallback',
-      selectedNodeIds: ['implementer'],
-      response: expect.stringContaining('Runtime Goal Master guard required one visible continuation'),
-    });
-    expect(goalDecisions[0]?.data).toMatchObject({
-      runtimeGuard: expect.stringContaining('Runtime Goal Master guard required one visible continuation'),
-    });
-    expect(goalDecisions[1]?.route?.selectedNodeIds).toEqual(['final-artifact']);
-    expect(semantic.filter((event) => event.nodeId === 'implementer' && event.type === 'participant_output')).toHaveLength(2);
-    expect(semantic.filter((event) => event.nodeId === 'tester' && event.type === 'participant_output')).toHaveLength(2);
-    expect(semantic.at(-1)?.type).toBe('final_artifact');
+    expect(goalDecisions).toHaveLength(3);
+    for (const decision of goalDecisions) {
+      expect(decision.route).toMatchObject({
+        source: 'runtime_fallback',
+        selectedNodeIds: ['implementer'],
+        response: 'Goal completion requires successful workflow tool evidence.',
+      });
+      expect(decision.data).toMatchObject({
+        runtimeGuard: 'Goal completion requires successful workflow tool evidence.',
+      });
+    }
+    expect(semantic.filter((event) => event.nodeId === 'implementer' && event.type === 'participant_output')).toHaveLength(3);
+    expect(semantic.filter((event) => event.nodeId === 'tester' && event.type === 'participant_output')).toHaveLength(3);
+    expect(semantic.some((event) => event.type === 'final_artifact')).toBe(false);
+    expect(run.status).toBe('failed');
+    expect(service.getEvents(run.id)).toContainEqual(expect.objectContaining({ reasonCode: 'max_node_visits' }));
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({
       type: 'architecture_event',
       label: expect.stringContaining('architecture_event:router_decision:goal-master'),
       data: expect.objectContaining({
-        runtimeGuard: expect.stringContaining('Runtime Goal Master guard required one visible continuation'),
+        runtimeGuard: 'Goal completion requires successful workflow tool evidence.',
       }),
     }));
   });

@@ -103,16 +103,63 @@ describe('executionGraphModel.helpers', () => {
     });
   });
 
-  it('marks cancelled and expired tool states as errors', () => {
+  it('does not present a persona recommendation as the actual explicitly selected runtime model', () => {
+    const turn = makeTurn({ done: true });
+    const session = {
+      id: turn.sessionId,
+      personaId: 'devin-persona',
+      executionProfileId: 'explicit-swe-2-profile',
+      title: 'HomeSite',
+      createdAt: 1,
+      updatedAt: 1,
+    } satisfies ChatSession;
+    const persona = { id: session.personaId, name: 'Devin SWE-2 QA', model: 'swe-2-medium' } as Persona;
+
+    const identity = buildTurnIdentity(turn, new Map([[session.id, session]]), new Map([[persona.id, persona]]));
+
+    expect(identity.actorLabel).toBe('Devin SWE-2 QA');
+    expect(identity.modelLabel).not.toBe('swe-2-medium');
+    expect(identity.subtitle).not.toContain('swe-2-medium');
+  });
+
+  it('uses recorded turn model rather than a changed persona recommendation', () => {
+    const turn = makeTurn({ done: true });
+    const session = { id: turn.sessionId, personaId: 'devin-persona', title: 'HomeSite', createdAt: 1, updatedAt: 2 } satisfies ChatSession;
+    const persona = { id: session.personaId, name: 'Devin SWE-2 QA', model: 'changed-model' } as Persona;
+    expect(buildTurnIdentity(turn, new Map([[session.id, session]]), new Map([[persona.id, persona]]), 'swe-2')).toMatchObject({
+      modelLabel: 'swe-2', subtitle: 'Devin SWE-2 QA - swe-2', detail: 'Turn completed',
+    });
+  });
+
+  it('distinguishes cancelled tools from expired tool errors', () => {
     const cancelled = { status: 'cancelled' } as ToolActivity;
     const expired = { status: 'expired' } as ToolActivity;
 
-    expect(statusFromActivity(cancelled, false)).toBe('error');
+    expect(statusFromActivity(cancelled, false)).toBe('cancelled');
     expect(statusFromActivity(expired, false)).toBe('error');
   });
 
-  it('does not infer tool success from an untyped result alone', () => {
-    expect(statusFromActivity(null, true, { output: 'unclassified' })).toBe('idle');
+  it('restores success from a raw persisted result', () => {
+    expect(statusFromActivity(null, true, { output: 'unclassified' })).toBe('success');
+  });
+
+  it.each([
+    [{ output: 'saved' }, 'success'],
+    [{ status: 'error', error: 'failed' }, 'error'],
+    [{ status: 'cancelled', error: 'denied' }, 'cancelled'],
+    [null, 'success'],
+  ] as const)('hydrates generic result %j without transient activities', (result, expected) => {
+    const messages: ChatMessage[] = [
+      { id: 'a', sessionId: 'session-1', role: 'assistant', content: '', createdAt: 1,
+        turnId: 'turn-1', promptMessageId: 'prompt-1', toolCalls: [{ id: 'call', name: 'fs_write', args: {} }] },
+      { id: 'r', sessionId: 'session-1', role: 'tool_result', content: JSON.stringify(result), createdAt: 2,
+        turnId: 'turn-1', promptMessageId: 'prompt-1', toolCallId: 'call' },
+    ];
+    const snapshots = buildToolSnapshots(messages, []);
+    const snapshot = snapshots.get('call')!;
+    expect(statusFromActivity(snapshot.activity, snapshot.result != null, snapshot.result, snapshot.toolName)).toBe(expected);
+    expect(getTurnStatus(makeTurn({ done: true, items: [{ kind: 'tool', callId: 'call' }] }), snapshots)).toBe(expected === 'cancelled' ? 'success' : expected);
+    expect(statusFromActivity(null, false)).toBe('idle');
   });
 
   it('keeps waiting child executions distinct from active running work', () => {

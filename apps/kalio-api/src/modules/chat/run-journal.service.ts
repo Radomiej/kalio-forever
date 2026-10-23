@@ -4,6 +4,8 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { ChatQueuedPayload, ChatRunPhase, ChatRunSnapshot, ChatRunStatus } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { chatRuns, type ChatRunRow } from '../../database/schema';
+import { hasNoNewerAdmittedTurn } from './run-journal-recovery.helpers';
+import { completeRunRequired, notifyRequiredCompletion } from './run-journal-completion';
 
 const ACTIVE_STATUSES: ChatRunStatus[] = ['active'];
 const CURRENT_STATUSES: ChatRunStatus[] = ['active', 'waiting_for_human', 'interrupted_needs_retry'];
@@ -260,6 +262,12 @@ export class RunJournalService implements OnModuleInit {
     return () => this.completedListeners.delete(listener);
   }
 
+  async completeRequired(id: string, expectedRevision: number, outcome: NonNullable<ChatRunSnapshot['outcome']>): Promise<ChatRunSnapshot> {
+    const completed = this.toSnapshot(completeRunRequired(this.drizzle.db, id, expectedRevision, outcome));
+    notifyRequiredCompletion(this.completedListeners, completed, this.logger);
+    return completed;
+  }
+
   async getCompletedTurn(sessionId: string, turnId: string): Promise<ChatRunSnapshot | null> {
     const [row] = await this.drizzle.db
       .select()
@@ -304,6 +312,7 @@ export class RunJournalService implements OnModuleInit {
         eq(chatRuns.status, 'interrupted_needs_retry'),
         eq(chatRuns.safeResume, true),
         eq(chatRuns.revision, expectedRevision),
+        hasNoNewerAdmittedTurn(),
       ))
       .run();
     return result.changes === 1;
@@ -314,6 +323,15 @@ export class RunJournalService implements OnModuleInit {
       eq(chatRuns.sessionId, sessionId), eq(chatRuns.turnId, turnId),
     )).orderBy(desc(chatRuns.updatedAt)).limit(1);
     return row ? this.toSnapshot(row) : null;
+  }
+
+  async getHistoryTurns(sessionId: string, turnIds: string[]): Promise<ChatRunSnapshot[]> {
+    const ids = [...new Set(turnIds)].slice(0, 100);
+    if (ids.length === 0) return [];
+    const rows = await this.drizzle.db.select().from(chatRuns).where(and(
+      eq(chatRuns.sessionId, sessionId), inArray(chatRuns.turnId, ids),
+    )).orderBy(desc(chatRuns.updatedAt));
+    return rows.map(row => this.toSnapshot(row));
   }
 
   async interrupt(id: string, message: string): Promise<void> {
@@ -356,7 +374,10 @@ export class RunJournalService implements OnModuleInit {
     const [row] = await this.drizzle.db
       .select()
       .from(chatRuns)
-      .where(and(eq(chatRuns.sessionId, sessionId), inArray(chatRuns.status, CURRENT_STATUSES)))
+      .where(and(
+        eq(chatRuns.sessionId, sessionId), inArray(chatRuns.status, CURRENT_STATUSES),
+        sql`(${chatRuns.status} <> 'interrupted_needs_retry' OR ${chatRuns.safeResume} = 0 OR ${hasNoNewerAdmittedTurn()})`,
+      ))
       .orderBy(desc(chatRuns.updatedAt))
       .limit(1);
 
@@ -385,6 +406,7 @@ export class RunJournalService implements OnModuleInit {
       .where(and(
         eq(chatRuns.status, 'interrupted_needs_retry'),
         eq(chatRuns.safeResume, true),
+        hasNoNewerAdmittedTurn(),
       ))
       .orderBy(desc(chatRuns.updatedAt));
     return rows.map((row) => this.toSnapshot(row));

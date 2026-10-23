@@ -190,7 +190,6 @@ export function GraphInspectorActions({
             className="w-full rounded-xl bg-emerald-500/85 hover:bg-emerald-500 text-white px-4 py-3 text-sm font-medium transition-colors"
             onClick={() => {
               eventBus.confirmTool({ requestId: selectedConfirmation.requestId, sessionId: selectedConfirmation.sessionId });
-              removePendingConfirmation(selectedConfirmation.sessionId, selectedConfirmation.requestId);
             }}
           >
             <span className="flex items-center justify-center gap-2">

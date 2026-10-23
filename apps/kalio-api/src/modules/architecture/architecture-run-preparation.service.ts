@@ -1,4 +1,5 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { EXECUTION_PROFILE_LOOKUP, type ExecutionProfileLookupPort } from '@kalio/types';
 import { nanoid } from 'nanoid';
 import type {
   ArchitectureExecutionMode,
@@ -12,6 +13,7 @@ import { CLIAgentConfigService } from '../cli-agent/cli-agent-config.service';
 import { extractAllowanceContext } from '../agent-flow/agent-flow-launch-context';
 import { VFSService } from '../vfs/vfs.service';
 import { ArchitectureRegistryService } from './architecture-registry.service';
+import { ArchitectureGoalRunAdmissionService } from './architecture-goal-run-admission.service';
 import {
   ARCHITECTURE_CLI_AGENT_IDS,
   buildArchitectureCliAgentContext,
@@ -48,14 +50,22 @@ export class ArchitectureRunPreparationService {
     private readonly sessions: SessionsService,
     @Optional() private readonly vfs?: VFSService,
     @Optional() private readonly cliAgentConfig?: Pick<CLIAgentConfigService, 'getConfig'>,
+    @Optional() @Inject(ArchitectureGoalRunAdmissionService)
+    private readonly goalAdmission?: Pick<ArchitectureGoalRunAdmissionService, 'attach'>,
+    @Optional() @Inject(EXECUTION_PROFILE_LOOKUP)
+    private readonly executionProfiles?: ExecutionProfileLookupPort,
   ) {}
 
   async prepareRun(dto: CreateArchitectureRunDto, status: ArchitectureRun['status']): Promise<PreparedArchitectureRun> {
     const normalizedDto = await this.normalizeCreateRunDto(dto);
+    if (normalizedDto.context?.['goalProtocol'] !== undefined && !this.goalAdmission) {
+      throw new Error('GOAL_ADMISSION_UNAVAILABLE');
+    }
     const baseSchema = this.registry.findOne(normalizedDto.schemaId);
     if (!baseSchema) throw new NotFoundException(`Architecture schema ${normalizedDto.schemaId} not found`);
     const schema = normalizedDto.schema ?? baseSchema;
     validateArchitectureCreateRunSlotOverrides(schema, normalizedDto.slotOverrides);
+    await this.validateExecutionProfile(normalizedDto);
 
     const now = Date.now();
     const runId = nanoid();
@@ -78,6 +88,7 @@ export class ArchitectureRunPreparationService {
       createdAt: now,
       updatedAt: now,
     };
+    await this.goalAdmission?.attach(run);
     return { schema, run, hydration };
   }
 
@@ -184,6 +195,7 @@ export class ArchitectureRunPreparationService {
     const historySessionId = getPersistedArchitectureHistorySessionId(dto.context);
     await this.sessions.createWithId(rootSessionId, {
       personaId: 'default',
+      ...(dto.executionProfileId ? { executionProfileId: dto.executionProfileId.trim() } : {}),
       title: this.toRunSessionTitle(dto.prompt),
       kind: isAgentFlowRoot ? 'agent-flow' : 'chat',
       parentSessionId: getPersistedArchitectureParentSessionId(dto.context),
@@ -222,6 +234,20 @@ export class ArchitectureRunPreparationService {
     );
 
     return Object.fromEntries(pairs);
+  }
+
+  private async validateExecutionProfile(dto: CreateArchitectureRunDto): Promise<void> {
+    if (dto.executionProfileId === undefined) return;
+    if (!this.executionProfiles) throw new Error('Architecture execution profile lookup is unavailable.');
+    const id = dto.executionProfileId.trim();
+    await this.executionProfiles.assertEnabled(id);
+    const parentId = getPersistedArchitectureParentSessionId(dto.context);
+    if (parentId) {
+      const parent = await this.sessions.get(parentId);
+      if (parent.executionProfileId !== id) {
+        throw new BadRequestException('Architecture execution profile must match its parent session.');
+      }
+    }
   }
 
   private shouldCreateBranch(

@@ -101,6 +101,24 @@ describe('LocalEmbeddingConfigCard', () => {
     });
   });
 
+  it('offers CPU-ready Gemma 2 text embeddings with the matching 768 dimensions', async () => {
+    const user = userEvent.setup();
+    const { saveMock } = renderHarness();
+    const modelSelect = screen.getByTestId('embedding-local-model');
+
+    await user.selectOptions(modelSelect, 'onnx-community/embeddinggemma-2-ONNX');
+    await user.click(screen.getByTestId('embedding-local-save'));
+
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'onnx-community/embeddinggemma-2-ONNX',
+        dimensions: 768,
+        backend: 'cpu',
+      }));
+    });
+    expect(modelSelect).toHaveTextContent('270M · 175 MB q4 text model');
+  });
+
   it('shows install state and keeps local testing disabled until the model is ready', async () => {
     renderHarness();
 

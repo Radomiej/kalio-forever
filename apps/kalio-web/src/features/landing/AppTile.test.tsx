@@ -3,6 +3,17 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { AppTile } from './AppTile';
 
 describe('AppTile', () => {
+  it('opens model settings without launching and exposes touch/focus affordances', () => {
+    const launch = vi.fn();
+    const settings = vi.fn();
+    render(<AppTile id="qa" name="Q&A" size="small" index={0} onClick={launch} onModelSettings={settings} isGenerating />);
+    const gear = screen.getByRole('button', { name: 'Model settings for Q&A' });
+    expect(gear).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(gear).toHaveClass('group-focus-within:opacity-100', '[@media(hover:none)]:opacity-100');
+    fireEvent.click(gear);
+    expect(settings).toHaveBeenCalledOnce();
+    expect(launch).not.toHaveBeenCalled();
+  });
   it('renders the tile name, description, and activates the open control', () => {
     const onClick = vi.fn();
 

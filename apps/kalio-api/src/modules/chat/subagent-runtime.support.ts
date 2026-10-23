@@ -9,6 +9,7 @@ import type { RunSubagentRequest } from '../tool/subagent-runtime.port';
 import type { ActiveSubagentRunStatus } from '../tool/subagent-runtime.port';
 import type { EmitFn } from './interfaces/stream-context.interface';
 import { createWorkflowError, isWorkflowError } from '../../common/utils/workflow-error.util';
+import type { createHostCancellationRecordingScope, HostCancellationLifecycleHandle } from './host-cancellation-recording-scope';
 
 export type AgentRunWithDepth = AgentRunContext & { subagentDepth?: number; autoApproveTools?: string[] };
 export type ChatErrorCode = SocketEvents['chat:error']['code'];
@@ -31,6 +32,18 @@ interface ActiveSubagentRun extends ActiveSubagentRunInput {
 
 export class ActiveSubagentRunRegistry {
   private readonly active = new Map<string, ActiveSubagentRun>();
+  private readonly cancellationRecording = new WeakMap<ActiveSubagentRun, HostCancellationLifecycleHandle>();
+
+  bindCancellationRecording(sessionId: string, controller: AbortController,
+    createScope: (executionIdentity: object, executionSignal: AbortSignal) => ReturnType<typeof createHostCancellationRecordingScope>,
+  ): HostCancellationLifecycleHandle | null {
+    const run = this.active.get(sessionId);
+    if (!run || run.controller !== controller || controller.signal.aborted || this.cancellationRecording.has(run)) return null;
+    const handle = createScope(run, controller.signal).lookup(run, controller.signal);
+    if (!handle) return null;
+    this.cancellationRecording.set(run, handle);
+    return handle;
+  }
 
   register(input: ActiveSubagentRunInput): () => void {
     let resolveDone!: () => void;
@@ -44,6 +57,8 @@ export class ActiveSubagentRunRegistry {
     };
     this.active.set(input.childSessionId, run);
     return () => {
+      this.cancellationRecording.get(run)?.close();
+      this.cancellationRecording.delete(run);
       if (this.active.get(input.childSessionId) === run) {
         this.active.delete(input.childSessionId);
       }
@@ -77,7 +92,11 @@ export class ActiveSubagentRunRegistry {
       || sessionIdSet.has(run.historySessionId)
       || sessionIdSet.has(run.vfsSessionId)
     ));
+    let recordingError: unknown;
+    let recordingFailed = false;
     for (const run of matchedRuns) {
+      try { this.cancellationRecording.get(run)?.stop(); }
+      catch (error) { recordingError = error; recordingFailed = true; }
       if (!run.controller.signal.aborted) {
         run.controller.abort(createWorkflowError(
           'UNKNOWN',
@@ -87,6 +106,7 @@ export class ActiveSubagentRunRegistry {
       }
     }
     await Promise.all(matchedRuns.map((run) => run.donePromise));
+    if (recordingFailed) throw recordingError;
   }
 }
 

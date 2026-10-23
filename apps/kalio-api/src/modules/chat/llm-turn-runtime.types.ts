@@ -1,5 +1,7 @@
-import type { AgentRunContext, ExecutionProfile, LLMContent, LLMStructuredOutputRequest, SessionRuntimeKind, ToolMeta } from '@kalio/types';
+import type { AgentRunContext, ExecutionProfile, HostRuntimeReceiptObserver, LLMContent, LLMStructuredOutputRequest, SessionRuntimeKind, ToolMeta } from '@kalio/types';
 import type { EmitFn } from './interfaces/stream-context.interface';
+import type { createHostDispatchReceiptRecorder } from './host-dispatch-receipts';
+import type { HostCancellationLifecycleHandle } from './host-cancellation-recording-scope';
 
 export type LLMRuntimeKind = Extract<SessionRuntimeKind, 'chat' | 'subagent' | 'agent-flow-branch'>;
 
@@ -18,6 +20,12 @@ export interface LLMAgentLoopCallbacks {
 }
 
 export interface LLMAgentLoopRequest {
+  /** In-memory host capability, intentionally excluded from provider params. */
+  hostRuntimeReceiptObserver?: HostRuntimeReceiptObserver;
+  /** Host-only dispatcher recorder; never forwarded to provider parameters. */
+  hostDispatchReceiptRecorder?: Pick<ReturnType<typeof createHostDispatchReceiptRecorder>, 'createCallRecorder'>;
+  /** Host Stop-owner capability; never forwarded to provider parameters. */
+  hostCancellationRecording?: HostCancellationLifecycleHandle;
   runtimeKind: LLMRuntimeKind;
   sessionId: string;
   runId?: string;

@@ -5,6 +5,7 @@ import type { ArchitectureRuntimeStopPort } from './architecture-runtime-stop.po
 import type { CLIAgentSessionRuntimePort } from '../cli-agent/cli-agent-session-runtime.port';
 import type { SubagentRuntimePort } from '../tool/subagent-runtime.port';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
+import { SessionExecutionAdmission } from './session-execution-admission';
 
 const rootSession: ChatSession = {
   id: 'root-session',
@@ -13,6 +14,23 @@ const rootSession: ChatSession = {
   createdAt: 1,
   updatedAt: 1,
 };
+
+function makeService(...args: ConstructorParameters<typeof SessionRuntimeStopService>) {
+  Object.assign(args[0], { claimTreeStop: vi.fn(() => ({ release: vi.fn() })) });
+  const pipeline = args[1];
+  const admission = new SessionExecutionAdmission();
+  Object.assign(pipeline, {
+    assertStopLeasesAvailable: (ids: readonly string[]) => ids.forEach(id => admission.assertStopLeaseAvailable(id)),
+    acquireStopLease: (id: string, owners: Promise<void>) => {
+      const drain = pipeline.stopAndDrain(id).then(() => ({ errors: [] as unknown[] }), (error: unknown) => ({ errors: [error] }));
+      return admission.acquireStopLease(id, owners, undefined, async () => {
+        const outcome = await drain;
+        if (outcome.errors.length > 0) throw outcome.errors[0];
+      });
+    },
+  });
+  return new SessionRuntimeStopService(...args);
+}
 
 const branchSession: ChatSession = {
   id: 'branch-session',
@@ -50,6 +68,63 @@ function makeAgentFlowSnapshot(id: string, status: 'running' | 'completed'): Age
 }
 
 describe('SessionRuntimeStopService', () => {
+  it('uses collected child ownership after another cancellation owner removes child records', async () => {
+    let removed = false;
+    const sessions = {
+      listChildren: vi.fn(async (id: string) => id === rootSession.id ? [branchSession, cliSession] : []),
+      get: vi.fn(async (id: string) => {
+        if (id === rootSession.id) return rootSession;
+        if (removed) throw new Error(`Session not found: ${id}`);
+        return id === branchSession.id ? branchSession : cliSession;
+      }),
+    };
+    const stopSession = vi.fn(async () => undefined);
+    const service = makeService(
+      sessions as never, { stopAndDrain: vi.fn(async () => undefined) } as never,
+      undefined, { stopSession } as unknown as CLIAgentSessionRuntimePort,
+      { stopRunsForSessions: async () => { removed = true; return []; } },
+    );
+    await expect(service.stopSessionTree(rootSession.id)).resolves.toMatchObject({ rootSessionId: rootSession.id });
+    expect(stopSession).toHaveBeenCalledExactlyOnceWith(branchSession.id, cliSession.id);
+    expect(sessions.get).not.toHaveBeenCalledWith(branchSession.id);
+    expect(sessions.get).not.toHaveBeenCalledWith(cliSession.id);
+  });
+
+  it('still rejects an actual CLI stop failure with collected child ownership', async () => {
+    const service = makeService(
+      { listChildren: vi.fn(async (id: string) => id === rootSession.id ? [cliSession] : []),
+        get: vi.fn(async (id: string) => id === cliSession.id ? cliSession : rootSession) } as never,
+      { stopAndDrain: vi.fn(async () => undefined) } as never,
+      undefined, { stopSession: vi.fn(async () => { throw new Error('CLI transport failure'); }) } as unknown as CLIAgentSessionRuntimePort,
+    );
+    await expect(service.stopSessionTree(rootSession.id)).rejects.toThrow('CLI transport failure');
+  });
+
+  it('starts subagent and pipeline cancellation before awaiting architecture drain', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const entering = new Promise<void>(resolve => { entered = resolve; });
+    const drain = new Promise<readonly string[]>(resolve => { release = () => resolve([]); });
+    const stopSubagents = vi.fn(async () => undefined);
+    const stopPipeline = vi.fn(async () => undefined);
+    const service = makeService(
+      { listChildren: vi.fn(async () => []), get: vi.fn(async () => rootSession) } as never,
+      { stopAndDrain: stopPipeline } as never,
+      undefined, undefined,
+      { stopRunsForSessions: () => { entered(); return drain; } },
+      { stopAndDrainSessions: stopSubagents } as unknown as SubagentRuntimePort,
+    );
+    const stopping = service.stopSessionTree('root-session');
+    try {
+      await entering;
+      await expect.poll(() => stopSubagents.mock.calls.length, { timeout: 200 }).toBe(1);
+      expect(stopPipeline).toHaveBeenCalledWith('root-session');
+    } finally {
+      release();
+      await stopping;
+    }
+  });
+
   it('stops architecture, agent flow, CLI, and chat pipeline for the full session tree', async () => {
     const sessions = {
       listChildren: vi.fn(async (sessionId: string): Promise<ChatSession[]> => {
@@ -97,7 +172,7 @@ describe('SessionRuntimeStopService', () => {
         updatedAt: Date.now(),
       })),
     };
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       sessions as never,
       pipeline as never,
       agentFlowRuntime as AgentFlowRuntimePort,
@@ -122,8 +197,8 @@ describe('SessionRuntimeStopService', () => {
       'cli-session',
     ]);
     expect(cliRuntime.stopSession).toHaveBeenCalledWith('branch-session', 'cli-session');
-    expect(stopAndDrainSubagents.mock.invocationCallOrder[0]).toBeLessThan(
-      pipeline.stopAndDrain.mock.invocationCallOrder[0],
+    expect(pipeline.stopAndDrain.mock.invocationCallOrder[0]).toBeLessThan(
+      stopAndDrainSubagents.mock.invocationCallOrder[0],
     );
     expect(pipeline.stopAndDrain).toHaveBeenNthCalledWith(1, 'root-session');
     expect(pipeline.stopAndDrain).toHaveBeenNthCalledWith(2, 'branch-session');
@@ -141,7 +216,7 @@ describe('SessionRuntimeStopService', () => {
     const stopAndDrainSubagents = vi.fn(async () => {
       throw new Error('transport down');
     });
-    const service = new SessionRuntimeStopService(
+    const service = makeService(
       sessions as never,
       pipeline as never,
       undefined,

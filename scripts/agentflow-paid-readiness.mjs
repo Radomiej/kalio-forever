@@ -3,10 +3,18 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readStackApiUrl } from './stack-state.mjs';
+import { collectDevinSessionReadinessChecks } from './devin-session-readiness.mjs';
+import { collectCodexProfileReadinessChecks } from './codex-profile-readiness.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..');
 
 export async function collectPaidReadinessChecks(options = {}) {
+  if (options.argv?.some(arg => arg === '--codex-profile' || arg.startsWith('--codex-profile='))) {
+    return collectCodexProfileReadinessChecks(options);
+  }
+  if (options.argv?.some(arg => arg === '--devin-session' || arg.startsWith('--devin-session='))) {
+    return collectDevinSessionReadinessChecks(options);
+  }
   const cliApiBase = resolveApiBaseFromArgv(options.argv, options.stderr ?? console.error);
   const apiBase = (options.apiBase ?? (cliApiBase === null ? undefined : cliApiBase) ?? process.env.KALIO_API_BASE_URL ?? resolveManagedApiBase()).replace(/\/$/, '');
   const maxRunningAgeMs = Number(options.maxRunningAgeMs ?? process.env.AGENTFLOW_MAX_RUNNING_AGE_MS ?? 15 * 60 * 1000);
@@ -306,6 +314,11 @@ export async function collectPaidReadinessChecks(options = {}) {
 
 export async function runPaidReadinessCheck(options = {}) {
   const stderr = options.stderr ?? console.error;
+  const readinessLabel = options.argv?.some(arg => arg === '--codex-profile' || arg.startsWith('--codex-profile='))
+    ? 'Codex profile static readiness'
+    : options.argv?.some(arg => arg === '--devin-session' || arg.startsWith('--devin-session='))
+    ? 'Devin session static readiness'
+    : 'AgentFlow paid-run readiness';
   const apiBaseFromArgv = resolveApiBaseFromArgv(options.argv, stderr);
   if (apiBaseFromArgv === null) {
     return 1;
@@ -319,11 +332,11 @@ export async function runPaidReadinessCheck(options = {}) {
 
   const failed = checks.filter((check) => !check.ok);
   if (failed.length > 0) {
-    stderr(`\nAgentFlow paid-run readiness failed: ${failed.length} blocker(s).`);
+    stderr(`\n${readinessLabel} failed: ${failed.length} blocker(s).`);
     return 1;
   }
 
-  stdout('\nAgentFlow paid-run readiness passed.');
+  stdout(`\n${readinessLabel} passed.`);
   return 0;
 }
 

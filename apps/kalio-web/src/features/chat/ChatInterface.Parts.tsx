@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSession, Persona, Project } from '@kalio/types';
+import type { ChatMessage, ChatSession, ExecutionProfile, Persona, Project } from '@kalio/types';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { mergeRuntimeSessionStatusSnapshots } from '../../store/agentRuntimeSelectors';
@@ -224,13 +224,16 @@ interface ChatWelcomeScreenProps {
   architectures: ArchitectSchema[];
   isStreaming: boolean;
   onArchitectureChange: (schemaId: string) => void;
-  onArchitectureRun: (content: string, schemaId: string) => void;
+  onArchitectureRun: (content: string, schemaId: string, executionProfileId?: string) => void;
   onDraftChange: (content: string) => void;
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
   onProjectChange?: (project: Project) => void;
-  onSend: (content: string, personaId: string) => void;
+  onSend: (content: string, personaId: string, executionProfileId?: string) => void;
   personas: Persona[];
+  executionProfiles?: ExecutionProfile[];
+  selectedExecutionProfileId?: string;
+  onExecutionProfileChange?: (profileId: string) => void;
   projectPath: string;
   projectId?: string;
   selectedPersonaId: string;
@@ -250,6 +253,9 @@ export function ChatWelcomeScreen({
   onProjectChange,
   onSend,
   personas,
+  executionProfiles,
+  selectedExecutionProfileId,
+  onExecutionProfileChange,
   projectPath,
   projectId,
   selectedPersonaId,
@@ -272,15 +278,19 @@ export function ChatWelcomeScreen({
       onPersonaChange={onPersonaChange}
       onProjectPathChange={onProjectPathChange}
       onProjectChange={onProjectChange}
-      onRunPrompt={(content) => {
-        onDraftChange('');
+      onRunPrompt={(content, executionProfileId) => {
         if (selectedArchitectureId === 'single-chat') {
-          onSend(content, selectedPersonaId);
+          if (executionProfileId === undefined) onSend(content, selectedPersonaId);
+          else onSend(content, selectedPersonaId, executionProfileId);
           return;
         }
-        onArchitectureRun(content, selectedArchitectureId);
+        if (executionProfileId === undefined) onArchitectureRun(content, selectedArchitectureId);
+        else onArchitectureRun(content, selectedArchitectureId, executionProfileId);
       }}
       personas={personas}
+      executionProfiles={executionProfiles}
+      selectedExecutionProfileId={selectedExecutionProfileId}
+      onExecutionProfileChange={onExecutionProfileChange}
       projectPath={projectPath}
       projectId={projectId}
       selectedPersonaId={selectedPersonaId}
@@ -303,6 +313,8 @@ function liveTurnStatusLabel(liveTurnState: LiveTurnState): string {
       return 'responding';
     case 'running_tool':
       return liveTurnState.toolName ? `${liveTurnState.toolName} running` : 'tool running';
+    case 'awaiting_confirmation':
+      return 'waiting for approval';
     case 'queued_followup':
       return liveTurnState.queuedDepth > 0 ? `queued ${liveTurnState.queuedDepth}` : 'queued';
     case 'pending':
@@ -312,6 +324,12 @@ function liveTurnStatusLabel(liveTurnState: LiveTurnState): string {
 }
 
 function liveTurnBody(liveTurnState: LiveTurnState): string {
+  if (liveTurnState.phase === 'awaiting_confirmation') {
+    return liveTurnState.toolName
+      ? `Kalio is waiting for your approval to use ${liveTurnState.toolName}.`
+      : 'Kalio is waiting for your approval.';
+  }
+
   if (liveTurnState.previewText?.trim()) {
     return liveTurnState.previewText.trim();
   }
@@ -342,7 +360,7 @@ export function PendingAssistantBubble({ liveTurnState }: PendingAssistantBubble
     <div className="flex justify-start" data-testid="pending-agent-bubble">
       <div className="max-w-[min(42rem,92%)] rounded-2xl border border-sky-500/20 bg-base-300/85 px-4 py-3 text-sm text-base-content shadow-sm">
         <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-sky-300/90">
-          <span className="loading loading-dots loading-xs" />
+          {liveTurnState.phase !== 'awaiting_confirmation' && <span className="loading loading-dots loading-xs" />}
           <span data-testid="pending-agent-phase">{liveTurnStatusLabel(liveTurnState)}</span>
         </div>
         <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-base-content/80">

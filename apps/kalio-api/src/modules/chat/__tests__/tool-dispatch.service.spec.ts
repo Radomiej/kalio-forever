@@ -10,7 +10,7 @@ import { HitlPolicyService } from '../../hitl/hitl-policy.service';
 import { RuntimeAuditLogger } from '../runtime-audit-logger.service';
 import type { StreamContext } from '../interfaces/stream-context.interface';
 import type { ToolRegistryEntry } from '../interfaces/tool-registry-entry.interface';
-import type { ToolDomain } from '@kalio/types';
+import type { ToolDomain, ToolResult } from '@kalio/types';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { MemoryService } from '../../memory/memory.service';
 import type { WebSearchService } from '../../search/web-search.service';
@@ -49,6 +49,27 @@ function makeDrizzleMock(personaId = 'persona-dispatch'): DrizzleService {
 }
 
 describe('ToolDispatchService', () => {
+  it.each([false, true])('defers registered execution ACK to its persistence owner and propagates ACK rejection=%s', async reject => {
+    const confirmations = new ToolConfirmationService(null, null);
+    vi.spyOn(confirmations, 'approveOrRequestConfirmation').mockResolvedValue({ approved: true, execution: { requestId: 'approval', revision: 4 } });
+    const finish = vi.spyOn(confirmations, 'finishLiveExecution').mockImplementation(async () => {
+      if (reject) throw new Error('durable ACK rejected');
+    });
+    const entry = makeEntry('receipt_tool', true, { written: true });
+    const service = new ToolDispatchService([entry], null, null, null, null, confirmations);
+    let commit: ((result: ToolResult) => Promise<void>) | undefined;
+    const result = await service.dispatch('receipt-call', 'receipt_tool', {}, {
+      ...makeCtx(), registerToolResultCommit: callback => { commit = callback; },
+    });
+    expect(result.status).toBe('success');
+    expect(finish).not.toHaveBeenCalled();
+    expect(commit).toBeTypeOf('function');
+    if (reject) await expect(commit!(result)).rejects.toThrow('durable ACK rejected');
+    else await commit!(result);
+    expect(entry.execute).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledWith({ requestId: 'approval', revision: 4 }, { status: 'success' });
+  });
+
   describe('dispatch — no confirmation required', () => {
     let service: ToolDispatchService;
     let entry: ToolRegistryEntry;
@@ -70,6 +91,18 @@ describe('ToolDispatchService', () => {
       const ctx = makeCtx();
       const result = await service.dispatch('call-1', 'simple_tool', { x: 1 }, ctx);
       expect(result).toEqual({ callId: 'call-1', status: 'success', data: { value: 42 } });
+    });
+
+    it.each(['resolve', 'reject'])('returns cancelled when execution finishes after abort (%s)', async (completion) => {
+      const controller = new AbortController();
+      const ctx = { ...makeCtx(), abortSignal: controller.signal };
+      entry.execute = async () => {
+        controller.abort();
+        if (completion === 'reject') throw new Error('Observation aborted');
+        return { value: 42 };
+      };
+      const result = await service.dispatch('call-aborted', 'simple_tool', {}, ctx);
+      expect(result).toEqual({ callId: 'call-aborted', status: 'cancelled' });
     });
 
     it('calls execute with correct ToolCallRequest', async () => {
@@ -418,7 +451,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -431,8 +463,14 @@ describe('ToolDispatchService', () => {
           agentType: 'subagent' as const,
           parentSessionId: 'master-session',
           vfsMode: 'isolated' as const,
+          autoApproveTools: ['vfs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'vfs_write', { filePath: 'index.html', content: '<h1>x</h1>' }, ctx);
 
@@ -594,7 +632,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -610,6 +647,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['vfs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch(
         'c1',
@@ -637,7 +679,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -653,6 +694,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['image_generate'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'image_generate', { prompt: 'hero coffee' }, ctx);
 
@@ -667,7 +713,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -683,6 +728,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['run_cli_agent'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'run_cli_agent', { agentId: 'copilot' }, ctx);
 
@@ -697,7 +747,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -713,6 +762,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['fs_write'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'fs_write', {
         path: 'C:\\Projekty\\TurboProject2\\package.json',
@@ -730,7 +784,6 @@ describe('ToolDispatchService', () => {
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [entry] },
-          { provide: HitlPolicyService, useValue: bypassApprovalPolicy },
         ],
       }).compile();
       const scopedService = moduleRef.get(ToolDispatchService);
@@ -746,6 +799,11 @@ describe('ToolDispatchService', () => {
           autoApproveTools: ['terminal_spawn'],
         },
       };
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => scopedService.cancelConfirmation(data['requestId']));
+        }
+      });
 
       const result = await scopedService.dispatch('c1', 'terminal_spawn', {
         command: 'npm',
@@ -1148,7 +1206,7 @@ describe('ToolDispatchService', () => {
       }).compile();
       const service = moduleRef.get(ToolDispatchService);
       const ctx = makeCtx();
-      const result = await service.dispatch('c1', 'mcp_s1_search', { q: 'test' }, ctx);
+      const result = await service.dispatchApproved('c1', 'mcp_s1_search', { q: 'test' }, ctx);
       expect(result.status).toBe('success');
       expect(mcpService.callTool).toHaveBeenCalledWith('s1', 'search', { q: 'test' });
     });
@@ -1185,7 +1243,7 @@ describe('ToolDispatchService', () => {
       expect(mcpService.callTool).not.toHaveBeenCalled();
     });
 
-    it('executes MCP tool without HITL when requiresConfirmation=false', async () => {
+    it('requires human confirmation for MCP tools even when requiresConfirmation=false and global policy bypasses', async () => {
       const mcpService = {
         resolveToolName: vi.fn().mockReturnValue({ serverKey: 's1', originalName: 'list_files' }),
         callTool: vi.fn().mockResolvedValue({ files: [] }),
@@ -1193,18 +1251,74 @@ describe('ToolDispatchService', () => {
           { name: 'mcp_s1_list_files', description: 'Lists files', parameters: {}, requiresConfirmation: false, serverId: 's1' },
         ),
       };
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+        resolveUnattendedApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'representative' }),
+      };
       const moduleRef = await Test.createTestingModule({
         providers: [
           ToolDispatchService,
           { provide: TOOL_REGISTRY, useValue: [] },
           { provide: MCPService, useValue: mcpService },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
         ],
       }).compile();
       const service = moduleRef.get(ToolDispatchService);
       const ctx = makeCtx();
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => service.cancelConfirmation(data['requestId'], 'sid'));
+        }
+      });
+
+      const result = await service.dispatch('c1', 'mcp_s1_list_files', {}, ctx);
+      expect(result.status).toBe('cancelled');
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'mcp_s1_list_files',
+        sessionId: 'sid',
+      }));
+      expect(hitlPolicy.resolveApproval).not.toHaveBeenCalled();
+      expect(hitlPolicy.resolveUnattendedApproval).not.toHaveBeenCalled();
+      expect(mcpService.callTool).not.toHaveBeenCalled();
+    });
+
+    it('executes an MCP tool only after explicit human confirmation', async () => {
+      const mcpService = {
+        resolveToolName: vi.fn().mockReturnValue({ serverKey: 's1', originalName: 'list_files' }),
+        callTool: vi.fn().mockResolvedValue({ files: [] }),
+        getToolByName: vi.fn().mockReturnValue(
+          { name: 'mcp_s1_list_files', description: 'Lists files', parameters: {}, requiresConfirmation: false, serverId: 's1' },
+        ),
+      };
+      const hitlPolicy = {
+        resolveApproval: vi.fn().mockResolvedValue({ status: 'approved', source: 'bypass' }),
+      };
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          ToolDispatchService,
+          { provide: TOOL_REGISTRY, useValue: [] },
+          { provide: MCPService, useValue: mcpService },
+          { provide: HitlPolicyService, useValue: hitlPolicy },
+        ],
+      }).compile();
+      const service = moduleRef.get(ToolDispatchService);
+      const ctx = makeCtx();
+
+      ctx.emit.mockImplementation((event: string, data: Record<string, string>) => {
+        if (event === 'tool:confirmation_required') {
+          setImmediate(() => service.resolveConfirmation(data['requestId'], 'sid'));
+        }
+      });
+
       const result = await service.dispatch('c1', 'mcp_s1_list_files', {}, ctx);
       expect(result.status).toBe('success');
-      expect(ctx.emit).not.toHaveBeenCalledWith('tool:confirmation_required', expect.anything());
+      expect(ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({
+        toolName: 'mcp_s1_list_files',
+        sessionId: 'sid',
+      }));
+      expect(hitlPolicy.resolveApproval).not.toHaveBeenCalled();
+      expect(mcpService.callTool).toHaveBeenCalledWith('s1', 'list_files', {});
     });
 
     it('returns error result when MCP callTool throws', async () => {
@@ -1224,7 +1338,7 @@ describe('ToolDispatchService', () => {
       }).compile();
       const service = moduleRef.get(ToolDispatchService);
       const ctx = makeCtx();
-      const result = await service.dispatch('c1', 'mcp_s1_broken_tool', {}, ctx);
+      const result = await service.dispatchApproved('c1', 'mcp_s1_broken_tool', {}, ctx);
       expect(result.status).toBe('error');
       expect((result as { errorCode: string }).errorCode).toBe('TOOL_EXECUTION_FAILED');
       expect((result as { errorMessage: string }).errorMessage).toContain('MCP connection lost');

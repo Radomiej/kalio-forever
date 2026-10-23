@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Trash2, Wrench } from 'lucide-react';
 import type { CreatePersonaDto, Credential, ExecutionProfile, MCPPolicy, Persona, PersonaAvatarToken, UpdatePersonaDto } from '@kalio/types';
-import { getCredentialModels, getCredentials, getExecutionProfiles, resolveDirectExecutionProfile } from '../../services/apiClient';
+import { getCredentialModels, getCredentials, getExecutionProfiles, resolveDevinCliExecutionProfile, resolveDirectExecutionProfile } from '../../services/apiClient';
 import { PersonaAvatar } from './PersonaAvatar';
 import { defaultAvatarFromName, personaToAvatarToken } from './persona-avatar.utils';
 import { PersonaAvatarModal } from './PersonaAvatarModal';
@@ -178,7 +178,16 @@ export function PersonaEditorPanel(props: Props) {
         resolvedExecutionProfileId = profile.id;
       } else if (runtimeKind !== 'direct-llm') {
         const selected = findProfile(executionProfiles, executionProfileId);
-        if (!selected || selected.kind !== runtimeKind || selected.model !== model || (selected.reasoningEffort ?? '') !== reasoningEffort) {
+        if (runtimeKind === 'devin-cli-acp') {
+          const profile = selected?.kind === runtimeKind && selected.model === model
+            ? selected
+            : await resolveDevinCliExecutionProfile(model);
+          resolvedExecutionProfileId = profile.id;
+          setExecutionProfiles((current) => current.some((candidate) => candidate.id === profile.id)
+            ? current
+            : [...current, profile]);
+          setExecutionProfileId(profile.id);
+        } else if (!selected || selected.kind !== runtimeKind || selected.model !== model || (selected.reasoningEffort ?? '') !== reasoningEffort) {
           const fallback = nativeModelOptions(executionProfiles, runtimeKind)
             .find((option) => option.model === model)?.profile;
           if (!fallback) throw new Error(`No enabled ${runtimeKind} profile is available for ${model}.`);
@@ -271,11 +280,9 @@ export function PersonaEditorPanel(props: Props) {
                 }
                 const options = nativeModelOptions(executionProfiles, kind);
                 const selected = options[0]?.profile;
-                if (selected) {
-                  setExecutionProfileId(selected.id);
-                  setModel(selected.model);
-                  setReasoningEffort(selected.reasoningEffort ?? '');
-                }
+                setExecutionProfileId(selected?.id ?? '');
+                setModel(selected?.model ?? '');
+                setReasoningEffort(selected?.reasoningEffort ?? '');
                 setDirectCredentialId('');
               }}
               onDirectCredentialChange={(credentialId) => {
@@ -291,9 +298,15 @@ export function PersonaEditorPanel(props: Props) {
               onNativeModelChange={(nextModel) => {
                 setModel(nextModel);
                 if (runtimeKind === 'direct-llm') return;
-                const selected = preferredProfile(executionProfiles, runtimeKind, nextModel);
-                setReasoningEffort(selected.reasoningEffort ?? '');
-                setExecutionProfileId(selected.id);
+                const selected = nativeModelOptions(executionProfiles, runtimeKind)
+                  .find((option) => option.model === nextModel)?.profile;
+                if (selected) {
+                  setReasoningEffort(selected.reasoningEffort ?? '');
+                  setExecutionProfileId(selected.id);
+                } else {
+                  setReasoningEffort('');
+                  setExecutionProfileId('');
+                }
               }}
               onReasoningChange={(nextReasoning) => {
                 setReasoningEffort(nextReasoning);

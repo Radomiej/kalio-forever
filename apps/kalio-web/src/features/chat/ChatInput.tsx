@@ -87,11 +87,11 @@ export function ChatInput({
         </p>
       )}
       <div className="flex items-center gap-2 px-3 pb-3 pt-2">
-        <div className="flex-1 flex items-center border-2 border-base-300 rounded-2xl bg-base-100 focus-within:border-sky-500/60 transition-colors px-3 py-1.5 gap-2 min-h-[44px]">
+        <div className="min-w-0 flex-1 flex flex-wrap sm:flex-nowrap items-center border-2 border-base-300 rounded-2xl bg-base-100 focus-within:border-sky-500/60 transition-colors px-3 py-1.5 gap-2 min-h-[44px]">
           {onArchitectureChange && (
             <select
               aria-label="Architecture runtime"
-              className="select select-bordered select-xs h-8 min-h-8 w-36 shrink-0 bg-base-200 text-[11px] sm:w-48"
+              className="select select-bordered select-xs h-8 min-h-8 w-full shrink-0 bg-base-200 text-[11px] sm:w-48"
               value={selectedArchitectureId}
               onChange={(event) => onArchitectureChange(event.target.value)}
               disabled={disabled}
@@ -107,7 +107,7 @@ export function ChatInput({
             ref={textareaRef}
             aria-label="Chat message"
             data-testid="chat-input"
-            className="flex-1 resize-none min-h-6 max-h-40 text-sm bg-transparent border-0 outline-none focus:outline-none leading-6 py-0 placeholder:text-base-content/45"
+            className="min-w-0 flex-1 resize-none min-h-6 max-h-40 text-sm bg-transparent border-0 outline-none focus:outline-none leading-6 py-0 placeholder:text-base-content/45"
             placeholder={disabled && !activeSessionId ? 'Select a session first…' : 'Ask Kalio…'}
             rows={1}
             value={value}

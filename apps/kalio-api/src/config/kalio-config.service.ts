@@ -5,6 +5,7 @@ import { access, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { parseGoalLaunchPolicyConfig, type GoalLaunchPolicyPublication } from './goal-launch-policy.config';
 import type {
   KalioConfig,
   KalioConfigLayer,
@@ -72,6 +73,31 @@ export class KalioConfigService {
   private cachedDefaultConfig: KalioEffectiveConfig | null = null;
   private cachedAt: number | null = null;
 
+  /** Host authority reads only the user layer, freshly; project config and the
+   * effective-config cache must never grant goal-launch eligibility. */
+  async getUserGoalLaunchPolicy(signal?: AbortSignal): Promise<GoalLaunchPolicyPublication | null> {
+    const checkAbort = (): void => { if (signal?.aborted) throw new Error('GOAL_LAUNCH_POLICY_ABORTED'); };
+    checkAbort();
+    let config: KalioConfig | null;
+    try { config = await this.readConfigFile(buildKalioConfigPath(homedir()), signal); }
+    catch {
+      checkAbort();
+      throw new Error('GOAL_LAUNCH_POLICY_READ_FAILED');
+    }
+    checkAbort();
+    const raw: unknown = config === null ? undefined : (config as unknown as Record<string, unknown>).goal_launch_policy;
+    // The existing TOML owner returns parser-owned tables/lists with hidden
+    // symbol metadata. Strip only that representation at the owner boundary;
+    // preserve every enumerable string field for the strict policy parser.
+    if (!isPlainObject(raw)) return parseGoalLaunchPolicyConfig(raw);
+    const detached = Object.fromEntries(Object.entries(raw));
+    if (Array.isArray(detached.allowedBindings)) {
+      detached.allowedBindings = detached.allowedBindings.map((row: unknown) =>
+        isPlainObject(row) ? Object.fromEntries(Object.entries(row)) : row);
+    }
+    return parseGoalLaunchPolicyConfig(detached);
+  }
+
   async getEffectiveConfig(): Promise<KalioEffectiveConfig> {
     if (
       this.cachedDefaultConfig !== null &&
@@ -124,6 +150,10 @@ export class KalioConfigService {
     }
 
     const result: Partial<ToolTimeoutSettings> = {};
+    if (typeof toolTimeouts.provider_request_timeout_ms === 'number'
+      && Number.isFinite(toolTimeouts.provider_request_timeout_ms)) {
+      result.providerRequestTimeoutMs = Math.round(toolTimeouts.provider_request_timeout_ms);
+    }
 
     if (typeof toolTimeouts.web_search_timeout_ms === 'number' && Number.isFinite(toolTimeouts.web_search_timeout_ms)) {
       result.webSearchTimeoutMs = Math.round(toolTimeouts.web_search_timeout_ms);
@@ -158,12 +188,12 @@ export class KalioConfigService {
     return config.cli_agents?.[agentId] ?? null;
   }
 
-  private async readConfigFile(filePath: string): Promise<KalioConfig | null> {
+  private async readConfigFile(filePath: string, signal?: AbortSignal): Promise<KalioConfig | null> {
     if (!await fileExists(filePath)) {
       return null;
     }
 
-    const raw = await readFile(filePath, 'utf8');
+    const raw = await readFile(filePath, { encoding: 'utf8', signal });
     try {
       return normalizeParsedConfig(TOML.parse(raw), filePath);
     } catch (error) {

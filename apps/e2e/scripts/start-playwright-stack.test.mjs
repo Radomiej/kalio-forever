@@ -1,7 +1,7 @@
 ﻿import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
@@ -75,7 +75,7 @@ export const devices = {
   process.exit(1);
 }
 
-console.log('[fake-playwright] ran with ' + process.env.PLAYWRIGHT_BASE_URL);
+console.log('[fake-playwright] ran with ' + process.env.PLAYWRIGHT_BASE_URL + ' project=' + process.env.KALIO_E2E_PROJECT_PATH);
 `,
     'utf8',
   );
@@ -120,6 +120,7 @@ server.listen(port, () => {
     'controlPort=' + process.env.KALIO_PLAYWRIGHT_CONTROL_PORT,
     'controlToken=' + (process.env.KALIO_PLAYWRIGHT_CONTROL_TOKEN ? 'set' : 'missing'),
     'model=' + process.env.LLM_MODEL,
+    'decisionOrigins=' + process.env.KALIO_DECISION_FRONTEND_ORIGINS,
   );
 });
 `,
@@ -312,6 +313,18 @@ async function waitForOutputCount(child, output, pattern, expectedCount, timeout
     child.stdout?.on('data', onChunk);
     child.stderr?.on('data', onChunk);
   });
+}
+
+async function requestControl(url, options, output) {
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Control plane request failed: ${message}\n\n${output.join('')}`, { cause: error });
+  }
 }
 
 async function terminateProcess(child) {
@@ -565,6 +578,11 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
 
   try {
     const { launcherPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const sharedDist = resolve(sandboxRoot, 'apps/kalio-web/dist');
+    const sharedRuntimeConfig = resolve(sharedDist, 'runtime-config.js');
+    const fixedQaConfig = 'window.__KALIO_RUNTIME_CONFIG__ = {"apiUrl":"http://127.0.0.1:3316","wsUrl":"http://127.0.0.1:3316"};\n';
+    await mkdir(sharedDist, { recursive: true });
+    await writeFile(sharedRuntimeConfig, fixedQaConfig);
     const frontendPort = await getFreePort();
     const backendPort = await getFreePort();
     const child = spawn(process.execPath, [launcherPath], {
@@ -588,6 +606,8 @@ test('launcher can start from prebuilt artifacts when build step is skipped', as
       assert.match(fullOutput, /skipping builds because KALIO_PLAYWRIGHT_SKIP_BUILD=1/);
       assert.doesNotMatch(fullOutput, /\[fake-pnpm\] build/);
       assert.match(fullOutput, /backend and frontend are ready/);
+      assert.equal(await readFile(sharedRuntimeConfig, 'utf8'), fixedQaConfig,
+        'isolated preview must not overwrite the shared fixed-QA artifact');
     } finally {
       stopCollecting();
       await terminateProcess(child);
@@ -626,13 +646,21 @@ test('launcher control plane authenticates and restarts backend after health rec
     try {
       await waitForReady(child, output, launcherReadyTimeoutMs);
 
-      const unauthorized = await fetch(`http://127.0.0.1:${controlPort}/restart-backend`, { method: 'POST' });
+      const unauthorized = await requestControl(
+        `http://127.0.0.1:${controlPort}/restart-backend`,
+        { method: 'POST' },
+        output,
+      );
       assert.equal(unauthorized.status, 401);
 
-      const restart = await fetch(`http://127.0.0.1:${controlPort}/restart-backend`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${controlToken}` },
-      });
+      const restart = await requestControl(
+        `http://127.0.0.1:${controlPort}/restart-backend`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${controlToken}` },
+        },
+        output,
+      );
       assert.equal(restart.status, 200);
       assert.deepEqual(await restart.json(), { status: 'ready' });
       await waitForOutputCount(child, output, /\[fake-backend\] listening on/g, 2, launcherReadyTimeoutMs);
@@ -642,6 +670,55 @@ test('launcher control plane authenticates and restarts backend after health rec
       await terminateProcess(child);
     }
   } finally {
+    await removeSandbox(sandboxRoot);
+  }
+});
+
+test('playwright lifecycle requests hidden windows for stack, builds, workers and shutdown', async () => {
+  const sandboxRoot = await mkdtemp(join(tmpdir(), 'kalio-playwright-hidden-lifecycle-'));
+  const output = [];
+  let child;
+  try {
+    const { runnerPath, binDir } = await createSandboxRepo(sandboxRoot);
+    const tracePath = resolve(sandboxRoot, 'spawn-trace.jsonl');
+    const preloadPath = resolve(sandboxRoot, 'spawn-trace.mjs');
+    await writeFile(preloadPath, `import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { appendFileSync } from 'node:fs';
+import { basename } from 'node:path';
+const original = cp.spawn;
+cp.spawn = function(command, args, options) {
+  appendFileSync(process.env.KALIO_TEST_SPAWN_TRACE, JSON.stringify({
+    command: basename(command), windowsHide: options?.windowsHide,
+  }) + '\\n');
+  return original.call(this, command, args, options);
+};
+syncBuiltinESMExports();
+`, 'utf8');
+    child = spawn(process.execPath, [runnerPath], {
+      cwd: sandboxRoot,
+      env: {
+        ...withoutSystemNodeOverride(withoutPlaywrightUrls(process.env)),
+        CI: 'true', PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        NODE_OPTIONS: `--import=${pathToFileURL(preloadPath).href}`,
+        KALIO_TEST_SPAWN_TRACE: tracePath,
+      },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stopCollecting = collectOutput(child, output);
+    try {
+      const [code] = await once(child, 'exit');
+      assert.equal(code, 0, output.join(''));
+    } finally { stopCollecting(); }
+    const calls = (await readFile(tracePath, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(calls.length >= 5, 'must observe stack, both builds, backend, frontend and worker');
+    if (process.platform === 'win32') {
+      assert.ok(calls.some(call => call.command.toLowerCase().startsWith('taskkill')), 'must observe shutdown');
+    }
+    assert.deepEqual(calls.filter(call => call.windowsHide !== true), [], 'every lifecycle spawn must suppress its console window');
+  } finally {
+    if (child) await terminateProcess(child);
     await removeSandbox(sandboxRoot);
   }
 });
@@ -722,6 +799,9 @@ test('playwright wrapper allocates E2E ports when URLs are not pinned', async ()
       assert.match(fullOutput, /starting backend on http:\/\/127\.0\.0\.1:\d+\b/);
       assert.match(fullOutput, /starting frontend preview on http:\/\/127\.0\.0\.1:\d+\b/);
       assert.match(fullOutput, /\[fake-playwright\] ran with http:\/\/127\.0\.0\.1:\d+\b/);
+      const frontendOrigin = fullOutput.match(/\[fake-playwright\] ran with (http:\/\/127\.0\.0\.1:\d+)\b/)?.[1];
+      assert.ok(frontendOrigin);
+      assert.equal(fullOutput.match(/decisionOrigins=(\S+)/)?.[1], frontendOrigin);
     } finally {
       stopCollecting();
     }
@@ -760,6 +840,7 @@ test('playwright wrapper gives each run isolated database and workspace paths', 
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]kalio-e2e\.db/);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]workspaces/);
       assert.match(fullOutput, /data[\\/]playwright-stack[\\/]\d+-\d+[\\/]memory/);
+      assert.match(fullOutput, /project=.*data[\\/]playwright-stack[\\/]\d+-\d+[\\/]project/);
       assert.doesNotMatch(fullOutput, /shared-from-env-file/);
     } finally {
       stopCollecting();

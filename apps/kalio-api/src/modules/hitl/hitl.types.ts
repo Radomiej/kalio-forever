@@ -1,36 +1,28 @@
-import type { AgentRunContext } from '@kalio/types';
+import type { AgentRunContext, HitlConfig as SharedHitlConfig } from '@kalio/types';
+import type {
+  HitlApprovalKind,
+  HitlMode,
+  HitlRuleDecision,
+} from '@kalio/types';
 
-export const HITL_MODES = ['manual', 'auto', 'bypass'] as const;
+export type {
+  HitlApprovalKind,
+  HitlConfig,
+  HitlHardRule,
+  HitlHardRuleInput,
+  HitlMode,
+  HitlRuleDecision,
+  UpdateHitlConfigDto,
+} from '@kalio/types';
 
-export type HitlMode = typeof HITL_MODES[number];
-export type HitlUnattendedFallback = 'pause' | 'representative';
-export type HitlNotificationChannel = 'none' | 'telegram';
-
-export interface HitlConfig {
-  mode: HitlMode;
-  autoPersonaId: string | null;
-  unattendedFallback: HitlUnattendedFallback;
-  representativePersonaId: string | null;
-  notificationChannel: HitlNotificationChannel;
-  externalPolicyEnabled: boolean;
-  externalPolicyPersonaId: string | null;
-  raAppApprovalTimeoutMs: number;
-}
-
-export interface UpdateHitlConfigDto {
-  mode: HitlMode;
-  autoPersonaId?: string | null;
-  unattendedFallback?: HitlUnattendedFallback;
-  representativePersonaId?: string | null;
-  notificationChannel?: HitlNotificationChannel;
-  externalPolicyEnabled?: boolean;
-  externalPolicyPersonaId?: string | null;
-  raAppApprovalTimeoutMs?: number;
-}
-
-export type HitlApprovalKind = 'tool' | 'raapp_native' | 'external_security';
+export const HITL_MODES: readonly HitlMode[] = ['manual', 'auto', 'bypass', 'jev'];
+export type ResolvedHitlConfig = SharedHitlConfig & Required<Pick<SharedHitlConfig,
+  'jevInstructions' | 'jevApprovalThreshold' | 'jevFallbackToPersona' | 'rules'
+>>;
+export type HitlUnattendedFallback = SharedHitlConfig['unattendedFallback'];
+export type HitlNotificationChannel = SharedHitlConfig['notificationChannel'];
 export type HitlApprovalStatus = 'manual' | 'approved' | 'rejected';
-export type HitlApprovalSource = 'manual' | 'auto' | 'bypass' | 'representative';
+export type HitlApprovalSource = 'manual' | 'auto' | 'bypass' | 'representative' | 'jev' | 'rule';
 
 export interface HitlApprovalRequest {
   kind: HitlApprovalKind;
@@ -58,7 +50,7 @@ export interface HitlDecisionResult {
   agree: boolean;
   reason: string;
   risk?: 'low' | 'medium' | 'high' | 'critical';
-  decision?: 'allow' | 'deny' | 'ask_user';
+  decision?: HitlRuleDecision;
 }
 
 export function isHitlMode(value: string | null | undefined): value is HitlMode {

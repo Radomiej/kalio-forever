@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BrainCircuit, ChevronDown } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { ThinkingBlock } from './ThinkingBlock';
+import { NativeToolAuditPanel } from './NativeToolAuditPanel';
 import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -43,43 +44,6 @@ interface Props {
   answeredCallIds?: Set<string>;
   renderedMessages?: ChatMessage[];
 }
-
-// ─── ThinkingBlock ────────────────────────────────────────────────────────────
-
-function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming: boolean }) {
-  const [open, setOpen] = useState(false);
-  const didAutoOpen = useRef(false);
-
-  useEffect(() => {
-    if (isStreaming && content.length > 0 && !didAutoOpen.current) {
-      didAutoOpen.current = true;
-      setOpen(true);
-    }
-    if (!isStreaming) didAutoOpen.current = false;
-  }, [isStreaming, content.length]);
-
-  return (
-    <div className="border border-base-content/10 rounded-lg overflow-hidden">
-      <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-xs text-base-content/50 hover:text-base-content/70 transition-colors bg-base-200/50"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <BrainCircuit size={12} className={isStreaming ? 'text-sky-400 animate-pulse' : 'text-base-content/40'} />
-        <span>Thinking</span>
-        {isStreaming && <span className="loading loading-dots loading-xs ml-1" />}
-        <ChevronDown size={12} className={`ml-auto transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="px-3 py-2 text-xs text-base-content/50 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto bg-base-200/20">
-          {content}
-          {isStreaming && <span className="inline-block h-3 w-0.5 animate-pulse bg-current ml-0.5" />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── AgentTurnBubble ──────────────────────────────────────────────────────────
 
 export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivities, answeredCallIds, renderedMessages }: Props) {
   const sessions = useSessionStore((state) => state.sessions);
@@ -261,6 +225,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
         </p>
 
         <div className={`group relative rounded-xl text-base-content text-sm px-2.5 py-1.5 flex flex-col gap-1 w-full ${turn.agentRun?.agentType === 'subagent' ? 'bg-sky-500/10 border border-sky-500/20' : 'bg-base-300'}`}>
+          <NativeToolAuditPanel key={`${turn.sessionId}:${turn.id}`} sessionId={turn.sessionId} turnId={turn.id} />
           {turnArchitectureRun && (
             <>
               <ArchitectureRunTimeline
@@ -315,7 +280,6 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                 return null;
               }
               
-              // Check if this is a live (in-progress) tool or completed
               const liveActivity = toolActivities.find((a) => a.callId === callId);
               const parsedToolResult = toolResult?.parsed;
               const cliSnapshot = parsedToolResult !== undefined ? extractCLIAgentSessionSnapshot(parsedToolResult) : null;
@@ -358,7 +322,6 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                 return <LiveToolCallBubble key={`${callId}-${idx}`} activity={syntheticLiveActivity} />;
               }
               
-              // Completed tool call
               return (
                 <HistoryToolCallBubble
                   key={`${callId}-${idx}`}
@@ -375,14 +338,14 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
             if (item.kind === 'thinking') {
               const messageId = item.messageId;
               const msg = turnMessages.find((m) => m.id === messageId);
-              // Prefer live chunk (streaming); fall back to persisted msg.thinking for history
               const thinkingContent = thinkingChunks[messageId] ?? msg?.thinking ?? '';
               if (!thinkingContent) return null;
-              const isThinkingStreaming = thinkingChunks[messageId] !== undefined;
+              const isThinkingStreaming = !turn.done && thinkingChunks[messageId] !== undefined
+                && !(streamingChunks[messageId] || msg?.content)
+                && visibleItems.at(-1)?.kind === 'thinking';
               return <ThinkingBlock key={`think-${messageId}`} content={thinkingContent} isStreaming={isThinkingStreaming} />;
             }
 
-            // text item
             const messageId = item.messageId;
             const msg = turnMessages.find((m) => m.id === messageId);
             if (!msg) return null;
@@ -390,8 +353,6 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
               return null;
             }
             
-            // Use per-message streaming state: cursor blinks only while this message's
-            // chunk is still live (disappears as soon as agent calls a tool / thinking / raapp).
             const isStreaming = isMessageLiveStreaming(messageId, msg, streamingChunks, turn.done);
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
 

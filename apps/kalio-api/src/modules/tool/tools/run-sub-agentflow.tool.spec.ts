@@ -76,6 +76,41 @@ function moduleRef(agentFlowRuntime: AgentFlowRuntimePort): ModuleRef {
 }
 
 describe('RunSubAgentFlowTool', () => {
+  it('forwards trusted source identity instead of model-supplied context identifiers', async () => {
+    const agentFlowRuntime = runtime();
+    const tool = new RunSubAgentFlowTool(moduleRef(agentFlowRuntime));
+    await tool.execute({
+      ...request({ flowId: 'goal_guard_delivery_loop', goal: 'Preserve user goal',
+        context: { projectPath: 'E:/Projekty/home-site', promptMessageId: 'forged-message', parentTurnId: 'forged-turn' } }),
+      promptMessageId: 'persisted-user-message', turnId: 'persisted-user-turn',
+    });
+    expect(agentFlowRuntime.start).toHaveBeenCalledWith(expect.objectContaining({ context: {
+      projectPath: 'E:/Projekty/home-site', promptMessageId: 'persisted-user-message', parentTurnId: 'persisted-user-turn',
+    } }));
+  });
+
+  it('does not promote model-supplied identity when the host request has no identity', async () => {
+    const agentFlowRuntime = runtime();
+    const tool = new RunSubAgentFlowTool(moduleRef(agentFlowRuntime));
+    await tool.execute(request({ flowId: 'goal_guard_delivery_loop', goal: 'Legacy request',
+      context: { projectPath: 'E:/Projekty/home-site', promptMessageId: 'forged-message', parentTurnId: 'forged-turn' } }));
+    expect(agentFlowRuntime.start).toHaveBeenCalledWith(expect.objectContaining({
+      context: { projectPath: 'E:/Projekty/home-site' },
+    }));
+  });
+
+  it('preserves string launch context while carrying trusted source identity', async () => {
+    const agentFlowRuntime = runtime();
+    const tool = new RunSubAgentFlowTool(moduleRef(agentFlowRuntime));
+    await tool.execute({
+      ...request({ flowId: 'goal_guard_delivery_loop', goal: 'Preserve user goal', context: 'Existing worker context' }),
+      promptMessageId: 'persisted-user-message', turnId: 'persisted-user-turn',
+    });
+    expect(agentFlowRuntime.start).toHaveBeenCalledWith(expect.objectContaining({ context: {
+      subAgentFlowContext: 'Existing worker context', promptMessageId: 'persisted-user-message', parentTurnId: 'persisted-user-turn',
+    } }));
+  });
+
   it('registers as a confirmation-gated native tool', () => {
     const metadata = Reflect.getMetadata(TOOL_METADATA, RunSubAgentFlowTool);
     expect(metadata).toMatchObject({

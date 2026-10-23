@@ -25,6 +25,36 @@ function turn(overrides: Partial<AgentTurn> = {}): AgentTurn {
 }
 
 describe('resolveLiveTurnState', () => {
+  it('waits for approval rather than claiming a restored confirmation is running', () => {
+    const state = resolveLiveTurnState({
+      sessionId: 'session-1',
+      sessionMessages: [],
+      agentTurns: [],
+      activeTurnId: null,
+      isStreaming: false,
+      streamingSessionId: null,
+      awaitingFirstChunk: false,
+      hasActiveLoop: false,
+      queuedDepth: 0,
+      activeToolActivities: [{
+        callId: 'write-1',
+        toolName: 'fs_write',
+        args: {},
+        sessionId: 'session-1',
+        status: 'awaiting_confirmation',
+        startedAt: 1,
+      }],
+      streamingChunks: {},
+      thinkingChunks: {},
+      chunkSessionIds: {},
+    });
+
+    expect(state.phase).toBe('awaiting_confirmation');
+    expect(state.toolName).toBe('fs_write');
+    expect(state.stoppable).toBe(true);
+    expect(state.showPlaceholderBubble).toBe(true);
+  });
+
   it('returns pending and renders an optimistic placeholder before the first chunk', () => {
     const state = resolveLiveTurnState({
       sessionId: 'session-1',
@@ -66,6 +96,7 @@ describe('resolveLiveTurnState', () => {
 
     expect(state.phase).toBe('thinking');
     expect(state.previewText).toBe('Let me think.');
+    expect(state.showPlaceholderBubble).toBe(false);
   });
 
   it('switches to streaming_text when the first visible answer chunk arrives', () => {
@@ -87,6 +118,7 @@ describe('resolveLiveTurnState', () => {
 
     expect(state.phase).toBe('streaming_text');
     expect(state.previewText).toBe('Partial answer');
+    expect(state.showPlaceholderBubble).toBe(false);
   });
 
   it('switches to running_tool when a session tool is active', () => {

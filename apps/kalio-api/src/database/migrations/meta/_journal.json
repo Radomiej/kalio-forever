@@ -246,6 +246,34 @@
       "when": 1787405500000,
       "tag": "0034_devin_local_cli_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1791395042000,
+      "tag": "0035_architecture_goal_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1791398799000,
+      "tag": "0036_architecture_goal_completion",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1791410399000,
+      "tag": "0037_host_dispatch_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1791413999000,
+      "tag": "0038_goal_launch_reservations",
+      "breakpoints": true
     }
   ]
 }

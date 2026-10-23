@@ -38,12 +38,16 @@ export async function replayPendingToolConfirmations(input: {
 
 export async function resolveToolConfirmation(input: {
   payload: SocketEvents['tool:confirm'];
-  toolDispatch: Pick<ToolDispatchService, 'resolveConfirmation'>;
-  chatService?: Pick<ChatService, 'approveAndResumeTool'>;
+  toolDispatch: Pick<ToolDispatchService, 'resolveConfirmation'> & Partial<Pick<ToolDispatchService, 'resolveConfirmationFromGateway'>>;
+  chatService?: Pick<ChatService, 'approveAndResumeTool'> & Partial<Pick<ChatService, 'hasPendingToolConfirmation'>>;
   emit: EmitFn;
+  /** Supplied only by the gateway after session membership validation, never from payload. */
+  gatewaySocketId?: string;
 }): Promise<void> {
   const { payload } = input;
-  const status = payload.message
+  const status = input.gatewaySocketId && input.toolDispatch.resolveConfirmationFromGateway
+    ? await input.toolDispatch.resolveConfirmationFromGateway(payload.requestId, payload.sessionId, input.gatewaySocketId, payload.message)
+    : payload.message
     ? await input.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId, payload.message)
     : await input.toolDispatch.resolveConfirmation(payload.requestId, payload.sessionId);
   if (status !== 'not_found') return;
@@ -55,6 +59,7 @@ export async function resolveToolConfirmation(input: {
     input.emit,
   );
   if (resumed) return;
+  if (await input.chatService?.hasPendingToolConfirmation?.(payload.requestId, payload.sessionId)) return;
   input.emit('tool:confirmation_invalidated', {
     requestId: payload.requestId,
     sessionId: payload.sessionId,

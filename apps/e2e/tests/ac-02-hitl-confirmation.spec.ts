@@ -1,4 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { io } from 'socket.io-client';
+import { hitlFixtureRequest } from './helpers/hitl-fixture-auth';
 import {
   API_BASE,
   deleteSessionIfExists,
@@ -39,15 +41,13 @@ async function saveManualHitlMode(page: Page): Promise<void> {
 }
 
 async function getHitlConfig(request: APIRequestContext): Promise<HitlConfig> {
-  const response = await request.get(`${API_BASE}/hitl/config`);
+  const response = await hitlFixtureRequest(request, 'GET');
   expect(response.ok()).toBeTruthy();
   return response.json() as Promise<HitlConfig>;
 }
 
 async function restoreHitlConfig(request: APIRequestContext, config: HitlConfig): Promise<void> {
-  const response = await request.put(`${API_BASE}/hitl/config`, {
-    data: config,
-  });
+  const response = await hitlFixtureRequest(request, 'PUT', config);
   expect(response.ok()).toBeTruthy();
 }
 
@@ -56,11 +56,39 @@ async function createSession(
   title: string,
   personaId: string,
 ): Promise<{ id: string; title: string }> {
+  // This suite tests tools in an existing conversation, not the live-provider launch wizard.
+  const profileResponse = await request.post(`${API_BASE}/runtime/profiles`, {
+    data: { name: `AC02 mock fixture ${title}`, kind: 'direct-llm', provider: 'mock', model: 'mock' },
+  });
+  expect(profileResponse.ok()).toBeTruthy();
+  const profile = await profileResponse.json() as { id: string };
   const response = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId },
+    data: { title, personaId, executionProfileId: profile.id },
   });
   expect(response.ok()).toBeTruthy();
   const session = await response.json() as { id: string };
+  const socket = io(API_BASE.replace(/\/api$/, ''), {
+    transports: ['websocket'], query: { sessionId: session.id }, autoConnect: false,
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('AC02 conversation fixture did not complete')), 10_000);
+      const finish = (error?: Error) => {
+        clearTimeout(timeout);
+        if (error) reject(error); else resolve();
+      };
+      socket.once('connect_error', (error) => finish(error));
+      socket.once('chat:error', (error: { message?: string }) => finish(new Error(error.message ?? 'Fixture chat failed')));
+      socket.once('chat:complete', () => finish());
+      socket.once('connect', () => socket.emit('chat:send', {
+        sessionId: session.id, personaId, executionProfileId: profile.id,
+        content: 'Hello. This is a mock-only tool confirmation test conversation.',
+      }));
+      socket.connect();
+    });
+  } finally {
+    socket.disconnect();
+  }
   return { id: session.id, title };
 }
 
@@ -257,12 +285,16 @@ test.describe('AC-02: HITL tool confirmation', () => {
       await expect(page.getByTestId('tool-call-target')).toContainText(MOCK_VFS_WRITE_PATH);
       const toggle = page.getByTestId('confirmation-args-toggle');
       await expect(toggle).toBeVisible({ timeout: 10_000 });
-      await toggle.click();
-
-      const expandedArgs = page.getByTestId('args-expanded');
+      const expandedArgs = page.getByRole('region', { name: 'Full tool arguments' });
       await expect(expandedArgs).toBeVisible({ timeout: 10_000 });
-      await expect(expandedArgs).toContainText(`filePath: ${MOCK_VFS_WRITE_PATH}`);
-      await expect(expandedArgs).toContainText(`content: ${MOCK_VFS_WRITE_CONTENT}`);
+      await expect(expandedArgs).toContainText(MOCK_VFS_WRITE_PATH);
+      await expect(expandedArgs).toContainText(MOCK_VFS_WRITE_CONTENT);
+      await toggle.click();
+      await expect(expandedArgs).toHaveCount(0);
+      await toggle.click();
+      await expect(expandedArgs).toBeVisible({ timeout: 10_000 });
+      await expect(expandedArgs).toContainText(MOCK_VFS_WRITE_PATH);
+      await expect(expandedArgs).toContainText(MOCK_VFS_WRITE_CONTENT);
     } finally {
       if (createdSessionId) {
         await deleteSessionIfExists(request, createdSessionId);

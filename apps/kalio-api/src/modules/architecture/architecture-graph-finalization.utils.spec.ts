@@ -92,6 +92,75 @@ function toolData(toolEvidence: Record<string, unknown>): Record<string, unknown
 }
 
 describe('architecture graph finalization helpers', () => {
+  const goalContext = { requireGoalMasterLoopProof: true };
+  function buildProof(status: 'passed' | 'failed', exitCode: number): ArchitectureExecutionEvent {
+    return event('participant_output', 'implementer', toolData({
+      toolResultCount: 2, successfulToolNames: ['fs_write', 'fs_read'], targetPaths: ['src/index.ts'],
+    }), [{ kind: 'BUILD_RESULT', status, data: { exitCode } }]);
+  }
+
+  it('blocks goal finalization on a failed build despite successful tools and a complete verdict', () => {
+    expect(blockingFinalizationReason({ schema,
+      runContext: { ...goalContext, externalQualityGate: { source: 'Jev', status: 'passed' } },
+      events: [buildProof('failed', 1)],
+    })).toMatch(/build/i);
+  });
+
+  it('does not let an older passed build mask a newer failed attempt', () => {
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      priorEvents: [buildProof('passed', 0)], events: [buildProof('failed', 1)],
+    })).toMatch(/build/i);
+  });
+
+  it('allows a newer passed build to supersede an old failed attempt', () => {
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      priorEvents: [buildProof('failed', 1)], events: [buildProof('passed', 0)],
+    })).toBeUndefined();
+  });
+
+  it.each([
+    { status: 'passed' as const, data: { exitCode: 1 } },
+    { status: 'failed' as const, data: { exitCode: 0 } },
+    { status: 'unknown' as const, data: { exitCode: 0 } },
+    { status: 'passed' as const, data: {} },
+  ])('rejects an invalid latest build result %j', (build) => {
+    const latest = buildProof('passed', 0);
+    latest.evidence = [{ kind: 'BUILD_RESULT', ...build }];
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      events: [buildProof('passed', 0), latest],
+    })).toMatch(/build/i);
+  });
+
+  it('checks the last typed build row in data evidence as well as top-level evidence', () => {
+    const latest = buildProof('passed', 0);
+    latest.data = { ...latest.data, evidence: [
+      { kind: 'BUILD_RESULT', status: 'passed', data: { exitCode: 0 } },
+      { kind: 'BUILD_RESULT', status: 'failed', data: { exitCode: 1 } },
+    ] };
+    latest.evidence = undefined;
+    expect(blockingFinalizationReason({ schema, runContext: goalContext, events: [latest] })).toMatch(/build/i);
+  });
+
+  it('does not admit a no-op implementer using old passed host proof after a new failed build', () => {
+    const oldProof = buildProof('passed', 0);
+    expect(architectureToolExecutorContract({ schema, runContext: goalContext,
+      slot: implementerSlot, data: {}, incomingEvents: [],
+      priorEvents: [oldProof], events: [buildProof('failed', 1)],
+    })).toEqual({ ok: false, reason: 'implementer did not produce a successful write result' });
+  });
+
+  it('blocks unsupported goal completion even after a prior continuation', () => {
+    expect(blockingFinalizationReason({ schema, runContext: goalContext,
+      events: [event('participant_output', 'implementer', { response: 'done' })],
+    })).toBeDefined();
+  });
+
+  it('keeps generic chat completion unchanged without the goal proof flag', () => {
+    expect(blockingFinalizationReason({ schema, runContext: {},
+      events: [buildProof('failed', 1)],
+    })).toBeUndefined();
+  });
+
   it('blocks finalization on typed external quality gate failure', () => {
     const reason = blockingFinalizationReason({
       schema,
@@ -155,6 +224,66 @@ describe('architecture graph finalization helpers', () => {
       events: [implementerEvent],
       priorEvents: [],
     })).toBe('CLI child implementation is incomplete: child status is running.');
+  });
+
+  it.each(['running', 'cancelled', 'failed', undefined])('does not let a passed QA gate hide unresolved child status %s', (status) => {
+    const implementation = event('participant_output', 'implementer', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['spawn_cli_agent'],
+      targetPaths: ['src/index.ts'],
+      childCliSessions: [{ status }],
+    }));
+    const verification = event('participant_output', 'verifier', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['fs_read'],
+      targetPaths: ['package.json'],
+    }));
+    expect(blockingFinalizationReason({
+      schema,
+      runContext: { externalQualityGate: { source: 'QA', status: 'passed', highFindings: 0 } },
+      events: [implementation, verification],
+    })).toBe(`CLI child implementation is incomplete: child status is ${status ?? 'unknown'}.`);
+  });
+
+  it('does not let independent read/build proof hide a currently running implementation child', () => {
+    const implementation = event('participant_output', 'implementer', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['spawn_cli_agent'],
+      targetPaths: ['src/index.ts'],
+      childCliSessions: [{ status: 'running' }],
+    }));
+    const verification = event('participant_output', 'verifier', toolData({
+      toolResultCount: 2,
+      successfulToolNames: ['fs_read', 'terminal_output'],
+      targetPaths: ['package.json'],
+    }), [{ kind: 'BUILD_RESULT', status: 'passed', data: { exitCode: 0 } }]);
+    expect(blockingFinalizationReason({ schema, runContext: {}, events: [implementation, verification] }))
+      .toBe('CLI child implementation is incomplete: child status is running.');
+  });
+
+  it.each(['completed', 'terminal-success', 'success', 'exited'])('allows a newer resolved child status %s to supersede old running evidence', (status) => {
+    const running = event('participant_output', 'implementer', toolData({
+      toolResultCount: 1,
+      successfulToolNames: ['spawn_cli_agent'],
+      targetPaths: ['src/index.ts'],
+      childCliSessions: [{ status: 'running' }],
+    }));
+    const resolved: ArchitectureExecutionEvent = {
+      ...running,
+      id: 'resolved-implementation',
+      sequence: 2,
+      data: toolData({
+        toolResultCount: 2,
+        successfulToolNames: ['message_cli_agent'],
+        targetPaths: ['src/index.ts'],
+        childCliSessions: [{ status }],
+      }),
+    };
+    expect(blockingFinalizationReason({
+      schema,
+      runContext: { externalQualityGate: { source: 'QA', status: 'passed', highFindings: 0 } },
+      events: [running, resolved],
+    })).toBeUndefined();
   });
 
   it('validates implementation and verifier tool-executor contracts from typed evidence', () => {

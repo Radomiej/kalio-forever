@@ -1,4 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { goalRouteAuditData } from './architecture-goal-route-audit';
 import type {
   ArchitectureExecutionEvent,
   ArchitectureRun,
@@ -25,6 +26,7 @@ export interface ArchitectureRuntimeAuditWriter {
     auditEvents?: boolean,
   ): void;
   logEvent(schema: ArchitectureSchema, run: ArchitectureRun, event: ArchitectureExecutionEvent): void;
+  logRouteDecisionRequired(schema: ArchitectureSchema, run: ArchitectureRun, event: ArchitectureExecutionEvent, checkpointId: string): Promise<void>;
   logFailure(schema: ArchitectureSchema, run: ArchitectureRun, failure: WorkflowFailure): void;
   logHydration(run: ArchitectureRun, hydration: ArchitectureVfsHydrationResult | null): void;
 }
@@ -117,6 +119,49 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
     if (runtimeEvent) {
       void this.runtimeAudit?.log(runtimeEvent);
     }
+  }
+
+  async logRouteDecisionRequired(
+    schema: ArchitectureSchema,
+    run: ArchitectureRun,
+    event: ArchitectureExecutionEvent,
+    checkpointId: string,
+  ): Promise<void> {
+    if (!this.audit) throw new Error('Durable audit storage is unavailable for Auto-routing.');
+    const goalData = goalRouteAuditData(event.data);
+    const goalCheckpoint = Object.hasOwn(goalData, 'goalBinding') || run.goalPacket !== undefined
+      || !!run.context && Object.hasOwn(run.context, 'goalProtocol');
+    const sessionId = goalCheckpoint ? run.rootSessionId
+      : getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      throw new Error('GOAL_ROUTE_AUDIT_SCOPE_INVALID');
+    }
+    const actionFields = architectureActionFieldsForEvent(event);
+    await this.audit.logRequired(checkpointId, {
+      sessionId,
+      type: 'architecture_event',
+      label: `architecture_event:${event.type}:${event.nodeId ?? 'runtime'}`,
+      data: {
+        domain: 'architecture', kind: 'architecture_event',
+        runId: run.id, architectureRunId: run.id, schemaId: schema.id,
+        executionMode: run.executionMode, rootSessionId: run.rootSessionId,
+        eventId: event.id, eventType: event.type, sequence: event.sequence,
+        lifecycle: event.lifecycle, status: event.status, reasonCode: event.reasonCode,
+        nodeId: event.nodeId, roleSlotId: event.roleSlotId,
+        route: event.route, routerOutput: event.routerOutput,
+        autoRoutingVisit: event.data?.['autoRoutingVisit'],
+        selectedEdgeId: event.data?.['selectedEdgeId'],
+        pendingNodeIds: event.data?.['pendingNodeIds'],
+        visitCounts: event.data?.['visitCounts'],
+        ...goalData,
+        ...(goalCheckpoint ? { goalProtocol: true } : {}),
+        selectedNodeIds: event.data?.['selectedNodeIds'],
+        messagePreview: event.message.slice(0, 800),
+        actionSummary: actionFields.actionSummary, action: actionFields.action, detail: actionFields.detail,
+      },
+    });
+    const runtimeEvent = architectureRuntimeAuditEventInput(schema, run, event, sessionId);
+    if (runtimeEvent) void this.runtimeAudit?.log(runtimeEvent);
   }
 
   logFailure(

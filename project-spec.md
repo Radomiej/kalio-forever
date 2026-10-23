@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-08-22
+Last updated: 2026-10-18
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -52,10 +52,24 @@ flowchart LR
 
 - Provider and model form one execution pair. An AgentFlow persona must not silently replace only the model on an unrelated active provider. Without an explicit run-level model override, workflow branches inherit the active provider configuration used by chat.
 
+## Provider And Persona Selection Direction (2026-10-02)
+
+- Accepted product direction: persona identity (role/instructions) is independent from execution provider/runtime and model, but a persona may recommend a default provider/model pair. New chat preselects that recommendation in a searchable provider/model finder; the user can override it, and the final pair is persisted at the conversation/run boundary. Provider and model are validated as one pair.
+- A persona recommendation seeds a new conversation only; the persisted conversation choice is authoritative for its runs. If neither recommendation nor saved choice is valid, require explicit user selection. Unavailable choices fail closed with actionable status; no lower-priority provider, mock, or environment fallback is tried silently.
+- Resolve the effective provider/runtime + model and permission context into an immutable run snapshot before dispatch. Retry, resume, reconnect, history, and audit for that run use its snapshot rather than mutable conversation/persona/default settings.
+- Backend state is authoritative. Resolve and snapshot the effective selection and relevant capability/permission context at launch; later settings changes do not rewrite an in-flight run. The UI must show the effective choice and typed readiness/progress/result.
+- This direction supersedes persona-bound provider/model selection as an enforced choice for new chats after the compatible session contract is implemented. Existing persona profile/model fields remain as recommendations, and historical session bindings remain readable until compatibility tests prove safe retirement.
+- Mock providers remain available to tests/development but are not ordinary user-facing provider choices.
+- Product terminology separates Integration (connection/auth), Development environment (VS Code, workspaces/projects), Agent runtime (Devin CLI, Codex App Server, Claude Code, hosted agents), and LLM provider. A runtime may use an LLM provider; the two are not interchangeable concepts.
+- Full UX scope, evidence, open questions, and acceptance criteria: `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+
 - A chat is composed of turns. The canonical run lifecycle is `queued`, `running`, `waiting_for_human`, `completed`, `failed`, `blocked`, or `cancelled`; unknown or legacy status must not be projected as success.
 - The latest active/terminal turn influences the chat status, but chat-level recovery may retry transport/provider failures through typed policy.
 - Workflow nodes call child chat sessions; child sessions execute turns. Nodes and connections orchestrate at a higher level and must consume child typed states, not child transcript prose.
 - CLI agents, subagents, and AgentFlow children are one child-execution family for lifecycle, visibility, stop, replay, and status projection.
+- Socket Stop, session DELETE and Telegram Stop use one session-tree coordinator. A single-process, database-identity topology claim freezes child creation before tree discovery; guarded session/CLI inserts and the claim execute synchronously. Parent links remain immutable. Same/ancestor/descendant Stop overlap is an explicit conflict; disjoint trees may stop concurrently.
+- Every discovered session receives a retained execution fence before external cancellation owners start. Ordinary continuation cancellation runs only after local workers and external journal writers quiesce; existing CAS and protected-goal checks remain authoritative. Readiness includes every required owner/cleanup/finalization error. DELETE executes under the retained fences, and all claims/fences release in `finally`; no success snapshot is published after a required Stop failure.
+- Cleanup release acknowledgement is not Stop success. Follow-ups and coalesced Stop callers waiting on a retained lease receive its semantic failure, including owner or DELETE-action failure, before any admission/dispatch. A later fresh request may retry after release; the first release outcome cannot be overwritten.
 - Terminal events are scoped to their `runId` and `turnId`; a terminal event for an older turn must not complete or clear a newer turn.
 
 ```mermaid
@@ -192,13 +206,15 @@ classDiagram
 ## Agent Runtime And Codex Boundary
 
 - Persona identity is independent from execution engine. Projects, personas, and sessions select a persisted `ExecutionProfile`; the direct LLM profile remains available and Codex profiles use the ChatGPT/Codex App Server.
+- Profile changes and turn reservation share one per-session admission gate. A winning profile update is durable before reservation; an already-reserved turn rejects rebinding, including persona-induced changes. Worker execution and Stop drain run outside that gate. Cross-module profile/default reads use `EXECUTION_PROFILE_LOOKUP` rather than concrete runtime services.
 - `devin-api` is a separate cloud task-agent profile. It uses the server-side Devin REST v3 session API with a bounded `DEVIN_MAX_ACU_LIMIT`; it does not receive Kalio `cwd`, local file contents, tool schemas, or native HITL callbacks. Kalio records when its available tool set is omitted at this boundary.
-- `devin-cli-acp` is a separate host-local profile family. It launches the authenticated Devin CLI directly as `devin --model <glm-5-2|swe-1-7> acp`, keeps one ACP process per model lane, and persists the opaque ACP `sessionId` through the existing `externalThreadId` binding. It is not `CLIAgentService`, `spawn_cli_agent`, or a Claude runtime.
+- `devin-cli-acp` is a separate host-local profile family. Kalio discovers currently available model slugs and IDs through the authenticated Devin CLI model catalogue, exposes them as a runtime configuration choice, and resolves the selected model into a strict execution profile. It launches `devin --model <selected-model> acp`, keeps one ACP process per model lane, and persists the opaque ACP `sessionId` through the existing `externalThreadId` binding. There is no static model allowlist; stale saved profiles remain visible rather than silently changing model. It is not `CLIAgentService`, `spawn_cli_agent`, or a Claude runtime.
 - Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server when the provider advertises HTTP MCP support. When the handshake does not advertise HTTP (the installed Devin CLI `3000.2.17` reports `mcpCapabilities.http=false`), Kalio passes a stdio MCP proxy compiled from `kalio-mcp-bridge-stdio.ts`; the proxy forwards only to the same authenticated bridge, so persona allow-lists, session/VFS scope, turn context, and HITL policy remain server-side. The stable session config carries the persona-filtered tool names and the serialized per-turn context registry supplies turn/message IDs without changing ACP session policy. The bridge token is resolved from the desktop Settings override first and `KALIO_MCP_BRIDGE_TOKEN` second, so local dev remains fail-closed when neither source is configured.
 - Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
 - Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
 - The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
+- Codex model-catalog deadlines abort only their local request, removing its pending router entry and abort listener. Late responses are ignored; other requests and the shared host remain usable, without an invented wire cancellation message.
 - Codex dynamic tools are declared at `thread/start` and are dispatched through Kalio's existing tool broker/policy path. Native Codex tools remain Codex-native; their approval can use Codex auto-review (`codex_guard`) or Kalio HITL (`kalio_strict`).
 - Kalio starts the Codex App Server with inherited `mcp_servers` disabled by default, so MCP entries from the user's global Codex profile are not silently exposed to a Kalio persona. Settings > Integrations exposes a per-auth-profile toggle through `PATCH /api/runtime/native-cli-integrations/:authProfileId/settings`; the choice is persisted as `codex.mcp.inherit.<authProfileId>` and resets that profile's App Server so the next process applies it. `KALIO_CODEX_INHERIT_MCP=true|false` is only the fallback when no profile setting exists. Kalio's own MCP visibility remains controlled separately by the persona `mcpPolicy` (`allow_all`, `deny_all`, or `allow_list`).
 - Active execution is bounded by the shared runtime scheduler, defaulting to five leases across foreground, control, and child agents. Child agents are not an unbounded second process class.
@@ -233,3 +249,60 @@ classDiagram
   MCP server. Clients that only support stdio may use an HTTP-to-stdio adapter;
   managed Devin ACP uses Kalio's compiled `kalio-mcp-bridge-stdio.js` so the
   bearer token stays in the child environment and never in repo-managed config.
+
+## Durable Recovery Supersession (2026-10-02)
+
+- A safe interrupted turn is eligible for current-run projection and automatic
+  child continuation only when no later distinct turn was admitted in that session.
+  UI projection, recovery enumeration and the atomic revision claim share this rule.
+- Admission order is `COALESCE(queue_claimed_at, started_at)` with SQLite `rowid`
+  as a stable tie-breaker. Heartbeats cannot revive an obsolete safe turn.
+  Queue-origin rows count only after being claimed; unclaimed or cancelled queued
+  work does not supersede recovery.
+- Active executions, human waits and unsafe interrupted tools remain unresolved
+  projection candidates. A later completed answer does not prove an old tool had
+  no side effects. Historical journal rows remain stored; `getTurn` is evidence,
+  not authorization to resume. No schema migration or history deletion is needed.
+
+## Embedding Spaces And Resource Indexes (2026-10-08)
+
+- Embedding identity is SHA256-bound to provider/scope/endpoint/model/revision,
+  dimensions/backend and transform versions. Mutable/unresolved revisions are not
+  immutable producer proof; model updates require explicit reindex.
+- Persona memory, conversations and web results are partitioned by current space
+  and resource kind; old databases remain read-only reembed sources.
+- Project assets are explicitly indexed through VFS-scoped bounded snapshots and
+  separate per-type sqlite-vec indexes plus FTS. Binary assets currently index
+  metadata only, never implicitly claim native multimodal understanding.
+- VFS owns project-index path hashing, observational existence checks, quotas and directory allocation through `PROJECT_RESOURCE_INDEX_STORAGE`. The common database runtime owns SQLite connections; Memory retains producer validation, schema, chunks and search. Existing per-project/per-model filenames are unchanged. Every admitted source extension and special filename is covered by the real reader-to-index parity regression; binary formats remain metadata-only.
+- Remote embedding calls require per-operation consent. Resource APIs require the
+  local control-plane capability; search text stays in a JSON body.
+- Project Context opt-in is persisted and default off. Search refreshes the index
+  on demand after opt-in, not on startup or in a background crawler. Users choose
+  the model; backend derives identity without manual digest/scope fields.
+  Loopback Ollama metadata is resolved automatically, but mutable-tag inference
+  is not immutable proof; project indexing remains blocked until a trusted
+  inference binding exists. The catalog-pinned local E5-small CPU/q8 adapter has
+  a trusted inference binding; other unresolved local/remote models stay blocked.
+  Selected model and installation readiness are visible at the top of Embeddings.
+  Confirmed refresh/search
+  tools resolve the project from the durable calling session, not agent arguments.
+  No automatic crawler or implicit prompt-context injection is enabled.
+- Added, modified, removed or newly excluded sources cause refresh before search;
+  unchanged sources reuse the published index without document inference.
+  Concurrent refresh requests coalesce, but consent remains per caller.
+  TS/JS chunking prefers declarations/class members; other languages use bounded
+  line windows. Full path/line labels and optional syntax context count toward
+  the loaded model's actual token budget; oversized inputs never silently truncate.
+  An internal chunking-version marker invalidates old snapshots independently
+  of source hashes. Continuous source mutation is bounded and fails closed;
+  publication validates source freshness and replaces the bounded snapshot in one
+  transaction. This is not an atomic operating-system filesystem snapshot.
+- Details and release boundaries: `docs/spec/embedding-spaces-and-project-resources.md`.
+
+## Local Model Evaluation And Context Budgets
+
+- The versioned [Ollama benchmark](benchmarks/ollama-2026-10-19/README.md) and its [evaluation specification](benchmarks/ollama-2026-10-19/SPEC.md) record measured model behavior, hardware, grading and limits. Model rankings must retain their workload and inference conditions.
+- Kalio's history budget and the provider's actual context capacity are separate limits. A larger history setting must not be presented as enlarging the provider window.
+- The benchmark's proposed tool discovery separates the authorized catalog from schemas currently advertised to a model. Discovery must not broaden persona/MCP permissions or bypass execution validation and HITL.
+- Static profiles, dynamic discovery and semantic compaction remain distinct implementation choices; benchmark proposals must not be described as shipped behavior. Preserve durable source material and measure correctness plus retrieval/recovery cost before adopting lossy compression.

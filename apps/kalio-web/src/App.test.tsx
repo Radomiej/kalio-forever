@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { App } from './App';
+import { apiClient } from './services/apiClient';
 import type { LLMConfigWithSource } from './features/settings/llm-panel.types';
 import type { RuntimeActivitySnapshot, SessionRuntimeContext } from '@kalio/types';
 import { writeReviewedRuntimeAttentionKeys } from './store/agentRuntimeAttentionNotice';
@@ -64,6 +67,7 @@ vi.mock('./features/chat/ChatInterface', () => ({
   ChatInterface: ({ onTalkViewChange }: { onTalkViewChange?: (view: 'conversation' | 'graph') => void }) => (
     <div data-testid="chat-interface">
       Chat
+      <textarea aria-label="Unsent draft" defaultValue="" />
       <button type="button" data-testid="mock-switch-graph" onClick={() => onTalkViewChange?.('graph')}>
         Graph
       </button>
@@ -144,8 +148,8 @@ vi.mock('./features/persona/PersonaPanel', () => ({
   PersonaPanel: () => <div data-testid="persona-panel">Personas</div>,
 }));
 
-vi.mock('./features/settings/SettingsModal', () => ({
-  SettingsModal: () => <div data-testid="settings-modal">Settings</div>,
+vi.mock('./features/settings/registry', () => ({
+  SETTINGS_BLOCKS: [{ id: 'llm', label: 'LLM Settings', icon: null, component: () => <button type="button">Add provider</button> }],
 }));
 
 vi.mock('./features/workspaces/WorkspacePanel', () => ({
@@ -177,10 +181,11 @@ vi.mock('./features/memory/MemoryPage', () => ({
 }));
 
 vi.mock('./features/landing/LandingPage', () => ({
-  LandingPage: ({ onNavigateToChat }: { onNavigateToChat: () => void }) => (
+  LandingPage: ({ onNavigateToChat, onOpenSessionInChat }: { onNavigateToChat: () => void; onOpenSessionInChat?: (sessionId: string) => void }) => (
     <div data-testid="landing-page">
       Landing
       <button data-testid="landing-to-chat" onClick={onNavigateToChat}>Open chat</button>
+      <button data-testid="landing-open-approval" onClick={() => onOpenSessionInChat?.('session-1')}>Open approval</button>
     </div>
   ),
 }));
@@ -286,7 +291,13 @@ vi.mock('./services/backendHealth', () => ({
 }));
 
 vi.mock('./features/settings/settingsStore', () => ({
-  useSettingsStore: (selector: (state: { setBackendConfig: typeof setBackendConfig }) => unknown) => selector({ setBackendConfig }),
+  useSettingsStore: (selector: (state: {
+    setBackendConfig: typeof setBackendConfig;
+    requestedSettingsTab: null;
+    clearRequestedSettingsTab: () => void;
+    requestRuntimeModelFocus: () => void;
+  }) => unknown) => selector({ setBackendConfig, requestedSettingsTab: null,
+    clearRequestedSettingsTab: () => undefined, requestRuntimeModelFocus: () => undefined }),
 }));
 
 function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot {
@@ -316,6 +327,16 @@ function makeWaitingRuntimeSnapshot(sessionId: string): RuntimeActivitySnapshot 
   };
 }
 
+function deferredSessions() {
+  let resolve!: (sessions: typeof sessionStoreState.sessions) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<typeof sessionStoreState.sessions>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('App view state persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -334,6 +355,7 @@ describe('App view state persistence', () => {
     sessionStoreState.sessionMessages = {};
     setActiveSession.mockReset();
     setSessions.mockReset();
+    setSessions.mockImplementation((sessions) => { sessionStoreState.sessions = sessions; });
     identifyWatchedSession.mockReset();
     replaceBaselineWatchedSessions.mockReset();
     resetSessionWatchConnectionEpoch.mockReset();
@@ -353,7 +375,311 @@ describe('App view state persistence', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('refreshes observer metadata on Home to Talk without remounting the draft', async () => {
+    const oldSession = { id: 'session-1', title: 'Old observer title', updatedAt: 1 };
+    const freshSession = { id: 'session-1', title: 'Current observer title', updatedAt: 200 };
+    sessionStoreState.sessions = [oldSession];
+    setSessions.mockImplementation((sessions) => { sessionStoreState.sessions = sessions; });
+    loadConversationSessions.mockResolvedValue([freshSession]);
+    render(<App />);
+    const draft = screen.getByLabelText('Unsent draft');
+    const sidebar = screen.getByTestId('conversation-panel');
+    fireEvent.change(draft, { target: { value: 'Keep this draft' } });
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+    expect(sessionStoreState.sessions).toEqual([oldSession]);
+
+    fireEvent.click(screen.getByTestId('nav-talk'));
+
+    await waitFor(() => expect(sessionStoreState.sessions).toEqual([freshSession]));
+    expect(loadConversationSessions).toHaveBeenCalledWith({ force: true });
+    expect(screen.getByLabelText('Unsent draft')).toBe(draft);
+    expect(screen.getByTestId('conversation-panel')).toBe(sidebar);
+    expect(draft).toHaveValue('Keep this draft');
+  });
+
+  it.each([false, true])('preserves initial bootstrap semantics with populated store: %s', async (populated) => {
+    const initial = { id: 'session-1', title: 'Existing session', updatedAt: 1 };
+    const fetched = { id: 'session-2', title: 'Fetched session', updatedAt: 2 };
+    sessionStoreState.sessions = populated ? [initial] : [];
+    sessionStorage.setItem('kalio:app-view-state', JSON.stringify({ activeSection: 'talk' }));
+    loadConversationSessions.mockResolvedValue([fetched]);
+    render(<App />);
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+    expect(sessionStoreState.sessions).toEqual(populated ? [initial] : [fetched]);
+    expect(loadConversationSessions).toHaveBeenCalledTimes(populated ? 0 : 1);
+    if (!populated) expect(loadConversationSessions).toHaveBeenCalledWith();
+    expect(loadRuntimeWatchlist).toHaveBeenCalledTimes(1);
+    expect(preloadRuntimeWatchSessionHistory).toHaveBeenCalledWith(expect.objectContaining({
+      sessions: populated ? [initial] : [fetched],
+    }));
+  });
+
+  it('deduplicates initial metadata requests during App StrictMode effect replay', async () => {
+    const bootstrap = await vi.importActual<typeof import('./services/sessionBootstrap')>('./services/sessionBootstrap');
+    const request = deferredSessions();
+    sessionStoreState.sessions = [];
+    loadConversationSessions.mockImplementation(bootstrap.loadConversationSessions);
+    vi.mocked(apiClient.get).mockImplementationOnce(() => request.promise.then((data) => ({ data })));
+    render(<StrictMode><App /></StrictMode>);
+    const fresh = { id: 'session-1', title: 'Single initial request', updatedAt: 100 };
+    await act(async () => request.resolve([fresh]));
+    expect(sessionStoreState.sessions).toEqual([fresh]);
+    expect(vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/api/sessions')).toHaveLength(1);
+    expect(loadConversationSessions.mock.calls).toEqual([[], []]);
+    expect(replaceBaselineWatchedSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts one fresh request per rapid Talk edge and ignores the older response', async () => {
+    sessionStoreState.sessions = [{ id: 'session-1', title: 'Initial', updatedAt: 1 }];
+    const older = deferredSessions();
+    const latest = deferredSessions();
+    loadConversationSessions.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise);
+    render(<App />);
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+    const draft = screen.getByLabelText('Unsent draft');
+    fireEvent.change(draft, { target: { value: 'Streaming chat draft' } });
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    fireEvent.click(screen.getByTestId('nav-home'));
+    fireEvent.click(screen.getByTestId('landing-to-chat'));
+    expect(loadConversationSessions.mock.calls).toEqual([[{ force: true }], [{ force: true }]]);
+    const fresh = { id: 'session-1', title: 'Fresh Talk', updatedAt: 300 };
+    await act(async () => latest.resolve([fresh]));
+    expect(sessionStoreState.sessions).toEqual([fresh]);
+    // Even a higher timestamp cannot let an obsolete request replace this result.
+    await act(async () => older.resolve([{ id: 'session-1', title: 'Obsolete request', updatedAt: 400 }]));
+    expect(sessionStoreState.sessions).toEqual([fresh]);
+    expect(loadRuntimeWatchlist).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Unsent draft')).toBe(draft);
+    expect(draft).toHaveValue('Streaming chat draft');
+  });
+
+  it('restores reconnect watches with current metadata and active id after Talk supersedes its load', async () => {
+    const reconnect = deferredSessions();
+    const talk = deferredSessions();
+    loadConversationSessions.mockReturnValueOnce(reconnect.promise).mockReturnValueOnce(talk.promise);
+    render(<App />);
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+    act(() => reconnectHandlers[0]?.());
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    const fresh = { id: 'session-1', title: 'Talk metadata', updatedAt: Date.now() + 1000 };
+    await act(async () => talk.resolve([fresh]));
+    sessionStoreState.activeSessionId = 'current-active-session';
+    await act(async () => reconnect.resolve([{ id: 'session-1', title: 'Old reconnect', updatedAt: 1 }]));
+    expect(sessionStoreState.sessions).toEqual([fresh]);
+    expect(replaceBaselineWatchedSessions).toHaveBeenLastCalledWith(['session-1'], 'reconnect-watchlist');
+    expect(preloadRuntimeWatchSessionHistory).toHaveBeenLastCalledWith({
+      sessions: [fresh], runtimeWatchTargets: [{ sessionId: 'session-1', reasons: ['active'] }], force: true,
+    });
+    expect(identifyWatchedSession).toHaveBeenLastCalledWith('current-active-session', 'reconnect-active-session', { sticky: true });
+    expect(resetSessionWatchConnectionEpoch).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a late Talk response after a newer reconnect refresh', async () => {
+    sessionStoreState.sessions = [{ id: 'session-1', title: 'Initial', updatedAt: 1 }];
+    const talk = deferredSessions();
+    const reconnect = deferredSessions();
+    loadConversationSessions.mockReturnValueOnce(talk.promise).mockReturnValueOnce(reconnect.promise);
+    render(<App />);
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    act(() => reconnectHandlers[0]?.());
+    const fresh = { id: 'session-1', title: 'Reconnected', updatedAt: 300 };
+    await act(async () => reconnect.resolve([fresh]));
+    await act(async () => talk.resolve([{ id: 'session-1', title: 'Obsolete Talk', updatedAt: 400 }]));
+    expect(sessionStoreState.sessions).toEqual([fresh]);
+  });
+
+  it('restores initial watches without overwriting Talk metadata when bootstrap arrives late', async () => {
+    sessionStoreState.sessions = [];
+    const bootstrap = deferredSessions();
+    const talk = deferredSessions();
+    loadConversationSessions.mockReturnValueOnce(bootstrap.promise).mockReturnValueOnce(talk.promise);
+    render(<App />);
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    const fresh = { id: 'session-1', title: 'Talk is current', updatedAt: 300 };
+    await act(async () => talk.resolve([fresh]));
+    await act(async () => bootstrap.resolve([{ id: 'session-1', title: 'Obsolete bootstrap', updatedAt: 400 }]));
+    expect(sessionStoreState.sessions).toEqual([fresh]);
+    expect(replaceBaselineWatchedSessions).toHaveBeenCalledWith(['session-1'], 'bootstrap-watchlist');
+    expect(preloadRuntimeWatchSessionHistory).toHaveBeenCalledWith(expect.objectContaining({ sessions: [fresh] }));
+  });
+
+  it('does not let a late initial watchlist replace reconnect watches', async () => {
+    let resolveWatchlist!: (targets: Array<{ sessionId: string; reasons: string[] }>) => void;
+    loadRuntimeWatchlist.mockReturnValueOnce(new Promise((resolve) => { resolveWatchlist = resolve; }));
+    render(<App />);
+    act(() => reconnectHandlers[0]?.());
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalledWith(['session-1'], 'reconnect-watchlist'));
+    await act(async () => resolveWatchlist([{ sessionId: 'obsolete-root', reasons: ['active'] }]));
+    expect(replaceBaselineWatchedSessions).toHaveBeenCalledTimes(1);
+    expect(preloadRuntimeWatchSessionHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges Talk metadata against current local sessions at apply time', async () => {
+    const request = deferredSessions();
+    loadConversationSessions.mockReturnValueOnce(request.promise);
+    render(<App />);
+    await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    const local = { id: 'session-1', title: 'Newer socket metadata', updatedAt: 500 };
+    const pending = {
+      id: 'pending-host-session:observer', title: 'Pending local host', updatedAt: 600,
+      runtimeContext: { runtimeKind: 'chat' as const, pendingHostSession: true },
+    };
+    sessionStoreState.sessions = [pending, local];
+    await act(async () => request.resolve([{ id: 'session-1', title: 'Older server snapshot', updatedAt: 400 }]));
+    expect(sessionStoreState.sessions).toEqual([pending, local]);
+  });
+
+  it.each(['bootstrap', 'reconnect', 'Talk'])('retains metadata after %s failure and retries on later Talk entry', async (source) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const failure = deferredSessions();
+    if (source === 'bootstrap') sessionStoreState.sessions = [];
+    loadConversationSessions.mockReturnValueOnce(failure.promise);
+    render(<App />);
+    if (source !== 'bootstrap') {
+      await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+      if (source === 'reconnect') act(() => reconnectHandlers[0]?.());
+      else fireEvent.click(screen.getByTestId('nav-talk'));
+    }
+    const before = [...sessionStoreState.sessions];
+    await act(async () => failure.reject(new Error('Offline metadata')));
+    expect(sessionStoreState.sessions).toEqual(before);
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(source === 'Talk' ? 'Talk entry' : source), expect.any(Error));
+    fireEvent.click(screen.getByTestId('nav-home'));
+    const fresh = { id: 'session-1', title: 'Recovered', updatedAt: Date.now() + 1000 };
+    loadConversationSessions.mockResolvedValueOnce([fresh]);
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    await waitFor(() => expect(sessionStoreState.sessions).toEqual([fresh]));
+  });
+
+  it.each(['bootstrap', 'reconnect', 'Talk'])('ignores pending %s results after App unmount', async (source) => {
+    const request = deferredSessions();
+    if (source === 'bootstrap') sessionStoreState.sessions = [];
+    loadConversationSessions.mockReturnValueOnce(request.promise);
+    const view = render(<App />);
+    if (source !== 'bootstrap') {
+      await waitFor(() => expect(replaceBaselineWatchedSessions).toHaveBeenCalled());
+      if (source === 'reconnect') act(() => reconnectHandlers[0]?.());
+      else fireEvent.click(screen.getByTestId('nav-talk'));
+    }
+    const before = [...sessionStoreState.sessions];
+    setSessions.mockClear();
+    replaceBaselineWatchedSessions.mockClear();
+    preloadRuntimeWatchSessionHistory.mockClear();
+    identifyWatchedSession.mockClear();
+    view.unmount();
+    await act(async () => request.resolve([{ id: 'session-1', title: 'After unmount', updatedAt: Date.now() + 1000 }]));
+    expect(sessionStoreState.sessions).toEqual(before);
+    expect(setSessions).not.toHaveBeenCalled();
+    expect(replaceBaselineWatchedSessions).not.toHaveBeenCalled();
+    expect(preloadRuntimeWatchSessionHistory).not.toHaveBeenCalled();
+    expect(identifyWatchedSession).not.toHaveBeenCalled();
+  });
+
+  it.each(['Escape', 'button'])('returns Settings focus to the mounted nav after %s removes the inert app shell', async (method) => {
+    const user = userEvent.setup();
+    const nativeFocus = HTMLElement.prototype.focus;
+    // jsdom does not enforce inertness. Model the browser rule at the DOM boundary,
+    // keeping App, AppNavRail and SettingsModal real so commit ordering is exercised.
+    const blockedFocus = vi.fn();
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (this.closest('[inert]')) { blockedFocus(); return; }
+      nativeFocus.call(this, options);
+    });
+    render(<App />);
+    const opener = screen.getByRole('button', { name: 'Settings' });
+    await user.click(opener);
+    expect(opener.isConnected).toBe(true);
+    expect(opener.closest('[inert]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(screen.getByRole('button', { name: 'Add provider' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
+    if (method === 'Escape') await user.keyboard('{Escape}');
+    else await user.click(screen.getByRole('button', { name: 'Close settings' }));
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(opener.closest('[inert]')).toBeNull();
+    expect(blockedFocus).toHaveBeenCalled();
+    expect(opener).toHaveFocus();
+  });
+
+  it.each([null, 'session-1'])('preserves the Talk surface across 1024 to 1023 with session %s', (sessionId) => {
+    vi.stubGlobal('innerWidth', 1440);
+    sessionStoreState.activeSessionId = sessionId;
+    render(<App />);
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    const draft = screen.getByRole('textbox', { name: 'Unsent draft' });
+    fireEvent.change(draft, { target: { value: 'Keep my unsent draft' } });
+
+    vi.stubGlobal('innerWidth', 1024);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).not.toBeNull();
+    vi.stubGlobal('innerWidth', 1023);
+    fireEvent(window, new Event('resize'));
+
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
+    expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Unsent draft' })).toBe(draft);
+    expect(draft).toHaveValue('Keep my unsent draft');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show conversations' }));
+    expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).not.toBeNull();
+    vi.stubGlobal('innerWidth', 800);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide conversations' }));
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+
+    vi.stubGlobal('innerWidth', 1440);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByRole('textbox', { name: 'Unsent draft' })).toBe(draft);
+    expect(draft).toHaveValue('Keep my unsent draft');
+    expect(setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the initial compact list until a conversation is selected', () => {
+    vi.stubGlobal('innerWidth', 390);
+    render(<App />);
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    vi.stubGlobal('innerWidth', 800);
+    fireEvent(window, new Event('resize'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-select-conversation'));
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+  });
+
+  it('does not switch to a conversation when crossing the breakpoint outside Talk', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    render(<App />);
+    vi.stubGlobal('innerWidth', 1023);
+    fireEvent(window, new Event('resize'));
+    fireEvent.click(screen.getByTestId('nav-talk'));
+    expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+  });
+
+  it('opens a Home approval directly in the conversation on compact screens even after using graph', async () => {
+    vi.stubGlobal('innerWidth', 390);
+    localStorage.setItem('kalio:talk-view', 'graph');
+    render(<App />);
+
+    await act(async () => { fireEvent.click(screen.getByTestId('landing-open-approval')); });
+
+    expect(setActiveSession).toHaveBeenCalledWith('session-1');
+    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
   });
 
   it('hydrates the stored section and nested tab on first mount', () => {

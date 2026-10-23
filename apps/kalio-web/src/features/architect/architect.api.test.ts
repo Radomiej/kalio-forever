@@ -9,6 +9,7 @@ import {
   startGoalGuardAgentFlowRun,
 } from './architect.api';
 import type { ArchitectSchema, ExternalQualityGateInput } from './architect.types';
+import { normalizeArchitectureSchema } from './architect.schema';
 
 const { apiGet, apiPost } = vi.hoisted(() => ({
   apiGet: vi.fn(),
@@ -36,6 +37,46 @@ vi.mock('../../services/apiClient', () => ({
 }));
 
 describe('startArchitectureRun', () => {
+  it('posts an explicit profile at the top level without changing the callback position', async () => {
+    apiPost.mockResolvedValueOnce({ data: { id: 'profile-run', status: 'completed' } });
+    apiGet.mockResolvedValue({ data: {} });
+    const update = vi.fn();
+    await startArchitectureRun('schema', 'Task', {}, 'subagent_execution', undefined, { projectPath: 'sandbox' }, update, 'devin-swe-2');
+    expect(apiPost).toHaveBeenCalledWith('/api/architecture-runs/async', expect.objectContaining({ executionProfileId: 'devin-swe-2' }));
+    expect(apiPost.mock.calls[0]![1].context).not.toHaveProperty('executionProfileId');
+    expect(update).toHaveBeenCalledOnce();
+  });
+  it('omits a profile when the caller intentionally uses the runtime default', async () => {
+    apiPost.mockResolvedValueOnce({ data: { id: 'default-run', status: 'completed' } });
+    apiGet.mockResolvedValue({ data: {} });
+    await startArchitectureRun('schema', 'Task', {}, 'subagent_execution');
+    expect(apiPost.mock.calls[0]![1]).not.toHaveProperty('executionProfileId');
+  });
+  it('preserves auto-routing settings in posted schemas and blocks invalid topology before HTTP', async () => {
+    const schema = normalizeArchitectureSchema({
+      id: 'auto-schema', name: 'Auto',
+      nodes: [
+        { id: 'auto', label: 'Auto', kind: 'auto_router', autoRouting: { confidenceThreshold: 0.8, instructions: 'Choose.' } },
+        { id: 'left', label: 'Left', kind: 'parallel' },
+        { id: 'right', label: 'Right', kind: 'parallel' },
+      ],
+      edges: [
+        { id: 'choice', fromNodeId: 'auto', toNodeId: 'left', selection: 'choice' },
+        { id: 'default', fromNodeId: 'auto', toNodeId: 'right', selection: 'default' },
+      ],
+    });
+    apiPost.mockResolvedValueOnce({ data: { id: 'auto-run', status: 'completed' } });
+    apiGet.mockResolvedValue({ data: {} });
+    await startArchitectureRun(schema.id, 'Route', {}, 'subagent_execution', schema);
+    const posted = apiPost.mock.calls[0]![1] as { schema: ArchitectSchema };
+    expect(posted.schema.nodes[0]?.autoRouting).toEqual(schema.nodes[0]?.autoRouting);
+    expect(posted.schema.nodes[0]?.autoRouting).not.toBe(schema.nodes[0]?.autoRouting);
+    expect(posted.schema.edges[0]?.selection).toBe('choice');
+    apiPost.mockClear();
+    schema.edges.pop();
+    await expect(startArchitectureRun(schema.id, 'Route', {}, 'subagent_execution', schema)).rejects.toThrow('exactly one default');
+    expect(apiPost).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -653,6 +694,67 @@ describe('startGoalGuardAgentFlowRun', () => {
 describe('getGoalGuardAgentFlowRunResult', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each([
+    {
+      name: 'keeps polling while a tool confirmation is pending',
+      events: [{
+        id: 'gate', sequence: 1, type: 'flow:edge_taken', status: 'waiting_on_orchestrator' as const,
+        reasonCode: 'runtime_pause' as const, data: { reasonCode: 'runtime_pause' as const }, message: 'Approval required.', createdAt: 3,
+      }],
+      awaitingHumanInput: true,
+    },
+    {
+      name: 'stops treating the run as human-blocked after approval resumes it',
+      events: [
+        {
+          id: 'gate', sequence: 1, type: 'flow:edge_taken', status: 'waiting_on_orchestrator' as const,
+          reasonCode: 'runtime_pause' as const, data: { reasonCode: 'runtime_pause' as const }, message: 'Approval required.', createdAt: 3,
+        },
+        { id: 'resume', sequence: 2, type: 'flow:resume_input', message: 'Approval granted.', createdAt: 4 },
+      ],
+      awaitingHumanInput: false,
+    },
+    {
+      name: 'leaves an external quality-gate wait paused',
+      events: [{
+        id: 'wait', sequence: 1, type: 'flow:edge_taken', status: 'waiting_on_orchestrator' as const,
+        reasonCode: 'return_to_orchestrator' as const, data: { reasonCode: 'return_to_orchestrator' as const },
+        message: 'QA evidence required.', createdAt: 3,
+      }],
+      awaitingHumanInput: false,
+    },
+  ])('$name', async ({ events, awaitingHumanInput }) => {
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/architecture-runs/graph-from-run/events') return Promise.resolve({ data: [] });
+      if (url === '/api/architecture-runs/graph-from-run/graph') {
+        return Promise.resolve({ data: { runId: 'graph-from-run', nodes: [], edges: [] } });
+      }
+      if (url === '/api/architecture-runs/graph-from-run/chat') {
+        return Promise.resolve({ data: { runId: 'graph-from-run', messages: [] } });
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const snapshot: AgentFlowRunSnapshot = {
+      run: {
+        id: 'flow-run-1',
+        parentSessionId: 'architect-ui',
+        childSessionId: 'child-1',
+        flowDefinitionId: 'goal_guard_delivery_loop',
+        status: 'waiting_on_orchestrator',
+        startMode: 'durable',
+        returnMode: 'summary',
+        openGraphRunId: 'graph-from-run',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      events,
+    };
+
+    const result = await getGoalGuardAgentFlowRunResult(snapshot, 'Build and verify.');
+
+    expect(result).toHaveProperty('agentFlowAwaitingHumanInput', awaitingHumanInput);
   });
 
   it.each([

@@ -1,12 +1,7 @@
 import { spawn } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { resolveCorepackEntrypoint } from './corepack-path.mjs';
 
-const nodeDir = dirname(process.execPath);
-const programFilesNodeDir = resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'nodejs');
-const corepackEntrypoint = existsSync(resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js'))
-  ? resolve(programFilesNodeDir, 'node_modules/corepack/dist/corepack.js')
-  : resolve(nodeDir, 'node_modules/corepack/dist/corepack.js');
+const corepackEntrypoint = resolveCorepackEntrypoint();
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -47,11 +42,26 @@ if (repoPreflight.code !== 0) {
 const scriptTests = await run(process.execPath, [
   '--test',
   './scripts/stack-state.test.mjs',
+  './scripts/corepack-path.test.mjs',
+  './scripts/linux-installer.test.mjs',
+  './scripts/linux-cli.test.mjs',
+  './scripts/linux-updater.test.mjs',
+  './scripts/local-model-benchmark.test.mjs',
+  './scripts/runtime-dependencies.test.mjs',
+  './scripts/runtime-native-addon.test.mjs',
   './scripts/kalio-updater.test.mjs',
+  './scripts/kalio-cli.test.mjs',
   './scripts/runtime-scripts.test.mjs',
+  './scripts/runtime-lock.integration.test.mjs',
+  './scripts/windows-autostart.test.mjs',
+  './scripts/release-experienced-qa.test.mjs',
   './scripts/code-audit/audit-scripts.test.mjs',
   './scripts/agentflow-paid-readiness.test.mjs',
+  './scripts/devin-session-readiness.test.mjs',
   './scripts/activate-live-credential.test.mjs',
+  './apps/kalio-web/decision-auth.proxy.test.mjs',
+  './scripts/bench-embedding-retrieval.test.mjs',
+  './scripts/bench-home-site-dataset.test.mjs',
 ]);
 
 if (scriptTests.code !== 0) {
@@ -67,6 +77,7 @@ const appTests = await run(process.execPath, [
   '--filter=kalio-web',
   'run',
   'test',
+  '--maxWorkers=2',
 ]);
 
 if (appTests.code !== 0) {

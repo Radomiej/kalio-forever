@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { SessionPipelineService } from '../session-pipeline.service';
+import { SessionProfileAdmissionService } from '../session-profile-admission.service';
 import { ChatService } from '../chat.service';
 import type { SocketEvents } from '@kalio/types';
 import type { EmitFn } from '../interfaces/stream-context.interface';
@@ -101,7 +102,7 @@ describe('ISSUE 1: Interrupt race condition', () => {
 
   beforeEach(() => {
     chatHarness = makeBlockingChatService();
-    svc = new SessionPipelineService(chatHarness.chat as ChatService);
+    svc = new SessionPipelineService(chatHarness.chat as ChatService, undefined, undefined, new SessionProfileAdmissionService());
   });
 
   /**

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { API_BASE, deleteSessionIfExists, sendMessageFromComposer } from './helpers/test-config';
+import { createLocalTitleProvider } from './helpers/local-title-provider';
 
 const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
 
@@ -27,6 +28,7 @@ test.describe('AC-21: Session auto-title', () => {
 
     const prompt = 'Session title regression verification uses a deliberately long first prompt to exceed sixty characters. Reply with exactly OK and do not use tools.';
     let sessionId: string | null = null;
+    const provider = await createLocalTitleProvider(request);
 
     try {
       await page.goto('/');
@@ -36,18 +38,17 @@ test.describe('AC-21: Session auto-title', () => {
       await expect(newSessionButton).toBeVisible({ timeout: 5000 });
       await newSessionButton.click();
 
-      await expect
-        .poll(
-          () => page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY),
-          { timeout: 5000 },
-        )
-        .not.toBeNull();
-      sessionId = await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY);
-      const activeSessionItem = page.locator(`[data-testid="session-item"][data-session-id="${sessionId}"]`);
-      const activeSessionTitle = page.getByTestId(`session-title-${sessionId}`);
-      await expect(activeSessionTitle).toHaveText('New Chat', { timeout: 5000 });
+      await expect(page.getByTestId('welcome-screen')).toBeVisible();
+      expect(await page.evaluate((storageKey) => window.sessionStorage.getItem(storageKey), LAST_ACTIVE_SESSION_STORAGE_KEY)).toBeNull();
 
+      await page.getByRole('combobox', { name: 'Provider and model', exact: true }).fill(provider.model);
+      await page.getByRole('option').filter({ hasText: provider.model }).click();
+
+      const created = page.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/sessions');
       await sendMessageFromComposer(page, prompt);
+      sessionId = (await (await created).json() as { id: string }).id;
+      const activeSessionTitle = page.getByTestId(`session-title-${sessionId}`);
 
       await expect
         .poll(
@@ -65,12 +66,16 @@ test.describe('AC-21: Session auto-title', () => {
       expect(finalTitle).not.toBe(prompt);
       expect(finalTitle).not.toContain('Reply with exactly OK');
       await expect(page.getByTestId('chat-session-title')).toHaveText(finalTitle, { timeout: 10_000 });
+      await page.reload();
+      await expect(page.getByTestId('chat-session-title')).toHaveText(finalTitle);
 
       const screenshotPath = testInfo.outputPath('session-title-summary-proof.png');
       await page.screenshot({ path: screenshotPath, fullPage: true });
     } finally {
-      if (sessionId) {
-        await deleteSessionIfExists(request, sessionId);
+      try {
+        if (sessionId) await deleteSessionIfExists(request, sessionId);
+      } finally {
+        await provider.close();
       }
     }
   });

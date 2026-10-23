@@ -1,22 +1,13 @@
 name: Desktop release
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/desktop-release.yml'
-      - 'apps/**'
-      - 'packages/**'
-      - 'scripts/**'
-      - 'src-tauri/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'LICENSE'
-      - 'COMMERCIAL-LICENSE.md'
-      - 'COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md'
+  # Desktop/runtime release builds run only on main pushes, release tags and
+  # manual dispatch — never on pull requests or feature branches.
   push:
+    branches:
+      - main
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -66,13 +57,26 @@ jobs:
         env:
           KALIO_RUNTIME_UPDATE_PUBLIC_KEY: ${{ vars.KALIO_RUNTIME_UPDATE_PUBLIC_KEY }}
         run: |
+          node --test scripts/runtime-archive.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime archive regression tests failed' }
           $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source
           $bunPath = (Get-Command bun -CommandType Application | Select-Object -First 1).Source
           $env:KALIO_NODE_BINARY = $nodePath
           $env:KALIO_BUN_BINARY = $bunPath
           New-Item -ItemType Directory -Path release -Force | Out-Null
           node scripts/build-runtime-package.mjs --platform windows --output release --runtime node
+          if ($LASTEXITCODE -ne 0) { throw 'Node runtime archive creation failed' }
           node scripts/build-runtime-package.mjs --platform windows --output release --runtime bun
+          if ($LASTEXITCODE -ne 0) { throw 'Bun runtime archive creation failed' }
+
+      - name: Smoke test Windows runtime archives
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath 'src-tauri\tauri.conf.json' -Raw | ConvertFrom-Json).version
+          pnpm runtime:smoke -- --archive "release\kalio-runtime-$version-windows-x64.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Node runtime archive smoke test failed' }
+          pnpm runtime:smoke -- --archive "release\kalio-runtime-$version-bun-windows-x64.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Bun runtime archive smoke test failed' }
 
       - name: Configure optional updater signing
         id: updater
@@ -118,6 +122,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config "$env:TAURI_UPDATER_CONFIG"
 
+      - name: Smoke test installed Windows Tauri app
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath 'src-tauri\target\release\bundle\nsis' -Filter '*-setup.exe' -File | Select-Object -First 1
+          if ($null -eq $installer) { throw 'The NSIS installer was not found' }
+          & .\scripts\desktop-installer-smoke.ps1 -InstallerPath $installer.FullName
+
+      - name: Smoke test packaged Windows backend
+        run: pnpm desktop:smoke
+
       - name: Prepare Windows release metadata
         shell: pwsh
         run: |
@@ -131,6 +145,17 @@ jobs:
           if ($null -eq $installer) { throw 'The NSIS installer was not found' }
           $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
           "$hash  $($installer.Name)" | Set-Content -LiteralPath release\SHA256SUMS-windows.txt -Encoding utf8
+          Get-ChildItem -LiteralPath release -Filter 'kalio-runtime-*-windows-x64.zip' -File | ForEach-Object {
+            $runtimeHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            "$runtimeHash  $($_.Name)" | Add-Content -LiteralPath release\SHA256SUMS-windows.txt -Encoding utf8
+          }
+
+      - name: Upload independently reviewable Windows checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-windows-metadata
+          if-no-files-found: error
+          path: release/SHA256SUMS-windows.txt
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -154,7 +179,9 @@ jobs:
           path: src-tauri/target/release/bundle/nsis/*.sig
 
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -189,7 +216,7 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libc6-dev libfuse2 patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libc6-dev libfuse2t64 patchelf
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -211,12 +238,21 @@ jobs:
           node scripts/build-runtime-package.mjs --platform linux --output release --runtime node
           node scripts/build-runtime-package.mjs --platform linux --output release --runtime bun
 
+      - name: Smoke test the packaged Linux Node runtime
+        shell: bash
+        run: |
+          archive=$(find release -maxdepth 1 -name 'kalio-runtime-*-linux-x64.tar.gz' ! -name '*-bun-linux-x64.tar.gz' -print -quit)
+          test -n "$archive"
+          node scripts/smoke-linux-runtime.mjs --archive "$archive" --output release/linux-node-smoke.json
+
       - name: Upload Linux runtime archives
         uses: actions/upload-artifact@v4
         with:
           name: kalio-linux-runtime
           if-no-files-found: error
-          path: release/kalio-runtime-*-linux-x64.tar.gz
+          path: |
+            release/kalio-runtime-*-linux-x64.tar.gz
+            release/linux-node-smoke.json
 
       - name: Split Linux Bun runtime archive for manual verification
         shell: bash
@@ -254,6 +290,12 @@ jobs:
           name: kalio-linux-bun-part-03
           if-no-files-found: ignore
           path: release-bun-parts/kalio-bun-runtime.part.03
+      - name: Smoke test Linux runtime archives
+        shell: bash
+        run: |
+          version="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).version")"
+          pnpm runtime:smoke -- --archive "release/kalio-runtime-${version}-linux-x64.tar.gz"
+          pnpm runtime:smoke -- --archive "release/kalio-runtime-${version}-bun-linux-x64.tar.gz"
 
       - name: Configure optional updater signing
         id: updater
@@ -293,6 +335,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config src-tauri/tauri.linux.conf.json --config "$TAURI_UPDATER_CONFIG" --verbose
 
+      - name: Smoke test packaged Linux backend
+        run: pnpm desktop:smoke
+
       - name: Prepare Linux release metadata
         shell: bash
         run: |
@@ -301,8 +346,16 @@ jobs:
           cp COMMERCIAL-LICENSE.md release/COMMERCIAL-LICENSE.md
           cp COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md release/COMMERCIAL-LICENSE-AGREEMENT-TEMPLATE.md
           node scripts/generate-third-party-notices.mjs --output release/THIRD_PARTY_NOTICES.md
-          find src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' \) -print0 | sort -z | xargs -0 sha256sum > release/SHA256SUMS-linux.txt
+          find src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' \) -print0 | sort -z | xargs -0 sha256sum | sed 's@  .*/@  @' > release/SHA256SUMS-linux.txt
+          (cd release && sha256sum kalio-runtime-*-linux-x64.tar.gz) >> release/SHA256SUMS-linux.txt
           test -s release/SHA256SUMS-linux.txt
+
+      - name: Upload independently reviewable Linux checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalio-linux-metadata
+          if-no-files-found: error
+          path: release/SHA256SUMS-linux.txt
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -350,6 +403,16 @@ jobs:
           pattern: kalio-*
           path: release-assets
           merge-multiple: true
+
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content -LiteralPath 'src-tauri\tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $tagVersion = $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($packageVersion -ne $tauriVersion -or $tagVersion -ne $tauriVersion) {
+            throw "Release version mismatch: tag=$tagVersion package=$packageVersion tauri=$tauriVersion"
+          }
 
       - name: Generate updater manifest when signatures exist
         shell: pwsh

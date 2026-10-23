@@ -6,5 +6,10 @@ import type { ToolMeta, ToolCallRequest } from '@kalio/types';
  */
 export interface ToolRegistryEntry {
   readonly meta: ToolMeta;
+  /** Host-owned restart comparison metadata, not execution/approval proof.
+   * All three must be present for durable dispatch proof eligibility. */
+  readonly catalogEntryId?: string;
+  readonly executorImplementationId?: string;
+  readonly executorImplementationVersion?: number;
   execute(req: ToolCallRequest): Promise<unknown>;
 }

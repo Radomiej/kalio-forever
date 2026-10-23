@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { installMockLaunchProfile } from './helpers/mock-launch-profile';
 import {
   API_BASE,
   deleteSessionIfExists,
@@ -81,6 +82,7 @@ test('runs a single-node no-tool canary from Talk and restores it after reload',
   }
 
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const profile = llmConfig.provider === 'mock' ? await installMockLaunchProfile(page, request) : null;
   const title = `Paid Canary ${suffix}`;
   const variantResponse = await request.post(
     `${API_BASE}/architecture-registry/schemas/strategic-decision-council/variants`,
@@ -111,7 +113,7 @@ test('runs a single-node no-tool canary from Talk and restores it after reload',
   expect(variantResponse.ok()).toBeTruthy();
   const variant = await variantResponse.json() as { id: string };
   const sessionResponse = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId: 'default' },
+    data: { title, personaId: 'default', ...(profile ? { executionProfileId: profile.id } : {}) },
   });
   expect(sessionResponse.ok()).toBeTruthy();
   const session = await sessionResponse.json() as { id: string };

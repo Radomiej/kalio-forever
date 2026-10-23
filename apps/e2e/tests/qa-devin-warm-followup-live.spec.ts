@@ -1,0 +1,34 @@
+import { expect, test } from '@playwright/test';
+import { resolve } from 'node:path';
+import { API_BASE, APP_BASE, selectSession, sendMessageFromComposer } from './helpers/test-config';
+
+test.skip(process.env['KALIO_DEVIN_WARM_FOLLOWUP'] !== '1', 'Explicit approved live follow-up only');
+test('existing SWE-2 thread answers without host reset or tool execution', async ({ page, request }) => {
+  expect(APP_BASE.replace(/\/$/, '')).toBe('http://localhost:5288');
+  const session = 'W4fggLSunrJB41C24MV7C';
+  const before = await (await request.get(`${API_BASE}/runtime/devin-cli/status`)).json();
+  expect(before.hosts).toHaveLength(1);
+  expect(before.hosts[0].model).toBe('swe-2');
+  const epoch = before.hosts[0].processEpoch;
+  expect(typeof epoch).toBe('string');
+  const marker = `QA137_WARM_${Date.now()}`;
+  const started = Date.now();
+  await page.goto('/');
+  await page.getByTestId('nav-talk').click();
+  await selectSession(page, session, 'Devin warm follow-up');
+  await sendMessageFromComposer(page, `Test komunikacji w istniejącym czacie. Model dokładnie swe-2. Bez żadnych narzędzi, plików, terminala, web ani zmian projektu. Odpowiedz nagłówkiem ## ${marker} i jednym zdaniem po polsku: Rozmowa działa bez resetowania hosta.`);
+  await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect.poll(async () => (await request.get(`${API_BASE}/sessions/${session}/runs/current`)).text(), { timeout: 30_000 }).toBe('');
+  const after = await (await request.get(`${API_BASE}/runtime/devin-cli/status`)).json();
+  expect(after.hosts).toHaveLength(1);
+  expect(after.hosts[0].processEpoch).toBe(epoch);
+  const audit = await (await request.get(`${API_BASE}/audit-log?sessionId=${session}&source=all`)).json();
+  const recent = audit.filter((entry: { createdAt: number }) => entry.createdAt >= started);
+  expect(recent.length).toBeGreaterThan(0);
+  expect(recent.some((entry: { label: string; data?: { toolCallCount?: number } }) => entry.label === 'llm.turn.completed' && entry.data?.toolCallCount === 0)).toBe(true);
+  expect(recent.filter((entry: { type: string }) => entry.type === 'tool_call')).toHaveLength(0);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible();
+  await expect(page.getByTestId('chat-connection-status')).toHaveCount(0, { timeout: 30_000 });
+  await page.screenshot({ path: resolve(__dirname, '../../../apps/e2e/outputs/qa-run-137/assets/devin-warm-followup.png') });
+});

@@ -7,6 +7,14 @@ vi.mock('../../store/sessionStore', () => ({
 }));
 
 describe('ChatInput', () => {
+  it('lets the runtime picker wrap without forcing message actions off compact screens', () => {
+    render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming onStop={vi.fn()} onArchitectureChange={vi.fn()} />);
+    const picker = screen.getByTestId('chat-architecture-select');
+    expect(picker.parentElement).toHaveClass('min-w-0', 'flex-wrap');
+    expect(picker).toHaveClass('w-full', 'sm:w-48');
+    expect(screen.getByTestId('chat-input')).toHaveClass('min-w-0');
+  });
+
   it('shows stop and send buttons together while streaming', () => {
     render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming={true} onStop={vi.fn()} />);
     expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();

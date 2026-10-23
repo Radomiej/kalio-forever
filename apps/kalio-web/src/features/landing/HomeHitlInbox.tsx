@@ -70,16 +70,11 @@ export function HomeHitlInbox({
   };
 
   const approve = (confirmation: ToolConfirmationRequest) => {
-    updateToolActivity(confirmation.toolCallId, {
-      status: 'running',
-      startedAt: Date.now(),
-    });
     eventBus.confirmTool({
       requestId: confirmation.requestId,
       sessionId: confirmation.sessionId,
       ...notePayload(confirmation.requestId),
     });
-    removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
   };
 
   const reject = (confirmation: ToolConfirmationRequest) => {

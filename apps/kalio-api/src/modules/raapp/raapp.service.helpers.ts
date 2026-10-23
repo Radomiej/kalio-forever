@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+
 export interface RAAppMeta {
   id: string;
   name: string;
@@ -27,6 +30,26 @@ export interface LoadedRAApp {
   appMode: 'display' | 'interactive';
   createdAt: number;
   updatedAt: number;
+  unchangedLegacyShippedQA?: boolean;
+}
+
+// Exact shipped 1.1.0 from 3077d9b7: JSON([meta.yml, ui.gui, systems.yml]), LF-normalized.
+const LEGACY_QA_SHA256 = 'e0890239470c60ce2aae5564bc47f5067dd67a045a009cc63f744846e501c0d6';
+
+export function isUnchangedLegacyShippedQA(files: string[], contents: Array<string | null>): boolean {
+  if (files.length !== 3 || !['meta.yml', 'ui.gui', 'systems.yml'].every((name) => files.includes(name))
+    || contents.some((content) => content === null)) return false;
+  return createHash('sha256').update(JSON.stringify(contents.map((content) => content?.replaceAll('\r\n', '\n'))))
+    .digest('hex') === LEGACY_QA_SHA256;
+}
+
+export function keepPackagedQAPatch(existing: LoadedRAApp, incoming: LoadedRAApp, packagedCoreDir: string | null): boolean {
+  // TODO: legacy fallback — only unchanged shipped 1.1.0 core may yield to the packaged 1.1.1 fix.
+  return packagedCoreDir !== null && existing.id === 'qa-interactive' && incoming.id === existing.id
+    && existing.source === 'core' && incoming.source === 'core'
+    && path.resolve(existing.zipPath) === path.resolve(packagedCoreDir, 'qa-interactive')
+    && existing.meta.version === '1.1.1' && existing.appMode === 'interactive'
+    && incoming.meta.version === '1.1.0' && incoming.unchangedLegacyShippedQA === true;
 }
 
 export interface SaveGeneratedAppInput {

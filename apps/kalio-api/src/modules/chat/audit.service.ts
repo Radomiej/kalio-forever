@@ -4,7 +4,10 @@ import { nanoid } from 'nanoid';
 import type { AuditRetentionPolicy, AuditRetentionStatus } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { auditLog, auditLogArchive } from '../../database/schema';
+import { assertNotReservedGoalLaunchLabel } from './goal-launch-pair-writer';
 import { AppSettingsService } from '../../database/app-settings.service';
+import { readGoalProofExact, logContentAddressedGoalAggregateRequired, updateMutableAudit,
+  type AuditGoalProofLocator, type AuditGoalProofRecord, type AuditGoalAggregateInput } from './audit-goal-proof';
 import {
   type AuditLogEntry,
   type AuditLogInput,
@@ -22,6 +25,7 @@ import {
 } from './audit.service.support';
 
 export type { AuditLogEntry, AuditLogInput, AuditLogQuery, AuditLogSource, AuditType } from './audit.service.support';
+export type { AuditGoalProofLocator, AuditGoalProofRecord, AuditGoalAggregateInput } from './audit-goal-proof';
 
 /**
  * Writes observability records to the audit_log table.
@@ -59,6 +63,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   }
 
   async log(entry: AuditLogInput): Promise<string> {
+    assertNotReservedGoalLaunchLabel(entry.label);
     const id = nanoid();
     try {
       await this.drizzle.db.insert(auditLog).values({
@@ -80,21 +85,47 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     return id;
   }
 
+  /** Execution checkpoints must fail closed; unlike telemetry, failures propagate. */
+  async logRequired(id: string, entry: AuditLogInput): Promise<void> {
+    assertNotReservedGoalLaunchLabel(entry.label);
+    const data = entry.data ?? null;
+    await this.drizzle.db.insert(auditLog).values({
+      id,
+      sessionId: entry.sessionId ?? null,
+      type: entry.type,
+      label: entry.label,
+      data,
+      durationMs: entry.durationMs ?? null,
+      chunkCount: entry.chunkCount ?? null,
+      createdAt: new Date(),
+    }).onConflictDoNothing();
+    const rows = await this.drizzle.db.select().from(auditLog).where(eq(auditLog.id, id));
+    const stored = rows.find((row) => row.id === id);
+    if (!stored) throw new Error('Required audit checkpoint was not written.');
+    if (stored.type !== entry.type || stored.label !== entry.label
+      || stored.sessionId !== (entry.sessionId ?? null)
+      || JSON.stringify(stored.data ?? null) !== JSON.stringify(data)) {
+      throw new Error('Required audit checkpoint key already contains a different decision.');
+    }
+  }
+
   async update(id: string, patch: { chunkCount?: number; durationMs?: number; data?: Record<string, unknown> }): Promise<void> {
     try {
-      await this.drizzle.db
-        .update(auditLog)
-        .set({
-          ...(patch.chunkCount !== undefined ? { chunkCount: patch.chunkCount } : {}),
-          ...(patch.durationMs !== undefined ? { durationMs: patch.durationMs } : {}),
-          ...(patch.data !== undefined ? { data: patch.data } : {}),
-        })
-        .where(eq(auditLog.id, id));
+      updateMutableAudit(this.drizzle.db, id, patch);
     } catch (err) {
+      if (err instanceof Error && err.message === 'AUDIT_PROOF_IMMUTABLE') throw err;
       this.logger.warn(
         `Audit update failed [${id}]: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  readGoalProofExact(locator: AuditGoalProofLocator, signal?: AbortSignal): Promise<AuditGoalProofRecord> {
+    return readGoalProofExact(this.drizzle.db, locator, signal);
+  }
+
+  logContentAddressedGoalAggregateRequired(entry: AuditGoalAggregateInput, signal?: AbortSignal): Promise<AuditGoalProofRecord> {
+    return logContentAddressedGoalAggregateRequired(this.drizzle.db, entry, signal);
   }
 
   async listEntries(query: AuditLogQuery): Promise<AuditLogEntry[]> {

@@ -232,24 +232,16 @@ export async function sendMessageFromComposer(page: Page, message: string): Prom
 }
 
 export async function expectComposerEnabled(page: Page, timeoutMs = 10_000): Promise<Locator> {
-	const welcomeInput = page.getByTestId('welcome-prompt-input');
-	if (await welcomeInput.isVisible().catch(() => false)) {
-		await expect(welcomeInput).toBeEnabled({ timeout: timeoutMs });
-		return welcomeInput;
-	}
-
-	const chatInput = page.getByTestId('chat-input');
-	await expect(chatInput).toBeEnabled({ timeout: timeoutMs });
-	return chatInput;
+	const input = page.locator('[data-testid="welcome-prompt-input"]:visible, [data-testid="chat-input"]:visible');
+	await expect(input).toHaveCount(1, { timeout: timeoutMs });
+	await expect(input).toBeEnabled({ timeout: timeoutMs });
+	return input;
 }
 
 export async function getComposerSendButton(page: Page): Promise<Locator> {
-	const welcomeButton = page.getByTestId('welcome-run-prompt');
-	if (await welcomeButton.isVisible().catch(() => false)) {
-		return welcomeButton;
-	}
-
-	return page.getByTestId('chat-send-btn');
+	const button = page.locator('[data-testid="welcome-run-prompt"]:visible, [data-testid="chat-send-btn"]:visible');
+	await expect(button).toHaveCount(1);
+	return button;
 }
 
 export async function selectArchitectureInComposer(page: Page, architectureId: string): Promise<void> {

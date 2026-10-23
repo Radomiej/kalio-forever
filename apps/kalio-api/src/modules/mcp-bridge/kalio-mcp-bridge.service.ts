@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolMeta, ToolResult } from '@kalio/types';
 import { ToolDispatchService } from '../chat/tool-dispatch.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import { TurnState } from '../chat/turn-state';
 import type { StreamContext } from '../chat/interfaces/stream-context.interface';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -59,12 +60,14 @@ export class KalioMcpBridgeHttpError extends Error {
  */
 @Injectable()
 export class KalioMcpBridgeService {
+  private readonly logger = new Logger(KalioMcpBridgeService.name);
   private readonly connections = new Map<string, BridgeConnection>();
 
   constructor(
     private readonly toolDispatch: ToolDispatchService,
     private readonly tokenService: KalioMcpBridgeTokenService,
     private readonly contextRegistry: KalioMcpBridgeContextRegistry,
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   async handleRequest(
@@ -183,23 +186,87 @@ export class KalioMcpBridgeService {
       if (connection.context.dynamicContextRequired && !dynamicContext) {
         return toolError('No active Kalio turn context is available for this native runtime.');
       }
+      if (connection.context.dynamicContextRequired && !dynamicContext?.dispatchNativeTool) {
+        return toolError('No durable Kalio tool execution port is available for this native runtime.');
+      }
       const callId = `mcp-${connection.sessionId ?? connection.id}-${String(extra.requestId)}`;
       const args = isRecord(request.params.arguments) ? request.params.arguments : {};
       const context = this.activeContext(connection);
+      const progressToken = request.params._meta?.progressToken;
+      const progressAbort = new AbortController();
+      const abortSignal = AbortSignal.any([extra.signal, progressAbort.signal]);
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      let progress = 0;
+      let notifications = Promise.resolve();
+      const stopHeartbeat = () => { clearInterval(heartbeat); heartbeat = undefined; };
+      const sendProgress = (message: string) => {
+        if (progressToken === undefined || abortSignal.aborted) return;
+        const nextProgress = ++progress;
+        notifications = notifications.then(() => extra.sendNotification({
+          method: 'notifications/progress',
+          params: { progressToken, progress: nextProgress, message },
+        })).catch((error: unknown) => {
+          this.logger.warn(`MCP approval progress failed for session ${context.sessionId}`);
+          progressAbort.abort(error);
+        });
+      };
+      abortSignal.addEventListener('abort', stopHeartbeat, { once: true });
+      const onApprovalProgress = (state: 'waiting' | 'resolved') => {
+        if (state === 'waiting' && progressToken !== undefined && !abortSignal.aborted) {
+          stopHeartbeat();
+          sendProgress('Awaiting human approval in Kalio');
+          // Protocol liveness only while the dispatcher is actually waiting for a decision.
+          heartbeat = setInterval(() => sendProgress('Awaiting human approval in Kalio'), 20_000);
+          heartbeat.unref();
+        } else if (state === 'resolved') {
+          stopHeartbeat();
+          sendProgress('Kalio approval resolved');
+        }
+      };
+      if (connection.context.dynamicContextRequired && dynamicContext?.dispatchNativeTool) {
+        try {
+          const result = await dynamicContext.dispatchNativeTool({ id: callId, name: toolName, args }, { abortSignal, onApprovalProgress });
+          await notifications;
+          return toMcpResult(result);
+        } finally {
+          stopHeartbeat();
+          abortSignal.removeEventListener('abort', stopHeartbeat);
+        }
+      }
+      // TODO: legacy fallback — standalone MCP clients have no owning chat runtime.
+      const emit: StreamContext['emit'] = (event, data) => {
+        this.chatGateway.emitSessionEvent(context.sessionId, event, data);
+        if (event === 'tool:confirmation_required') onApprovalProgress('waiting');
+        else if (event === 'tool:confirmation_invalidated') onApprovalProgress('resolved');
+      };
       const streamContext: StreamContext = {
         sessionId: context.sessionId,
         turnId: context.turnId,
         promptMessageId: context.promptMessageId,
         vfsSessionId: context.vfsSessionId,
         messageId: callId,
-        abortSignal: extra.signal,
+        abortSignal,
         state: new TurnState(),
-        emit: (() => undefined) as StreamContext['emit'],
+        emit,
         runtimeKind: 'chat',
       };
 
-      const result = await this.toolDispatch.dispatch(callId, toolName, args, streamContext, visible);
-      return toMcpResult(result);
+      emit('tool:start', {
+        callId,
+        toolName,
+        args,
+        sessionId: context.sessionId,
+        turnId: context.turnId,
+      });
+      try {
+        const result = await this.toolDispatch.dispatch(callId, toolName, args, streamContext, visible);
+        emit('tool:result', { ...result, sessionId: context.sessionId, toolName });
+        await notifications;
+        return toMcpResult(result);
+      } finally {
+        stopHeartbeat();
+        abortSignal.removeEventListener('abort', stopHeartbeat);
+      }
     });
 
     return server;
@@ -245,6 +312,9 @@ function toMcpTool(meta: ToolMeta): McpTool {
 function toMcpResult(result: ToolResult): { content: [{ type: 'text'; text: string }]; isError?: boolean } {
   if (result.status === 'success') {
     return { content: [{ type: 'text', text: JSON.stringify(result.data ?? null) }] };
+  }
+  if (result.status === 'cancelled') {
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   }
   return {
     content: [{ type: 'text', text: result.errorMessage ?? result.errorCode ?? 'Kalio tool failed.' }],

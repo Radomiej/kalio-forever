@@ -2,7 +2,11 @@ import { chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:f
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-
+import { compressClaudeAgentSdkExecutable } from './compress-claude-agent-sdk.mjs';
+import { stageRuntimeTypes } from './stage-runtime-types.mjs';
+import { createRuntimeArchive } from './runtime-archive.mjs';
+import { copyNativeAddon } from './runtime-native-addon.mjs';
+import { createRuntimeDependencies } from './runtime-dependencies.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const platformIndex = args.indexOf('--platform');
@@ -32,6 +36,25 @@ const cliSource = join(root, 'scripts', 'kalio-cli.mjs');
 const updaterSource = join(root, 'scripts', 'kalio-updater.mjs');
 const updaterHelpersSource = join(root, 'scripts', 'kalio-updater-helpers.mjs');
 const launcherSource = join(root, 'scripts', 'kalio-launcher.ps1');
+
+const PRUNABLE_STAGE_ROOT_DIRECTORIES = [
+  '.turbo',
+  'coverage',
+  'src',
+  'src-tauri',
+  'test',
+  'tests',
+  'tmp',
+];
+
+const PRUNABLE_STAGE_ROOT_FILES = [
+  'desktop-server-bootstrap.mjs',
+  'drizzle.config.ts',
+  'eslint.config.mjs',
+  'nest-cli.json',
+  'tsconfig.json',
+  'vitest.config.ts',
+];
 
 function run(command, commandArgs, cwd = root) {
   const currentPath = process.env.PATH ?? process.env.Path ?? '';
@@ -96,7 +119,7 @@ async function ensureNativeSqliteAddon() {
   if (sourcePath) {
     const targetPath = join(targetRoot, 'build', 'Release', 'better_sqlite3.node');
     await mkdir(dirname(targetPath), { recursive: true });
-    await cp(sourcePath, targetPath, { force: true });
+    await copyNativeAddon(sourcePath, targetPath);
     console.log('[kalio] bundled better-sqlite3 native addon: ' + sourcePath);
   }
 }
@@ -123,35 +146,21 @@ function getPnpm() {
   return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 }
 
-function getPnpmMajor(pnpm) {
-  const result = spawnSync(pnpm, ['--version'], {
-    cwd: root,
-    encoding: 'utf8',
-    shell: process.platform === 'win32' && pnpm.endsWith('.cmd'),
-    windowsHide: true,
-  });
-  if (result.error || result.status !== 0) {
-    throw result.error ?? new Error('Unable to resolve pnpm version');
-  }
-  const major = Number.parseInt(result.stdout.trim().split('.')[0] ?? '', 10);
-  if (!Number.isInteger(major)) {
-    throw new Error('Unable to parse pnpm version: ' + result.stdout.trim());
-  }
-  return major;
-}
-
 async function installFlatRuntimeDependencies() {
   const packageJsonPath = join(serverRoot, 'package.json');
   const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8'));
-  const runtimeDependencies = Object.fromEntries(
-    Object.entries(manifest.dependencies ?? {}).filter(([name]) => (
-      name !== '@kalio/types' && (runtime !== 'bun' || name !== 'better-sqlite3')
-    )),
-  );
+  const workspace = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  const installedVersions = {};
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    if (name === '@kalio/types' || (runtime === 'bun' && name === 'better-sqlite3')) continue;
+    installedVersions[name] = JSON.parse(await readFile(join(root, 'apps/kalio-api/node_modules', name, 'package.json'), 'utf8')).version;
+  }
+  const runtimeDependencies = createRuntimeDependencies(manifest.dependencies ?? {}, installedVersions, runtime);
   await writeFile(packageJsonPath, JSON.stringify({
     name: 'kalio-runtime-server',
     version,
     private: true,
+    packageManager: workspace.packageManager,
     dependencies: runtimeDependencies,
   }, null, 2) + '\n', 'utf8');
   await rm(join(serverRoot, 'node_modules'), { recursive: true, force: true });
@@ -186,6 +195,7 @@ function isPrunableFile(name) {
     || lowerName.endsWith('.map')
     || lowerName.endsWith('.ts')
     || lowerName.endsWith('.tsx')
+    || /\.(spec|test)\.(c|m)?js$/i.test(name)
     || /^(readme|changelog|history|contributing)([-_.].*)?$/i.test(name);
 }
 
@@ -214,8 +224,16 @@ async function pruneRuntimeArtifacts() {
     }));
   }
 
+  await Promise.all(PRUNABLE_STAGE_ROOT_DIRECTORIES.map((name) => (
+    rm(join(serverRoot, name), { recursive: true, force: true })
+  )));
+  await Promise.all(PRUNABLE_STAGE_ROOT_FILES.map((name) => (
+    rm(join(serverRoot, name), { force: true })
+  )));
+
   await rm(join(nodeModulesRoot, '@types'), { recursive: true, force: true });
   await visit(nodeModulesRoot);
+  await visit(join(serverRoot, 'dist'));
   return { removedFiles, removedDirectories };
 }
 
@@ -242,6 +260,83 @@ async function measureTree(directory) {
   await visit(directory);
   return { files, bytes };
 }
+
+async function removeUnneededOnnxRuntimeArtifacts() {
+  const onnxRoot = join(serverRoot, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
+  const platformName = process.platform === 'win32'
+    ? 'win32'
+    : process.platform === 'linux'
+      ? 'linux'
+      : process.platform === 'darwin'
+        ? 'darwin'
+        : null;
+  const architecture = process.arch === 'arm64' ? 'arm64' : process.arch === 'x64' ? 'x64' : null;
+  if (!platformName || !architecture) {
+    return;
+  }
+
+  const targetRoot = join(onnxRoot, platformName, architecture);
+  try {
+    await stat(targetRoot);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  const platformEntries = await readdir(onnxRoot, { withFileTypes: true });
+  await Promise.all(platformEntries
+    .filter((entry) => entry.isDirectory() && entry.name !== platformName)
+    .map((entry) => rm(join(onnxRoot, entry.name), { recursive: true, force: true })));
+
+  const architectureEntries = await readdir(join(onnxRoot, platformName), { withFileTypes: true });
+  await Promise.all(architectureEntries
+    .filter((entry) => entry.isDirectory() && entry.name !== architecture)
+    .map((entry) => rm(join(onnxRoot, platformName, entry.name), { recursive: true, force: true })));
+
+  if (platformName === 'linux') {
+    await Promise.all([
+      rm(join(targetRoot, 'libonnxruntime_providers_cuda.so'), { force: true }),
+      rm(join(targetRoot, 'libonnxruntime_providers_tensorrt.so'), { force: true }),
+    ]);
+  }
+}
+
+async function removeUnneededOnnxRuntimeWebArtifacts() {
+  // Transformers.js loads only the /webgpu entry in the Node runtime. Keep its
+  // bundle and asyncify binary; the remaining browser/provider variants are not
+  // reachable from the desktop server and add tens of MiB to every package.
+  const onnxWebRoot = join(serverRoot, 'node_modules', 'onnxruntime-web');
+  const distRoot = join(onnxWebRoot, 'dist');
+  const keepDistFiles = new Set([
+    'ort.webgpu.bundle.min.mjs',
+    'ort.webgpu.min.js',
+    'ort.webgpu.min.mjs',
+    'ort-wasm-simd-threaded.asyncify.mjs',
+    'ort-wasm-simd-threaded.asyncify.wasm',
+  ]);
+
+  await Promise.all([
+    rm(join(onnxWebRoot, 'lib'), { recursive: true, force: true }),
+    rm(join(onnxWebRoot, 'node_modules'), { recursive: true, force: true }),
+  ]);
+
+  let entries;
+  try {
+    entries = await readdir(distRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && !keepDistFiles.has(entry.name))
+    .map((entry) => rm(join(distRoot, entry.name), { force: true })));
+}
+
 async function removeLinuxOptionalArtifacts() {
   if (platform !== 'linux') {
     return;
@@ -251,17 +346,22 @@ async function removeLinuxOptionalArtifacts() {
   await Promise.all(entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('bare-'))
     .map((entry) => rm(join(nodeModulesRoot, entry.name, 'prebuilds'), { recursive: true, force: true })));
-  const imgRoot = join(nodeModulesRoot, '@img');
-  try {
-    const imageEntries = await readdir(imgRoot, { withFileTypes: true });
-    await Promise.all(imageEntries
-      .filter((entry) => entry.isDirectory() && entry.name.includes('linuxmusl'))
-      .map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })));
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      throw error;
+  const imgRoots = [
+    join(nodeModulesRoot, '@img'),
+    join(nodeModulesRoot, 'sharp', 'node_modules', '@img'),
+  ];
+  await Promise.all(imgRoots.map(async (imgRoot) => {
+    try {
+      const imageEntries = await readdir(imgRoot, { withFileTypes: true });
+      await Promise.all(imageEntries
+        .filter((entry) => entry.name.includes('linuxmusl'))
+        .map((entry) => rm(join(imgRoot, entry.name), { recursive: true, force: true })));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
     }
-  }
+  }));
   await rm(
     join(nodeModulesRoot, '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl'),
     { recursive: true, force: true },
@@ -274,21 +374,13 @@ await mkdir(outputRoot, { recursive: true });
 await requirePath(join(apiDist, 'main.js'), 'API build');
 await requirePath(join(webDist, 'index.html'), 'web build');
 
-const deployArgs = [
-  '--config.virtual-store-dir-max-length=40',
-  '--filter',
-  'kalio-api',
-  'deploy',
-  '--prod',
-  serverRoot,
-];
-const pnpm = getPnpm();
-if (getPnpmMajor(pnpm) >= 10) {
-  deployArgs.splice(deployArgs.length - 1, 0, '--legacy');
-}
-run(pnpm, deployArgs);
+await cp(join(root, 'apps/kalio-api/package.json'), join(serverRoot, 'package.json'));
 await installFlatRuntimeDependencies();
+await stageRuntimeTypes(root, serverRoot);
 await removeLinuxOptionalArtifacts();
+if (platform === 'linux') await compressClaudeAgentSdkExecutable(join(serverRoot, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64'));
+await removeUnneededOnnxRuntimeArtifacts();
+await removeUnneededOnnxRuntimeWebArtifacts();
 await rm(join(serverRoot, 'dist'), { recursive: true, force: true });
 await cp(apiDist, join(serverRoot, 'dist'), { recursive: true });
 await ensureNativeSqliteAddon();
@@ -296,7 +388,7 @@ await cp(bootstrapSource, join(serverRoot, 'runtime-server-bootstrap.mjs'));
 await cp(webDist, join(stageRoot, 'web'), { recursive: true });
 await writeFile(
   join(stageRoot, 'web', 'runtime-config.js'),
-  'window.__KALIO_RUNTIME_CONFIG__ = {};\n',
+  'window.__KALIO_RUNTIME_CONFIG__ = { apiUrl: window.location.origin, wsUrl: window.location.origin };\n',
   'utf8',
 );
 await cp(cliSource, join(stageRoot, 'bin', 'kalio-cli.mjs'));
@@ -377,9 +469,6 @@ const archive = join(
   outputRoot,
   packageName + (platform === 'windows' ? '.zip' : '.tar.gz'),
 );
-const archiveArgs = platform === 'windows'
-  ? ['-a', '-c', '-f', archive, '-C', stagingParent, packageName]
-  : ['-czf', archive, '-C', stagingParent, packageName];
-run('tar', archiveArgs);
+await createRuntimeArchive({ platform, archive, stagingParent, packageName });
 await rm(stagingParent, { recursive: true, force: true });
 console.log('[kalio] runtime package created: ' + archive);

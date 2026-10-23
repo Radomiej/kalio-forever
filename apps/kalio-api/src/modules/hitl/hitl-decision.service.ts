@@ -56,13 +56,11 @@ function parseDecision(raw: string): HitlDecisionResult {
   const risk = parsed['risk'];
   const reason = parsed['reason'];
 
-  const normalizedAgree = typeof agree === 'boolean'
-    ? agree
-    : decision === 'allow'
+  const normalizedAgree = decision === 'allow'
       ? true
       : decision === 'deny' || decision === 'ask_user'
         ? false
-        : undefined;
+        : typeof agree === 'boolean' ? agree : undefined;
   if (normalizedAgree === undefined) {
     throw new Error('Auto HITL response is missing a boolean agree field.');
   }
@@ -98,6 +96,7 @@ export class HitlDecisionService {
   ) {}
 
   async evaluateApproval(input: HitlDecisionInput): Promise<HitlDecisionResult> {
+    input.request.abortSignal?.throwIfAborted();
     const personaConfig = await this.personaService.getSessionConfig(input.personaId);
     if (!personaConfig) {
       throw new Error(`Auto HITL persona ${input.personaId} was not found.`);
@@ -134,6 +133,7 @@ export class HitlDecisionService {
     ];
 
     const rawResponse = await this.evaluateWithConfiguredProfile(personaConfig.executionProfileId, messages, input);
+    input.request.abortSignal?.throwIfAborted();
 
     try {
       return parseDecision(rawResponse);

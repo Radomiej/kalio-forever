@@ -56,6 +56,10 @@ function makeMemoryService() {
     getModelName: vi.fn(async () => 'Xenova/multilingual-e5-small'),
     embedBatch,
     embedOne,
+    captureSpace: () => ({ id: embeddingService.getProfileId(), provider: 'local-transformers', model: 'Xenova/multilingual-e5-small',
+      modelRevision: '', dimensions: embeddingService.getDimensions(), promptVersion: 'raw-v1' }),
+    embedPinned: (_space: unknown, texts: string[], purpose = 'document') => purpose === 'query'
+      ? Promise.all(texts.map(text => embedOne(text))) : embedBatch(texts),
   } as unknown as EmbeddingService;
 
   const memoryService = new MemoryService(config, appSettings, embeddingService);
@@ -90,6 +94,89 @@ function makeWebChunks(query = 'local embeddings'): WebSearchChunk[] {
 }
 
 describe('MemoryService reembedPersona', () => {
+  it('partitions conversation and memory while aggregating FTS and deleting only the active space', async () => {
+    const { memoryService, embeddingService, memoryPath } = makeMemoryService();
+    await memoryService.ingest('boron memory', 'partition');
+    await memoryService.ingestConversation([{ role: 'user', content: 'boron conversation' }], 'partition');
+    const profile = embeddingService.getProfileId();
+    expect(fs.existsSync(path.join(memoryPath, `partition.${profile}.memory.db`))).toBe(true);
+    expect(fs.existsSync(path.join(memoryPath, `partition.${profile}.conversation.db`))).toBe(true);
+    expect(memoryService.count('partition')).toBe(2);
+    expect(memoryService.searchFTS('boron', 'partition')).toHaveLength(2);
+    expect(await memoryService.search('boron', 'partition')).toHaveLength(2);
+    expect(await memoryService.hybridSearch('boron', 'partition')).toHaveLength(2);
+    expect(memoryService.getSummary([{ id: 'partition', name: 'Partition' }]).totalCount).toBe(2);
+    const conversation = memoryService.getAll('partition').find(entry => entry.metadata.source === 'conversation')!;
+    expect(memoryService.delete(conversation.id, 'partition')).toBe(true);
+    expect(memoryService.count('partition')).toBe(1);
+    memoryService.deleteAll('partition');
+    expect(memoryService.count('partition')).toBe(0);
+    memoryService.onModuleDestroy();
+  });
+  it('reembeds old dimensions without modifying the mixed source and routes conversation metadata', async () => {
+    const { memoryService, memoryPath, embeddingService } = makeMemoryService();
+    const sourcePath = path.join(memoryPath, 'old.ollama-old-profile.db');
+    const source = new VectorStoreService(sourcePath, 7);
+    source.insert('m', Array<number>(7).fill(1), 'old memory', {}, 'old-model');
+    source.insert('c', Array<number>(7).fill(2), 'old conversation', { source: 'conversation' }, 'old-model');
+    source.close();
+    const bytes = fs.readFileSync(sourcePath);
+    expect(memoryService.count('old')).toBe(0);
+    expect(await memoryService.reembedPersona('old')).toMatchObject({ count: 2 });
+    expect(fs.readFileSync(sourcePath)).toEqual(bytes);
+    const profile = embeddingService.getProfileId();
+    for (const [kind, id] of [['memory', 'm'], ['conversation', 'c']]) {
+      const target = new VectorStoreService(path.join(memoryPath, `old.${profile}.${kind}.db`), 384);
+      expect(target.getAll().map(entry => entry.id)).toEqual([id]);
+      target.close();
+    }
+    memoryService.onModuleDestroy();
+  });
+
+  it('does not create a target or write vectors after pinned embedding rejects a reload', async () => {
+    const { memoryService, embeddingService, memoryPath } = makeMemoryService();
+    vi.spyOn(embeddingService, 'embedPinned').mockRejectedValue(new Error('EMBEDDING_SPACE_CHANGED'));
+    await expect(memoryService.ingest('memory', 'racing')).rejects.toThrow('EMBEDDING_SPACE_CHANGED');
+    await expect(memoryService.ingestConversation([{ role: 'user', content: 'conversation' }], 'racing')).rejects.toThrow('EMBEDDING_SPACE_CHANGED');
+    await expect(memoryService.ingestWebSearchResult(makeWebChunks())).rejects.toThrow('EMBEDDING_SPACE_CHANGED');
+    expect(fs.readdirSync(memoryPath)).toEqual([]);
+    memoryService.onModuleDestroy();
+  });
+  it('preserves partition kind rather than reclassifying new memory from source metadata', async () => {
+    const { memoryService, embeddingService, memoryPath } = makeMemoryService();
+    await memoryService.ingest('explicit memory kind', 'kind', { source: 'conversation' });
+    vi.mocked(embeddingService.getProfileId).mockReturnValue('ollama-new-space');
+    await memoryService.reembedPersona('kind');
+    expect(memoryService.count('kind')).toBe(1);
+    const target = new VectorStoreService(path.join(memoryPath, 'kind.ollama-new-space.memory.db'), 384);
+    expect(target.count()).toBe(1);
+    target.close();
+    memoryService.onModuleDestroy();
+  });
+
+  it('keeps FTS and summary readable without invoking embeddings while provider is offline', async () => {
+    const { memoryService, embeddingService } = makeMemoryService();
+    await memoryService.ingest('offline keyword', 'offline');
+    await memoryService.ingestConversation([{ role: 'user', content: 'offline conversation' }], 'offline');
+    vi.mocked(embeddingService.getStatus).mockReturnValue({ configured: false } as ReturnType<EmbeddingService['getStatus']>);
+    vi.spyOn(embeddingService, 'captureSpace').mockImplementation(() => { throw new Error('offline'); });
+    expect(memoryService.searchFTS('offline', 'offline')).toHaveLength(2);
+    expect(memoryService.getSummary([{ id: 'offline', name: 'Offline' }]).totalCount).toBe(2);
+    memoryService.onModuleDestroy();
+  });
+
+  it('reembeds web metadata from a different vector dimension without changing its source', async () => {
+    const { memoryService, memoryPath } = makeMemoryService();
+    const sourcePath = path.join(memoryPath, 'ollama-old-web', 'web-results.db');
+    const source = new VectorStoreService(sourcePath, 7);
+    source.insert('web-old', Array<number>(7).fill(1), 'old web keyword', { namespace: 'web_search' }, 'old');
+    source.close();
+    const bytes = fs.readFileSync(sourcePath);
+    expect(await memoryService.reembedAll()).toMatchObject({ personas: 0, count: 1 });
+    expect(fs.readFileSync(sourcePath)).toEqual(bytes);
+    expect(memoryService.getAllWebResults()).toHaveLength(1);
+    memoryService.onModuleDestroy();
+  });
   it('re-embeds stored chunks with the current model', async () => {
     const { memoryService, embeddingService, embedBatch } = makeMemoryService();
 
@@ -280,7 +367,7 @@ describe('MemoryService reembedPersona', () => {
     expect(await memoryService.searchWebResults('after wipe')).toHaveLength(2);
   });
 
-  it('deletes memories from all profile databases and legacy database for a persona', async () => {
+  it('deletes only current partitions and preserves old profile and legacy sources', async () => {
     const { memoryService, embeddingService, memoryPath } = makeMemoryService();
     const getProfileId = vi.mocked(embeddingService.getProfileId);
 
@@ -296,10 +383,10 @@ describe('MemoryService reembedPersona', () => {
 
     expect(memoryService.getAll('persona-delete')).toHaveLength(0);
     getProfileId.mockReturnValue('local-transformers-xenova-multilingual-e5-small-384-auto');
-    expect(memoryService.getAll('persona-delete')).toHaveLength(0);
+    expect(memoryService.getAll('persona-delete')).toHaveLength(1);
 
     const legacyCheck = new VectorStoreService(path.join(memoryPath, 'persona-delete.db'), 384);
-    expect(legacyCheck.count()).toBe(0);
+    expect(legacyCheck.count()).toBe(1);
     legacyCheck.close();
   });
 });

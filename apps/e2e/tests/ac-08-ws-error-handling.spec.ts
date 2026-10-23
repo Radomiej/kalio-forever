@@ -5,15 +5,13 @@ import {
   selectSession,
   sendMessageFromComposer,
 } from './helpers/test-config';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 
 // AC-08: ChatGateway disconnects gracefully and emits error event
 test.describe('AC-08: WebSocket error handling', () => {
   test('chat:error from server displays error banner in UI', async ({ page, request }) => {
     // Create and then delete a session, then try to chat — triggers SESSION_NOT_FOUND
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC08 Error Banner', personaId: 'default' },
-    });
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, 'AC08 Error Banner');
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
@@ -30,10 +28,7 @@ test.describe('AC-08: WebSocket error handling', () => {
   });
 
   test('streaming indicator disappears after error and input re-enables', async ({ page, request }) => {
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC08 Streaming Recovery', personaId: 'default' },
-    });
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, 'AC08 Streaming Recovery');
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
@@ -49,10 +44,7 @@ test.describe('AC-08: WebSocket error handling', () => {
   });
 
   test('user can send another message after an error', async ({ page, request }) => {
-    const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC08 Resend', personaId: 'default' },
-    });
-    const session = await res.json() as { id: string };
+    const session = await createExistingMockConversation(request, 'AC08 Resend');
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();

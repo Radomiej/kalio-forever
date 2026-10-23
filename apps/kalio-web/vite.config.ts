@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decisionProtectedProxy } from './decision-auth.proxy.mjs';
 
 const configDir = dirname(fileURLToPath(import.meta.url));
 const vitePort = Number.parseInt(process.env['VITE_PORT'] ?? '5188', 10);
@@ -65,6 +66,7 @@ export default defineConfig({
       ignored: ['**/*.spec.ts', '**/*.spec.tsx', '**/*.test.ts', '**/*.test.tsx'],
     },
     proxy: {
+      ...decisionProtectedProxy(apiOrigin),
       '/api': {
         target: apiOrigin,
         changeOrigin: true,

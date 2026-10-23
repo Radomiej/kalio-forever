@@ -191,7 +191,7 @@ export class SessionManagerService {
     toolCallId: string,
     content: string,
     turnLink?: { turnId?: string; promptMessageId?: string },
-  ): Promise<void> {
+  ): Promise<string> {
     const messageId = nanoid();
     const msg: ChatMessage = {
       id: messageId,
@@ -203,6 +203,7 @@ export class SessionManagerService {
       createdAt: Date.now(),
     };
     await this.repo.saveMessage(msg);
+    return messageId;
   }
 
   /**

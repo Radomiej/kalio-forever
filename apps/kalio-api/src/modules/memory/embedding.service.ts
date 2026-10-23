@@ -1,7 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { EmbeddingModelIdentityService } from './embedding-model-identity.service';
 import { ConfigService } from '@nestjs/config';
 import type { OnModuleDestroy } from '@nestjs/common';
-import type { EmbeddingStatus } from '@kalio/types';
+import type { EmbeddingSpace, EmbeddingStatus } from '@kalio/types';
+import { buildEmbeddingSpace, embeddingPromptVersions, GEMMA2_EMBEDDING_PROMPT_VERSION, isEmbeddingGemma2,
+  preparePinnedEmbeddingTexts, RAW_EMBEDDING_PROMPT_VERSION, validateEmbeddingVectors,
+  type EmbeddingPurpose } from './embedding-identity';
 import { EmbeddingCredentialsService, type LocalEmbeddingConfig } from './embedding-credentials.service';
 import type { EmbeddingProviderConfig, IEmbeddingProvider } from './embedding-provider.types';
 import {
@@ -44,8 +48,17 @@ function maskUrl(baseUrl: string): string {
   }
 }
 
-function isOllamaUrl(baseUrl: string): boolean {
-  return baseUrl.includes('localhost:11434') || baseUrl.toLowerCase().includes('ollama');
+export function isOllamaUrl(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname.toLowerCase();
+    const loopback = hostname === 'localhost' || hostname === '[::1]'
+      || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+    return hostname.includes('ollama') || loopback && url.port === '11434';
+  } catch {
+    return false;
+  }
 }
 
 function buildProvider(cfg: EmbeddingProviderConfig): IEmbeddingProvider {
@@ -100,17 +113,6 @@ export function buildDefaultLocalEmbeddingConfig(config: ConfigService): LocalEm
   };
 }
 
-function sanitizeProfilePart(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
-}
-
-function buildProfileId(provider: string, model: string, dimensions: number, backend?: string): string {
-  return [provider, model, String(dimensions), backend]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .map(sanitizeProfilePart)
-    .join('-');
-}
-
 // ── EmbeddingService ────────────────────────────────────────────────────────
 
 @Injectable()
@@ -126,10 +128,15 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
   private activeBackend: LocalEmbeddingBackend | null = null;
   private activeCacheDir: string | null = null;
   private activeProfileId = 'mock';
+  private profileEpoch = 0;
+  private activeModelRevision = 'unresolved';
+  private activeProviderScope = 'unresolved';
+  private identityRefresh: { epoch: number; promise: Promise<{ modelRevision: string; providerScope: string }> } | null = null;
 
   constructor(
     private readonly config: ConfigService,
     private readonly embeddingCredentials: EmbeddingCredentialsService,
+    @Optional() private readonly identities: EmbeddingModelIdentityService = new EmbeddingModelIdentityService(),
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -144,9 +151,14 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
    * Called on startup and after any credential CRUD to refresh the provider.
    */
   async reloadFromCredential(): Promise<void> {
+    const epoch = this.profileEpoch + 1;
     await this.disposeProvider();
+    if (epoch !== this.profileEpoch) throw new Error('EMBEDDING_SPACE_CHANGED');
 
     const active = await this.embeddingCredentials.getActiveConfig();
+    if (epoch !== this.profileEpoch) throw new Error('EMBEDDING_SPACE_CHANGED');
+    this.activeModelRevision = 'unresolved';
+    this.activeProviderScope = 'unresolved';
     if (active) {
       this.provider = buildProvider({
         apiKey: active.apiKey,
@@ -162,8 +174,8 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
       this.activeDimensions = active.dimensions;
       this.activeBackend = null;
       this.activeCacheDir = null;
-      this.activeProfileId = buildProfileId(isOllamaUrl(active.baseUrl) ? 'ollama' : 'openai-compatible', active.model, active.dimensions);
-      this.logger.log(`Embedding provider loaded from DB credential "${active.name}": ${active.model} @ ${active.baseUrl}`);
+      this.activeProfileId = this.buildActiveSpace(RAW_EMBEDDING_PROMPT_VERSION).id;
+      this.logger.log(`Embedding provider loaded from DB: ${active.model} @ ${maskUrl(active.baseUrl)}`);
       return;
     }
 
@@ -178,7 +190,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
       this.activeDimensions = this.provider.getDimensions();
       this.activeBackend = null;
       this.activeCacheDir = null;
-      this.activeProfileId = buildProfileId('mock', this.activeModel, this.activeDimensions);
+      this.activeProfileId = this.buildActiveSpace(RAW_EMBEDDING_PROMPT_VERSION).id;
       this.logger.log('Embedding provider initialized from explicit mock configuration');
       return;
     }
@@ -199,6 +211,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
     );
     const forceLocal = this.config.get<string>('EMBEDDING_FORCE_LOCAL', 'false') === 'true'
       || await this.embeddingCredentials.shouldForceLocal();
+    if (epoch !== this.profileEpoch) throw new Error('EMBEDDING_SPACE_CHANGED');
 
     if (!forceLocal && apiKey && baseUrl && apiKey !== 'mock' && baseUrl !== 'mock') {
       this.provider = buildProvider({ apiKey, baseUrl, model: remoteModel, dimensions: remoteDimensions });
@@ -210,8 +223,8 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
       this.activeDimensions = remoteDimensions;
       this.activeBackend = null;
       this.activeCacheDir = null;
-      this.activeProfileId = buildProfileId(isOllamaUrl(baseUrl) ? 'ollama' : 'openai-compatible', remoteModel, remoteDimensions);
-      this.logger.log(`Embedding provider initialized from env: ${remoteModel} @ ${baseUrl}`);
+      this.activeProfileId = this.buildActiveSpace(RAW_EMBEDDING_PROMPT_VERSION).id;
+      this.logger.log(`Embedding provider initialized from env: ${remoteModel} @ ${maskUrl(baseUrl)}`);
     } else if (!localConfig.enabled) {
       this.provider = null;
       this.providerSource = 'disabled';
@@ -222,7 +235,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
       this.activeDimensions = localConfig.dimensions;
       this.activeBackend = localConfig.backend;
       this.activeCacheDir = localConfig.cacheDir;
-      this.activeProfileId = buildProfileId('disabled', localConfig.model, localConfig.dimensions, localConfig.backend);
+      this.activeProfileId = this.buildActiveSpace(RAW_EMBEDDING_PROMPT_VERSION).id;
       this.logger.log('Embedding provider disabled by local config');
     } else {
       this.provider = buildLocalProvider(localConfig);
@@ -234,7 +247,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
       this.activeDimensions = localConfig.dimensions;
       this.activeBackend = localConfig.backend;
       this.activeCacheDir = localConfig.cacheDir;
-      this.activeProfileId = buildProfileId('local-transformers', localConfig.model, localConfig.dimensions, localConfig.backend);
+      this.activeProfileId = this.buildActiveSpace(RAW_EMBEDDING_PROMPT_VERSION).id;
       this.logger.log(`Embedding provider initialized locally: ${localConfig.model} (${localConfig.backend}) @ ${this.activeBaseUrl}`);
     }
   }
@@ -288,6 +301,8 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /** Legacy methods deliberately send raw text. Gemma2 task prefixes belong only
+   * to embedPinned's different space identity; migration must reindex vectors. */
   async embedOne(text: string): Promise<number[]> {
     if (!this.provider) {
       await this.reloadFromCredential();
@@ -322,6 +337,88 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
     return this.activeProfileId;
   }
 
+  captureSpace(): EmbeddingSpace {
+    if (!this.provider || this.providerSource === 'disabled') throw new Error('EMBEDDING_SPACE_UNAVAILABLE');
+    return this.buildActiveSpace(isEmbeddingGemma2(this.activeModel ?? '')
+      ? GEMMA2_EMBEDDING_PROMPT_VERSION : RAW_EMBEDDING_PROMPT_VERSION);
+  }
+
+  async ensureCurrentIdentity(): Promise<{ modelRevision: string; providerScope: string }> {
+    const epoch = this.profileEpoch;
+    if (this.identityRefresh?.epoch === epoch) return this.identityRefresh.promise;
+    const promise = this.refreshIdentity(epoch);
+    this.identityRefresh = { epoch, promise };
+    try { return await promise; } finally {
+      if (this.identityRefresh?.promise === promise) this.identityRefresh = null;
+    }
+  }
+
+  private async refreshIdentity(epoch: number): Promise<{ modelRevision: string; providerScope: string }> {
+    const identity = this.providerSource === 'local'
+      ? this.provider?.getModelIdentity?.() ?? { modelRevision: 'unresolved', providerScope: 'unresolved' }
+      : this.getStatus().provider === 'ollama' && this.provider
+      ? await this.identities.resolve(this.activeBaseUrl ?? '', this.activeModel ?? '',
+        this.activeCredentialId ? `credential:${this.activeCredentialId}` : `source:${this.providerSource}`)
+      : { modelRevision: 'unresolved', providerScope: 'unresolved' };
+    if (epoch !== this.profileEpoch) throw new Error('EMBEDDING_SPACE_CHANGED');
+    if (identity.modelRevision !== this.activeModelRevision || identity.providerScope !== this.activeProviderScope) {
+      ++this.profileEpoch;
+      this.activeModelRevision = identity.modelRevision;
+      this.activeProviderScope = identity.providerScope;
+      this.activeProfileId = this.buildActiveSpace(RAW_EMBEDDING_PROMPT_VERSION).id;
+    }
+    return identity;
+  }
+
+  async embedPinned(space: EmbeddingSpace, texts: string[], purpose: EmbeddingPurpose = 'document'): Promise<number[][]> {
+    const initial = this.captureSpace();
+    if (!space || Object.keys(initial).some(key => space[key as keyof EmbeddingSpace] !== initial[key as keyof EmbeddingSpace])) throw new Error('EMBEDDING_SPACE_CHANGED');
+    if (!texts.length) return [];
+    // Legacy ordinary memory can still use unresolved providers. Project resources
+    // enforce producer/inference trust separately before reaching this method.
+    const refreshIdentity = space.modelRevision !== 'unresolved' && space.providerScope !== 'unresolved';
+    if (refreshIdentity) await this.ensureCurrentIdentity();
+    const provider = this.provider;
+    const epoch = this.profileEpoch;
+    const expected = this.captureSpace();
+    const matches = () => !!space && Object.keys(expected).every(key =>
+      space[key as keyof EmbeddingSpace] === expected[key as keyof EmbeddingSpace]);
+    if (!provider || !matches()) throw new Error('EMBEDDING_SPACE_CHANGED');
+    const input = preparePinnedEmbeddingTexts(expected, texts, purpose);
+    const fits = refreshIdentity ? await provider.getInputSizer?.() : undefined;
+    if (fits && input.some(text => !fits(text))) throw new Error('EMBEDDING_INPUT_TOO_LONG');
+    if (epoch !== this.profileEpoch || provider !== this.provider || !matches()) throw new Error('EMBEDDING_SPACE_CHANGED');
+    const vectors = input.length ? await provider.embed(input) : [];
+    // Metadata checks do not prove digest-pinned inference (including hidden ABA).
+    if (refreshIdentity) await this.ensureCurrentIdentity();
+    if (epoch !== this.profileEpoch || provider !== this.provider || !matches()) throw new Error('EMBEDDING_SPACE_CHANGED');
+    validateEmbeddingVectors(vectors, input.length, expected.dimensions);
+    return vectors;
+  }
+
+  async getDocumentSizer(space: EmbeddingSpace): Promise<((text: string) => boolean) | undefined> {
+    const provider = this.provider; const epoch = this.profileEpoch;
+    const assertCurrent = () => {
+      if (!provider || provider !== this.provider || epoch !== this.profileEpoch
+        || this.captureSpace().id !== space.id) throw new Error('EMBEDDING_SPACE_CHANGED');
+    };
+    assertCurrent();
+    const fits = await provider?.getInputSizer?.();
+    assertCurrent();
+    if (!fits) return undefined;
+    return text => { assertCurrent(); return fits(preparePinnedEmbeddingTexts(space, [text], 'document')[0]!); };
+  }
+
+  private buildActiveSpace(promptVersion: string): EmbeddingSpace {
+    const provider = this.providerSource === 'local' ? 'local-transformers'
+      : this.providerSource === 'mock' || this.providerSource === 'disabled' ? this.providerSource
+      : isOllamaUrl(this.activeBaseUrl ?? '') ? 'ollama' : 'openai-compatible';
+    return buildEmbeddingSpace({ provider, providerScope: this.activeProviderScope,
+      model: this.activeModel ?? '', modelRevision: this.activeModelRevision,
+      dimensions: this.activeDimensions ?? 0, backend: this.activeBackend ?? '',
+      baseUrl: this.activeBaseUrl ?? '', promptVersion, ...embeddingPromptVersions(promptVersion) });
+  }
+
   private getProvider(): IEmbeddingProvider {
     if (!this.provider) {
       this.logger.warn('getProvider() called before onModuleInit — returning mock');
@@ -331,6 +428,7 @@ export class EmbeddingService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async disposeProvider(): Promise<void> {
+    ++this.profileEpoch;
     const current = this.provider;
     this.provider = null;
     await current?.dispose?.();

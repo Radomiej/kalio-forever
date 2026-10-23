@@ -18,6 +18,8 @@ import type {
 } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
 import { normalizeArchitectureSchemas } from './architect.schema';
+import { validateArchitectAutoRouting } from './architect.auto-routing';
+import { toSchemaNodes } from './ArchitectPage.graph';
 import { notifyArchitectureRegistryChanged } from './architectureRegistryEvents';
 import { resumeAgentFlowRun as resumeAgentFlowRunApi } from '../agent-flow/agentFlow.api';
 
@@ -47,6 +49,10 @@ export async function saveArchitectureVariant(
   schemaId: string,
   dto: CreateArchitectureSchemaVariantDto,
 ): Promise<ArchitectSchema> {
+  if (dto.nodes && dto.edges) validateArchitectAutoRouting({
+    nodes: dto.nodes.map((node) => ({ ...node, kind: dto.nodeKindOverrides?.[node.id] ?? node.kind })),
+    edges: dto.edges,
+  });
   const { data } = await apiClient.post<unknown>(`/api/architecture-registry/schemas/${schemaId}/variants`, dto);
   if (!data) {
     throw new Error('Architecture variant response was empty');
@@ -69,6 +75,7 @@ export async function startArchitectureRun(
   schema?: ArchitectSchema,
   context?: Record<string, unknown>,
   onUpdate?: (result: ArchitectRunResult) => void,
+  executionProfileId?: string,
 ): Promise<ArchitectRunResult> {
   const dto: CreateArchitectureRunDto = {
     schemaId,
@@ -76,21 +83,13 @@ export async function startArchitectureRun(
     slotOverrides: personaOverrides,
     executionMode,
     context,
+    ...(executionProfileId ? { executionProfileId } : {}),
   };
   if (schema) {
+    validateArchitectAutoRouting(schema);
     dto.schema = {
       ...schema,
-      nodes: schema.nodes.map((node) => ({
-        id: node.id,
-        label: node.label,
-        kind: node.kind,
-        roleSlotId: node.roleSlotId,
-        maxToolAttempts: node.maxToolAttempts,
-        toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
-        behavior: node.behavior ? { ...node.behavior } : undefined,
-        x: node.x,
-        y: node.y,
-      })),
+      nodes: toSchemaNodes(schema),
       edges: schema.edges.map((edge) => ({ ...edge })),
     };
   }
@@ -200,6 +199,17 @@ function architectureStatusFromAgentFlow(status: AgentFlowRunSnapshot['run']['st
   return 'running';
 }
 
+function isAgentFlowAwaitingHumanInput(snapshot: AgentFlowRunSnapshot): boolean {
+  let awaitingHumanInput = false;
+  for (const event of snapshot.events ?? []) {
+    if (event.type === 'flow:resume_input') awaitingHumanInput = false;
+    if (event.status === 'waiting_on_orchestrator' && event.reasonCode === 'runtime_pause') {
+      awaitingHumanInput = true;
+    }
+  }
+  return awaitingHumanInput;
+}
+
 export async function startGoalGuardAgentFlowRun(
   prompt: string,
   context?: Record<string, unknown>,
@@ -261,6 +271,7 @@ export async function getGoalGuardAgentFlowRunResult(
     run,
     agentFlowRunId: snapshot.run.id,
     agentFlowStatus: snapshot.run.status,
+    agentFlowAwaitingHumanInput: isAgentFlowAwaitingHumanInput(snapshot),
     agentFlowSummary: snapshot.result?.summary,
   };
 }

@@ -44,6 +44,25 @@ const GUI_TOOL_RESULT = JSON.stringify({
 });
 
 const NON_RAAPP_RESULT = JSON.stringify({ status: 'ok', items: [] });
+
+describe('full tool argument review', () => {
+  const content = 'x'.repeat(150) + '\nEND_OF_FILE_REVIEW';
+
+  it.each(['running', 'awaiting_confirmation'] as const)('retains the full payload when %s is expanded', (status) => {
+    render(<LiveToolCallBubble activity={makeActivity({ toolName: 'fs_write', status, args: { content } })} />);
+    if (status === 'running') {
+      expect(screen.queryByText(/END_OF_FILE_REVIEW/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle details' }));
+    }
+    expect(screen.getByText(/END_OF_FILE_REVIEW/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Full tool arguments' })).toHaveAttribute('tabindex', '0');
+  });
+
+  it('retains the full payload in expanded history', () => {
+    render(<HistoryToolCallBubble toolName="fs_write" content={NON_RAAPP_RESULT} args={{ content }} defaultOpenOverride />);
+    expect(screen.getByText(/END_OF_FILE_REVIEW/)).toBeInTheDocument();
+  });
+});
 const realSessionActions = {
   setActiveSession: useSessionStore.getState().setActiveSession,
   setPendingMessage: useSessionStore.getState().setPendingMessage,
@@ -442,6 +461,40 @@ describe('HistoryToolCallBubble - CLI terminal output', () => {
 });
 
 describe('HistoryToolCallBubble - persisted tool status', () => {
+  it('labels the Kalio execution boundary in stored calls', () => {
+    render(<HistoryToolCallBubble toolName="fs_read" content={NON_RAAPP_RESULT} />);
+    expect(screen.getByTestId('tool-execution-origin')).toHaveTextContent('Kalio');
+  });
+
+  it.each(['running', 'awaiting_confirmation'] as const)('labels the Kalio boundary when %s', (status) => {
+    render(<LiveToolCallBubble activity={makeActivity({ status })} />);
+    expect(screen.getByTestId('tool-execution-origin')).toHaveTextContent('Kalio');
+  });
+
+  it('keeps ordinary tool details accessible after a later user message', () => {
+    render(<HistoryToolCallBubble toolName="fs_read" isAnswered content={JSON.stringify({ text: 'saved file' })} />);
+    expect(screen.queryByText(/answered/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle details' }));
+    expect(screen.getByText(/saved file/)).toBeVisible();
+  });
+
+  it('renders cancellation reasons neutrally in history', () => {
+    render(<HistoryToolCallBubble toolName="terminal_spawn" content={JSON.stringify({ status: 'cancelled', errorMessage: 'Approval declined' })} />);
+    expect(screen.getByText('cancelled')).toBeVisible();
+    expect(screen.getAllByText('Approval declined')[0]).not.toHaveClass('text-error');
+  });
+
+  it('renders cancellation reasons neutrally while live', () => {
+    render(<LiveToolCallBubble activity={makeActivity({ toolName: 'terminal_spawn', status: 'cancelled', result: { callId: 'call-1', status: 'cancelled', errorMessage: 'Approval declined' } })} />);
+    expect(screen.getByText('Approval declined')).not.toHaveClass('text-error');
+  });
+
+  it.each(['', '   '])('does not report success when a restored tool call has no result', (content) => {
+    const { container } = render(<HistoryToolCallBubble toolName="fs_write" content={content} />);
+    expect(screen.getByText('unconfirmed')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-circle-check')).toBeNull();
+  });
+
   it('renders failed status for persisted error results after reload', () => {
     render(
       <HistoryToolCallBubble

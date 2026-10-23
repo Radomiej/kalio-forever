@@ -21,6 +21,12 @@ function renderToolbar(overrides: Partial<ComponentProps<typeof ArchitectGraphTo
 }
 
 describe('ArchitectGraphToolbar', () => {
+  it('exposes auto-router creation through the existing palette', () => {
+    const props = renderToolbar();
+    fireEvent.click(screen.getByRole('button', { name: 'More graph controls' }));
+    fireEvent.click(screen.getByTestId('architect-mode-add-auto_router'));
+    expect(props.onModeChange).toHaveBeenCalledWith('add', 'auto_router');
+  });
   it('gives icon-only editing modes accessible names', () => {
     const props = renderToolbar();
 

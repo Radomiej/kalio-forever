@@ -6,6 +6,7 @@ export const LOCAL_MODELS = [
   { model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, params: '118M' },
   { model: 'Xenova/multilingual-e5-base', dimensions: 768, params: '278M' },
   { model: 'Xenova/distiluse-base-multilingual-cased-v2', dimensions: 512, params: '135M' },
+  { model: 'onnx-community/embeddinggemma-2-ONNX', dimensions: 768, params: '270M · 175 MB q4 text model' },
 ] as const;
 
 export const LOCAL_BACKEND_LABELS = {

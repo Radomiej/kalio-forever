@@ -1,8 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { registerKalioBridgeProxy } from './kalio-mcp-bridge-proxy';
 
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:3016/api/mcp/bridge';
 
@@ -19,14 +19,7 @@ async function main(): Promise<void> {
     { name: 'kalio-devin-stdio-proxy', version: '1.0.0' },
     { capabilities: { tools: { listChanged: false } }, instructions: 'Kalio tools remain scoped and authorized by the Kalio bridge.' },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const result = await remote.listTools();
-    return { tools: result.tools as Tool[] };
-  });
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const result = await remote.callTool(request.params);
-    return result as CallToolResult;
-  });
+  registerKalioBridgeProxy(remote, server);
 
   const stdio = new StdioServerTransport();
   await server.connect(stdio);

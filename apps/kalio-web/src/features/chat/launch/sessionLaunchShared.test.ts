@@ -2,16 +2,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
 import type { ArchitectRunResult, ArchitectSchema } from '../../architect/architect.types';
-import { launchWorkflowPrompt } from './sessionLaunchShared';
+import { createAndActivateHostSession, launchWorkflowPrompt } from './sessionLaunchShared';
 
 const getSessionVfsFilesMock = vi.hoisted(() => vi.fn());
 const apiPatchMock = vi.hoisted(() => vi.fn());
+const apiPostMock = vi.hoisted(() => vi.fn());
 const startArchitectureRunMock = vi.hoisted(() => vi.fn());
 const startGoalGuardAgentFlowRunMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../services/apiClient', () => ({
   apiClient: {
     patch: apiPatchMock,
+    post: apiPostMock,
   },
   getSessionVfsFiles: getSessionVfsFilesMock,
 }));
@@ -20,6 +22,34 @@ vi.mock('../../architect/architect.api', () => ({
   startArchitectureRun: startArchitectureRunMock,
   startGoalGuardAgentFlowRun: startGoalGuardAgentFlowRunMock,
 }));
+
+describe('createAndActivateHostSession', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('includes an explicit profile in the persisted create request before activation', async () => {
+    const session = { id: 'host', executionProfileId: 'chosen' } as ChatSession;
+    const deps = { addSession: vi.fn(), setActiveSession: vi.fn(), setMessages: vi.fn(), setAgentTurns: vi.fn() };
+    apiPostMock.mockImplementationOnce(async () => {
+      expect(deps.setActiveSession).not.toHaveBeenCalled();
+      return { data: session };
+    });
+    expect(await createAndActivateHostSession({ personaId: 'ra-apps', executionProfileId: 'chosen', ...deps })).toBe(session);
+    expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', { personaId: 'ra-apps', title: 'New Chat', executionProfileId: 'chosen' });
+    expect(deps.addSession).toHaveBeenCalledWith(session);
+    expect(deps.setActiveSession).toHaveBeenCalledWith(session.id);
+    expect(deps.setMessages).toHaveBeenCalledWith([], session.id);
+    expect(deps.setAgentTurns).toHaveBeenCalledWith([], session.id);
+  });
+
+  it('omits an unspecified profile and propagates failed creation without activation', async () => {
+    apiPostMock.mockRejectedValueOnce(new Error('Unavailable'));
+    const deps = { addSession: vi.fn(), setActiveSession: vi.fn(), setMessages: vi.fn(), setAgentTurns: vi.fn() };
+    await expect(createAndActivateHostSession({ personaId: 'ra-apps', ...deps })).rejects.toThrow('Unavailable');
+    expect(apiPostMock).toHaveBeenCalledWith('/api/sessions', { personaId: 'ra-apps', title: 'New Chat' });
+    expect(deps.addSession).not.toHaveBeenCalled();
+    expect(deps.setActiveSession).not.toHaveBeenCalled();
+  });
+});
 
 function makeSchema(): ArchitectSchema {
   return {

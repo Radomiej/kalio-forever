@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecutionProfile } from '@kalio/types';
-import { nativeModelOptions, nativeReasoningOptions } from './persona-runtime-selection';
+import { nativeModelOptions, nativeReasoningOptions, RUNTIME_KIND_LABELS } from './persona-runtime-selection';
 
 function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
   return {
@@ -18,6 +18,10 @@ function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
 }
 
 describe('persona runtime selection', () => {
+  it('lists Devin CLI and Codex before the other runtime choices', () => {
+    expect(Object.keys(RUNTIME_KIND_LABELS).slice(0, 2)).toEqual(['devin-cli-acp', 'codex-app-server']);
+  });
+
   it('deduplicates native models and prefers the strict profile', () => {
     const options = nativeModelOptions([
       profile({ id: 'codex-guard', name: 'Codex Guard' }),

@@ -3,11 +3,10 @@ import { io, Socket } from 'socket.io-client';
 import {
   API_BASE,
   deleteSessionIfExists,
-  getActiveCredentialId,
-  restoreActiveCredential,
   selectSession,
   sendMessageFromComposer,
 } from './helpers/test-config';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 
 const WS_BASE = API_BASE.replace('/api', '');
 const MOCK_TRIGGER = '[[mock:tool:raapp_create:no-arg-progress]]';
@@ -37,15 +36,13 @@ async function waitFor<T>(producer: () => T | undefined, timeoutMs: number, labe
   throw new Error(`Timeout waiting for ${label}`);
 }
 
-async function runMockFallbackFlow(page: Page, request: APIRequestContext): Promise<{
+async function runMockFallbackFlow(page: Page, request: APIRequestContext, screenshotPath: string): Promise<{
   confirmations: Array<TimedEvent<{ toolName: string }>>;
   progressEvents: Array<TimedEvent<{ toolName: string; totalChars: number; charsPerSec: number }>>;
   chatErrors: Array<TimedEvent<unknown>>;
   seenIndicatorText: string;
 }> {
-  const previousActiveCredentialId = await getActiveCredentialId(request);
   const sessionTitle = uniqueName('Mock Tool Intent');
-  let createdCredentialId: string | null = null;
   let sessionId: string | null = null;
   let socket: Socket | null = null;
 
@@ -54,34 +51,7 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
   const chatErrors: Array<TimedEvent<unknown>> = [];
 
   try {
-    const createCredential = await request.post(`${API_BASE}/credentials`, {
-      data: {
-        name: uniqueName('Mock fallback'),
-        provider: 'mock',
-        apiKey: 'mock',
-        model: 'mock',
-        baseUrl: 'mock',
-      },
-    });
-    expect(createCredential.ok()).toBeTruthy();
-    const createdCredential = await createCredential.json() as { id: string };
-    createdCredentialId = createdCredential.id;
-
-    const activateCredential = await request.put(`${API_BASE}/credentials/active/${createdCredentialId}`);
-    expect(activateCredential.ok()).toBeTruthy();
-
-    const llmConfigResponse = await request.get(`${API_BASE}/llm/config`);
-    expect(llmConfigResponse.ok()).toBeTruthy();
-    const llmConfig = await llmConfigResponse.json() as { provider?: string; model?: string; source?: string };
-    expect(llmConfig.provider).toBe('mock');
-    expect(llmConfig.model).toBe('mock');
-    expect(llmConfig.source).toBe('env');
-
-    const createSession = await request.post(`${API_BASE}/sessions`, {
-      data: { title: sessionTitle, personaId: 'designer' },
-    });
-    expect(createSession.ok()).toBeTruthy();
-    const session = await createSession.json() as { id: string };
+    const session = await createExistingMockConversation(request, sessionTitle, 'designer');
     sessionId = session.id;
 
     socket = connectSocket(sessionId);
@@ -97,7 +67,7 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
     await selectSession(page, sessionId, sessionTitle);
     await sendMessageFromComposer(page, `${MOCK_TRIGGER} Użyj dokładnie narzędzia raapp_create i niczego więcej.`);
 
-    const agentBubble = page.getByTestId('agent-turn-bubble').first();
+    const agentBubble = page.getByTestId('agent-turn-bubble').filter({ has: page.getByTestId('confirmation-confirm-btn') });
     await expect(agentBubble).toBeVisible({ timeout: 10_000 });
 
     const progressIndicator = agentBubble.getByTestId('tool-arg-progress-indicator');
@@ -108,6 +78,8 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
       10_000,
       'mock confirmation_required event',
     );
+    // Capture the reviewed wait state before cleanup removes the pending turn.
+    await page.screenshot({ path: screenshotPath, fullPage: true });
 
     return {
       confirmations,
@@ -118,25 +90,20 @@ async function runMockFallbackFlow(page: Page, request: APIRequestContext): Prom
   } finally {
     socket?.disconnect();
     if (sessionId) {
-      await deleteSessionIfExists(request, sessionId).catch(() => undefined);
-    }
-    await restoreActiveCredential(request, previousActiveCredentialId).catch(() => undefined);
-    if (createdCredentialId) {
-      await request.delete(`${API_BASE}/credentials/${createdCredentialId}`).catch(() => undefined);
+      await deleteSessionIfExists(request, sessionId);
     }
   }
 }
 
 test.describe('Mock tool intent fallback', () => {
   test('shows synthetic Preparing raapp_create without tool:arg_progress chunks', async ({ page, request }, testInfo) => {
-    const { confirmations, progressEvents, chatErrors, seenIndicatorText } = await runMockFallbackFlow(page, request);
+    const screenshotPath = testInfo.outputPath('tool-intent-progress-proof.png');
+    const { confirmations, progressEvents, chatErrors, seenIndicatorText } = await runMockFallbackFlow(page, request, screenshotPath);
 
     expect(chatErrors).toEqual([]);
     expect(confirmations.some((event) => event.data.toolName === 'raapp_create')).toBe(true);
     expect(progressEvents.some((event) => event.data.toolName === 'raapp_create')).toBe(false);
     expect(seenIndicatorText).toMatch(/Preparing\s+raapp_create/i);
 
-    const screenshotPath = testInfo.outputPath('tool-intent-progress-proof.png');
-    await page.screenshot({ path: screenshotPath, fullPage: true });
   });
 });

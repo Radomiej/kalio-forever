@@ -1,5 +1,6 @@
 import type {
   AgentRunContext,
+  HostRuntimeReceiptObserver,
   ArchitectureSlotToolPolicy,
   LLMStructuredOutputRequest,
   SocketEvents,
@@ -39,6 +40,8 @@ export interface RunSubagentRequest {
   emit?: SubagentEmit;
   parentAgentRun?: AgentRunContext;
   structuredOutput?: LLMStructuredOutputRequest;
+  /** In-memory host capability; never derive from model/context/tool args. */
+  hostRuntimeReceiptObserver?: HostRuntimeReceiptObserver;
 }
 
 export interface RunSubagentResult {

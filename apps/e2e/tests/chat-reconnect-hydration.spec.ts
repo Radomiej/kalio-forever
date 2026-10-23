@@ -93,6 +93,9 @@ test.describe('chat reconnect hydration on built QA', () => {
         .toBe(0);
 
       await expect(confirmButton).toHaveCount(0, { timeout: 20_000 });
+      await expect(page.getByTestId('chat-recovery-notice')).toContainText(
+        /Connection restored\.|Recovered missed stream events after reconnect\./,
+      );
       await expect(page.getByTestId('message-list')).toBeVisible();
       await expect(page.getByText('I need confirmation before running image generation.')).toBeVisible();
     } finally {

@@ -36,23 +36,15 @@ import { useSessionStore } from './store/sessionStore';
 import { useAgentStore } from './store/agentStore';
 import { backendHealth } from './services/backendHealth';
 import { apiClient } from './services/apiClient';
-import { eventBus } from './services/eventBus';
-import { loadConversationSessions, loadRuntimeWatchlist } from './services/sessionBootstrap';
-import {
-  identifyWatchedSession,
-  replaceBaselineWatchedSessions,
-  resetSessionWatchConnectionEpoch,
-} from './services/sessionWatchRegistry';
+import { useAppSessionBootstrap } from './App.sessionBootstrap';
 import { useSettingsStore } from './features/settings/settingsStore';
 import { activateConversationSession } from './features/chat/activeConversationSession';
-import { preloadRuntimeWatchSessionHistory } from './features/chat/runtimeWatchHistoryBootstrap';
 import { selectRuntimeAttentionItems } from './store/agentRuntimeSelectors';
 import {
   RUNTIME_ATTENTION_REVIEWED_EVENT,
   readReviewedRuntimeAttentionKeys,
   selectRuntimeAttentionNotice,
 } from './store/agentRuntimeAttentionNotice';
-import { mergeSessionsPreservingLocal } from './features/sessions/mergeSessionsPreservingLocal';
 
 export function App() {
   const initialViewState = loadAppViewState();
@@ -64,14 +56,23 @@ export function App() {
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(initialViewState.selectedSkillId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
+  const settingsOpenerRef = useRef<HTMLElement | null>(null);
   const [lastTalkActiveAt, setLastTalkActiveAt] = useState<number | null>(() => loadLastTalkActiveAt());
   const [talkSidebarCollapsed, setTalkSidebarCollapsed] = useState(false);
   const [runtimeAttentionNowMs, setRuntimeAttentionNowMs] = useState(() => Date.now());
   const [reviewedRuntimeAttentionKeys, setReviewedRuntimeAttentionKeys] = useState(readReviewedRuntimeAttentionKeys);
 
-  const openSettings = (tab?: string) => { setSettingsInitialTab(tab); setSettingsOpen(true); };
+  const openSettings = (tab?: string, opener?: HTMLElement) => {
+    settingsOpenerRef.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setSettingsInitialTab(tab); setSettingsOpen(true);
+  };
+  useEffect(() => {
+    if (settingsOpen) return;
+    if (settingsOpenerRef.current?.isConnected) settingsOpenerRef.current.focus();
+    settingsOpenerRef.current = null;
+  }, [settingsOpen]);
   const setBackendConfig = useSettingsStore((s) => s.setBackendConfig);
-  const { sessions, activeSessionId, sessionMessages, setActiveSession, setSessions } = useSessionStore();
+  const { sessions, sessionMessages, setActiveSession } = useSessionStore();
   const recentTalkCount = recentTalkBadgeCount(sessions, lastTalkActiveAt);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const pendingBudgetApprovals = useAgentStore((s) => s.pendingBudgetApprovals);
@@ -100,7 +101,21 @@ export function App() {
       : `${talkAttentionCount} attention item${talkAttentionCount === 1 ? '' : 's'} waiting`;
   const hasTalkAttention = talkAttentionCount > 0;
   const setCanvasOpen = useAgentStore((s) => s.setCanvasOpen);
-  const bootstrapFetchSeqRef = useRef(0);
+  useAppSessionBootstrap({ isTalkActive: activeSection === 'talk' });
+
+  useEffect(() => {
+    let wasCompact = window.innerWidth < 1024;
+    const handleResize = () => {
+      const isCompact = window.innerWidth < 1024;
+      // Keep the visible Talk surface when desktop panes become sequential.
+      if (!wasCompact && isCompact && activeSection === 'talk') {
+        setTalkSidebarCollapsed(true);
+      }
+      wasCompact = isCompact;
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [activeSection]);
 
   useEffect(() => {
     const handleReviewedRuntimeAttention = () => {
@@ -139,64 +154,6 @@ export function App() {
         console.warn('[App] Failed to load backend LLM config', err);
       });
   }, [setBackendConfig]);
-
-  useEffect(() => {
-    const requestSeq = bootstrapFetchSeqRef.current + 1;
-    bootstrapFetchSeqRef.current = requestSeq;
-    const shouldFetchSessions = useSessionStore.getState().sessions.length === 0;
-
-    void Promise.all([
-      shouldFetchSessions ? loadConversationSessions() : Promise.resolve(useSessionStore.getState().sessions),
-      loadRuntimeWatchlist(),
-    ])
-      .then(([sessionsFromApi, runtimeWatchTargets]) => {
-        if (bootstrapFetchSeqRef.current !== requestSeq) {
-          return;
-        }
-        const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
-        if (shouldFetchSessions) {
-          setSessions(mergedSessions);
-        }
-        replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'bootstrap-watchlist');
-        void preloadRuntimeWatchSessionHistory({
-          sessions: mergedSessions,
-          runtimeWatchTargets,
-        });
-        identifyWatchedSession(useSessionStore.getState().activeSessionId, 'bootstrap-active-session', { sticky: true });
-      })
-      .catch((err: unknown) => {
-        console.warn('[App] Failed to load bootstrap runtime state', err);
-      });
-  }, [setSessions]);
-
-  useEffect(() => {
-    identifyWatchedSession(activeSessionId, 'active-session', { sticky: true });
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    const offReconnect = eventBus.onReconnect(() => {
-      resetSessionWatchConnectionEpoch('socket-reconnect');
-      void Promise.all([
-        loadConversationSessions({ force: true }),
-        loadRuntimeWatchlist({ force: true }),
-      ])
-        .then(([sessionsFromApi, runtimeWatchTargets]) => {
-          const mergedSessions = mergeSessionsPreservingLocal(useSessionStore.getState().sessions, sessionsFromApi);
-          setSessions(mergedSessions);
-          replaceBaselineWatchedSessions(runtimeWatchTargets.map((target) => target.sessionId), 'reconnect-watchlist');
-          void preloadRuntimeWatchSessionHistory({
-            sessions: mergedSessions,
-            runtimeWatchTargets,
-            force: true,
-          });
-          identifyWatchedSession(useSessionStore.getState().activeSessionId, 'reconnect-active-session', { sticky: true });
-        })
-        .catch((err: unknown) => {
-          console.warn('[App] Failed to refresh sessions after reconnect', err);
-        });
-    });
-    return offReconnect;
-  }, [setSessions]);
 
   // Close canvas when navigating away from talk
   useEffect(() => {
@@ -248,6 +205,7 @@ export function App() {
     });
     setTalkTab('conversations');
     if (forceChat) setTalkView('conversation');
+    if (window.innerWidth < 1024) setTalkSidebarCollapsed(true);
     setActiveSection('talk');
   };
   return (
@@ -264,24 +222,24 @@ export function App() {
         talkAttentionTitle={talkAttentionTitle}
         recentTalkCount={recentTalkCount}
         onGoHome={goHome}
-        onOpenSettings={() => openSettings()}
+        onOpenSettings={(opener) => openSettings(undefined, opener)}
         onSelectSection={setActiveSection}
       />
       <main className="flex-1 overflow-hidden min-w-0" data-testid="main-chat">
         {activeSection === 'landing' && (
-          <LandingPage onNavigateToChat={openConversationFromLanding} onOpenSessionInChat={openSessionInConversation} />
+          <LandingPage onNavigateToChat={openConversationFromLanding} onOpenSessionInChat={(sessionId) => openSessionInConversation(sessionId, true)} />
         )}
 
         {/* talk section: always mounted so ChatInterface never loses socket listeners
             or in-flight streaming state when the user navigates to the landing page */}
-        <div className={`flex h-full flex-col md:flex-row ${activeSection !== 'talk' ? 'hidden' : ''}`}>
+        <div className={`flex h-full flex-col lg:flex-row ${activeSection !== 'talk' ? 'hidden' : ''}`}>
             {/* Left sidebar: session list */}
             {talkSidebarCollapsed ? (
               <div
-                className="h-12 w-full shrink-0 border-b border-base-300 bg-base-100 md:h-full md:w-12 md:border-b-0 md:border-r"
+                className="h-12 w-full shrink-0 border-b border-base-300 bg-base-100 lg:h-full lg:w-12 lg:border-b-0 lg:border-r"
                 data-testid="talk-sidebar-collapsed"
               >
-                <div className="flex h-full items-center justify-between gap-2 px-2 md:flex-col md:justify-start md:py-2">
+                <div className="flex h-full items-center justify-between gap-2 px-2 lg:flex-col lg:justify-start lg:py-2">
                   <button
                     type="button"
                     className="btn btn-ghost btn-xs h-8 min-h-0 w-8 rounded-md p-0 text-base-content/60 hover:text-base-content"
@@ -295,7 +253,7 @@ export function App() {
                 </div>
               </div>
             ) : (
-            <div className="h-64 w-full shrink-0 flex flex-col border-b border-base-300 overflow-hidden md:h-full md:w-80 md:border-b-0 md:border-r">
+            <div className="h-full w-full shrink-0 flex flex-col border-b border-base-300 overflow-hidden lg:w-80 lg:border-b-0 lg:border-r">
               <div className="flex h-9 items-center gap-1 border-b border-base-300 px-2 shrink-0" data-testid="talk-sidebar-mode-switcher">
                 {[
                   { id: 'conversations' as const, label: 'Conversations', icon: <MessageSquare size={14} /> },
@@ -343,7 +301,9 @@ export function App() {
               <div className="flex-1 overflow-hidden">
                 {talkTab === 'conversations' && (
                   <ConversationPanel
-                    onSelect={() => undefined}
+                    onSelect={() => {
+                      if (window.innerWidth < 1024) setTalkSidebarCollapsed(true);
+                    }}
                   />
                 )}
                 {talkTab === 'agents' && (
@@ -355,7 +315,7 @@ export function App() {
               </div>
             </div>
             )}
-            <div className="flex-1 min-w-0 flex overflow-hidden">
+            <div className={`flex-1 min-w-0 overflow-hidden ${talkSidebarCollapsed ? 'flex' : 'hidden lg:flex'}`}>
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-hidden min-h-0">
                   <div className={talkView === 'conversation' ? 'h-full' : 'hidden'}>

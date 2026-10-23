@@ -15,11 +15,28 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
-    exclude: [...configDefaults.exclude, 'dist/**', 'coverage/**', 'storybook-static/**', 'test-results/**'],
+    maxWorkers: 4,
+    exclude: [
+      ...configDefaults.exclude,
+      'decision-auth.proxy.test.mjs', // Executed by the root Node test gate, not jsdom.
+      'dist/**',
+      'coverage/**',
+      'storybook-static/**',
+      'test-results/**',
+      '.stryker-tmp/**',
+      'reports/**',
+    ],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.spec.{ts,tsx}', 'src/**/*.test.{ts,tsx}', 'src/main.tsx', 'src/test-setup.ts'],
+      exclude: [
+        'src/**/*.spec.{ts,tsx}',
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.stories.{ts,tsx}',
+        'src/main.tsx',
+        'src/test-setup.ts',
+        'src/test/**',
+      ],
       thresholds: {
         lines: 38,
         functions: 30,

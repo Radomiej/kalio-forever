@@ -92,7 +92,7 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
       ...this.buildThinkingParams(),
     });
 
-    const response = await this.fetchStreamingResponse(body, abortSignal);
+    const response = await this.fetchStreamingResponse(body, abortSignal, options.requestTimeoutMs);
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => '');
@@ -184,6 +184,9 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
           }
         }
       }
+    } catch (err) {
+      if (abortSignal?.aborted) throw err;
+      throw this.normalizeThrownError(err);
     } finally {
       reader.releaseLock();
     }
@@ -276,11 +279,15 @@ export class BaseOpenAICompatibleProvider implements ILLMProvider {
     );
   }
 
-  private async fetchStreamingResponse(body: string, abortSignal?: AbortSignal): Promise<Response> {
+  private async fetchStreamingResponse(
+    body: string,
+    abortSignal?: AbortSignal,
+    requestTimeoutMs = PROVIDER_TIMEOUT_MS,
+  ): Promise<Response> {
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt++) {
-      const timeoutSignal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+      const timeoutSignal = AbortSignal.timeout(requestTimeoutMs);
       const signal = abortSignal
         ? AbortSignal.any([abortSignal, timeoutSignal])
         : timeoutSignal;

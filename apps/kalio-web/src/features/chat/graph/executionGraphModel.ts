@@ -1,5 +1,6 @@
 import type { ChatMessage, RuntimeChildExecution } from '@kalio/types';
 import type { AgentTurn } from '../../../store/sessionStore';
+import { aggregateGraphStatus } from './executionGraphStatus';
 import { renderArchitectureRunProjection } from './executionGraphArchitectureRun';
 import { findWorkflowEnvelopeArchitectureMessage } from './executionGraphWorkflowEnvelope';
 import { resolveWorkflowTurnProjection } from '../workflowTurnProjection';
@@ -411,7 +412,7 @@ export function buildExecutionGraphModel({
         const flowStatus: ExecutionGraphNodeStatus = runtimeAgentFlowExecution
           ? statusFromRuntimeChildExecution(runtimeAgentFlowExecution.status)
           : subAgentFlowResult.status === 'failed' || subAgentFlowResult.status === 'blocked' || subAgentFlowResult.status === 'cancelled'
-            ? 'error'
+            ? subAgentFlowResult.status === 'cancelled' ? 'cancelled' : 'error'
             : subAgentFlowResult.status === 'waiting_on_orchestrator'
               ? 'waiting'
               : subAgentFlowResult.status === 'done'
@@ -661,15 +662,7 @@ export function buildExecutionGraphModel({
         };
       });
 
-      const groupStatus: ExecutionGraphNodeStatus = groupedTools.some((tool) => tool.status === 'error')
-        ? 'error'
-        : groupedTools.some((tool) => tool.status === 'waiting')
-          ? 'waiting'
-        : groupedTools.some((tool) => tool.status === 'running')
-          ? 'running'
-          : groupedTools.some((tool) => tool.status === 'success')
-            ? 'success'
-            : 'idle';
+      const groupStatus = aggregateGraphStatus(groupedTools.map((tool) => tool.status));
 
       const groupNode = addNode({
         id: `tool-group:${turn.id}`,

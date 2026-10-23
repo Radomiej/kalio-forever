@@ -66,12 +66,12 @@ export function ChatSessionHeader({
   const runtimeLabel = [activeProvider, activeModel].filter(Boolean).join(' · ');
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-base-300 shrink-0">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div data-testid="chat-session-header" className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-2 sm:px-4 border-b border-base-300 shrink-0">
+      <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
         <span className="min-w-0 truncate text-sm font-medium" data-testid="chat-session-title">{activeSession.title}</span>
         {architectureLabel && (
           <span
-            className="shrink-0 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-200"
+            className="max-w-full min-w-0 truncate rounded border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-200"
             data-testid="chat-session-architecture-label"
           >
             {architectureLabel}
@@ -111,7 +111,7 @@ export function ChatSessionHeader({
       </div>
       {runtimeLabel && (
         <span
-          className="max-w-[14rem] shrink-0 truncate rounded-md border border-base-300/70 bg-base-200/50 px-2 py-1 text-[10px] font-medium text-base-content/65"
+          className="w-full min-w-0 truncate rounded-md border border-base-300/70 bg-base-200/50 px-2 py-1 text-[10px] font-medium text-base-content/65 sm:w-auto sm:max-w-[14rem]"
           title={runtimeLabel}
           data-testid="chat-runtime-label"
         >

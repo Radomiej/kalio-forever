@@ -8,10 +8,13 @@ import yaml from 'js-yaml';
 import type { RAAppBlock, RAAppResult } from '@kalio/types';
 import { compileGui } from './gui/guiDslExpand';
 import { GuiParseError } from './gui/guiDslParser';
+import { validateInteractiveQA } from './qa-interactive-validation';
 import {
   type LoadedRAApp,
   getRenderableScore,
   isDirectoryOrigin,
+  isUnchangedLegacyShippedQA,
+  keepPackagedQAPatch,
 } from './raapp.service.helpers';
 import {
   inspectRAAppZip,
@@ -76,6 +79,11 @@ export class RAAppService implements OnApplicationBootstrap {
     if (!existing) {
       this.loaded.set(app.id, app);
       return app;
+    }
+
+    if (keepPackagedQAPatch(existing, app, this.packagedCoreDir)) {
+      this.logger.log(`[RAAppService] Using packaged qa-interactive 1.1.1 over unchanged legacy core ${app.zipPath}; files preserved`);
+      return existing;
     }
 
     const existingScore = getRenderableScore(existing);
@@ -224,6 +232,11 @@ export class RAAppService implements OnApplicationBootstrap {
       createdAt,
       updatedAt: stats.mtimeMs,
     };
+    if (source === 'core' && meta.id === 'qa-interactive' && meta.version === '1.1.0') {
+      const entries = await fs.readdir(appDir, { withFileTypes: true });
+      app.unchangedLegacyShippedQA = entries.every((entry) => entry.isFile())
+        && isUnchangedLegacyShippedQA(entries.map((entry) => entry.name), [metaRaw, guiContent, systemsContent]);
+    }
 
     const storedApp = this.storeLoadedApp(app);
     this.logger.log(
@@ -339,6 +352,10 @@ export class RAAppService implements OnApplicationBootstrap {
     // gui type: parse with GUI DSL and return nodes+data as JSON string
     try {
       const nodes = compileGui(block.content);
+      const validationError = validateInteractiveQA(nodes, data);
+      if (validationError) {
+        return { status: 'error', error: { code: 'DSL_EXEC_ERROR', message: validationError } };
+      }
       const renderedContent = JSON.stringify({ nodes, data });
       return { status: 'ready', renderedContent };
     } catch (err) {

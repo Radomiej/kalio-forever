@@ -6,6 +6,7 @@ import * as schema from '../../database/schema';
 import { DrizzleService } from '../../database/drizzle.service';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { EmbeddingCredentialsService } from './embedding-credentials.service';
+import { LocalTransformersEmbeddingProvider } from './local-transformers-embedding.provider';
 import {
   EmbeddingService,
   MockEmbeddingProvider,
@@ -24,11 +25,16 @@ vi.mock('@huggingface/transformers', () => ({
     allowRemoteModels: true,
   },
   pipeline: pipelineMock,
+  AutoTokenizer: { from_pretrained: vi.fn(async () => ({})) },
+  AutoModel: { from_pretrained: vi.fn(async (_model: string, options: unknown) => ({ dispose: vi.fn(), options })) },
+  FeatureExtractionPipeline: function (args: { task: string; model: { options: unknown } }) {
+    return pipelineMock(args.task, 'local', args.model.options);
+  },
 }));
 
-pipelineMock.mockImplementation(async () => async () => ({
+pipelineMock.mockImplementation(async () => Object.assign(async () => ({
   data: new Float32Array(384).fill(0.01),
-}));
+}), { tokenizer: (text: string) => ({ input_ids: { size: text.length } }) }));
 
 // â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -232,6 +238,40 @@ describe('OpenAICompatibleEmbeddingProvider', () => {
 // â”€â”€ EmbeddingService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('EmbeddingService', () => {
+  it('binds document sizing to the active provider epoch', async () => {
+    const fits = vi.fn(() => true);
+    const spy = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'getInputSizer').mockResolvedValue(fits);
+    try {
+      const { svc } = makeService({ EMBEDDING_BACKEND: 'cpu' });
+      await svc.reloadFromCredential(); await svc.ensureCurrentIdentity();
+      const space = svc.captureSpace(); const size = await svc.getDocumentSizer(space);
+      expect(size?.('document')).toBe(true);
+      expect(fits).toHaveBeenCalledWith('document');
+      await svc.reloadFromCredential();
+      expect(() => size?.('document')).toThrow('EMBEDDING_SPACE_CHANGED');
+    } finally { spy.mockRestore(); }
+  });
+  it('rejects oversized pinned inputs before inference instead of silently truncating', async () => {
+    const sizing = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'getInputSizer').mockResolvedValue(text => text.length <= 3);
+    const inference = vi.spyOn(LocalTransformersEmbeddingProvider.prototype, 'embed');
+    try {
+      const { svc } = makeService({ EMBEDDING_BACKEND: 'cpu' });
+      await svc.reloadFromCredential(); await svc.ensureCurrentIdentity();
+      await expect(svc.embedPinned(svc.captureSpace(), ['too long'])).rejects.toThrow('EMBEDDING_INPUT_TOO_LONG');
+      expect(inference).not.toHaveBeenCalled();
+    } finally { sizing.mockRestore(); inference.mockRestore(); }
+  });
+  it('derives the default local CPU space from the same revision used for inference', async () => {
+    const { svc } = makeService();
+    await svc.reloadFromCredential();
+    await svc.ensureCurrentIdentity();
+    const space = svc.captureSpace();
+    expect(space.modelRevision).toBe('761b726dd34fb83930e26aab4e9ac3899aa1fa78');
+    expect(space.providerScope).toMatch(/^scope-[a-f0-9]{64}$/);
+    const vectors = await svc.embedPinned(space, ['export function buildSite() {}']);
+    expect(vectors[0]).toHaveLength(384);
+    expect(svc.captureSpace().id).toBe(space.id);
+  });
   describe('reloadFromCredential â€” no DB credential, no env', () => {
     it('uses the local default embedding model when nothing configured', async () => {
       const { svc } = makeService();
@@ -253,7 +293,7 @@ describe('EmbeddingService', () => {
         expect(s.backend).toBe('cpu');
         expect(s.gpuAvailable).toBeUndefined();
         expect(s.cacheDir).toBe('./data/embeddings-cache');
-        expect(s.profileId).toBe('local-transformers-xenova-multilingual-e5-small-384-cpu');
+        expect(s.profileId).toMatch(/^local-transformers-[a-f0-9]{64}$/);
       });
 
     it('can disable embeddings from local config', async () => {
@@ -396,7 +436,7 @@ describe('EmbeddingService', () => {
       expect(status.source).toBe('local');
       expect(status.model).toBe('Xenova/multilingual-e5-base');
       expect(status.dimensions).toBe(768);
-      expect(status.profileId).toBe('local-transformers-xenova-multilingual-e5-base-768-cpu');
+      expect(status.profileId).toMatch(/^local-transformers-[a-f0-9]{64}$/);
     });
   });
 
@@ -513,7 +553,7 @@ describe('EmbeddingService', () => {
     it('uses model, dimensions, and backend for local profile isolation', async () => {
       const { svc } = makeService({ EMBEDDING_BACKEND: 'cpu' });
       await svc.reloadFromCredential();
-      expect(svc.getProfileId()).toBe('local-transformers-xenova-multilingual-e5-small-384-cpu');
+      expect(svc.getProfileId()).toMatch(/^local-transformers-[a-f0-9]{64}$/);
     });
   });
 

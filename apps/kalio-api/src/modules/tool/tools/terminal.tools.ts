@@ -82,8 +82,15 @@ export class TerminalSpawnTool {
     const command = getCommandArg(request.args);
     const args = getArgsArg(request.args);
     const cwd = getCwdArg(request.args);
-    const session = await this.terminals.spawn(command, args, cwd);
-    return { id: session.id, pid: session.pid, command: session.command };
+    const session = await this.terminals.spawn(command, args, cwd, false, {
+      sessionId: request.sessionId,
+      turnId: request.turnId,
+      callId: request.callId,
+    });
+    return {
+      id: session.id, pid: session.pid, command: session.command,
+      ...(session.executionDescriptor ? { executionDescriptor: structuredClone(session.executionDescriptor) } : {}),
+    };
   }
 }
 
@@ -111,12 +118,15 @@ export class TerminalListTool {
 @Tool({
   name: 'terminal_output',
   domain: 'terminal',
-  description: 'Get the buffered output (stdout + stderr) of a terminal session.',
+  description: 'Get the buffered output (stdout + stderr) of a terminal session. ' +
+    'For builds/tests, set waitMs=30000 to observe completion in this turn. ' +
+    'Timeout returns the current status without stopping the process. If still running, read again; do not claim success until status is exited and exitCode is 0.',
   parameters: {
     type: 'object',
     required: ['id'],
     properties: {
       id: { type: 'string', description: 'Terminal session ID returned by terminal_spawn.' },
+      waitMs: { type: 'integer', minimum: 0, maximum: 30000, description: 'Optional wait for exit, in milliseconds. Default 0 is an immediate snapshot; never kills the process.' },
     },
   },
   requiresConfirmation: false,
@@ -126,13 +136,21 @@ export class TerminalOutputTool {
 
   async execute(request: ToolCallRequest) {
     const id = getIdArg(request.args);
-    const session = this.terminals.get(id);
+    const waitMs = request.args['waitMs'] === undefined ? 0 : request.args['waitMs'];
+    if (typeof waitMs !== 'number' || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > 30000) {
+      throw new Error('INVALID_WAIT: waitMs must be an integer between 0 and 30000');
+    }
+    const session = waitMs > 0
+      ? await this.terminals.observeUntilExit(id, waitMs, request.abortSignal)
+      : this.terminals.get(id);
     if (!session) throw new Error(`Terminal session not found: ${id}`);
     return {
       id: session.id,
       status: session.status,
       exitCode: session.exitCode,
       output: session.output,
+      ...(session.executionDescriptor?.ownerIdentity?.sessionId === request.sessionId
+        ? { executionDescriptor: structuredClone(session.executionDescriptor) } : {}),
     };
   }
 }

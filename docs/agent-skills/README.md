@@ -20,4 +20,5 @@ C:\Users\Radomiej\.codex\skills\<skill-name>\SKILL.md
 - `kalio-browser-mcp-qa`
 - `kalio-manual-qa`
 - `kalio-readme-maintainer`
+- `kalio-user-simulation`
 - `serena-kalio-code-navigation`

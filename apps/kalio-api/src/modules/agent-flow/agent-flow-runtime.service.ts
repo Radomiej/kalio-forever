@@ -10,6 +10,7 @@ import type {
 import { ArchitectureAgentFlowAdapter } from './architecture-agent-flow.adapter';
 import { resolveEffectiveAgentFlowContext } from './agent-flow-launch-context';
 import { AgentFlowRunRepository } from './agent-flow-run.repository';
+import { AgentFlowReconciliationTimers } from './agent-flow-reconciliation-timers';
 import type { AgentFlowRuntimePort } from './agent-flow-runtime.port';
 import { ArchitectureRuntimeService } from '../architecture/architecture-runtime.service';
 import { SessionsService } from '../chat/sessions.service';
@@ -39,6 +40,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort, OnApplicat
   private readonly logger = new Logger(AgentFlowRuntimeService.name);
   private readonly recoveryOwnerId = `agent-flow-${randomUUID()}`;
   private unsubscribeCompletedRun?: () => void;
+  private readonly reconciliationTimers = new AgentFlowReconciliationTimers();
   constructor(
     private readonly adapter: ArchitectureAgentFlowAdapter,
     private readonly repository: AgentFlowRunRepository,
@@ -59,6 +61,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort, OnApplicat
   }
 
   onModuleDestroy(): void {
+    this.reconciliationTimers.destroy();
     this.unsubscribeCompletedRun?.();
     this.unsubscribeCompletedRun = undefined;
   }
@@ -279,6 +282,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort, OnApplicat
   private scheduleDurableReconciliation(runId: string): void {
     let attempts = 0;
     const reconcile = async (): Promise<void> => {
+      if (!this.reconciliationTimers.active) return;
       attempts += 1;
       const snapshot = this.repository.getSnapshot(runId);
       if (!snapshot || snapshot.run.status !== 'running') {
@@ -286,6 +290,7 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort, OnApplicat
       }
 
       const refreshed = await this.adapter.getSnapshot(runId, argsFromRun(snapshot.run));
+      if (!this.reconciliationTimers.active) return;
       if (refreshed) {
         const reconciled = mergeRefreshedSnapshot(snapshot, refreshed);
         this.repository.saveSnapshot(this.copyBackIfNeeded(reconciled));
@@ -300,11 +305,16 @@ export class AgentFlowRuntimeService implements AgentFlowRuntimePort, OnApplicat
       }
 
       if (attempts < DURABLE_RECONCILE_MAX_ATTEMPTS) {
-        setTimeout(() => void reconcile(), DURABLE_RECONCILE_INTERVAL_MS);
+        schedule();
       }
     };
-
-    setTimeout(() => void reconcile(), DURABLE_RECONCILE_INTERVAL_MS);
+    const schedule = () => this.reconciliationTimers.schedule(() => {
+      void reconcile().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`AgentFlow reconciliation failed for ${runId}: ${message}`);
+      });
+    }, DURABLE_RECONCILE_INTERVAL_MS);
+    schedule();
   }
 
   private copyBackIfNeeded(snapshot: AgentFlowRunSnapshot): AgentFlowRunSnapshot {

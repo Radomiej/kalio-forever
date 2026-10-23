@@ -28,6 +28,7 @@ const PUBLIC_ARCHITECTURE_CONTEXT_KEYS = new Set([
   'raAppLaunchId',
   'raAppLaunchName',
   'raAppLaunchSource',
+  'raAppLaunchInputs',
 ]);
 
 @Controller('sessions')
@@ -113,6 +114,12 @@ export class SessionsController {
     return this.runJournal.getCurrentRun(id);
   }
 
+  @Get(':id/runs/history')
+  getHistoryRuns(@Param('id') id: string, @Query('turnIds') turnIds?: string): Promise<ChatRunSnapshot[]> {
+    const ids = (turnIds ?? '').split(',').filter(value => /^[\w-]{1,128}$/.test(value)).slice(0, 100);
+    return this.runJournal.getHistoryTurns(id, ids);
+  }
+
   @Post(':id/context-preview')
   getContextPreview(
     @Param('id') id: string,
@@ -123,11 +130,9 @@ export class SessionsController {
 
   @Delete(':id')
   async delete(@Param('id') id: string): Promise<void> {
-    const sessionTree = await this.runtimeStop.stopSessionTree(id);
-    const deleteOrder = [...sessionTree.sessionIds].reverse();
-    for (const sessionId of deleteOrder) {
-      await this.sessions.delete(sessionId);
-    }
+    await this.runtimeStop.withStoppedTree(id, async sessionTree => {
+      for (const sessionId of [...sessionTree.sessionIds].reverse()) await this.sessions.delete(sessionId);
+    });
   }
 
   @Post(':id/archive')
@@ -143,7 +148,7 @@ export class SessionsController {
   @Patch(':id')
   async update(
     @Param('id') id: string,
-    @Body() body: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
+    @Body() body: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext },
   ): Promise<void> {
     await this.sessions.update(id, {
       ...body,

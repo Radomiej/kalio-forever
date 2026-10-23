@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { activeSessionAfterSubmit, installMockLaunchProfile, selectMockLaunchProfile } from './helpers/mock-launch-profile';
 import {
   deleteSessionIfExists,
   selectArchitectureInComposer,
@@ -10,25 +11,19 @@ test.describe('Workflow architecture label proof', () => {
     test.setTimeout(90_000);
 
     let sessionId: string | null = null;
+    await installMockLaunchProfile(page, request);
 
     try {
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
 
-      await expect
-        .poll(
-          () => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')),
-          { timeout: 10_000 },
-        )
-        .not.toBeNull();
-      sessionId = await page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id'));
-      if (!sessionId) {
-        throw new Error('Missing active session id after creating a Talk conversation');
-      }
+      await expect(page.getByTestId('welcome-screen')).toBeVisible();
+      await selectMockLaunchProfile(page);
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
       await sendMessageFromComposer(page, 'Assess the release workflow and answer briefly.');
+      sessionId = await activeSessionAfterSubmit(page);
 
       await expect(page.getByTestId('chat-session-architecture-label')).toHaveText('Strategic Decision Council', { timeout: 15_000 });
       await expect(page.getByTestId(`session-architecture-label-${sessionId}`)).toHaveText('Strategic Decision Council', { timeout: 15_000 });

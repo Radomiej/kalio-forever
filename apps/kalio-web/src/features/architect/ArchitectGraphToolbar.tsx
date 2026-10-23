@@ -23,6 +23,7 @@ const PALETTE: ReadonlyArray<{
 }> = [
   { kind: 'role', label: 'Agent', title: 'Add agent node', icon: Bot },
   { kind: 'router', label: 'Router', title: 'Add router node', icon: Route },
+  { kind: 'auto_router', label: 'Auto-routing', title: 'Add auto-routing node', icon: Route },
   { kind: 'parallel', label: 'Parallel', title: 'Add parallel router node', icon: GitBranch },
   { kind: 'artifact', label: 'Artifact', title: 'Add final artifact node', icon: Box },
 ];

@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test';
+import { hitlFixtureRequest } from './helpers/hitl-fixture-auth';
 import {
   API_BASE,
   ensureEnvMockProvider,
@@ -9,6 +10,7 @@ import {
   selectSession,
 } from './helpers/test-config';
 import { restartPlaywrightBackend } from './helpers/restart-control';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 
 const MOCK_VFS_WRITE_TRIGGER = '[[mock:tool:vfs_write:no-arg-progress]]';
 const MOCK_VFS_WRITE_PATH = 'e2e/mock-tool-trigger.txt';
@@ -46,16 +48,12 @@ async function fetchFromNode(
 }
 
 async function restoreHitlConfigFromNode(config: HitlConfig): Promise<void> {
-  const response = await fetchFromNode(
-    `${API_BASE}/hitl/config`,
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(config),
-    },
-    'restore HITL config',
-  );
-  expect(response.ok).toBeTruthy();
+  const request = await playwrightRequest.newContext();
+  try {
+    await hitlFixtureRequest(request, 'PUT', config);
+  } finally {
+    await request.dispose();
+  }
 }
 
 async function restoreActiveCredentialFromNode(credentialId: string | null): Promise<void> {
@@ -93,7 +91,7 @@ async function saveHitlMode(page: Page, mode: 'manual' | 'bypass'): Promise<void
 }
 
 async function getHitlConfig(request: APIRequestContext): Promise<HitlConfig> {
-  const response = await request.get(`${API_BASE}/hitl/config`);
+  const response = await hitlFixtureRequest(request, 'GET');
   expect(response.ok()).toBeTruthy();
   return response.json() as Promise<HitlConfig>;
 }
@@ -103,11 +101,7 @@ async function createSession(
   title: string,
   personaId: string,
 ): Promise<{ id: string; title: string }> {
-  const response = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId },
-  });
-  expect(response.ok()).toBeTruthy();
-  const session = await response.json() as { id: string };
+  const session = await createExistingMockConversation(request, title, personaId);
   return { id: session.id, title };
 }
 

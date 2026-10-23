@@ -1,7 +1,7 @@
 {
   "name": "kalio-forever",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.3",
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File start-dev.ps1",
     "qa": "powershell -ExecutionPolicy Bypass -File start-qa.ps1",
@@ -11,14 +11,15 @@
     "qa:status": "node scripts/stack-manager.mjs status",
     "prod": "powershell -ExecutionPolicy Bypass -File start-prod.ps1",
     "prod:rebuild": "powershell -ExecutionPolicy Bypass -File start-prod.ps1 -Rebuild",
-    "prod:install": "powershell -ExecutionPolicy Bypass -File scripts/install.ps1",
-    "prod:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1 -KeepData",
+    "prod:install": "powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1",
+    "prod:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall.ps1",
     "dev:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
     "build": "corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run build",
     "db:reset": "node scripts/reset-kalio-db.mjs",
     "typecheck": "corepack pnpm --filter @kalio/types run build && corepack pnpm -r --filter @kalio/types --filter @kalio/sdk --filter kalio-api --filter kalio-web run typecheck",
     "lint": "corepack pnpm -r --filter kalio-api --filter kalio-web run lint",
     "test": "node scripts/run-test-gate.mjs",
+    "test:mutation:web-updates": "corepack pnpm --filter kalio-web run test:mutation",
     "test:e2e": "corepack pnpm --filter @kalio/e2e run test:e2e",
     "test:e2e:qa-ac13": "node scripts/run-ac13-qa-stack.mjs",
     "preflight": "node scripts/repo-preflight.mjs",
@@ -40,13 +41,15 @@
     "tauri": "node node_modules/@tauri-apps/cli/tauri.js",
     "desktop:prepare": "node scripts/tauri-prepare.mjs",
     "desktop:build": "node scripts/desktop-build.mjs",
+    "desktop:smoke": "node scripts/desktop-package-smoke.mjs",
     "desktop:updater-config": "node scripts/tauri-updater-config.mjs",
     "release:tauri-manifest": "node scripts/generate-tauri-latest-json.mjs",
     "release:runtime-manifest": "node scripts/generate-runtime-release-manifest.mjs",
-      "release:third-party-notices": "node scripts/generate-third-party-notices.mjs",
+    "release:third-party-notices": "node scripts/generate-third-party-notices.mjs",
     "release:version": "node scripts/bump-version.mjs",
     "runtime:package": "node scripts/build-runtime-package.mjs",
     "runtime:package:bun": "node scripts/build-runtime-package.mjs --runtime bun",
+    "runtime:smoke": "node scripts/runtime-package-smoke.mjs",
     "runtime:update": "node scripts/kalio-updater.mjs",
     "runtime:install:release:windows": "powershell -ExecutionPolicy Bypass -File scripts/install-release.ps1"
   },
@@ -62,7 +65,8 @@
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
     "patchedDependencies": {
-      "@nestjs/cli": "patches/@nestjs__cli.patch"
+      "@nestjs/cli": "patches/@nestjs__cli.patch",
+      "@huggingface/transformers@4.3.1": "patches/@huggingface__transformers@4.3.1.patch"
     }
   }
 }

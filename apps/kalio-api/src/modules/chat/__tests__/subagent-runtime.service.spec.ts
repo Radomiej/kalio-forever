@@ -1658,6 +1658,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn(async (_sessionId: string, toolCallId: string, content: string) => {
         savedToolResults.push({ toolCallId, content });
+        return `fixture-tool-result-${savedToolResults.length}`;
       }),
       loadHistory: vi.fn().mockResolvedValue([]),
       loadHistoryForLLM: vi.fn(async () => ({
@@ -1820,6 +1821,7 @@ describe('SubagentRuntimeService nested subagents', () => {
       persistAssistantMessage: vi.fn().mockResolvedValue(undefined),
       saveToolResult: vi.fn(async (_sessionId: string, toolCallId: string, content: string) => {
         savedToolResults.push({ toolCallId, content });
+        return `fixture-tool-result-${savedToolResults.length}`;
       }),
       loadHistory: vi.fn().mockResolvedValue([]),
       loadHistoryForLLM: vi.fn(async () => ({

@@ -153,6 +153,7 @@ vi.mock('../../../services/apiClient', () => ({
   },
   getSessionVfsFiles: getSessionVfsFilesMock,
   getProjects: getProjectsMock,
+  getExecutionProfiles: vi.fn(() => Promise.resolve([])),
 }));
 
 vi.mock('../../architect/architect.api', async () => {
@@ -357,6 +358,25 @@ describe('ExecutionGraphView empty-session state', () => {
     sendMessageMock.mockReturnValue(true);
   });
 
+  it('renders the recorded runtime model instead of the persona recommendation', async () => {
+    sessionState.activeSessionId = 'session-1';
+    sessionState.sessions[0] = { ...sessionState.sessions[0], executionProfileId: 'swe-profile' };
+    sessionState.sessionMessages['session-1'] = [
+      makeMessage({ id: 'prompt', role: 'user', content: 'Read package', turnId: 'real-turn' }),
+      makeMessage({ id: 'answer', role: 'assistant', content: 'Done', turnId: 'real-turn', createdAt: 2 }),
+    ];
+    sessionState.sessionAgentTurns['session-1'] = [{ id: 'real-turn', sessionId: 'session-1', promptMessageId: 'prompt',
+      done: true, items: [{ kind: 'text', messageId: 'answer' }] }];
+    const defaultGet = apiGetMock.getMockImplementation()!;
+    apiGetMock.mockImplementation((url: string) => url.startsWith('/api/audit-log?')
+      ? Promise.resolve({ data: [{ id: 'model-audit', sessionId: 'session-1', type: 'runtime_event', label: 'llm.turn.started',
+        data: { turnId: 'real-turn', model: 'swe-2' }, createdAt: 1, durationMs: null, chunkCount: null }] })
+      : defaultGet(url));
+    await renderExecutionGraphView();
+    await waitFor(() => expect(screen.getAllByText('RaBuilder - swe-2').length).toBeGreaterThan(0));
+    expect(screen.queryByText('RaBuilder - gpt-4.1')).not.toBeInTheDocument();
+  });
+
   it('shows the shared launch screen when no session is selected', async () => {
     await renderExecutionGraphView();
 
@@ -364,7 +384,7 @@ describe('ExecutionGraphView empty-session state', () => {
     expect(screen.getByTestId('graph-empty-persona-select')).toBeInTheDocument();
     expect(screen.queryByTestId('graph-empty-architecture-select')).not.toBeInTheDocument();
     expect(screen.getByTestId('graph-empty-project-picker-trigger')).toBeInTheDocument();
-    expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Chat runtime: RaBuilder');
+    expect(screen.getByTestId('graph-empty-prompt-input')).toHaveAttribute('placeholder', 'Ask RaBuilder...');
     expect(screen.queryByTestId('execution-graph-live-sidebar')).not.toBeInTheDocument();
   });
 
@@ -555,7 +575,7 @@ describe('ExecutionGraphView empty-session state', () => {
       target: { value: 'goal-master-delivery-loop' },
     });
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toHaveValue('goal-master-delivery-loop'));
-    await waitFor(() => expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Workflow runtime: Goal Master Delivery Loop'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-prompt-input')).toHaveAttribute('placeholder', 'Run prompt through Goal Master Delivery Loop'));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Run the workflow' },
     });
@@ -666,7 +686,7 @@ describe('ExecutionGraphView empty-session state', () => {
       target: { value: 'strategic-decision-council' },
     });
     await waitFor(() => expect(screen.getByTestId('graph-empty-architecture-select')).toHaveValue('strategic-decision-council'));
-    await waitFor(() => expect(screen.getByTestId('graph-empty-routing-summary')).toHaveTextContent('Workflow runtime: Strategic Decision Council'));
+    await waitFor(() => expect(screen.getByTestId('graph-empty-prompt-input')).toHaveAttribute('placeholder', 'Run prompt through Strategic Decision Council'));
     fireEvent.change(screen.getByTestId('graph-empty-prompt-input'), {
       target: { value: 'Run the standard workflow' },
     });
@@ -1097,7 +1117,9 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Accept tool request' }));
 
     expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(agentState.removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
+    expect(agentState.removePendingConfirmation).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Accept tool request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel tool request' })).toBeInTheDocument();
   });
 
   it('keeps awaiting-confirmation actions reachable from a collapsed tool group', async () => {
@@ -1159,7 +1181,9 @@ describe('ExecutionGraphView empty-session state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Accept tool request' }));
 
     expect(confirmToolMock).toHaveBeenCalledWith({ requestId: 'req-1', sessionId: 'session-1' });
-    expect(agentState.removePendingConfirmation).toHaveBeenCalledWith('session-1', 'req-1');
+    expect(agentState.removePendingConfirmation).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Accept tool request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel tool request' })).toBeInTheDocument();
   });
 
   it('does not show confirmation actions for a collapsed tool group when no grouped tool needs approval', async () => {

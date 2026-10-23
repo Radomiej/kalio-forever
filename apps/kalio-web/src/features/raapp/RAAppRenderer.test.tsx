@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { RAAppRenderer } from './RAAppRenderer';
+import type { GuiDslPayload } from '@kalio/types';
 
 vi.mock('./HtmlIframeRenderer', () => ({
   HtmlIframeRenderer: ({ html, mode }: { html: string; mode?: string }) => (
@@ -14,11 +15,13 @@ vi.mock('./VfsHtmlRenderer', () => ({
   ),
 }));
 
-vi.mock('./GuiDslRenderer', () => ({
-  GuiDslRenderer: ({ onAction }: { onAction: (action: string) => void }) => (
-    <button data-testid="raapp-gui-action" onClick={() => onAction('GUI_ACTION')}>Run GUI action</button>
-  ),
-}));
+const { rendererState } = vi.hoisted(() => ({ rendererState: { realGui: false } }));
+vi.mock('./GuiDslRenderer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./GuiDslRenderer')>();
+  return { GuiDslRenderer: ({ payload, onAction }: { payload: GuiDslPayload; onAction: (action: string) => void }) =>
+    rendererState.realGui ? <actual.GuiDslRenderer payload={payload} onAction={onAction} />
+      : <button data-testid="raapp-gui-action" onClick={() => onAction('GUI_ACTION')}>Run GUI action</button> };
+});
 
 const { agentState } = vi.hoisted(() => ({
   agentState: {
@@ -115,11 +118,50 @@ vi.mock('../../services/eventBus', () => ({
 
 describe('RAAppRenderer', () => {
   beforeEach(() => {
+    rendererState.realGui = false;
     vi.clearAllMocks();
     raAppNativeHandlers.splice(0, raAppNativeHandlers.length);
     agentState.getToolActivitiesForSession.mockReturnValue([]);
     agentState.hasActiveLoopForSession.mockReturnValue(false);
     agentState.queuedDepthBySession = {};
+  });
+
+  it('rehydrates Q&A question/options and sends the clicked answer through the conversation channel', () => {
+    rendererState.realGui = true;
+    const payload: GuiDslPayload = { nodes: [{ kind: 'element', tag: 'window',
+      props: { id: { kind: 'identifier', value: 'qa_panel' } }, children: [
+        { kind: 'element', tag: 'label', props: { text: { kind: 'string', value: '[output.question]' } }, children: [] },
+        ...[0, 1].map((index) => ({ kind: 'element' as const, tag: 'button', props: {
+          text: { kind: 'string' as const, value: `[output.option_${index}]` },
+          visible: { kind: 'string' as const, value: `[output.option_${index}]` },
+          onclick: { kind: 'string' as const, value: `I choose: [output.option_${index}]` },
+        }, children: [] })),
+      ] }], data: { output: { question: 'Which runtime?', options: ['OpenRouter', 'Devin'], option_0: 'OpenRouter', option_1: 'Devin' } } };
+    const block = { type: 'gui' as const, mode: 'interactive' as const, content: JSON.stringify(payload) };
+    const first = render(<RAAppRenderer block={block} sessionId="session-1" />);
+    expect(screen.getByText('Which runtime?')).toBeInTheDocument();
+    first.unmount();
+    render(<RAAppRenderer block={JSON.parse(JSON.stringify(block))} sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Devin' }));
+    expect(addMessage).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-1', role: 'user', content: 'I choose: Devin' }));
+    expect(sendMessage).toHaveBeenCalledWith({ sessionId: 'session-1', content: 'I choose: Devin', personaId: 'persona-1' });
+  });
+
+  it('shows an actionable error for an empty Q&A restored from persisted history', () => {
+    const payload: GuiDslPayload = { nodes: [{ kind: 'element', tag: 'window',
+      props: { id: { kind: 'identifier', value: 'qa_panel' } }, children: [] }], data: { output: {} } };
+    render(<RAAppRenderer block={{ type: 'gui', mode: 'interactive', content: JSON.stringify(payload) }} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Ask the agent to generate');
+    expect(screen.queryByTestId('raapp-gui-action')).not.toBeInTheDocument();
+  });
+
+  it('does not send an answer from another session preview into the active conversation', () => {
+    render(<RAAppRenderer sessionId="different-session" block={{ type: 'gui', mode: 'interactive',
+      content: JSON.stringify({ nodes: [], data: {} }) }} />);
+    fireEvent.click(screen.getByTestId('raapp-gui-action'));
+    expect(addMessage).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(enqueueUserAction).not.toHaveBeenCalled();
   });
 
   it('routes VFS-backed html blocks to VfsHtmlRenderer', () => {

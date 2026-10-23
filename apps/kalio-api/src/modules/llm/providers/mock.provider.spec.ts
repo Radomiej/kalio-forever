@@ -3,6 +3,56 @@ import type { ContextManagedLLMMessage } from '../../../common/utils/context-man
 import { MockLLMProvider } from './mock.provider';
 
 describe('MockLLMProvider', () => {
+  it('preserves explicit Q&A inputs from the real manager launch prompt exactly', async () => {
+    const inputs = { question: 'Which RA-App regression boundary should we verify?', options: ['Session fallback', 'Explicit profile'] };
+    const prompt = `Run the "Interactive Q&A" RA-App for me. Use these JSON inputs: ${JSON.stringify(inputs)}. Before calling run_raapp, prepare a non-empty question and 1–5 non-empty string options. Launch it immediately. Use run_raapp with the exact id "qa-interactive" now.`;
+    const provider = new MockLLMProvider({ delay: async () => undefined });
+    const calls = await provider.streamChat([{ role: 'user', content: prompt }],
+      [{ name: 'run_raapp', description: 'Run app', parameters: {} }],
+      { sessionId: 'qa-host', messageId: 'qa-message', onChunk: vi.fn() });
+    expect(calls).toEqual([expect.objectContaining({ name: 'run_raapp', args: { id: 'qa-interactive', inputs } })]);
+  });
+
+  it('preserves nested JSON and quoted braces without taking trailing prose as input', async () => {
+    const inputs = { question: 'Choose "}" or "{"?', options: ['A \\"quoted" choice', 'B'], nested: { values: [{ text: '}. suffix' }] } };
+    const provider = new MockLLMProvider({ delay: async () => undefined });
+    const calls = await provider.streamChat([{ role: 'user', content: `Use these JSON inputs: ${JSON.stringify(inputs)}. Ignore this prose {not JSON}. Use run_raapp with the exact id "qa-interactive" now.` }],
+      [{ name: 'run_raapp', description: 'Run app', parameters: {} }],
+      { sessionId: 'qa-host', messageId: 'qa-message', onChunk: vi.fn() });
+    expect(calls[0]?.args).toEqual({ id: 'qa-interactive', inputs });
+  });
+
+  it.each(['{"question":', '{broken}', '[]', 'null', '42'])('rejects malformed/non-object explicit inputs without dispatching: %s', async (raw) => {
+    const provider = new MockLLMProvider({ delay: async () => undefined });
+    const onToolArgChunk = vi.fn();
+    await expect(provider.streamChat([{ role: 'user', content: `Use these JSON inputs: ${raw}. Use run_raapp with the exact id "qa-interactive" now.` }],
+      [{ name: 'run_raapp', description: 'Run app', parameters: {} }],
+      { sessionId: 'qa-host', messageId: 'qa-message', onChunk: vi.fn(), onToolArgChunk }))
+      .rejects.toThrow('Invalid explicit RA-App JSON inputs');
+    expect(onToolArgChunk).not.toHaveBeenCalled();
+  });
+
+  it('does not synthesize Q&A inputs when the manager supplies none', async () => {
+    const provider = new MockLLMProvider({ delay: async () => undefined });
+    const calls = await provider.streamChat([{ role: 'user', content: 'Use run_raapp with the exact id "qa-interactive" now.' }],
+      [{ name: 'run_raapp', description: 'Run app', parameters: {} }],
+      { sessionId: 'qa-host', messageId: 'qa-message', onChunk: vi.fn() });
+    expect(calls[0]?.args).toEqual({ id: 'qa-interactive' });
+  });
+
+  it('emits scripted reasoning separately from the answer in order', async () => {
+    const provider = new MockLLMProvider({ delay: async () => undefined });
+    const chunks: unknown[] = [];
+    await provider.streamChat([{ role: 'user', content: '[[mock:script]] think("Reasoning"); hold(1); return("Answer") [[/mock:script]]' }], [], {
+      sessionId: 's', messageId: 'm', onChunk: chunk => chunks.push(chunk),
+    });
+    expect(chunks).toEqual([
+      { delta: 'Reasoning', thinking: true, done: false, sessionId: 's', messageId: 'm' },
+      { delta: 'Answer', done: false, sessionId: 's', messageId: 'm' },
+      { delta: '', done: true, sessionId: 's', messageId: 'm' },
+    ]);
+  });
+
   it('REGRESSION: throws a deterministic 429-like error when the last user prompt requests mock quota exhaustion', async () => {
     const provider = new MockLLMProvider();
     const onChunk = vi.fn();

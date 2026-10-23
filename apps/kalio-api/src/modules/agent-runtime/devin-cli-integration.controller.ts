@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Patch } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Patch, Query } from '@nestjs/common';
 import { kalioMcpBridgeUrl } from '../../common/kalio-mcp-bridge-config';
 import { KalioMcpBridgeTokenService, KALIO_MCP_BRIDGE_TOKEN_MIN_LENGTH, type KalioMcpBridgeTokenSource } from '../../database/kalio-mcp-bridge-token.service';
 import { DevinAcpHostRegistry, type DevinCliIntegrationStatus } from './devin-cli-acp.host';
@@ -33,8 +33,8 @@ export class DevinCliIntegrationController {
   ) {}
 
   @Get('status')
-  status(): Promise<DevinCliIntegrationStatus> {
-    return this.registry.getStatus();
+  status(@Query('refresh') refresh?: string): Promise<DevinCliIntegrationStatus> {
+    return this.registry.getStatus(refresh === 'true');
   }
 
   @Get('settings')

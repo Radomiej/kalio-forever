@@ -120,4 +120,19 @@ describe('SessionRuntimeWatchlistService', () => {
       reasons: ['run_recovery_required'],
     });
   });
+
+  it('watches a durable human wait after restart even without in-memory confirmations', async () => {
+    toolDispatch.getPendingConfirmations.mockReturnValue([]);
+    pipeline.getActiveSessionIds.mockReturnValue(new Set());
+    pipeline.getSessionStatusWithRun.mockImplementation((sessionId: string) => Promise.resolve({
+      sessionId, active: false, queueLength: 0,
+      ...(sessionId === 'child-pending' ? {
+        run: { status: 'waiting_for_human', phase: 'tool_pending', safeResume: false },
+      } : {}),
+    }));
+
+    await expect(service.list()).resolves.toContainEqual({
+      sessionId: 'root-pending', reasons: ['pending_confirmation'],
+    });
+  });
 });

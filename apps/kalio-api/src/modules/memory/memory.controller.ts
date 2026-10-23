@@ -33,6 +33,7 @@ import {
   OpenAICompatibleEmbeddingProvider,
   OllamaEmbeddingProvider,
   buildDefaultLocalEmbeddingConfig,
+  isOllamaUrl,
 } from './embedding.service';
 import { LocalTransformersEmbeddingProvider } from './local-transformers-embedding.provider';
 import type { IngestDto, IngestConversationDto } from './dto';
@@ -264,7 +265,7 @@ export class MemoryController {
   async probeEmbeddingCredential(
     @Body() dto: CreateEmbeddingCredentialDto
   ): Promise<{ ok: boolean; error?: string }> {
-    const isOllama = dto.baseUrl.includes('localhost:11434') || dto.baseUrl.toLowerCase().includes('ollama');
+    const isOllama = isOllamaUrl(dto.baseUrl);
     try {
       if (isOllama) {
         const p = new OllamaEmbeddingProvider(dto.baseUrl, dto.model, dto.dimensions);
@@ -291,7 +292,7 @@ export class MemoryController {
   ): Promise<{ ok: boolean; error?: string }> {
     const cred = await this.embeddingCredentials.getConfigById(id);
     if (!cred) throw new NotFoundException(`Embedding credential ${id} not found`);
-    const isOllama = cred.baseUrl.includes('localhost:11434') || cred.baseUrl.toLowerCase().includes('ollama');
+    const isOllama = isOllamaUrl(cred.baseUrl);
     try {
       if (isOllama) {
         const p = new OllamaEmbeddingProvider(cred.baseUrl, cred.model, cred.dimensions);

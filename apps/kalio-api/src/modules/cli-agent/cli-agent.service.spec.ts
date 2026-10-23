@@ -65,28 +65,86 @@ const WINDOWS_CODEX_COMMAND = defaultCodexCommand('win32');
 
 describe('CLIAgentService', () => {
   let CLIAgentServiceClass: typeof import('./cli-agent.service').CLIAgentService;
+  let CLIAgentProbeServiceClass: typeof import('./cli-agent-probe.service').CLIAgentProbeService;
+  let CLIAgentLaunchPreparationServiceClass: typeof import('./cli-agent-launch-preparation.service').CLIAgentLaunchPreparationService;
   let stoppedErrorCode: string;
   let service: import('./cli-agent.service').CLIAgentService;
   let configService: CLIAgentConfigService;
   let ptyService: { run: ReturnType<typeof vi.fn> };
+  let cmdAudit: { recordInvocation: ReturnType<typeof vi.fn> };
+  let probes: import('./cli-agent-probe.service').CLIAgentProbeService;
 
   beforeEach(async () => {
-    ({ CLIAgentService: CLIAgentServiceClass, CLI_AGENT_STOPPED_ERROR: stoppedErrorCode } = await import('./cli-agent.service'));
+    const [{ CLIAgentService: serviceClass, CLI_AGENT_STOPPED_ERROR }, { CLIAgentProbeService: probeServiceClass }, { CLIAgentLaunchPreparationService: launchPreparationClass }] = await Promise.all([
+      import('./cli-agent.service'),
+      import('./cli-agent-probe.service'),
+      import('./cli-agent-launch-preparation.service'),
+    ]);
+    CLIAgentServiceClass = serviceClass;
+    CLIAgentProbeServiceClass = probeServiceClass;
+    CLIAgentLaunchPreparationServiceClass = launchPreparationClass;
+    stoppedErrorCode = CLI_AGENT_STOPPED_ERROR;
     configService = { getConfig: vi.fn().mockResolvedValue(makeConfig()) } as unknown as CLIAgentConfigService;
     ptyService = { run: vi.fn() };
+    cmdAudit = { recordInvocation: vi.fn().mockResolvedValue(undefined) };
+    const copilotAdapter = makeAdapter('copilot');
+    const geminiAdapter = makeAdapter('gemini');
+    const claudeAdapter = makeAdapter('claude');
+    const codexAdapter = makeAdapter('codex');
+    probes = new CLIAgentProbeServiceClass(
+      configService,
+      copilotAdapter as unknown as CopilotAdapter,
+      geminiAdapter as unknown as GeminiAdapter,
+      claudeAdapter as unknown as ClaudeCodeAdapter,
+      codexAdapter as unknown as CodexAdapter,
+      cmdAudit as never,
+    );
     service = new CLIAgentServiceClass(
       configService,
-      makeAdapter('copilot') as unknown as CopilotAdapter,
-      makeAdapter('gemini') as unknown as GeminiAdapter,
-      makeAdapter('claude') as unknown as ClaudeCodeAdapter,
-      makeAdapter('codex') as unknown as CodexAdapter,
+      copilotAdapter as unknown as CopilotAdapter,
+      geminiAdapter as unknown as GeminiAdapter,
+      claudeAdapter as unknown as ClaudeCodeAdapter,
+      codexAdapter as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
+      probes,
+      new CLIAgentLaunchPreparationServiceClass(),
+      cmdAudit as never,
     );
   }, 30_000);
 
   afterEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers(); // safety: always restore real timers
+  });
+
+  it('coalesces startup and first-list CLI probes instead of launching each command twice', async () => {
+    let releaseConfig!: () => void;
+    const configGate = new Promise<void>((resolve) => { releaseConfig = resolve; });
+    vi.mocked(configService.getConfig).mockImplementation(async () => {
+      await configGate;
+      return makeConfig({ cliPath: 'cmd' });
+    });
+    vi.mocked(childProcess.execFile).mockImplementation((
+      ((
+        _file: string,
+        _args: readonly string[],
+        _options: Record<string, unknown>,
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        callback(null, '1.0.0', '');
+        return {} as never;
+      }) as unknown as typeof childProcess.execFile
+    ));
+
+    const startupProbe = service.refreshAllProbes();
+    const initialList = service.listAll();
+    releaseConfig();
+
+    await Promise.all([startupProbe, initialList]);
+
+    expect(childProcess.execFile).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(childProcess.execFile).mock.calls.every(([file]) => file === 'cmd')).toBe(true);
+    expect(cmdAudit.recordInvocation).toHaveBeenCalledTimes(4);
   });
 
   it('throws for unknown agentId — no spawn', async () => {
@@ -98,6 +156,30 @@ describe('CLIAgentService', () => {
     vi.mocked(configService.getConfig).mockResolvedValue(makeConfig({ enabled: false }));
     await expect(service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's' })).rejects.toThrow('disabled');
     expect(childProcess.spawn).not.toHaveBeenCalled();
+  });
+
+  it('audits a command-shim CLI run with its session, turn, and tool-call identifiers', async () => {
+    vi.mocked(configService.getConfig).mockResolvedValue(makeConfig({ cliPath: 'cmd.exe' }));
+    const fakeProc = makeFakeProc();
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc as unknown as ReturnType<typeof childProcess.spawn>);
+    const run = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'call-1', sessionId: 'session-1', turnId: 'turn-1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(cmdAudit.recordInvocation).toHaveBeenCalledExactlyOnceWith({
+      command: 'cmd.exe',
+      source: 'cli-agent.run',
+      launcher: 'spawn',
+      agentId: 'copilot',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      callId: 'call-1',
+    });
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      'cmd.exe', expect.any(Array), expect.objectContaining({ windowsHide: true, cwd: '/w' }),
+    );
+
+    fakeProc.emit('close', 0);
+    await run;
   });
 
   it('resolves with exitCode=0 on successful run', async () => {
@@ -236,6 +318,15 @@ describe('CLIAgentService', () => {
 
     expect(result.output).toBe('KALIO_CODEX_OK');
     expect(childProcess.spawn).not.toHaveBeenCalled();
+    expect(cmdAudit.recordInvocation).toHaveBeenCalledExactlyOnceWith({
+      command: process.platform === 'win32' ? WINDOWS_CODEX_COMMAND : 'codex',
+      source: 'cli-agent.pty',
+      launcher: 'pty',
+      agentId: 'codex',
+      sessionId: 's',
+      turnId: 'turn-codex',
+      callId: 'c',
+    });
     const expectedLaunch = process.platform === 'win32'
       ? {
           executable: WINDOWS_POWERSHELL_EXE,
@@ -341,6 +432,9 @@ describe('CLIAgentService', () => {
       makeAdapter('claude') as unknown as ClaudeCodeAdapter,
       makeAdapter('codex') as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
+      probes,
+      new CLIAgentLaunchPreparationServiceClass(),
+      cmdAudit as never,
     );
 
     const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'c', sessionId: 's' });
@@ -432,6 +526,9 @@ describe('CLIAgentService', () => {
       makeAdapter('claude') as unknown as ClaudeCodeAdapter,
       makeAdapter('codex') as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
+      probes,
+      new CLIAgentLaunchPreparationServiceClass(),
+      cmdAudit as never,
     );
 
     const p = service.run({ agentId: 'copilot', prompt: 'task', workdir: '/w', callId: 'callId', sessionId: 'sess-1' });
@@ -453,6 +550,9 @@ describe('CLIAgentService', () => {
       makeAdapter('claude') as unknown as ClaudeCodeAdapter,
       makeAdapter('codex') as unknown as CodexAdapter,
       ptyService as unknown as import('./cli-agent-pty.service').CLIAgentPtyService,
+      probes,
+      new CLIAgentLaunchPreparationServiceClass(),
+      cmdAudit as never,
     );
     vi.spyOn(service as unknown as { getPlatform(): NodeJS.Platform }, 'getPlatform').mockReturnValue('win32');
 

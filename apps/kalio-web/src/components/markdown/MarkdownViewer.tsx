@@ -59,10 +59,10 @@ export const MarkdownViewer = memo(function MarkdownViewer({ content, className 
         </code>
       );
     },
-    h1: (props) => <h1 className="text-2xl font-bold mt-6 mb-3" {...props} />,
-    h2: (props) => <h2 className="text-xl font-bold mt-5 mb-2" {...props} />,
-    h3: (props) => <h3 className="text-lg font-semibold mt-4 mb-2" {...props} />,
-    h4: (props) => <h4 className="text-base font-semibold mt-3 mb-1" {...props} />,
+    h1: (props) => <h1 className="text-2xl font-bold mt-6 mb-3 [overflow-wrap:anywhere]" {...props} />,
+    h2: (props) => <h2 className="text-xl font-bold mt-5 mb-2 [overflow-wrap:anywhere]" {...props} />,
+    h3: (props) => <h3 className="text-lg font-semibold mt-4 mb-2 [overflow-wrap:anywhere]" {...props} />,
+    h4: (props) => <h4 className="text-base font-semibold mt-3 mb-1 [overflow-wrap:anywhere]" {...props} />,
     p: (props) => <p className="my-2 leading-relaxed" {...props} />,
     a: (props) => (
       <a className="text-primary hover:text-primary/80 underline underline-offset-2" target="_blank" rel="noopener noreferrer" {...props} />

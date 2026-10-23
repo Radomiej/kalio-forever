@@ -15,7 +15,7 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('renderArchitectureRunProjection', () => {
-  it('renders cancelled architecture runs as error nodes instead of success', () => {
+  it('renders cancelled architecture runs distinctly from errors and success', () => {
     const nodes: ExecutionGraphNode[] = [];
     const edges: ExecutionGraphEdge[] = [];
 
@@ -66,7 +66,7 @@ describe('renderArchitectureRunProjection', () => {
     expect(nodes[0]).toMatchObject({
       id: 'architecture-run:final-1',
       subtitle: 'goal-guard-delivery-loop / cancelled',
-      status: 'error',
+      status: 'cancelled',
     });
     expect(edges).toContainEqual(
       expect.objectContaining({

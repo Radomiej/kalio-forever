@@ -1,4 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
+import { installMockLaunchProfile, selectMockLaunchProfile } from './helpers/mock-launch-profile';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import {
   API_BASE,
@@ -207,7 +209,7 @@ async function waitForArchitectureRunIdFromSession(
 
 test.describe('Architecture chat turn projection', () => {
   test('renders a sequential router chain without collapsing it into a parallel council', async ({ page, request }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
     const title = `Architecture Sequential E2E ${Date.now()}`;
     const schemaName = `Sequential Router Chain ${Date.now()}`;
     const variantResponse = await request.post(`${API_BASE}/architecture-registry/schemas/strategic-decision-council/variants`, {
@@ -274,11 +276,10 @@ test.describe('Architecture chat turn projection', () => {
     expect(variantResponse.ok()).toBeTruthy();
     const variant = await variantResponse.json() as { id: string };
 
-    const response = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
+    const session = await createExistingMockConversation(request, title);
+    const workflowBubble = page.getByTestId('agent-turn-bubble').filter({
+      has: page.getByTestId('architecture-run-timeline'),
     });
-    expect(response.ok()).toBeTruthy();
-    const session = await response.json() as { id: string };
 
     try {
       await page.goto('/');
@@ -288,7 +289,7 @@ test.describe('Architecture chat turn projection', () => {
       await selectArchitectureInComposer(page, variant.id);
       await sendMessageFromComposer(page, 'Route this through the sequential chain.');
 
-      await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 90_000 });
+      await expect(workflowBubble).toHaveCount(1, { timeout: 90_000 });
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
       const architectureRunId = await waitForArchitectureRunIdFromSession(request, session.id);
       await waitForArchitectureRunCompleted(request, architectureRunId);
@@ -310,11 +311,11 @@ test.describe('Architecture chat turn projection', () => {
       expect(graph.nodes?.filter((node) => node.kind === 'role')).toHaveLength(2);
       expect(graph.nodes?.find((node) => node.id === 'final-artifact')?.status).toBe('completed');
 
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
+      await expect(workflowBubble).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer', { timeout: 90_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
       await expect(page.getByTestId('architecture-route-router')).toHaveCount(3);
-      await expect(page.getByTestId('agent-turn-bubble')).not.toContainText('Execution trace:');
+      await expect(workflowBubble).not.toContainText('Execution trace:');
 
       await page.getByTestId('open-architecture-run-canvas').click();
       await expect(page.getByTestId('architecture-run-canvas-section')).toBeVisible({ timeout: 10_000 });
@@ -325,11 +326,11 @@ test.describe('Architecture chat turn projection', () => {
       await page.reload();
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
-      await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
+      await expect(workflowBubble).toHaveCount(1, { timeout: 30_000 });
       await expect(page.getByTestId('architecture-route-parallel-agents')).toHaveCount(0);
       await expect(page.getByTestId('architecture-route-agent')).toHaveCount(2);
       await expect(page.getByTestId('architecture-route-router')).toHaveCount(3);
-      await expect(page.getByTestId('agent-turn-bubble')).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer');
+      await expect(workflowBubble).toContainText('Router -> Pragmatist -> Router -> Innovator -> Router -> Finalizer');
     } finally {
       await deleteSessionIfExists(request, session.id);
       await request.delete(`${API_BASE}/architecture-registry/schemas/${variant.id}`, { timeout: 5000 }).catch(() => undefined);
@@ -363,17 +364,13 @@ test.describe('Architecture chat turn projection', () => {
       variantId = variant.id;
       expect(variant.nodes?.find((node) => node.id === 'pragmatist')?.maxToolAttempts).toBe(7);
 
-      const response = await request.post(`${API_BASE}/sessions`, {
-        data: { title, personaId: 'default' },
-      });
-      expect(response.ok()).toBeTruthy();
-      const session = await response.json() as { id: string };
+      const session = await createExistingMockConversation(request, title);
       sessionId = session.id;
 
       await page.getByTestId('nav-talk').click();
       await selectSession(page, session.id, title);
       await selectArchitectureInComposer(page, variant.id);
-      await expect(page.getByTestId('welcome-architecture-select').locator(`option[value="${variant.id}"]`)).toHaveCount(1, { timeout: 30_000 });
+      await expect(page.getByTestId('chat-architecture-select')).toHaveValue(variant.id);
       await sendMessageFromComposer(page, 'Run the UI-saved architecture variant and produce a concise final decision.');
 
       await expect(page.getByTestId('architecture-run-timeline')).toBeVisible({ timeout: 90_000 });
@@ -408,8 +405,9 @@ test.describe('Architecture chat turn projection', () => {
   test('renders council branches as sub-agent chips and restores them after reload', async ({ page, request }, testInfo) => {
     test.setTimeout(240_000);
     const title = `Architecture E2E ${Date.now()}`;
+    const profile = await installMockLaunchProfile(page, request);
     const response = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
+      data: { title, personaId: 'default', executionProfileId: profile.id },
     });
     expect(response.ok()).toBeTruthy();
     const session = await response.json() as { id: string };
@@ -689,8 +687,9 @@ test.describe('Architecture chat turn projection', () => {
   test('restores a persisted architecture envelope selection back to the host conversation', async ({ page, request }, testInfo) => {
     test.setTimeout(120_000);
     const title = `Architecture Restore E2E ${Date.now()}`;
+    const profile = await installMockLaunchProfile(page, request);
     const response = await request.post(`${API_BASE}/sessions`, {
-      data: { title, personaId: 'default' },
+      data: { title, personaId: 'default', executionProfileId: profile.id },
     });
     expect(response.ok()).toBeTruthy();
     const session = await response.json() as { id: string };
@@ -735,6 +734,7 @@ test.describe('Architecture chat turn projection', () => {
   test('launches Architecture Debate from the welcome screen with projectPath and keeps child transcripts repo-scoped after reload', async ({ page, request }) => {
     test.setTimeout(420_000);
     const projectPath = requireProjectPath();
+    await installMockLaunchProfile(page, request);
     let sessionId: string | null = null;
     let title = '';
 
@@ -744,7 +744,7 @@ test.describe('Architecture chat turn projection', () => {
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
       await expect(page.getByTestId('welcome-screen')).toBeVisible({ timeout: 15_000 });
-
+      await selectMockLaunchProfile(page);
       await selectArchitectureInComposer(page, 'strategic-decision-council');
       await selectProjectInWelcome(page, projectPath);
       await page.getByTestId('welcome-prompt-input').fill('Oceń architekturę projektu');

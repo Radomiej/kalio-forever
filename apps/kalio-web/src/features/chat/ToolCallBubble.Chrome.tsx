@@ -10,11 +10,37 @@ function formatMs(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+function KalioToolOrigin() {
+  return (
+    <span
+      data-testid="tool-execution-origin"
+      className="rounded bg-sky-400/10 px-1 text-[10px] font-mono text-sky-300"
+      title="Handled by Kalio's tool dispatcher, not the provider's native tool runtime."
+    >
+      Kalio
+    </span>
+  );
+}
+
 export function formatArgValue(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'string') return value.length > 100 ? value.slice(0, 100) + '…' : value;
   const str = JSON.stringify(value);
   return str.length > 100 ? str.slice(0, 100) + '…' : str;
+}
+
+export function FullToolArguments({ args }: { args: Record<string, unknown> }) {
+  return (
+    <div role="region" aria-label="Full tool arguments" tabIndex={0} data-testid="args-expanded"
+      className="min-w-0 max-h-40 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] font-mono bg-base-200/60 rounded px-2 py-1 text-xs text-base-content/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400">
+      {Object.entries(args).map(([key, value]) => (
+        <div key={key}>
+          <span className="text-base-content/50">{key}:</span>{' '}
+          {typeof value === 'string' ? value : JSON.stringify(value ?? null, null, 2)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function Chip({
@@ -47,6 +73,7 @@ export function Chip({
       <div data-testid="tool-call-chip" className="flex items-center gap-1.5 flex-wrap">
         {icon}
         <span className="font-mono text-xs text-sky-400">{toolName}</span>
+        <KalioToolOrigin />
         {targetLabel && (
           <span
             data-testid="tool-call-target"
@@ -81,7 +108,7 @@ export function Chip({
 }
 
 export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity }) {
-  const [argsOpen, setArgsOpen] = useState(false);
+  const [argsOpen, setArgsOpen] = useState(true);
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
   const pendingConfirmations = useAgentStore((s) => s.pendingConfirmations);
   const toolArgProgress = useAgentStore((s) => s.toolArgProgress);
@@ -103,10 +130,7 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
 
   const handleConfirm = () => {
     if (!confirmation) return;
-    setSubmittedRequestId(confirmation.requestId);
-    updateToolActivity(activity.callId, { status: 'running', startedAt: Date.now() });
     eventBus.confirmTool({ requestId: confirmation.requestId, sessionId: confirmation.sessionId });
-    removePendingConfirmation(confirmation.sessionId, confirmation.requestId);
   };
 
   const handleCancel = () => {
@@ -125,6 +149,7 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
       <div data-testid="tool-call-chip" className="flex items-center gap-1.5 flex-wrap">
         <AlertTriangle size={12} className="text-warning animate-pulse shrink-0" data-testid="awaiting-confirmation-icon" />
         <span className="font-mono text-xs text-amber-400">{activity.toolName}</span>
+        <KalioToolOrigin />
         {targetLabel && (
           <span
             data-testid="tool-call-target"
@@ -169,12 +194,8 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
       )}
 
       {argsOpen && argEntries.length > 0 && (
-        <div className="mt-1.5 font-mono bg-base-200/60 rounded px-2 py-1 max-h-40 overflow-y-auto text-xs text-base-content/50" data-testid="args-expanded">
-          {argEntries.map(([k, v]) => (
-            <div key={k}>
-              <span className="text-base-content/40">{k}:</span> {formatArgValue(v)}
-            </div>
-          ))}
+        <div className="mt-1.5">
+          <FullToolArguments args={activity.args} />
         </div>
       )}
 

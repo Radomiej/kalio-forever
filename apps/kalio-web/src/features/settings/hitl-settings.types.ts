@@ -1,14 +1,6 @@
-export type HitlMode = 'manual' | 'auto' | 'bypass';
-export type HitlUnattendedFallback = 'pause' | 'representative';
-export type HitlNotificationChannel = 'none' | 'telegram';
+import type { HitlConfig as SharedHitlConfig, HitlMode as SharedHitlMode } from '@kalio/types';
 
-export interface HitlConfig {
-  mode: HitlMode;
-  autoPersonaId: string | null;
-  unattendedFallback: HitlUnattendedFallback;
-  representativePersonaId: string | null;
-  notificationChannel: HitlNotificationChannel;
-  externalPolicyEnabled: boolean;
-  externalPolicyPersonaId: string | null;
-  raAppApprovalTimeoutMs: number;
-}
+export type HitlConfig = SharedHitlConfig;
+export type HitlMode = SharedHitlMode;
+export type HitlUnattendedFallback = SharedHitlConfig['unattendedFallback'];
+export type HitlNotificationChannel = SharedHitlConfig['notificationChannel'];

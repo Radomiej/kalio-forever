@@ -11,6 +11,7 @@ export async function ensureSubagentSession(input: {
   parentTurnId?: string;
   parentToolCallId?: string;
   runtimeContext: SessionRuntimeContext;
+  reloadAfterUpdate?: boolean;
 }): Promise<ChatSession> {
   const childSession = input.requestedChildSessionId
     ? await input.sessions.get(input.requestedChildSessionId)
@@ -31,12 +32,13 @@ export async function ensureSubagentSession(input: {
     throw new Error(`Sub-agent session ${childSession.id} does not belong to parent session ${input.parentSessionId}`);
   }
   if (
-    input.requestedChildSessionId
+    (input.requestedChildSessionId || input.reloadAfterUpdate)
     && (!childSession.runtimeContext || JSON.stringify(childSession.runtimeContext) !== JSON.stringify(input.runtimeContext))
   ) {
     await input.sessions.updateRuntimeContext(childSession.id, input.runtimeContext, {
       registerRuntimeProjectPath: true,
     });
+    if (input.reloadAfterUpdate) return input.sessions.get(childSession.id);
   }
   return childSession;
 }

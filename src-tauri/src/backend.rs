@@ -99,6 +99,7 @@ pub fn start(app: &mut App) -> Result<(), Box<dyn Error>> {
         .env("CORS_ORIGIN", TAURI_ORIGIN)
         .env("KALIO_INSTALL_PROFILE", "desktop")
         .env("KALIO_ENABLE_TEST_SUPPORT", "false")
+        .env("KALIO_DECISION_DESKTOP_AUTH", "true")
         .env("KALIO_HOME", &kalio_home)
         .env("KALIO_DATA_ROOT", &data_root)
         .env("KALIO_HOST", "127.0.0.1")
@@ -263,4 +264,3 @@ fn health_check(address: SocketAddr) -> bool {
     };
     String::from_utf8_lossy(&response[..read]).contains(" 200 ")
 }
-

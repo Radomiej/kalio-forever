@@ -20,6 +20,7 @@ const MOCK_SCRIPT_END = '[[/mock:script]]';
 type MockScriptAction =
   | { kind: 'wait'; ms: number }
   | { kind: 'hold'; ms: number }
+  | { kind: 'think'; text: string }
   | { kind: 'return'; text: string };
 
 type MockScriptCase = {
@@ -129,7 +130,7 @@ export function parseMockScript(script: string): MockScriptCase[] {
 
 function parseMockScriptActions(source: string): MockScriptAction[] {
   const actions: MockScriptAction[] = [];
-  const actionPattern = /hold\((\d+)\)|wait\((\d+)\)|return\((['"])([\s\S]*?)\3\)/gi;
+  const actionPattern = /hold\((\d+)\)|wait\((\d+)\)|(return|think)\((['"])([\s\S]*?)\4\)/gi;
   for (const match of source.matchAll(actionPattern)) {
     if (match[1] !== undefined) {
       actions.push({ kind: 'hold', ms: Number(match[1]) });
@@ -139,7 +140,7 @@ function parseMockScriptActions(source: string): MockScriptAction[] {
       actions.push({ kind: 'wait', ms: Number(match[2]) });
       continue;
     }
-    actions.push({ kind: 'return', text: match[4] ?? '' });
+    actions.push({ kind: match[3]?.toLowerCase() === 'think' ? 'think' : 'return', text: match[5] ?? '' });
   }
   return actions;
 }
@@ -168,11 +169,44 @@ export function extractRunRaappLaunchId(prompt: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
-export function createRunRaappToolCall(id: string): LLMToolCall {
+function readExplicitRAAppInputs(prompt: string): Record<string, unknown> | undefined {
+  const marker = /Use these JSON inputs:\s*/i.exec(prompt);
+  if (!marker) return undefined;
+  const raw = prompt.slice(marker.index + marker[0].length);
+  const invalid = () => new Error('Invalid explicit RA-App JSON inputs');
+  if (!raw.startsWith('{')) throw invalid();
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index++) {
+    const char = raw[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) {
+      try {
+        const parsed: unknown = JSON.parse(raw.slice(0, index + 1));
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalid();
+        return parsed as Record<string, unknown>;
+      } catch (error) {
+        throw new Error('Invalid explicit RA-App JSON inputs', { cause: error });
+      }
+    }
+  }
+  throw invalid();
+}
+
+export function createRunRaappToolCall(id: string, prompt = ''): LLMToolCall {
+  const inputs = readExplicitRAAppInputs(prompt);
   return {
     id: `mock_tool_${Date.now()}`,
     name: 'run_raapp',
-    args: { id },
+    args: { id, ...(inputs === undefined ? {} : { inputs }) },
   };
 }
 

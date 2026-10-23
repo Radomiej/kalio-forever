@@ -44,6 +44,7 @@ describe('TimeoutSettingsService', () => {
 
   it('returns default timeout settings when nothing is persisted', async () => {
     await expect(service.getTimeoutSettings()).resolves.toEqual({
+      providerRequestTimeoutMs: 120_000,
       webSearchTimeoutMs: 120_000,
       providerLocalTimeoutMs: 3_000,
       providerRemoteTimeoutMs: 15_000,
@@ -60,6 +61,7 @@ describe('TimeoutSettingsService', () => {
     });
 
     await expect(service.getTimeoutSettings()).resolves.toEqual({
+      providerRequestTimeoutMs: 120_000,
       webSearchTimeoutMs: 180_000,
       providerLocalTimeoutMs: 7_000,
       providerRemoteTimeoutMs: 45_000,
@@ -80,6 +82,7 @@ describe('TimeoutSettingsService', () => {
     });
 
     await expect(service.getTimeoutSettings()).resolves.toEqual({
+      providerRequestTimeoutMs: 120_000,
       webSearchTimeoutMs: 15_000,
       providerLocalTimeoutMs: 30_000,
       providerRemoteTimeoutMs: 5_000,
@@ -95,6 +98,7 @@ describe('TimeoutSettingsService', () => {
     await appSettings.set('tool_timeout_provider_remote_ms', '20000oops');
 
     await expect(malformedService.getTimeoutSettings()).resolves.toEqual({
+      providerRequestTimeoutMs: 120_000,
       webSearchTimeoutMs: 120_000,
       providerLocalTimeoutMs: 3_000,
       providerRemoteTimeoutMs: 15_000,
@@ -115,12 +119,13 @@ describe('TimeoutSettingsService', () => {
     const configManagedService = new TimeoutSettingsService(appSettings as never, kalioConfig as never);
 
     await expect(configManagedService.getTimeoutSettings()).resolves.toEqual({
+      providerRequestTimeoutMs: 180_000,
       webSearchTimeoutMs: 250_000,
       providerLocalTimeoutMs: 8_000,
       providerRemoteTimeoutMs: 22_000,
       providerMaxConcurrentStreams: 4,
     });
-    expect(appSettings.get).toHaveBeenCalledTimes(1);
+    expect(appSettings.get).toHaveBeenCalledTimes(2);
     expect(appSettings.get).toHaveBeenCalledWith('tool_timeout_provider_remote_ms');
   });
 
@@ -199,4 +204,27 @@ describe('TimeoutSettingsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(appSettings.set).not.toHaveBeenCalled();
   });
+  it('persists generation timeout independently of probe timeouts across service recreation', async () => {
+    const appSettings = new AppSettingsService(makeTestDrizzle());
+    const first = new TimeoutSettingsService(appSettings);
+    await expect(first.getProviderRequestTimeoutMs()).resolves.toBe(120_000);
+    await first.setTimeoutSettings({ providerRequestTimeoutMs: 600_000 });
+    const restarted = new TimeoutSettingsService(appSettings);
+    await expect(restarted.getProviderRequestTimeoutMs()).resolves.toBe(600_000);
+    await expect(restarted.getProviderTimeoutMs(true)).resolves.toBe(3_000);
+    await restarted.setTimeoutSettings({ providerRequestTimeoutMs: 0 });
+    await expect(restarted.getProviderRequestTimeoutMs()).resolves.toBe(1_000);
+    await restarted.setTimeoutSettings({ providerRequestTimeoutMs: 2_000_000 });
+    await expect(restarted.getProviderRequestTimeoutMs()).resolves.toBe(1_800_000);
+  });
+
+  it('honors TOML request timeout and prevents overriding its managed value', async () => {
+    const appSettings = { get: vi.fn().mockResolvedValue('120000'), set: vi.fn() };
+    const managed = new TimeoutSettingsService(appSettings as never,
+      makeKalioConfigMock({ providerRequestTimeoutMs: 600000 }) as never);
+    await expect(managed.getProviderRequestTimeoutMs()).resolves.toBe(600000);
+    await expect(managed.setTimeoutSettings({ providerRequestTimeoutMs: 300000 })).rejects.toBeInstanceOf(BadRequestException);
+    expect(appSettings.set).not.toHaveBeenCalled();
+  });
+
 });

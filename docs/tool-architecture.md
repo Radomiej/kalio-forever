@@ -170,9 +170,11 @@ Current rules from the code:
   - `agentRun.agentType === 'subagent'`
   - `agentRun.vfsMode === 'isolated'`
   - `ctx.vfsSessionId === ctx.sessionId`
-- `run_subagent` can also pass an optional `autoApproveTools` allowlist for isolated child runs.
-- Only a narrow backend safelist is honored from that allowlist today: `image_generate`.
-- Unsupported tool names in `autoApproveTools` are ignored; shared-VFS child runs still require normal HITL confirmation.
+- A sub-agent can also pass an explicit `autoApproveTools` allowlist. The backend honors only
+  the narrow native safelist `vfs_write`, `image_generate`, `run_cli_agent`, `spawn_cli_agent`,
+  `message_cli_agent`, `fs_write`, and `terminal_spawn`; `image_generate` remains limited to
+  isolated children.
+- Unsupported tool names in `autoApproveTools` are ignored; shared-VFS child runs still require normal HITL confirmation unless a backend-approved tool is explicitly allowlisted.
 - Sub-agent confirmation requests currently use `timeoutMs = 0`; the runtime is optimized around isolated child writes or explicitly allowlisted safe child tools being auto-approved rather than timing out.
 - Normal manual confirmation timeout is distinct from cancel/abort. Timeout keeps the default behavior as a pause/cancel path unless `unattendedFallback === "representative"` and `representativePersonaId` are configured.
 - Representative fallback runs through the same structured approval evaluator as auto HITL, but returns `source: "representative"` and is invoked only after timeout. Explicit user cancel and turn abort never delegate to the representative.

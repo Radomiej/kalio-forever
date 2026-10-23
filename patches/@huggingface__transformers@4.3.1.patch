@@ -1,0 +1,39 @@
+diff --git a/src/tokenization_utils.js b/src/tokenization_utils.js
+--- a/src/tokenization_utils.js
++++ b/src/tokenization_utils.js
+@@ -34,5 +34,8 @@ export async function loadTokenizer(pretrained_model_name_or_path, options) {
+     const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
+-    return await Promise.all(
++    const results = await Promise.allSettled(
+         tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options)),
+     );
++    const failure = results.find(result => result.status === 'rejected');
++    if (failure) throw failure.reason;
++    return results.map(result => result.value);
+ }
+diff --git a/dist/transformers.node.mjs b/dist/transformers.node.mjs
+--- a/dist/transformers.node.mjs
++++ b/dist/transformers.node.mjs
+@@ -15215,5 +15215,8 @@ async function loadTokenizer(pretrained_model_name_or_path, options) {
+   const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
+-  return await Promise.all(
++  const results = await Promise.allSettled(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
++  const failure = results.find((result) => result.status === "rejected");
++  if (failure) throw failure.reason;
++  return results.map((result) => result.value);
+ }
+diff --git a/dist/transformers.node.cjs b/dist/transformers.node.cjs
+--- a/dist/transformers.node.cjs
++++ b/dist/transformers.node.cjs
+@@ -16208,5 +16208,8 @@ async function loadTokenizer(pretrained_model_name_or_path, options) {
+   const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
+-  return await Promise.all(
++  const results = await Promise.allSettled(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
++  const failure = results.find((result) => result.status === "rejected");
++  if (failure) throw failure.reason;
++  return results.map((result) => result.value);
+ }

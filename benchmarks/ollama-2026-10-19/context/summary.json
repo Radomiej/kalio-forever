@@ -1,0 +1,486 @@
+[
+  {
+    "model": "qwen3.5:2b",
+    "group": "capacity",
+    "condition": "4096",
+    "passed": 1,
+    "trials": 1,
+    "correct_fields": 3,
+    "total_fields": 3,
+    "tasks": [
+      {
+        "task": "short_pl",
+        "passed": true,
+        "prompt_tokens": 52,
+        "wall_s": 9.833074045000103,
+        "ttft_s": 7.341338555997936,
+        "prefill_s": 0.723579,
+        "load_s": 6.604604967,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "capacity",
+    "condition": "32768",
+    "passed": 1,
+    "trials": 1,
+    "correct_fields": 3,
+    "total_fields": 3,
+    "tasks": [
+      {
+        "task": "short_pl",
+        "passed": true,
+        "prompt_tokens": 52,
+        "wall_s": 6.89946439599953,
+        "ttft_s": 3.9394108840024273,
+        "prefill_s": 0.749579,
+        "load_s": 3.182457087,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "tools",
+    "condition": "basic6",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 2,
+    "total_fields": 2,
+    "tasks": [
+      {
+        "task": "write_pl",
+        "passed": true,
+        "prompt_tokens": 936,
+        "wall_s": 16.182607228998677,
+        "ttft_s": 16.106394967999222,
+        "prefill_s": 9.723067,
+        "load_s": 2.671617554,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "read_en",
+        "passed": true,
+        "prompt_tokens": 915,
+        "wall_s": 11.72229142300057,
+        "ttft_s": 11.64246974300113,
+        "prefill_s": 9.348693,
+        "load_s": 0.002102136,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "tools",
+    "condition": "all62",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 2,
+    "total_fields": 2,
+    "tasks": [
+      {
+        "task": "write_pl",
+        "passed": true,
+        "prompt_tokens": 12045,
+        "wall_s": 149.62765470500017,
+        "ttft_s": 149.53646997800024,
+        "prefill_s": 142.466392,
+        "load_s": 2.668460211,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "read_en",
+        "passed": true,
+        "prompt_tokens": 12024,
+        "wall_s": 26.50885892199949,
+        "ttft_s": 26.376710141998046,
+        "prefill_s": 23.163518,
+        "load_s": 0.003169159,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "filled_context",
+    "condition": "40_records",
+    "passed": 1,
+    "trials": 2,
+    "correct_fields": 4,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": true,
+        "prompt_tokens": 1240,
+        "wall_s": 21.105469005997293,
+        "ttft_s": 18.343732343997544,
+        "prefill_s": 13.795964,
+        "load_s": 4.531237073,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": false,
+        "prompt_tokens": 1239,
+        "wall_s": 12.03910855599679,
+        "ttft_s": 10.42245591399842,
+        "prefill_s": 10.400995,
+        "load_s": 0.006636232,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "filled_context",
+    "condition": "300_records",
+    "passed": 1,
+    "trials": 2,
+    "correct_fields": 4,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": true,
+        "prompt_tokens": 8973,
+        "wall_s": 124.87630926400016,
+        "ttft_s": 121.9465281010016,
+        "prefill_s": 118.965557,
+        "load_s": 2.95600649,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": false,
+        "prompt_tokens": 8972,
+        "wall_s": 14.897337204001815,
+        "ttft_s": 13.032023993000621,
+        "prefill_s": 13.014001,
+        "load_s": 0.003343395,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "filled_context",
+    "condition": "800_records",
+    "passed": 1,
+    "trials": 2,
+    "correct_fields": 4,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": true,
+        "prompt_tokens": 23840,
+        "wall_s": 339.1311878409979,
+        "ttft_s": 334.4129564319992,
+        "prefill_s": 331.651417,
+        "load_s": 2.694913001,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": false,
+        "prompt_tokens": 23839,
+        "wall_s": 21.61663676399985,
+        "ttft_s": 18.524261500999273,
+        "prefill_s": 18.47645,
+        "load_s": 0.001781938,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "capacity",
+    "condition": "4096",
+    "passed": 1,
+    "trials": 1,
+    "correct_fields": 3,
+    "total_fields": 3,
+    "tasks": [
+      {
+        "task": "short_pl",
+        "passed": true,
+        "prompt_tokens": 46,
+        "wall_s": 16.099621098997886,
+        "ttft_s": 8.673658051997336,
+        "prefill_s": 0.499346,
+        "load_s": 8.092514886,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "capacity",
+    "condition": "32768",
+    "passed": 1,
+    "trials": 1,
+    "correct_fields": 3,
+    "total_fields": 3,
+    "tasks": [
+      {
+        "task": "short_pl",
+        "passed": true,
+        "prompt_tokens": 46,
+        "wall_s": 15.836969064999721,
+        "ttft_s": 8.350320929999725,
+        "prefill_s": 0.535206,
+        "load_s": 7.739659324,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "tools",
+    "condition": "basic6",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 2,
+    "total_fields": 2,
+    "tasks": [
+      {
+        "task": "write_pl",
+        "passed": true,
+        "prompt_tokens": 700,
+        "wall_s": 20.986670962000062,
+        "ttft_s": 15.136626450999756,
+        "prefill_s": 7.077786,
+        "load_s": 7.981328426,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "read_en",
+        "passed": true,
+        "prompt_tokens": 678,
+        "wall_s": 11.372967272000096,
+        "ttft_s": 7.825337317000958,
+        "prefill_s": 7.727281,
+        "load_s": 0.007105302,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "tools",
+    "condition": "all62",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 2,
+    "total_fields": 2,
+    "tasks": [
+      {
+        "task": "write_pl",
+        "passed": true,
+        "prompt_tokens": 11263,
+        "wall_s": 153.99087740899995,
+        "ttft_s": 147.78019167800085,
+        "prefill_s": 138.617303,
+        "load_s": 9.01457053,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "read_en",
+        "passed": true,
+        "prompt_tokens": 11241,
+        "wall_s": 19.093142499998066,
+        "ttft_s": 13.557822329999908,
+        "prefill_s": 13.403249,
+        "load_s": 0.010738328,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "filled_context",
+    "condition": "40_records",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 5,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": true,
+        "prompt_tokens": 964,
+        "wall_s": 30.126260045999516,
+        "ttft_s": 17.97100065599807,
+        "prefill_s": 10.415659,
+        "load_s": 7.490529331,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": true,
+        "prompt_tokens": 962,
+        "wall_s": 16.4823125169969,
+        "ttft_s": 9.580566436998197,
+        "prefill_s": 9.49463,
+        "load_s": 0.001723954,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "filled_context",
+    "condition": "300_records",
+    "passed": 0,
+    "trials": 2,
+    "correct_fields": 3,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": false,
+        "prompt_tokens": 6832,
+        "wall_s": 149.48171661800006,
+        "ttft_s": 84.37663800900191,
+        "prefill_s": 76.273319,
+        "load_s": 7.990768478,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": false,
+        "prompt_tokens": 6830,
+        "wall_s": 24.652672184998664,
+        "ttft_s": 12.094754072000796,
+        "prefill_s": 11.996495,
+        "load_s": 0.001700145,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "filled_context",
+    "condition": "800_records",
+    "passed": 0,
+    "trials": 2,
+    "correct_fields": 1,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": false,
+        "prompt_tokens": 18133,
+        "wall_s": 277.425723706001,
+        "ttft_s": 259.2896118890021,
+        "prefill_s": 250.828733,
+        "load_s": 8.243265456,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": false,
+        "prompt_tokens": 18131,
+        "wall_s": 121.25203286599935,
+        "ttft_s": 18.94391836900104,
+        "prefill_s": 18.78482,
+        "load_s": 0.002168517,
+        "done_reason": "length",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "qwen3.5:2b",
+    "group": "focused_context",
+    "condition": "oracle_3_records",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 5,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": true,
+        "prompt_tokens": 147,
+        "wall_s": 7.5846200969972415,
+        "ttft_s": 5.051633742998092,
+        "prefill_s": 1.950437,
+        "load_s": 3.087170177,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": true,
+        "prompt_tokens": 146,
+        "wall_s": 3.692755173000478,
+        "ttft_s": 1.952788132999558,
+        "prefill_s": 1.944162,
+        "load_s": 0.001051802,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  },
+  {
+    "model": "lfm2.5:8b",
+    "group": "focused_context",
+    "condition": "oracle_3_records",
+    "passed": 2,
+    "trials": 2,
+    "correct_fields": 5,
+    "total_fields": 5,
+    "tasks": [
+      {
+        "task": "recall_pl",
+        "passed": true,
+        "prompt_tokens": 131,
+        "wall_s": 20.12002494099943,
+        "ttft_s": 9.903756370997144,
+        "prefill_s": 1.602849,
+        "load_s": 8.215752932,
+        "done_reason": "stop",
+        "error": null
+      },
+      {
+        "task": "join_en",
+        "passed": true,
+        "prompt_tokens": 129,
+        "wall_s": 7.131284348000918,
+        "ttft_s": 1.92707734799842,
+        "prefill_s": 1.840809,
+        "load_s": 0.002701344,
+        "done_reason": "stop",
+        "error": null
+      }
+    ]
+  }
+]

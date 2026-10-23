@@ -54,6 +54,21 @@ function profileRow(overrides: Partial<ProfileRow> = {}): ProfileRow {
 }
 
 describe('ExecutionProfileService', () => {
+  it('resolves a discovered Codex model idempotently with strict approval', async () => {
+    const { service, insert } = makeService();
+    const first = await service.resolveCodex('chatgpt-default', 'gpt-6-luna');
+    expect(first).toMatchObject({ kind: 'codex-app-server', model: 'gpt-6-luna', authProfileId: 'chatgpt-default', approvalMode: 'kalio_strict' });
+    expect((await service.resolveCodex('chatgpt-default', 'gpt-6-luna')).id).toBe(first.id);
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+  it('does not reuse another account or a guard profile for strict Codex selection', async () => {
+    const { service } = makeService([profileRow({ model: 'gpt-6-luna' })]);
+    // The shared fixture's SQL where stub returns the first row; model exact id lookup here.
+    vi.spyOn(service, 'get').mockImplementation(async id => (await service.list()).find(profile => profile.id === id)!);
+    const selected = await service.resolveCodex('another-account', 'gpt-6-luna');
+    expect(selected.id).not.toBe('codex-guard');
+    expect(selected.authProfileId).toBe('another-account');
+  });
   it('maps persisted profiles to the shared contract', async () => {
     const { service } = makeService([profileRow()]);
 
@@ -132,5 +147,22 @@ describe('ExecutionProfileService', () => {
 
     await expect(service.resolveDirect({ credentialId: 'credential-1', model: 'openrouter/missing' }))
       .rejects.toThrow('not available');
+  });
+
+  it('resolves a dynamically discovered Devin model to an idempotent strict profile', async () => {
+    const { service, rows, insert } = makeService();
+
+    const first = await service.resolveDevinCli('swe-2-high');
+    const second = await service.resolveDevinCli('swe-2-high');
+
+    expect(first).toEqual(expect.objectContaining({
+      kind: 'devin-cli-acp',
+      model: 'swe-2-high',
+      approvalMode: 'kalio_strict',
+      enabled: true,
+    }));
+    expect(second.id).toBe(first.id);
+    expect(rows).toHaveLength(1);
+    expect(insert).toHaveBeenCalledOnce();
   });
 });

@@ -7,10 +7,11 @@ import {
   readdirSync,
   statSync,
   existsSync,
+  realpathSync,
   unlinkSync,
   createReadStream,
 } from 'node:fs';
-import { join, resolve, normalize, basename, extname, sep } from 'node:path';
+import { join, resolve, normalize, basename, extname, sep, relative, isAbsolute } from 'node:path';
 import type { Readable } from 'node:stream';
 import archiver from 'archiver';
 import { eq } from 'drizzle-orm';
@@ -88,6 +89,17 @@ export class VFSService {
     mkdirSync(resolve(safePath, '..'), { recursive: true });
     writeFileSync(safePath, req.content, 'utf8');
     this.logger.debug(`VFS write: ${safePath}`);
+  }
+
+  /** Read-only validation of the persisted project boundary, including junctions. */
+  assertProjectExecutionCwd(projectPath: string, executionCwd: string): { projectRoot: string; cwd: string } {
+    if (!isAbsolute(projectPath) || !isAbsolute(executionCwd)) throw new Error('Project execution scope requires absolute paths.');
+    const projectRoot = realpathSync(projectPath);
+    const cwd = realpathSync(executionCwd);
+    if (!statSync(projectRoot).isDirectory() || !statSync(cwd).isDirectory()) throw new Error('Project execution scope requires an existing directory.');
+    const offset = relative(projectRoot, cwd);
+    if (offset === '..' || offset.startsWith(`..${sep}`) || isAbsolute(offset)) throw new Error('Execution cwd is outside the registered project scope.');
+    return { projectRoot, cwd };
   }
 
   /**

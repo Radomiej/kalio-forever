@@ -79,7 +79,7 @@ export function CodeIntelligencePanel() {
     <section className="flex flex-col gap-5" aria-labelledby="code-intelligence-title">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 id="code-intelligence-title" className="text-base font-semibold">VS Code</h3>
+          <h3 id="code-intelligence-title" className="text-base font-semibold">VS Code development environment</h3>
         </div>
         <button type="button" className="btn btn-xs btn-ghost gap-1" onClick={() => void refreshDetection()} disabled={loading || action !== null}>
           {action === 'detect' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
@@ -93,7 +93,9 @@ export function CodeIntelligencePanel() {
           <div className="rounded-xl border border-base-300 bg-base-200/20 p-3">
             <div className="grid gap-2 sm:grid-cols-3">
               <Fact label="VS Code" value={status.vscodeVersion ?? (status.platformSupported ? 'Detected' : 'Unsupported')} ok={status.platformSupported} />
-              <Fact label="Bridge" value={status.bridgeVersion ?? (status.bridgeInstalled ? 'Installed' : 'Missing')} ok={status.bridgeInstalled && status.bridgeCompatible} />
+              <Fact label="Bridge" value={status.bridgeInstalled
+                ? status.bridgeCompatible ? `Compatible · v${status.bridgeVersion ?? 'unknown'}` : `Update required · v${status.bridgeVersion ?? 'unknown'}`
+                : 'Not installed'} ok={status.bridgeInstalled && status.bridgeCompatible} />
               <Fact label="Runtimes" value={`${status.activeRuntimeCount}/${status.maxManagedRuntimes}`} ok={status.activeRuntimeCount < status.maxManagedRuntimes} />
             </div>
             <details className="mt-3 border-t border-base-300/70 pt-2">
@@ -114,8 +116,9 @@ export function CodeIntelligencePanel() {
               <ChevronDown size={12} className="ml-auto" />
             </summary>
             <div className="mt-3 border-t border-warning/20 pt-3 text-xs text-base-content/60">
-              <p>VS Code providers run with host permissions. Enable only projects you trust.</p>
-              <label className="mt-3 flex items-center gap-2"><input type="checkbox" className="toggle toggle-sm" checked={false} disabled /> Allow in VFS sandbox <span className="text-xs">Unavailable</span></label>
+              <p>VS Code language providers run with host permissions. Enable only projects you trust.</p>
+              <p className="mt-2">Kalio cannot enforce its VFS sandbox on these host processes, so sandbox permission is unavailable. Project trust is controlled separately below.</p>
+              <label className="mt-3 flex items-center gap-2"><input type="checkbox" className="toggle toggle-sm" checked={false} disabled /> Restrict to Kalio VFS sandbox <span className="text-xs">Unsupported</span></label>
             </div>
           </details>
           <div className="flex flex-col gap-3">

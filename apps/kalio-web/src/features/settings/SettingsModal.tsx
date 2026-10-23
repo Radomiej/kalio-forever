@@ -8,23 +8,61 @@ interface SettingsModalProps {
   initialTab?: string;
 }
 
+function tabStops(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(
+    'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]',
+  )).filter((element) => {
+    if (element.tabIndex < 0 || element.matches(':disabled') || element.closest('[hidden], [inert]')) return false;
+    for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+      const style = window.getComputedStyle(ancestor);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (ancestor instanceof HTMLDetailsElement && !ancestor.open
+        && !ancestor.querySelector('summary')?.contains(element)) return false;
+      if (ancestor === container) break;
+    }
+    return true;
+  });
+}
+
 export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
   const [tabId, setTabId] = useState(initialTab ?? SETTINGS_BLOCKS[0]?.id ?? 'llm');
   const contentRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const pendingRuntimeFocusRequestRef = useRef(false);
   const requestedSettingsTab = useSettingsStore((state) => state.requestedSettingsTab);
   const clearRequestedSettingsTab = useSettingsStore((state) => state.clearRequestedSettingsTab);
   const requestRuntimeModelFocus = useSettingsStore((state) => state.requestRuntimeModelFocus);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const modal = modalRef.current;
+      if (!modal || modal.inert || e.defaultPrevented) return;
+      const activeDialog = document.activeElement?.closest('dialog, [role="dialog"]');
+      if (activeDialog && activeDialog !== modal) return;
+      if (e.key === 'Escape'
+        && document.activeElement?.closest('[role="combobox"][aria-expanded="true"]')) return;
+      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Tab') return;
+      const stops = tabStops(modal);
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      const active = document.activeElement;
+      if (!modal.contains(active) || (e.shiftKey ? active === first : active === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first)?.focus();
+      }
+    };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
   useLayoutEffect(() => {
+    const previousFocus = document.activeElement;
     closeButtonRef.current?.focus();
+    return () => {
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
   }, []);
 
   useEffect(() => {
@@ -61,6 +99,7 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
 
   return (
     <div
+      ref={modalRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-base-300/80 p-3 backdrop-blur-sm sm:p-6"
       role="dialog" aria-modal="true" aria-label="Settings"
       data-testid="settings-modal"

@@ -2,14 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ArchitectPage } from './ArchitectPage';
 import { useSessionStore } from '../../store/sessionStore';
+import type { CreateArchitectureRunDto, ExecutionProfile } from '@kalio/types';
 
-const { apiGet, apiPost, apiDelete } = vi.hoisted(() => ({
+const { apiGet, apiPost, apiDelete, profilesGet } = vi.hoisted(() => ({
+  profilesGet: vi.fn(),
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiDelete: vi.fn(),
 }));
 
 vi.mock('../../services/apiClient', () => ({
+  getExecutionProfiles: profilesGet,
+  getDevinCliStatus: vi.fn().mockResolvedValue({ modelCatalogStatus: 'ready', modelCatalogStale: false, models: [] }),
   apiClient: {
     get: apiGet,
     post: apiPost,
@@ -251,6 +255,7 @@ function openGraphControls() {
 describe('ArchitectPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    profilesGet.mockResolvedValue([]);
     useSessionStore.setState({ sessions: [], activeSessionId: null });
     apiGet.mockImplementation((url: string) => {
       if (url === '/api/architecture-registry/schemas') {
@@ -486,6 +491,38 @@ describe('ArchitectPage', () => {
         }),
       }));
     });
+  });
+
+  it('binds the selected Devin profile at the top level of the architecture request', async () => {
+    const profile: ExecutionProfile = { id: 'devin-swe-2', name: 'Devin', kind: 'devin-cli-acp', model: 'swe-2', enabled: true, approvalMode: 'kalio_strict', capabilitiesVersion: '1', createdAt: 1, updatedAt: 1 };
+    profilesGet.mockResolvedValueOnce([profile]);
+    render(<ArchitectPage />);
+    fireEvent.click(await screen.findByTestId('architect-run-modal-open'));
+    const input = screen.getByRole('combobox', { name: 'Provider and model' });
+    await waitFor(() => expect(input).toBeEnabled());
+    fireEvent.focus(input);
+    fireEvent.click(await screen.findByRole('option', { name: /Devin CLI · swe-2/ }));
+    expect(input).toHaveValue('Devin CLI · swe-2');
+    fireEvent.click(screen.getByTestId('architect-start-run'));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/architecture-runs/async', expect.objectContaining({ executionProfileId: profile.id })));
+    const dto = apiPost.mock.calls.find(([url]) => url === '/api/architecture-runs/async')![1] as CreateArchitectureRunDto;
+    expect(dto.context).not.toHaveProperty('executionProfileId');
+    expect(await screen.findByText('run-1')).toBeInTheDocument();
+  });
+
+  it('blocks Goal Guard before any HTTP start request when an explicit profile is selected', async () => {
+    const profile: ExecutionProfile = { id: 'devin-swe-2', name: 'Devin', kind: 'devin-cli-acp', model: 'swe-2', enabled: true, approvalMode: 'kalio_strict', capabilitiesVersion: '1', createdAt: 1, updatedAt: 1 };
+    profilesGet.mockResolvedValueOnce([profile]);
+    render(<ArchitectPage />);
+    fireEvent.click(await screen.findByTestId('architect-run-modal-open'));
+    const input = screen.getByRole('combobox', { name: 'Provider and model' });
+    await waitFor(() => expect(input).toBeEnabled());
+    fireEvent.focus(input);
+    fireEvent.click(await screen.findByRole('option', { name: /Devin CLI · swe-2/ }));
+    fireEvent.click(screen.getByTestId('architect-start-goal-guard-flow'));
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('cannot forward an explicit execution profile');
+    expect(input).toHaveValue('Devin CLI · swe-2');
   });
 
   it('starts a run with schema and persona override data', async () => {

@@ -6,24 +6,29 @@ import type {
   AssignSessionProjectDto,
   ChatSession,
   ChatMessage,
-  ChatSessionKind,
   CreateSessionDto,
   SessionRuntimeContext,
+  ExecutionProfileLookupPort,
 } from '@kalio/types';
+import { EXECUTION_PROFILE_LOOKUP } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
 import { SessionManagerService } from './session-manager.service';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
 import { MESSAGE_REPOSITORY } from './chat.tokens';
 import { SessionEventsService } from './session-events.service';
+import { toChatSession } from './session-row';
+import { DEFAULT_SESSION_TITLE, insertSessionRecord, runtimeProjectPath } from './session-creation';
+import { sessionDescendantIds } from './session-tree.utils';
+import { sessionTreeStopAdmission, type SessionTreeStopClaim } from '../../database/session-tree-stop-admission';
 import { LLMService } from '../llm/llm.service';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { ProjectsService, SYSTEM_PROJECT_IDS } from './projects.service';
 import type { SessionMessagePage } from './interfaces/message-repository.interface';
 import { ActiveSessionRegistry } from './active-session-registry.service';
 import { PersonaService } from '../persona/persona.service';
-import { resolveExecutionProfileId } from '../agent-runtime/execution-profile.utils';
-import { resolvePersonaExecutionProfileChange } from './session-profile-binding.utils';
+import { prepareSessionProfileUpdate } from './session-profile-update';
+import { SessionProfileAdmissionService } from './session-profile-admission.service';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
 import {
   buildTitlePrompt as buildSessionTitlePrompt,
@@ -32,8 +37,6 @@ import {
   normalizedUserPrompt as normalizeSessionPrompt,
 } from './sessions-title.utils';
 
-const toMs = (v: number | Date): number => (v instanceof Date ? v.getTime() : v);
-const DEFAULT_SESSION_TITLE = 'New Chat';
 const MAX_SESSION_LIST_LIMIT = 500;
 interface SessionRuntimeScopeOptions {
   registerRuntimeProjectPath?: boolean;
@@ -56,9 +59,11 @@ export class SessionsService {
     private readonly llm: LLMService,
     private readonly allowedPaths: AllowedPathsService,
     private readonly projects: ProjectsService,
-    @Optional() private readonly activeSessionRegistry?: ActiveSessionRegistry,
-    @Optional() private readonly moduleRef?: ModuleRef,
-    @Optional() private readonly personas?: PersonaService,
+    @Optional() @Inject(ActiveSessionRegistry) private readonly activeSessionRegistry: ActiveSessionRegistry | undefined,
+    @Optional() @Inject(ModuleRef) private readonly moduleRef: ModuleRef | undefined,
+    @Optional() @Inject(PersonaService) private readonly personas: PersonaService | undefined,
+    @Optional() @Inject(EXECUTION_PROFILE_LOOKUP) private readonly executionProfiles: ExecutionProfileLookupPort | undefined,
+    private readonly profileAdmission: SessionProfileAdmissionService,
   ) {}
 
   async list(options: SessionListOptions = {}): Promise<ChatSession[]> {
@@ -70,7 +75,7 @@ export class SessionsService {
       ? query.orderBy(desc(sessions.updatedAt))
       : query.where(isNull(sessions.archivedAt)).orderBy(desc(sessions.updatedAt));
     const rows = await (limit === undefined ? orderedQuery : orderedQuery.limit(limit));
-    return rows.map(this.toChatSession);
+    return rows.map(toChatSession);
   }
 
   async create(dto: CreateSessionDto): Promise<ChatSession> {
@@ -84,30 +89,18 @@ export class SessionsService {
   ): Promise<ChatSession> {
     const scope = await this.resolveProjectScope(dto);
     await this.registerRuntimeProjectPathIfRequested(scope.runtimeContext ?? undefined, options);
-    const now = new Date();
-    const row = {
-      id,
-      personaId: dto.personaId ?? 'default',
-      title: dto.title ?? DEFAULT_SESSION_TITLE,
-      kind: dto.kind ?? 'chat',
-      parentSessionId: dto.parentSessionId ?? null,
-      parentTurnId: dto.parentTurnId ?? null,
-      parentToolCallId: dto.parentToolCallId ?? null,
-      projectId: scope.projectId,
-      executionProfileId: scope.executionProfileId,
-      runtimeContext: scope.runtimeContext ?? null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.drizzle.db.insert(sessions).values(row);
-    const session = this.toChatSession(row);
+    const session = insertSessionRecord(this.drizzle.db, id, dto, scope);
     this.sessionEvents.emitSessionCreated(session);
     return session;
   }
 
   async get(id: string): Promise<ChatSession> {
     const row = await this.getRow(id);
-    return this.toChatSession(row);
+    return toChatSession(row);
+  }
+
+  claimTreeStop(id: string): SessionTreeStopClaim {
+    return sessionTreeStopAdmission(this.drizzle.db).claim(id);
   }
 
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
@@ -128,7 +121,7 @@ export class SessionsService {
       .select()
       .from(sessions)
       .where(eq(sessions.parentSessionId, parentSessionId));
-    return rows.map(this.toChatSession);
+    return rows.map(toChatSession);
   }
 
   async delete(id: string): Promise<void> {
@@ -159,7 +152,7 @@ export class SessionsService {
     await this.update(id, { title });
   }
 
-  async update(id: string, patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
+  async update(id: string, patch: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext }): Promise<void> {
     return this.updateWithOptions(id, patch);
   }
 
@@ -232,33 +225,36 @@ export class SessionsService {
 
   async updateWithOptions(
     id: string,
-    patch: { title?: string; personaId?: string; runtimeContext?: SessionRuntimeContext },
+    patch: { title?: string; personaId?: string; executionProfileId?: string; runtimeContext?: SessionRuntimeContext },
     options: SessionRuntimeScopeOptions = {},
   ): Promise<void> {
-    await this.assertExists(id);
-    const current = await this.get(id);
-    let nextExecutionProfileId: string | undefined;
-    if (patch.personaId !== undefined && patch.personaId !== current.personaId) {
-      const personaConfig = await this.personas?.getSessionConfig(patch.personaId);
-      const nextProfileId = personaConfig?.executionProfileId;
-      nextExecutionProfileId = await resolvePersonaExecutionProfileChange(
-        this.repo,
-        id,
-        current.executionProfileId,
-        nextProfileId,
-      );
-    }
-    const hasPatch = patch.title !== undefined || patch.personaId !== undefined || patch.runtimeContext !== undefined;
-    if (hasPatch) {
-      await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
+    // Path registration may notify other consumers; keep it outside admission.
+    await this.registerRuntimeProjectPathIfRequested(patch.runtimeContext, options);
+    const updated = await this.profileAdmission.runMutation(id, async assertNotStopped => {
+      const current = await this.get(id);
+      const assertMutable = () => {
+        assertNotStopped();
+        if (this.activeSessionRegistry?.isActive(id)) {
+          throw new ConflictException('Execution profile cannot change while this conversation is generating.');
+        }
+      };
+      const nextExecutionProfileId = await prepareSessionProfileUpdate({
+        current, patch, repository: this.repo, profiles: this.executionProfiles,
+        personaProfile: async personaId => (await this.personas?.getSessionConfig(personaId))?.executionProfileId,
+        assertMutable,
+      });
+      const hasPatch = patch.title !== undefined || patch.personaId !== undefined || nextExecutionProfileId !== undefined || patch.runtimeContext !== undefined;
+      if (!hasPatch) return undefined;
+      if (nextExecutionProfileId !== undefined) assertMutable();
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.title !== undefined) set.title = patch.title;
       if (patch.personaId !== undefined) set.personaId = patch.personaId;
       if (nextExecutionProfileId !== undefined) set.executionProfileId = nextExecutionProfileId;
       if (patch.runtimeContext !== undefined) set.runtimeContext = patch.runtimeContext;
-      await this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id));
-      this.sessionEvents.emitSessionUpdated(await this.get(id));
-    }
+      this.drizzle.db.update(sessions).set(set).where(eq(sessions.id, id)).run();
+      return this.get(id);
+    });
+    if (updated) this.sessionEvents.emitSessionUpdated(updated);
   }
 
   async updateRuntimeContext(
@@ -376,15 +372,16 @@ export class SessionsService {
     const personaProfileId = parent
       ? undefined
       : (await this.personas?.getSessionConfig(dto.personaId))?.executionProfileId;
+    const defaultProfileId = parent ? undefined : await this.executionProfiles?.getDefaultId();
     if (projectId === SYSTEM_PROJECT_IDS.none) {
       if (requestedProjectId === SYSTEM_PROJECT_IDS.none && dto.projectPathOverride?.trim()) {
         throw new BadRequestException('The no-project session cannot have a path override.');
       }
       return {
         projectId,
-        executionProfileId: resolveExecutionProfileId({
+        executionProfileId: this.resolveProfileId({
           explicitProfileId: parentProfileId ?? explicitProfileId,
-          personaProfileId,
+          personaProfileId: defaultProfileId ?? personaProfileId,
           projectProfileId: 'local-direct-default',
         }),
         runtimeContext: requestedProjectId === SYSTEM_PROJECT_IDS.none
@@ -400,13 +397,18 @@ export class SessionsService {
     }
     return {
       projectId,
-      executionProfileId: resolveExecutionProfileId({
+      executionProfileId: this.resolveProfileId({
         explicitProfileId: parentProfileId ?? explicitProfileId,
-        personaProfileId,
+        personaProfileId: defaultProfileId ?? personaProfileId,
         projectProfileId: project.defaultExecutionProfileId,
       }),
       runtimeContext: this.applyProjectPath(dto.runtimeContext, path),
     };
+  }
+
+  private resolveProfileId(selection: Parameters<ExecutionProfileLookupPort['resolveId']>[0]): string {
+    if (!this.executionProfiles) throw new ConflictException('Execution profile selection is unavailable.');
+    return this.executionProfiles.resolveId(selection);
   }
 
   private applyProjectPath(
@@ -442,46 +444,14 @@ export class SessionsService {
     const rows = await this.drizzle.db
       .select({ id: sessions.id, parentSessionId: sessions.parentSessionId })
       .from(sessions);
-    const childrenByParent = new Map<string, string[]>();
-    for (const row of rows) {
-      if (!row.parentSessionId) continue;
-      childrenByParent.set(row.parentSessionId, [
-        ...(childrenByParent.get(row.parentSessionId) ?? []),
-        row.id,
-      ]);
-    }
-    const result: string[] = [];
-    const pending = [id];
-    const visited = new Set<string>();
-    while (pending.length > 0) {
-      const currentId = pending.shift();
-      if (!currentId || visited.has(currentId)) continue;
-      visited.add(currentId);
-      result.push(currentId);
-      pending.push(...(childrenByParent.get(currentId) ?? []));
-    }
-    return result;
+    return sessionDescendantIds(id, rows);
   }
 
   private async assertExists(id: string): Promise<void> {
     await this.getRow(id);
   }
 
-  private async getRow(id: string): Promise<{
-    id: string;
-    personaId: string;
-    title: string;
-    kind?: ChatSessionKind;
-    parentSessionId?: string | null;
-    parentTurnId?: string | null;
-    parentToolCallId?: string | null;
-    projectId?: string | null;
-    executionProfileId?: string | null;
-    externalThreadId?: string | null;
-    runtimeContext?: SessionRuntimeContext | null;
-    createdAt: number | Date;
-    updatedAt: number | Date;
-  }> {
+  private async getRow(id: string): Promise<Parameters<typeof toChatSession>[0]> {
     const [row] = await this.drizzle.db
       .select()
       .from(sessions)
@@ -498,11 +468,7 @@ export class SessionsService {
     if (!options.registerRuntimeProjectPath) {
       return;
     }
-    const projectPathValue = runtimeContext?.architectureContext?.['projectPath'];
-    const executionCwd = runtimeContext?.architectureContext?.['executionCwd'];
-    const projectPath = typeof projectPathValue === 'string' && projectPathValue.trim().length > 0
-      ? projectPathValue.trim()
-      : typeof executionCwd === 'string' && executionCwd.trim().length > 0 ? executionCwd.trim() : undefined;
+    const projectPath = runtimeProjectPath(runtimeContext);
     if (!projectPath) {
       return;
     }
@@ -515,38 +481,6 @@ export class SessionsService {
     } catch {
       return undefined;
     }
-  }
-
-  private toChatSession(row: {
-    id: string;
-    personaId: string;
-    title: string;
-    kind?: ChatSessionKind;
-    parentSessionId?: string | null;
-    parentTurnId?: string | null;
-      parentToolCallId?: string | null;
-      projectId?: string | null;
-      executionProfileId?: string | null;
-      externalThreadId?: string | null;
-    runtimeContext?: SessionRuntimeContext | null;
-    createdAt: number | Date;
-    updatedAt: number | Date;
-  }): ChatSession {
-    return {
-      id: row.id,
-      personaId: row.personaId,
-      title: row.title,
-      kind: row.kind ?? 'chat',
-      parentSessionId: row.parentSessionId ?? undefined,
-      parentTurnId: row.parentTurnId ?? undefined,
-      parentToolCallId: row.parentToolCallId ?? undefined,
-      ...(row.projectId ? { projectId: row.projectId } : {}),
-      ...(row.executionProfileId ? { executionProfileId: row.executionProfileId } : {}),
-      ...(row.externalThreadId ? { externalThreadId: row.externalThreadId } : {}),
-      runtimeContext: row.runtimeContext ?? undefined,
-      createdAt: toMs(row.createdAt),
-      updatedAt: toMs(row.updatedAt),
-    };
   }
 }
 

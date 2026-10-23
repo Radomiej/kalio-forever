@@ -1,16 +1,19 @@
 import {
   appendFile,
   cp,
+  chmod,
   mkdir,
+  link,
   open,
   readFile,
+  readlink,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   downloadFile,
@@ -188,12 +191,14 @@ function readWindowsProcess(pid) {
 
 export function isRuntimeProcessOwned(home, processInfo) {
   const homeText = String(home);
-  const absoluteHome = /^[A-Za-z]:[\\/]/.test(homeText) || homeText.startsWith('\\\\')
+  const windowsPath = /^[A-Za-z]:[\\/]/.test(homeText) || homeText.startsWith('\\\\');
+  const absoluteHome = windowsPath
     ? homeText
     : resolve(homeText);
-  const versionsRoot = join(absoluteHome, 'app', 'versions').replaceAll('/', '\\').toLowerCase() + '\\';
-  const executablePath = String(processInfo?.ExecutablePath ?? '').replaceAll('/', '\\').toLowerCase();
-  const commandLine = String(processInfo?.CommandLine ?? '').replaceAll('/', '\\').toLowerCase();
+  const normalize = (value) => windowsPath ? String(value).replaceAll('/', '\\').toLowerCase() : String(value);
+  const versionsRoot = normalize(join(absoluteHome, 'app', 'versions')) + (windowsPath ? '\\' : '/');
+  const executablePath = normalize(processInfo?.ExecutablePath ?? '');
+  const commandLine = normalize(processInfo?.CommandLine ?? '');
   return executablePath.startsWith(versionsRoot)
     && commandLine.includes(versionsRoot)
     && commandLine.includes('kalio-cli.mjs');
@@ -238,11 +243,17 @@ async function stopRuntime(home, force) {
     }
   } else {
     try {
+      const executable = await readlink(`/proc/${pid}/exe`);
+      const commandLine = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).replaceAll('\0', ' ');
+      if (!isRuntimeProcessOwned(home, { ExecutablePath: executable, CommandLine: commandLine })) {
+        throw new Error(`Runtime lock PID ${pid} does not belong to this Kalio installation; refusing --force`);
+      }
       process.kill(pid, 'SIGTERM');
     } catch (error) {
-      if (error?.code !== 'ESRCH') {
+      if (error?.code !== 'ESRCH' && error?.code !== 'ENOENT') {
         throw error;
       }
+      await rm(join(home, '.runtime.lock'), { force: true });
     }
   }
   await waitForLockRelease(home);
@@ -341,7 +352,7 @@ async function installArchive(home, archivePath, expected) {
     if (
       metadata.version !== expected.releaseVersion
       || metadata.runtime !== expected.runtime
-      || metadata.platform !== 'windows'
+      || metadata.platform !== expected.platform
       || metadata.architecture !== 'x64'
     ) {
       throw new Error('Runtime archive metadata does not match the verified release asset');
@@ -350,7 +361,7 @@ async function installArchive(home, archivePath, expected) {
     const sourceRoot = resolve(metadataPath, '..');
     const versionsRoot = resolve(home, 'app', 'versions');
     const versionRoot = resolve(versionsRoot, metadata.version);
-    if (!versionRoot.startsWith(versionsRoot + '\\')) {
+    if (!versionRoot.startsWith(versionsRoot + sep)) {
       throw new Error('Runtime archive version escapes the install directory');
     }
     await mkdir(versionsRoot, { recursive: true });
@@ -372,10 +383,25 @@ async function installArchive(home, archivePath, expected) {
   }
 }
 
+async function ensureLinuxLauncher(home) {
+  if (process.platform !== 'linux') return;
+  const directory = join(home, 'bin');
+  const temporary = join(directory, `.kalio-launcher-${process.pid}`);
+  await mkdir(directory, { recursive: true });
+  try {
+    await writeFile(temporary, "#!/bin/sh\nset -eu\nKALIO_HOME=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\nexport KALIO_HOME\nversion=$(sed -n 's/.*\"version\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' \"$KALIO_HOME/current.json\" | head -n 1)\ncase \"$version\" in\n  \"\"|.|..|*[!A-Za-z0-9._-]*) echo \"[kalio] invalid current runtime version\" >&2; exit 1 ;;\nesac\nexec \"$KALIO_HOME/app/versions/$version/bin/kalio\" \"$@\"\n", { mode: 0o755, flag: 'wx' });
+    await chmod(temporary, 0o755);
+    try { await link(temporary, join(directory, 'kalio')); }
+    catch (error) { if (error?.code !== 'EEXIST') throw error; }
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 async function applyUpdate(options) {
   const home = resolve(options.home);
   const { current, versionRoot } = await readCurrent(home);
-  const expected = await loadRelease(options, { current, versionRoot });
+  const expected = await loadRelease(options, { current, versionRoot }, logMessage);
   if (expected.releaseVersion === current.version && expected.runtime === current.runtime) {
     await logMessage(home, `Already up to date at ${current.version} (${current.runtime})`);
     return;
@@ -397,6 +423,7 @@ async function applyUpdate(options) {
     }
     await stopRuntime(home, options.force);
     const installed = await installArchive(home, archivePath, expected);
+    await ensureLinuxLauncher(home);
     await writeCurrent(home, installed.current);
     await logMessage(home, `Installed ${installed.current.version} (${installed.current.runtime})`);
     if (!options.noLaunch) {

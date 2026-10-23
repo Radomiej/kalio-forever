@@ -12,6 +12,27 @@ import type { SessionEventsService } from '../session-events.service';
 import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import type { ModuleRef } from '@nestjs/core';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from '../architecture-runtime-stop.port';
+import { SUBAGENT_RUNTIME } from '../../tool/subagent-runtime.port';
+import { SessionRuntimeStopService } from '../session-runtime-stop.service';
+import type { ChatService } from '../chat.service';
+import type { EmitFn } from '../interfaces/stream-context.interface';
+
+type GatewayArgs = ConstructorParameters<typeof ChatGateway>;
+type GatewayTestArgs = [GatewayArgs[0], GatewayArgs[1], GatewayArgs[2], GatewayArgs[3], GatewayArgs[4], GatewayArgs[5],
+  GatewayArgs[6]?, GatewayArgs[7]?, ArchitectureRuntimeStopPort?, GatewayArgs[8]?, GatewayArgs[9]?, GatewayArgs[10]?, GatewayArgs[11]?];
+
+function makeGateway(...args: GatewayTestArgs) {
+  const pipeline = args[1];
+  Object.assign(args[3], { claimTreeStop: vi.fn(() => ({ release: vi.fn() })) });
+  Object.assign(pipeline, { assertStopLeasesAvailable: () => undefined, acquireStopLease: (id: string, owners: Promise<void>) => ({
+    ready: pipeline.stopAndDrain(id).then(async () => { await owners; return { errors: [] }; },
+      async error => { await owners; return { errors: [error] }; }),
+    completion: Promise.resolve(), release: () => undefined,
+  }) });
+  const stop = new SessionRuntimeStopService(args[3], pipeline, args[6], args[7], args[8], args[10], args[9]);
+  return new ChatGateway(args[0], pipeline, args[2], args[3], args[4], args[5], args[6], args[7],
+    args[9], args[10], args[11], args[12], stop);
+}
 
 type ConfirmHandler = (client: never, payload: { requestId: string; sessionId: string; message?: string }) => void;
 type SessionCreatedHandler = (event: { session: ChatSession }) => void;
@@ -29,6 +50,7 @@ describe('ChatGateway', () => {
   let agentBudgetApprovals: AgentBudgetApprovalService;
   let architectureRuntimeStop: ArchitectureRuntimeStopPort;
   let moduleRef: ModuleRef;
+  let stopSubagents: ReturnType<typeof vi.fn>;
   let client: { id: string; emit: ReturnType<typeof vi.fn> };
   let observer: { id: string; emit: ReturnType<typeof vi.fn> };
 
@@ -98,8 +120,11 @@ describe('ChatGateway', () => {
     architectureRuntimeStop = {
       stopRunsForSessions: vi.fn().mockResolvedValue([]),
     };
+    stopSubagents = vi.fn().mockResolvedValue(undefined);
     moduleRef = {
-      get: vi.fn((token: symbol) => (token === ARCHITECTURE_RUNTIME_STOP ? architectureRuntimeStop : undefined)),
+      get: vi.fn((token: symbol) => token === SUBAGENT_RUNTIME
+        ? { stopAndDrainSessions: stopSubagents }
+        : token === ARCHITECTURE_RUNTIME_STOP ? architectureRuntimeStop : undefined),
     } as unknown as ModuleRef;
 
     client = {
@@ -111,7 +136,7 @@ describe('ChatGateway', () => {
       emit: vi.fn(),
     };
 
-    gateway = new ChatGateway(
+    gateway = makeGateway(
       toolDispatch,
       pipeline,
       raappHITL,
@@ -178,6 +203,23 @@ describe('ChatGateway', () => {
     expect(observer.emit).toHaveBeenCalledWith('chat:chunk', expect.objectContaining({ sessionId: 'child-session' }));
   });
 
+  it('broadcasts external MCP confirmation requests to sockets subscribed to the session', async () => {
+    await gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
+    const request = {
+      requestId: 'approval-1',
+      toolCallId: 'mcp-call-1',
+      sessionId: 'session-1',
+      toolName: 'fs_write',
+      args: { path: 'new-file.txt', content: 'safe test' },
+      timeoutMs: 0,
+    } as ToolConfirmationRequest;
+
+    gateway.emitSessionEvent('session-1', 'tool:confirmation_required', request);
+
+    expect(observer.emit).toHaveBeenCalledWith('tool:confirmation_required', request);
+    expect(client.emit).not.toHaveBeenCalledWith('tool:confirmation_required', request);
+  });
+
   it('REGRESSION: allows the initiator to stop a child session after child events were streamed to that socket', async () => {
     (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
       emit('chat:chunk', {
@@ -218,11 +260,37 @@ describe('ChatGateway', () => {
     );
   });
 
-  it('REGRESSION: chat:stop emits a stopped runtime snapshot before slow turn drain settles', async () => {
+  it('REGRESSION: pipeline cancellation starts while architecture drain is pending', async () => {
+    let releaseArchitecture!: () => void;
+    let enterArchitecture!: () => void;
+    const entered = new Promise<void>((resolve) => { enterArchitecture = resolve; });
+    const drain = new Promise<readonly string[]>((resolve) => {
+      releaseArchitecture = () => resolve(['architecture-run']);
+    });
+    vi.mocked(architectureRuntimeStop.stopRunsForSessions).mockImplementation(() => {
+      enterArchitecture();
+      return drain;
+    });
+    const stopping = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    try {
+      await entered;
+      await expect.poll(() => vi.mocked(pipeline.stopAndDrain).mock.calls.length, { timeout: 200 }).toBeGreaterThan(0);
+      await expect.poll(() => stopSubagents.mock.calls.length, { timeout: 200 }).toBe(1);
+      expect(stopSubagents).toHaveBeenCalledWith(['session-1']);
+    } finally {
+      releaseArchitecture();
+      await stopping;
+    }
+  });
+
+  it('REGRESSION: chat:stop emits authoritative snapshots only after slow turn drain settles', async () => {
     let resolveDrain!: () => void;
-    (pipeline.stopAndDrain as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((resolve) => {
-      resolveDrain = resolve;
-    }));
+    let entered!: () => void;
+    const draining = new Promise<void>((resolve) => { entered = resolve; });
+    vi.mocked(pipeline.stopAndDrain).mockImplementation(() => {
+      entered();
+      return new Promise<void>((resolve) => { resolveDrain = resolve; });
+    });
     (pipeline.getSessionStatusWithRun as ReturnType<typeof vi.fn>).mockResolvedValue({
       sessionId: 'session-1',
       active: true,
@@ -243,7 +311,19 @@ describe('ChatGateway', () => {
     });
 
     const stopPromise = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await draining;
+
+    expect(client.emit).not.toHaveBeenCalledWith('session:runtime_snapshot', expect.anything());
+    expect(pipeline.getSessionStatusWithRun).not.toHaveBeenCalled();
+    vi.mocked(pipeline.getSessionStatusWithRun).mockResolvedValue({
+      sessionId: 'session-1', active: false, queueLength: 0,
+      run: {
+        id: 'run-1', sessionId: 'session-1', turnId: 'turn-1', phase: 'interrupted', status: 'interrupted',
+        errorCode: 'INTERRUPTED', retryCount: 0, safeResume: false, startedAt: 1, updatedAt: 3, lastHeartbeatAt: 3,
+      },
+    });
+    resolveDrain();
+    await stopPromise;
 
     expect(client.emit).toHaveBeenCalledWith(
       'session:runtime_snapshot',
@@ -254,13 +334,42 @@ describe('ChatGateway', () => {
         run: expect.objectContaining({
           phase: 'interrupted',
           status: 'interrupted',
-          errorCode: 'USER_STOPPED',
+          errorCode: 'INTERRUPTED',
         }),
       }),
     );
 
-    resolveDrain();
-    await stopPromise;
+    expect(client.emit.mock.calls.filter(([event]) => event === 'session:runtime_snapshot')).toHaveLength(1);
+  });
+
+  it('starts descendant cleanup while the root drain is blocked and waits for both before projecting', async () => {
+    vi.mocked(sessions.listChildren).mockImplementation(async (id) => id === 'session-1' ? [sessionFixture({ id: 'child-session' })] : []);
+    let childStarted!: () => void;
+    const child = new Promise<void>((resolve) => { childStarted = resolve; });
+    let releaseRoot!: () => void;
+    vi.mocked(pipeline.stopAndDrain).mockImplementation(async (id) => {
+      if (id === 'child-session') { childStarted(); return; }
+      await new Promise<void>((resolve) => { releaseRoot = resolve; });
+    });
+    const stopping = gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    await child;
+    expect(architectureRuntimeStop.stopRunsForSessions).toHaveBeenCalled();
+    expect(pipeline.stopAndDrain).toHaveBeenCalledWith('session-1');
+    expect(client.emit).not.toHaveBeenCalledWith('session:runtime_snapshot', expect.anything());
+    releaseRoot();
+    await stopping;
+  });
+
+  it('does not fabricate interrupted state if durable pending state still exists after drain', async () => {
+    vi.mocked(pipeline.getSessionStatusWithRun).mockResolvedValue({
+      sessionId: 'session-1', active: false, queueLength: 0,
+      run: { id: 'waiting', sessionId: 'session-1', turnId: 'turn-1', phase: 'tool_pending', status: 'waiting_for_human',
+        retryCount: 0, safeResume: false, startedAt: 1, updatedAt: 2, lastHeartbeatAt: 2 },
+    });
+    await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
+    const snapshots = client.emit.mock.calls.filter(([event]) => event === 'session:runtime_snapshot');
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0][1]).toMatchObject({ run: { status: 'waiting_for_human', phase: 'tool_pending' } });
   });
 
   it('REGRESSION: chat:stop stops active architecture runs for the root and descendant session tree', async () => {
@@ -307,7 +416,7 @@ describe('ChatGateway', () => {
     await gateway.handleChatStop(client as never, { sessionId: 'session-1' });
 
     expect(sessions.listChildren).toHaveBeenCalledTimes(2);
-    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(4);
+    expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
   });
 
   it('does not delegate chat:stop to CLI runtime for non-cli-agent sessions', async () => {
@@ -408,7 +517,7 @@ describe('ChatGateway', () => {
         return undefined;
       }),
     } as unknown as ModuleRef;
-    gateway = new ChatGateway(
+    gateway = makeGateway(
       toolDispatch,
       pipeline,
       raappHITL,
@@ -766,7 +875,7 @@ describe('ChatGateway', () => {
 
   it('REGRESSION: stopping a parent session delegates descendant cli-agent children through the CLI runtime', async () => {
     (sessions.listChildren as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce([{ id: 'cli-child-1' }])
+      .mockResolvedValueOnce([sessionFixture({ id: 'cli-child-1', kind: 'cli-agent', parentSessionId: 'session-1' })])
       .mockResolvedValueOnce([]);
     vi.mocked(sessions.get).mockImplementation(async (sessionId: string) => {
       if (sessionId === 'cli-child-1') {
@@ -921,7 +1030,7 @@ describe('ChatGateway', () => {
       findByParentSessionId,
       stop: vi.fn().mockResolvedValue(null),
     } as unknown as AgentFlowRuntimePort;
-    gateway = new ChatGateway(
+    gateway = makeGateway(
       toolDispatch,
       pipeline,
       raappHITL,
@@ -1056,7 +1165,7 @@ describe('ChatGateway', () => {
         toolName: 'fs_write', args: { path: 'report.md' }, timeoutMs: 0,
       };
       const hitlRequests = { listPendingToolConfirmations: vi.fn().mockResolvedValue([pending]) };
-      gateway = new ChatGateway(
+      gateway = makeGateway(
         toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
         agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
         hitlRequests,
@@ -1214,6 +1323,18 @@ describe('ChatGateway', () => {
   });
 
   describe('tool confirmations', () => {
+    it('passes only the server socket identity after membership, ignoring client origin claims', async () => {
+      const resolve = vi.fn().mockResolvedValue('resolved');
+      toolDispatch.resolveConfirmationFromGateway = resolve;
+      const payload = { requestId: 'request', sessionId: 'session-1', socketId: 'forged',
+        approvalOrigin: { kind: 'gateway_tool_confirm' }, message: 'ok' };
+      await gateway.handleToolConfirm(observer as never, payload);
+      expect(resolve).not.toHaveBeenCalled();
+      await gateway.handleToolConfirm(client as never, payload);
+      expect(resolve).toHaveBeenCalledExactlyOnceWith('request', 'session-1', client.id, 'ok');
+      expect(toolDispatch.resolveConfirmation).not.toHaveBeenCalled();
+    });
+
     it('rejects tool confirm when socket does not own the session', () => {
       const handleToolConfirm = (gateway as unknown as { handleToolConfirm: ConfirmHandler }).handleToolConfirm.bind(gateway);
 
@@ -1243,20 +1364,36 @@ describe('ChatGateway', () => {
     });
 
     it('atomically approves and resumes a durable tool when the in-memory confirmation was lost', async () => {
+      const approveAndResumeTool: ChatService['approveAndResumeTool'] = async (
+        _requestId,
+        sessionId,
+        _message,
+        emit: EmitFn,
+      ) => {
+        emit('tool:result', {
+          callId: 'call-durable',
+          sessionId,
+          status: 'success',
+          toolName: 'fs_write',
+        });
+        return true;
+      };
       const chatService = {
-        approveAndResumeTool: vi.fn().mockResolvedValue(true),
+        approveAndResumeTool: vi.fn(approveAndResumeTool),
         cancelPendingTool: vi.fn().mockResolvedValue(false),
       };
       (toolDispatch.resolveConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
-      gateway = new ChatGateway(
+      gateway = makeGateway(
         toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
         agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
         undefined, chatService,
       );
       gateway.handleConnection(client as never);
-      (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions
-        .get(client.id)
-        ?.add('session-1');
+      gateway.handleConnection(observer as never);
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+      await gateway.handleSessionIdentify(observer as never, { sessionId: 'session-1' });
+      client.emit.mockClear();
+      observer.emit.mockClear();
 
       await gateway.handleToolConfirm(client as never, { requestId: 'durable-request', sessionId: 'session-1' });
 
@@ -1266,9 +1403,13 @@ describe('ChatGateway', () => {
         undefined,
         expect.any(Function),
       );
-      expect(client.emit).not.toHaveBeenCalledWith(
-        'tool:confirmation_invalidated',
-        expect.anything(),
+      expect(client.emit).toHaveBeenCalledWith(
+        'tool:result',
+        expect.objectContaining({ callId: 'call-durable', sessionId: 'session-1', status: 'success' }),
+      );
+      expect(observer.emit).toHaveBeenCalledWith(
+        'tool:result',
+        expect.objectContaining({ callId: 'call-durable', sessionId: 'session-1', status: 'success' }),
       );
     });
 
@@ -1310,7 +1451,7 @@ describe('ChatGateway', () => {
         cancelPendingTool: vi.fn().mockResolvedValue(true),
       };
       (toolDispatch.cancelConfirmation as ReturnType<typeof vi.fn>).mockResolvedValue('not_found');
-      gateway = new ChatGateway(
+      gateway = makeGateway(
         toolDispatch, pipeline, raappHITL, sessions, sessionEvents, agentBudgetApprovals,
         agentFlowRuntime, cliAgentSessionRuntime, architectureRuntimeStop, moduleRef, undefined,
         undefined, chatService,

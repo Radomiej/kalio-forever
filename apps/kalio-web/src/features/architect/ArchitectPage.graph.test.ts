@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { ArchitectSchema } from './architect.types';
-import { applyGraphDraft, EMPTY_GRAPH_DRAFT, setEdgeSelection, toSchemaNodes } from './ArchitectPage.graph';
+import { applyGraphDraft, createDraftNode, EMPTY_GRAPH_DRAFT, setEdgeSelection, toSchemaNodes } from './ArchitectPage.graph';
 
 describe('ArchitectPage graph draft', () => {
+  it('creates a slot-free auto router and retains independently cloned settings in runtime nodes', () => {
+    const node = createDraftNode([], { x: 10, y: 20 }, 'auto_router');
+    expect(node.roleSlotId).toBeUndefined();
+    expect(node.autoRouting).toEqual({ confidenceThreshold: 0.7, instructions: '' });
+    const schema = { ...makeSchema(), nodes: [node] };
+    const nodes = toSchemaNodes(schema);
+    expect(nodes[0]?.autoRouting).toEqual(node.autoRouting);
+    expect(nodes[0]?.autoRouting).not.toBe(node.autoRouting);
+    const drafted = applyGraphDraft(schema, {}, { ...EMPTY_GRAPH_DRAFT, nodeAutoRouting: { [node.id]: { confidenceThreshold: 0.8, instructions: 'Changed.' } } });
+    expect(drafted?.nodes[0]?.autoRouting).toEqual({ confidenceThreshold: 0.8, instructions: 'Changed.' });
+    expect(node.autoRouting?.confidenceThreshold).toBe(0.7);
+  });
   it('preserves explicit node tool overrides when building runtime schema nodes', () => {
     const schema = makeSchema();
     const drafted = applyGraphDraft(schema, {}, {

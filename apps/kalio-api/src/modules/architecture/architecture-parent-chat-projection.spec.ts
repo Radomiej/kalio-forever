@@ -107,7 +107,7 @@ describe('buildArchitectureParentChatMessages', () => {
 
     const messages = buildArchitectureParentChatMessages(
       makeSchema(),
-      makeRun({ context: { promptMessageId: 'user-real' } }),
+      makeRun({ context: { parentSessionId: 'parent-1', promptMessageId: 'user-real', parentTurnId: 'user-turn' } }),
       'parent-1',
       events,
       100,
@@ -115,12 +115,13 @@ describe('buildArchitectureParentChatMessages', () => {
     const assistantMessages = messages.filter((message) => message.role === 'assistant');
 
     expect(messages[0]).toMatchObject({
-      id: 'user-real',
+      id: 'architecture:run-1:user',
       role: 'user',
       promptMessageId: 'user-real',
     });
     expect(assistantMessages).not.toHaveLength(0);
     expect(assistantMessages.every((message) => message.promptMessageId === 'user-real')).toBe(true);
+    expect(messages.every((message) => message.turnId === 'user-turn')).toBe(true);
   });
 
   it('attaches typed workflow-envelope metadata to branch-only projections', () => {

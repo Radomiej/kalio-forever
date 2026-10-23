@@ -29,7 +29,8 @@ function releaseApiUrl(options) {
 }
 
 function runtimeAssetName(version, runtime) {
-  return `kalio-runtime-${version}${runtime === 'bun' ? '-bun' : ''}-windows-x64.zip`;
+  const suffix = process.platform === 'win32' ? 'windows-x64.zip' : 'linux-x64.tar.gz';
+  return `kalio-runtime-${version}${runtime === 'bun' ? '-bun' : ''}-${suffix}`;
 }
 
 function parseVersion(version) {
@@ -135,6 +136,7 @@ export async function loadRelease(options, current, logMessage) {
   const releaseTag = String(release.tag_name ?? '');
   const releaseVersion = releaseTag.replace(/^v/, '');
   const runtime = options.runtime || current.current.runtime;
+  const platform = process.platform === 'win32' ? 'windows' : 'linux';
   const manifestAsset = release.assets?.find((asset) => asset.name === 'kalio-runtime-manifest.json');
   if (!manifestAsset) {
     throw new Error('kalio-runtime-manifest.json is missing from the published Release');
@@ -172,7 +174,7 @@ export async function loadRelease(options, current, logMessage) {
   const target = payload.assets?.find((asset) => (
     asset.name === expectedName
       && asset.runtime === runtime
-      && asset.platform === 'windows'
+      && asset.platform === platform
       && asset.architecture === 'x64'
   ));
   const releaseAsset = release.assets?.find((asset) => asset.name === expectedName);
@@ -185,5 +187,6 @@ export async function loadRelease(options, current, logMessage) {
     releaseTag,
     releaseVersion,
     runtime,
+    platform,
   };
 }

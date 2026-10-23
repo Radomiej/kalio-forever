@@ -38,7 +38,6 @@ export function judgeArchitectureContinuationGuard(input: JudgeContinuationGuard
     selectedNodeIds,
     outgoingNodeIds,
     finalizationInput,
-    events,
   } = input;
 
   if (slot.slotType !== 'judge' || !requireGoalMasterLoopProof) {
@@ -48,7 +47,10 @@ export function judgeArchitectureContinuationGuard(input: JudgeContinuationGuard
   if (!finalNodeId) {
     return { selectedNodeIds, applied: false };
   }
-  const blockingReason = blockingFinalizationReason(finalizationInput);
+  const blockingReason = blockingFinalizationReason({
+    ...finalizationInput,
+    runContext: { ...finalizationInput.runContext, requireGoalMasterLoopProof: true },
+  });
   if (blockingReason) {
     const continuationNodeId = continuationOutgoingNodeId({
       schema,
@@ -74,32 +76,5 @@ export function judgeArchitectureContinuationGuard(input: JudgeContinuationGuard
       reason: acceptanceReason,
     };
   }
-  if (!selectedNodeIds.includes(finalNodeId)) {
-    return { selectedNodeIds, applied: false };
-  }
-  if (hasVisibleWorkflowToolProof(finalizationInput)) {
-    return { selectedNodeIds, applied: false };
-  }
-  const previousContinuation = events.some((event) =>
-    event.nodeId === node.id
-    && event.type === 'router_decision'
-    && event.route?.selectedNodeIds.some((id) => id !== finalNodeId));
-  if (previousContinuation) {
-    return { selectedNodeIds, applied: false };
-  }
-  const continuationNodeId = continuationOutgoingNodeId({
-    schema,
-    sourceNodeId: node.id,
-    incomingNodeIds,
-    outgoingNodeIds,
-    defaultNodeId: finalNodeId,
-  });
-  if (!continuationNodeId) {
-    return { selectedNodeIds, applied: false };
-  }
-  return {
-    selectedNodeIds: [continuationNodeId],
-    applied: true,
-    reason: `Runtime Goal Master guard required one visible continuation through ${continuationNodeId} before finalization.`,
-  };
+  return { selectedNodeIds, applied: false };
 }

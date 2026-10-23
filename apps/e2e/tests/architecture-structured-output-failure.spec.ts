@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { activeSessionAfterSubmit, installMockLaunchProfile, selectMockLaunchProfile } from './helpers/mock-launch-profile';
 import {
   API_BASE,
   deleteSessionIfExists,
@@ -57,26 +58,19 @@ test.describe('Architecture structured-output failure handling', () => {
 
     try {
       await ensureEnvMockProvider(request);
+      await installMockLaunchProfile(page, request);
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await page.getByTestId('nav-talk').click();
       await page.getByTestId('new-session-btn').click();
-      await expect(page.getByTestId('chat-session-title')).toHaveText('New Chat', { timeout: 30_000 });
-      await expect
-        .poll(
-          () => page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id')),
-          { timeout: 15_000 },
-        )
-        .not.toBeNull();
-      hostSessionId = await page.evaluate(() => window.sessionStorage.getItem('kalio:last-active-session-id'));
-      if (!hostSessionId) {
-        throw new Error('Missing active host session id after creating a new chat.');
-      }
+      await expect(page.getByTestId('welcome-screen')).toBeVisible();
+      await selectMockLaunchProfile(page);
 
       await selectArchitectureInComposer(page, 'strategic-decision-council');
       await sendMessageFromComposer(
         page,
         'Trigger malformed router structured output [[mock:architecture:router:malformed-output]]',
       );
+      hostSessionId = await activeSessionAfterSubmit(page);
 
       const timeline = page.getByTestId('architecture-run-timeline');
       await expect(timeline).toBeVisible({ timeout: 120_000 });

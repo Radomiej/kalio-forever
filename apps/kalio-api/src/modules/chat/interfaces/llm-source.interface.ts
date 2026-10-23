@@ -1,6 +1,7 @@
 import type { ExecutionProfile, LLMConfig, LLMStructuredOutputRequest, ToolMeta, ToolResult } from '@kalio/types';
 import type { InternalLLMChunk } from './llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../../common/utils/context-managed-llm-message.util';
+import type { NativeToolDispatch } from '../../../common/kalio-mcp-bridge-context';
 
 export interface LLMSourceParams {
   messages: ContextManagedLLMMessage[];
@@ -14,6 +15,9 @@ export interface LLMSourceParams {
   structuredOutput?: LLMStructuredOutputRequest;
   executionProfile?: ExecutionProfile;
   runId?: string;
+  turnId?: string;
+  promptMessageId?: string;
+  dispatchNativeTool?: NativeToolDispatch;
   externalThreadId?: string;
   cwd?: string;
   onExternalThreadBound?: (threadId: string, binding?: { turnId?: string; processEpoch?: string }) => Promise<void>;

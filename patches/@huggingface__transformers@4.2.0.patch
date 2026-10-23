@@ -1,0 +1,54 @@
+diff --git a/dist/transformers.node.cjs b/dist/transformers.node.cjs
+index 6cb09aecb7364f1b909fb6ceed8daff52bba345b..9fa2c57c171ff8310b8a553337b7d3eb5ea9fdfa 100644
+--- a/dist/transformers.node.cjs
++++ b/dist/transformers.node.cjs
+@@ -15072,9 +15072,12 @@ async function get_tokenizer_files(modelId) {
+ // src/tokenization_utils.js
+ async function loadTokenizer(pretrained_model_name_or_path, options) {
+   const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
+-  return await Promise.all(
++  const results = await Promise.allSettled(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
++  const failure = results.find(result => result.status === "rejected");
++  if (failure) throw failure.reason;
++  return results.map(result => result.value);
+ }
+ function prepareTensorForDecode(tensor) {
+   const dims = tensor.dims;
+diff --git a/dist/transformers.node.mjs b/dist/transformers.node.mjs
+index bacb354fe1b898d4c535a39f5ef1ba5c6a463d75..735a547603a72788f73bbbef3186b1ab80e35cf4 100644
+--- a/dist/transformers.node.mjs
++++ b/dist/transformers.node.mjs
+@@ -14112,9 +14112,12 @@ async function get_tokenizer_files(modelId) {
+ // src/tokenization_utils.js
+ async function loadTokenizer(pretrained_model_name_or_path, options) {
+   const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
+-  return await Promise.all(
++  const results = await Promise.allSettled(
+     tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options))
+   );
++  const failure = results.find(result => result.status === "rejected");
++  if (failure) throw failure.reason;
++  return results.map(result => result.value);
+ }
+ function prepareTensorForDecode(tensor) {
+   const dims = tensor.dims;
+diff --git a/src/tokenization_utils.js b/src/tokenization_utils.js
+index 29de6f18656f0361aa4d3a65df29092ca31cc9e7..ca43e36a4f699e9ab18e30599487e8691366a1b8 100644
+--- a/src/tokenization_utils.js
++++ b/src/tokenization_utils.js
+@@ -27,9 +27,12 @@ import { get_tokenizer_files } from './utils/model_registry/get_tokenizer_files.
+  */
+ export async function loadTokenizer(pretrained_model_name_or_path, options) {
+     const tokenizerFiles = await get_tokenizer_files(pretrained_model_name_or_path);
+-    return await Promise.all(
++    const results = await Promise.allSettled(
+         tokenizerFiles.map((file) => getModelJSON(pretrained_model_name_or_path, file, true, options)),
+     );
++    const failure = results.find(result => result.status === 'rejected');
++    if (failure) throw failure.reason;
++    return results.map(result => result.value);
+ }
+ 
+ /**

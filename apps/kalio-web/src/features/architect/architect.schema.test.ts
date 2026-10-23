@@ -2,6 +2,61 @@ import { describe, expect, it } from 'vitest';
 import { normalizeArchitectureSchema, normalizeArchitectureSchemas } from './architect.schema';
 
 describe('normalizeArchitectureSchema', () => {
+  const autoSchema = (selection: string = 'choice', confidenceThreshold: unknown = 0.7, instructions: unknown = '') => ({
+    nodes: [
+      { id: 'auto', label: 'Auto', kind: 'auto_router', autoRouting: { confidenceThreshold, instructions } },
+      { id: 'target', label: 'Target', kind: 'artifact' },
+      { id: 'fallback', label: 'Fallback', kind: 'artifact' },
+    ],
+    edges: [
+      { id: 'choice', fromNodeId: 'auto', toNodeId: 'target', selection },
+      { id: 'default', fromNodeId: 'auto', toNodeId: 'fallback', selection: 'default' },
+    ],
+  });
+
+  it.each([-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY, '0.7', null])('rejects invalid auto-routing threshold %s', (threshold) => {
+    expect(() => normalizeArchitectureSchema(autoSchema('choice', threshold))).toThrow();
+  });
+
+  it.each(['normal', 'converge', 'continuation', 'default'])('rejects auto-router outgoing role %s instead of choices', (selection) => {
+    expect(() => normalizeArchitectureSchema(autoSchema(selection))).toThrow();
+  });
+
+  it('enforces instruction bounds and exactly one default', () => {
+    expect(() => normalizeArchitectureSchema(autoSchema('choice', 1, 'a'.repeat(2000)))).not.toThrow();
+    expect(() => normalizeArchitectureSchema(autoSchema('choice', 0, ''))).not.toThrow();
+    expect(() => normalizeArchitectureSchema(autoSchema('choice', 0.7, 'a'.repeat(2001)))).toThrow();
+    expect(() => normalizeArchitectureSchema(autoSchema('choice', 0.7, null))).toThrow();
+    const missing = autoSchema();
+    missing.edges.pop();
+    expect(() => normalizeArchitectureSchema(missing)).toThrow();
+    const duplicate = autoSchema();
+    duplicate.edges.push({ id: 'default2', fromNodeId: 'auto', toNodeId: 'target', selection: 'default' });
+    expect(() => normalizeArchitectureSchema(duplicate)).toThrow();
+  });
+
+  it('accepts multiple choices and omitted optional settings', () => {
+    const schema = autoSchema();
+    const autoNode = schema.nodes[0]!;
+    Reflect.deleteProperty(autoNode, 'autoRouting');
+    schema.edges.push({ id: 'choice2', fromNodeId: 'auto', toNodeId: 'fallback', selection: 'choice' });
+    expect(() => normalizeArchitectureSchema(schema)).not.toThrow();
+  });
+
+  it('preserves auto-routing metadata and choice roles without sharing the configuration', () => {
+    const autoRouting = { confidenceThreshold: 0.7, instructions: 'Choose a route.' };
+    const schema = normalizeArchitectureSchema({
+      nodes: [{ id: 'auto', label: 'Auto', kind: 'auto_router', autoRouting }],
+      edges: [
+        { id: 'choice', fromNodeId: 'auto', toNodeId: 'target', selection: 'choice' },
+        { id: 'default', fromNodeId: 'auto', toNodeId: 'fallback', selection: 'default' },
+      ],
+    });
+    expect(schema.nodes[0]?.kind).toBe('auto_router');
+    expect(schema.nodes[0]?.autoRouting).toEqual(autoRouting);
+    expect(schema.nodes[0]?.autoRouting).not.toBe(autoRouting);
+    expect(schema.edges[0]?.selection).toBe('choice');
+  });
   it('lays out unpositioned graph nodes into readable columns and stacked parallel branches', () => {
     const schema = normalizeArchitectureSchema({
       id: 'layout-schema',

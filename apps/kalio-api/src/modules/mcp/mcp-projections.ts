@@ -34,7 +34,7 @@ export function buildMcpToolPayload(serverKey: string, tool: MCPToolDiscoveryRes
     name: buildMcpToolName(serverKey, tool.name),
     description: tool.description ?? '',
     parameters: (tool.inputSchema ?? {}) as Record<string, unknown>,
-    requiresConfirmation: false,
+    requiresConfirmation: true,
     serverKey,
     serverId: serverKey,
     aliases: [legacyCanonicalName, `mcp_${tool.name}`],

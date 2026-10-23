@@ -225,7 +225,6 @@ export type LLMProviderType =
   | 'mock';
 
 export type ExecutionProfileKind = 'direct-llm' | 'codex-app-server' | 'claude-agent-sdk' | 'devin-api' | 'devin-cli-acp';
-export type DevinCliModel = 'glm-5-2' | 'swe-1-7';
 export type ExecutionApprovalMode = 'codex_guard' | 'kalio_strict';
 
 export interface ExecutionProfile {
@@ -1106,6 +1105,8 @@ export interface CreateCredentialDto {
 }
 
 export interface ToolTimeoutSettings {
+  /** Timeout for one LLM generation request, including streamed output. */
+  providerRequestTimeoutMs: number;
   webSearchTimeoutMs: number;
   providerLocalTimeoutMs: number;
   providerRemoteTimeoutMs: number;
@@ -1632,6 +1633,12 @@ export interface CLIAgentConfig {
 
 // ─── Memory (Hybrid: Vector + BM25) ─────────────────────────────────────────
 export type MemorySearchMode = 'vector' | 'fts' | 'hybrid';
+export { PROJECT_RESOURCE_READER, PROJECT_RESOURCE_INDEX_STORAGE } from './embedding-resources';
+export type {
+  EmbeddingSpace, ResourceModality, ResourceRepresentation, ProjectResourceFile,
+  ProjectResourceSnapshot, ProjectResourceReaderPort, ProjectResourceIndexStoragePort, ProjectResourceIndexRequest,
+  ProjectResourceIndexResult, ProjectResourceSearchRequest, ProjectResourceSearchResult,
+} from './embedding-resources';
 
 export interface MemoryIngestResult {
   ids: string[];
@@ -1928,7 +1935,7 @@ export interface SecurityPolicyResponse {
 }
 
 // Architecture Orchestration
-export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact';
+export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
 export type ArchitectureNodeBehaviorMode =
   | 'fan_out_all'
   | 'choose_one'
@@ -1939,7 +1946,7 @@ export type ArchitectureNodeFanOutMode = 'parallel' | 'sequential';
 export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'custom';
 export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
-export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback';
+export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
 export type ArchitectureEventAction =
   | 'run_created'
   | 'run_stopped'
@@ -1992,6 +1999,10 @@ export interface ArchitectureSchemaNode {
     scoringPolicy?: ArchitectureNodeScoringPolicy;
     description?: string;
   };
+  autoRouting?: {
+    confidenceThreshold: number;
+    instructions: string;
+  };
   x?: number;
   y?: number;
 }
@@ -2005,7 +2016,7 @@ export interface ArchitectureSchemaEdge {
   returnToOrchestrator?: boolean;
 }
 
-export type ArchitectureSchemaEdgeSelection = 'default' | 'converge' | 'continuation';
+export type ArchitectureSchemaEdgeSelection = 'default' | 'converge' | 'continuation' | 'choice';
 
 export type ArchitectureContextCompression = 'none' | 'summary' | 'evidence_only';
 
@@ -2054,11 +2065,16 @@ export interface ArchitectureSchema {
 export interface CreateArchitectureRunDto {
   schemaId: ID;
   prompt: string;
+  /** Explicit root agent identity. Children inherit it; never a bare model override. */
+  executionProfileId?: ID;
   context?: Record<string, unknown>;
   slotOverrides?: Record<string, ID>;
   executionMode?: ArchitectureExecutionMode;
   schema?: ArchitectureSchema;
 }
+
+export { EXECUTION_PROFILE_LOOKUP } from './execution-profile-lookup';
+export type { ExecutionProfileLookupPort } from './execution-profile-lookup';
 
 export interface CreateArchitectureSchemaVariantDto {
   name?: string;
@@ -2074,6 +2090,8 @@ export interface ArchitectureRun {
   id: ID;
   schemaId: ID;
   prompt: string;
+  /** Optional protocol; absent on legacy runs, never inferred from prose. */
+  goalPacket?: import('./architecture-goal').ArchitectureGoalPacketV1;
   executionMode: ArchitectureExecutionMode;
   context?: Record<string, unknown>;
   slotOverrides?: Record<string, ID>;
@@ -2097,6 +2115,9 @@ export interface ArchitectureRouteDecision {
   convergeToNodeId?: string;
   mode?: ArchitectureNodeBehaviorMode;
   response?: string;
+  selectedEdgeId?: string;
+  confidence?: number;
+  decisionReason?: string;
 }
 
 export type ArchitectureRouterNextAction =
@@ -2224,3 +2245,13 @@ export interface ArchitectureChatProjection {
 }
 
 export type ArchitectureGraphNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export * from './decision-settings';
+export * from './hitl-settings';
+export * from './architecture-goal';
+// Additive host-only contract; requires shared-contract PR review before merge.
+export type { HostRuntimeReceiptIdentity, HostRuntimeToolAdmission, HostRuntimeToolCommit, HostRuntimeReceiptObserver, HostDispatchApproval, HostResolvedToolDispatch, HostHitlExecutionCommit } from './host-runtime-receipt-observer';
+export * from './chat-durable-evidence-reader';
+export * from './goal-launch-decision';
+export { PROJECT_CONTEXT_PORT } from './embedding-resources';
+export type { ProjectContextSettings, ProjectContextPort } from './embedding-resources';

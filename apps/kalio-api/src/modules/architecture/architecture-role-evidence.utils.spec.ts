@@ -70,12 +70,13 @@ describe('architecture role evidence helpers', () => {
           childSessionId: 'cli-child-1',
           childStatus: 'completed',
         },
+        { sequence: 7, event: 'tool:result', toolName: 'vfs_write', status: 'cancelled' },
       ],
     }));
 
     expect(evidence).toEqual({
       toolCallCount: 2,
-      toolResultCount: 4,
+      toolResultCount: 5,
       toolNames: ['fs_list', 'fs_read'],
       successfulToolNames: ['fs_list', 'spawn_cli_agent', 'get_cli_agent_status'],
       targetPaths: ['C:\\Projects\\FamilyQuest', 'C:\\Projects\\FamilyQuest\\package.json'],

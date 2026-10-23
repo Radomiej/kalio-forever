@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
-import { Plus, Loader2, AlertCircle, Info } from 'lucide-react';
+import { Plus, Loader2, AlertCircle } from 'lucide-react';
 import type { EmbeddingCredential, CreateEmbeddingCredentialDto, EmbeddingStatus, UpdateLocalEmbeddingConfigDto } from '@kalio/types';
 import { EmbeddingCredentialCard } from './EmbeddingCredentialCard';
 import {
@@ -11,7 +11,9 @@ import {
   emptyForm,
   type AddForm,
 } from './EmbeddingProviderForm';
-import { LOCAL_BACKEND_LABELS, LOCAL_MODELS, LocalEmbeddingConfigCard } from './LocalEmbeddingConfigCard';
+import { LOCAL_MODELS, LocalEmbeddingConfigCard } from './LocalEmbeddingConfigCard';
+import { ActiveEmbeddingModelCard } from './ActiveEmbeddingModelCard';
+import { ProjectContextCard } from './ProjectContextCard';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -364,10 +366,11 @@ export function EmbeddingsPanel() {
       <div>
         <h2 className="text-base font-semibold mb-1">Embeddings Provider</h2>
         <p className="text-xs text-base-content/60">
-          Choose how Kalio powers memory and saved search recall.
-          Local runs automatically; remote providers are optional.
+          Choose and install your embedding model here. The selected model powers memory and project search.
         </p>
       </div>
+
+      <ActiveEmbeddingModelCard status={status} localAvailability={localAvailability} />
 
       {error && (
         <div className="alert alert-warning py-2 text-xs gap-2">
@@ -386,7 +389,7 @@ export function EmbeddingsPanel() {
           {/* Credential list */}
           <div className="flex flex-col gap-2">
             {credentials.length === 0 && !showForm && (
-              <p className="text-xs text-base-content/40">No remote embedding providers configured. Local embeddings are used by default.</p>
+              <p className="text-xs text-base-content/40">No remote embedding providers configured.</p>
             )}
             {credentials.map((cred) => (
               <EmbeddingCredentialCard
@@ -403,34 +406,6 @@ export function EmbeddingsPanel() {
               />
             ))}
           </div>
-
-          {(status?.source === 'local' || status?.source === 'disabled' || status?.source === 'env' || status?.source === 'mock') && !activeId && (
-            <div className="border border-sky-500/20 bg-sky-500/5 rounded-lg p-3 flex flex-col gap-1" data-testid="embedding-env-card">
-              <div className="flex items-center gap-2">
-                <Info size={13} className="text-sky-400 shrink-0" />
-                <span className="text-sm font-medium flex-1">
-                  {status.source === 'env' ? 'Env Provider' : status.source === 'mock' ? 'Mock embeddings' : 'Local embeddings'}
-                </span>
-                <span className={`badge badge-xs ${status.source === 'disabled' ? 'badge-warning' : 'badge-ghost'}`}>
-                  {status.source === 'disabled' ? 'disabled' : status.source === 'mock' ? 'test' : 'active'}
-                </span>
-              </div>
-              <div className="text-xs text-base-content/60 pl-5 flex flex-col gap-0.5">
-                <span>Model: <span className="font-mono">{status.model}</span></span>
-                {status.source === 'mock' && <span>Deterministic test provider; no remote model is used.</span>}
-                {status.modelParameters && <span>Parameters: <span className="font-mono">{status.modelParameters}</span></span>}
-                {status.backend && (
-                  <span>
-                    Compute: <span className="font-mono">{LOCAL_BACKEND_LABELS[status.backend] ?? status.backend}</span>
-                    {status.activeBackend ? <span> / active <span className="font-mono">{LOCAL_BACKEND_LABELS[status.activeBackend] ?? status.activeBackend}</span></span> : null}
-                  </span>
-                )}
-                {status.backend !== 'cpu' && status.gpuAvailable === false && (
-                  <span>GPU unavailable on this machine; CPU will be used.</span>
-                )}
-              </div>
-            </div>
-          )}
 
           <LocalEmbeddingConfigCard
             form={localForm}
@@ -480,6 +455,7 @@ export function EmbeddingsPanel() {
             </button>
           )}
 
+          <ProjectContextCard status={status} onApplied={() => apiFetch<EmbeddingStatus>('/memory/status/embedding').then(setStatus)} />
           <p className="text-xs text-base-content/40 border-t border-base-300 pt-3">
             Saved search results and persona memories use the active provider. Reindex after changing providers to refresh existing recall.
           </p>

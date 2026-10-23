@@ -32,6 +32,17 @@ export function blockingFinalizationReason(input: ArchitectureGraphFinalizationI
   if (externalBlocker) {
     return externalBlocker;
   }
+  const childBlocker = blockingLatestImplementationChildReason(input);
+  if (childBlocker) {
+    return childBlocker;
+  }
+  if (input.runContext?.['requireGoalMasterLoopProof'] === true) {
+    const buildBlocker = blockingLatestGoalBuildReason(input);
+    if (buildBlocker) return buildBlocker;
+    if (!hasVisibleWorkflowToolProof(input)) {
+      return 'Goal completion requires successful workflow tool evidence.';
+    }
+  }
   if (externalQualityGateAcceptanceReason(input) && hasVisibleWorkflowToolProof(input)) {
     return undefined;
   }
@@ -236,12 +247,12 @@ function blockingIncompleteMaterializationReason(input: ArchitectureGraphFinaliz
     if (!evidence) {
       continue;
     }
-    if (hasIndependentHostVerificationEvidence(input)) {
-      return undefined;
-    }
     const unresolvedReason = unresolvedCliChildReason(evidence);
     if (unresolvedReason) {
       return unresolvedReason;
+    }
+    if (hasIndependentHostVerificationEvidence(input)) {
+      return undefined;
     }
     if (hasMaterializationEvidence(evidence, input.events)) {
       return undefined;
@@ -254,7 +265,21 @@ function blockingIncompleteMaterializationReason(input: ArchitectureGraphFinaliz
   return undefined;
 }
 
+function blockingLatestImplementationChildReason(input: ArchitectureGraphFinalizationInput): string | undefined {
+  const implementationSlotIds = new Set(input.schema.roleSlots.filter(isImplementationProofSlot).map(slot => slot.id));
+  const latest = [...input.events].reverse().find(event => (
+    event.type === 'participant_output'
+    && event.roleSlotId !== undefined
+    && implementationSlotIds.has(event.roleSlotId)
+    && isRecord(event.data)
+  ));
+  return latest && isRecord(latest.data) ? unresolvedCliChildReason(toolEvidence(latest.data)) : undefined;
+}
+
 function hasIndependentHostVerificationEvidence(input: ArchitectureGraphFinalizationInput): boolean {
+  if (input.runContext?.['requireGoalMasterLoopProof'] === true && blockingLatestGoalBuildReason(input)) {
+    return false;
+  }
   return [
     ...(input.priorEvents ?? []),
     ...input.events,
@@ -283,6 +308,18 @@ function hasPassedBuildResultEvidence(event: ArchitectureExecutionEvent): boolea
     }
     return numberField(evidence.data, 'exitCode') === 0;
   });
+}
+
+function blockingLatestGoalBuildReason(input: ArchitectureGraphFinalizationInput): string | undefined {
+  // Events are ordered execution history; priorEvents precede this attempt.
+  for (const event of [...(input.priorEvents ?? []), ...input.events].reverse()) {
+    const build = [...workflowEvidenceForEvent(event)].reverse().find((item) => item.kind === 'BUILD_RESULT');
+    if (!build) continue;
+    return build.status === 'passed' && isRecord(build.data) && numberField(build.data, 'exitCode') === 0
+      ? undefined
+      : 'Goal completion blocked: latest build attempt did not pass with exitCode 0.';
+  }
+  return undefined;
 }
 
 function workflowEvidenceForEvent(event: ArchitectureExecutionEvent): NonNullable<ArchitectureExecutionEvent['evidence']> {

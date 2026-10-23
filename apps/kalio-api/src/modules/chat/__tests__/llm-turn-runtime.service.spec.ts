@@ -24,6 +24,38 @@ async function* partialThenThrow(error: Error): AsyncIterable<InternalLLMChunk> 
 }
 
 describe('LLMTurnRuntimeService', () => {
+  it('audits the selected execution profile model instead of the persona recommendation', async () => {
+    const llmSource: ILLMSource = { stream: vi.fn(() => streamFrom([{ type: 'done' }])) };
+    const sessionManager = {
+      loadHistoryForLLM: vi.fn().mockResolvedValue({ history: [], unboundedHistoryCount: 0 }),
+    };
+    const runtimeAudit = { log: vi.fn<RuntimeAuditLogger['log']>().mockResolvedValue('audit-id') };
+    const runtime = new LLMTurnRuntimeService(
+      llmSource,
+      { process: vi.fn() } as unknown as StreamProcessorService,
+      sessionManager as unknown as SessionManagerService,
+      { dispatch: vi.fn() } as unknown as ToolDispatchService,
+      undefined,
+      runtimeAudit as unknown as RuntimeAuditLogger,
+    );
+    await runtime.runAgentLoop({
+      runtimeKind: 'chat', sessionId: 'sid', personaId: 'persona',
+      effectiveSystemPrompt: 'prompt', toolMetas: [], model: 'swe-2-medium',
+      executionProfile: {
+        id: 'devin-swe-2', name: 'Devin', kind: 'devin-cli-acp', model: 'swe-2',
+        approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1',
+        createdAt: 1, updatedAt: 1,
+      },
+      abortSignal: new AbortController().signal, emit: vi.fn() as EmitFn, maxIterations: 1,
+    });
+    expect(runtimeAudit.log).toHaveBeenCalledWith(expect.objectContaining({
+      eventName: 'llm.turn.started', data: expect.objectContaining({ model: 'swe-2' }),
+    }));
+    expect(llmSource.stream).toHaveBeenCalledWith(expect.objectContaining({
+      executionProfile: expect.objectContaining({ model: 'swe-2' }),
+    }));
+  });
+
   it('returns provider structured output without routing it through display chunk handlers', async () => {
     const structuredOutput = {
       name: 'architecture_router_output',

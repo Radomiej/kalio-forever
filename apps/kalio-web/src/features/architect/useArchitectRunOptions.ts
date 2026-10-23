@@ -1,8 +1,24 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import type { ExecutionProfile } from '@kalio/types';
+import { getExecutionProfiles } from '../../services/apiClient';
 import type { ArchitectExecutionMode } from './architect.types';
 import { DEFAULT_ARCHITECTURE_RUN_LIMITS } from '../architectureRunDefaults';
 
 export function useArchitectRunOptions() {
+  const [executionProfileId, setExecutionProfileId] = useState('');
+  const [executionProfiles, setExecutionProfiles] = useState<ExecutionProfile[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void getExecutionProfiles().then((profiles) => {
+      if (active) setExecutionProfiles(profiles.filter((profile) => profile.enabled));
+    }).catch((error: unknown) => {
+      console.error('[Architect] Execution profiles could not be loaded', error);
+      if (active) setProfilesError('Could not load execution profiles. Retry by reopening Architect.');
+    }).finally(() => { if (active) setProfilesLoading(false); });
+    return () => { active = false; };
+  }, []);
   const [taskPrompt, setTaskPrompt] = useState('Decide the smallest valuable architecture runtime slice.');
   const [maxArchitectureSteps, setMaxArchitectureSteps] = useState(DEFAULT_ARCHITECTURE_RUN_LIMITS.maxArchitectureSteps);
   const [maxArchitectureNodeVisits, setMaxArchitectureNodeVisits] = useState(DEFAULT_ARCHITECTURE_RUN_LIMITS.maxArchitectureNodeVisits);
@@ -46,6 +62,7 @@ export function useArchitectRunOptions() {
   ]);
 
   return {
+    executionProfileId, setExecutionProfileId, executionProfiles, profilesLoading, profilesError,
     allowOrchestratorSubagents,
     autoApproveTerminal,
     autoApproveProjectWrites,

@@ -47,11 +47,30 @@ function formatControlValue(value: number): string {
 export function ToolTimeoutsSection({ values, onInputChange, onCommit }: ToolTimeoutsSectionProps) {
   return (
     <div className="border-t border-base-300 pt-4">
-      <h3 className="text-sm font-semibold mb-1">Tool Timeouts</h3>
+      <h3 className="text-sm font-semibold mb-1">Request and Tool Timeouts</h3>
       <p className="text-xs text-base-content/60 mb-3">
-        Shared backend timeouts for web search and provider probes. Raise them when external services are slow.
+        The LLM request timeout covers generation and streaming. Provider probe limits only affect connection checks.
       </p>
 
+      <label className="block mb-4 text-xs text-base-content/60">
+        LLM request timeout (seconds)
+        <input
+          type="number"
+          aria-label="LLM request timeout (seconds)"
+          className="input input-bordered input-sm w-full mt-2"
+          min={1}
+          max={1800}
+          step={1}
+          value={values.providerRequestTimeoutMs / 1000}
+          onChange={(event) => {
+            const seconds = event.target.valueAsNumber;
+            if (Number.isFinite(seconds)) onInputChange('providerRequestTimeoutMs', seconds * 1000);
+          }}
+          onBlur={(event) => onCommit('providerRequestTimeoutMs', event.target.valueAsNumber * 1000)}
+          data-testid="provider-request-timeout-input"
+        />
+        <span className="block mt-1">1–1800 seconds. Increase for slow local models or large tool contexts. Saved when you leave the field.</span>
+      </label>
       <div className="space-y-4">
         {TOOL_TIMEOUT_CONTROLS.map((control) => (
           <div key={control.key}>

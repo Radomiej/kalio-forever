@@ -31,10 +31,33 @@ describe('DevinCliIntegrationController', () => {
     expect(result.mcpBridge).not.toHaveProperty('token');
   });
 
+  it('uses cached status by default and probes Devin only for refresh=true', async () => {
+    const { controller, registry } = createController();
+
+    await controller.status();
+    expect(registry.getStatus).toHaveBeenLastCalledWith(false);
+
+    await controller.status('true');
+    expect(registry.getStatus).toHaveBeenLastCalledWith(true);
+  });
+
   it('generates a Settings token and resets active Devin hosts', async () => {
     const { controller, tokenService, registry } = createController();
     await controller.updateSettings({ generateMcpBridgeToken: true });
     expect(tokenService.generate).toHaveBeenCalledOnce();
+    expect(registry.reset).toHaveBeenCalledOnce();
+  });
+
+  it('empty settings reset preserves every native permission and leaves tokens untouched', async () => {
+    const { controller, nativeToolsPolicy, tokenService, registry } = createController({ token: 'saved-token', source: 'settings' });
+    const before = await controller.settings();
+    const after = await controller.updateSettings({});
+    expect(after.nativeTools).toMatchObject({ filesystem: false, web: false, terminal: false });
+    expect(after.mcpBridge).toEqual(before.mcpBridge);
+    expect(nativeToolsPolicy.update).toHaveBeenCalledWith({ filesystem: false, web: false, terminal: false });
+    expect(tokenService.generate).not.toHaveBeenCalled();
+    expect(tokenService.setOverride).not.toHaveBeenCalled();
+    expect(tokenService.clearOverride).not.toHaveBeenCalled();
     expect(registry.reset).toHaveBeenCalledOnce();
   });
 

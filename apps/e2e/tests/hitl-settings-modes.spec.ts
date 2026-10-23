@@ -1,4 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { hitlFixtureRequest } from './helpers/hitl-fixture-auth';
+import { createExistingMockConversation } from './helpers/existing-mock-conversation';
 import {
   API_BASE,
   deleteSessionIfExists,
@@ -57,15 +59,13 @@ async function saveHitlMode(page: Page, mode: Extract<HitlMode, 'manual' | 'bypa
 }
 
 async function getHitlConfig(request: APIRequestContext): Promise<HitlConfig> {
-  const response = await request.get(`${API_BASE}/hitl/config`);
+  const response = await hitlFixtureRequest(request, 'GET');
   expect(response.ok()).toBeTruthy();
   return response.json() as Promise<HitlConfig>;
 }
 
 async function restoreHitlConfig(request: APIRequestContext, config: HitlConfig): Promise<void> {
-  const response = await request.put(`${API_BASE}/hitl/config`, {
-    data: config,
-  });
+  const response = await hitlFixtureRequest(request, 'PUT', config);
   expect(response.ok()).toBeTruthy();
 }
 
@@ -74,11 +74,7 @@ async function createSession(
   title: string,
   personaId: string,
 ): Promise<{ id: string; title: string }> {
-  const response = await request.post(`${API_BASE}/sessions`, {
-    data: { title, personaId },
-  });
-  expect(response.ok()).toBeTruthy();
-  const session = await response.json() as { id: string };
+  const session = await createExistingMockConversation(request, title, personaId);
   return { id: session.id, title };
 }
 

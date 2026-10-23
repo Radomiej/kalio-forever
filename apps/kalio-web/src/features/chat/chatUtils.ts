@@ -59,7 +59,11 @@ function mergeMessageCopies(currentMessage: ChatMessage, loadedMessage: ChatMess
     turnId: currentMessage.turnId ?? loadedMessage.turnId,
     promptMessageId: currentMessage.promptMessageId ?? loadedMessage.promptMessageId,
     thinking: currentMessage.thinking ?? loadedMessage.thinking,
-    toolCalls: currentMessage.toolCalls ?? loadedMessage.toolCalls,
+    // Calls are append-only across approval resumes; a local prefix must not hide durable calls.
+    toolCalls: currentMessage.toolCalls && loadedMessage.toolCalls
+      ? [...new Map([...currentMessage.toolCalls, ...loadedMessage.toolCalls]
+        .map((call) => [call.id, call])).values()]
+      : currentMessage.toolCalls ?? loadedMessage.toolCalls,
     toolCallId: currentMessage.toolCallId ?? loadedMessage.toolCallId,
     attachments: currentMessage.attachments ?? loadedMessage.attachments,
     streaming: currentMessage.streaming ?? loadedMessage.streaming,

@@ -22,15 +22,9 @@ import {
   finalArtifactStatusFromData,
 } from './architecture-final-artifact-status';
 import { normalizeFlowEventType, normalizeFlowLifecycle, normalizeFlowStatus } from './agent-flow-trace-mapping';
+import { schemaIdForFlow } from './agent-flow-schema-alias';
 
-const FLOW_SCHEMA_ALIASES: Record<string, string> = {
-  goal_guard_delivery_loop: 'goal-master-delivery-loop',
-};
 const DEFAULT_LIVE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-
-function schemaIdForFlow(flowId: string): string {
-  return FLOW_SCHEMA_ALIASES[flowId] ?? flowId;
-}
 
 function normalizeStatus(status: ArchitectureRun['status']): SubAgentFlowResult['status'] {
   if (status === 'completed') return 'done';

@@ -1,4 +1,4 @@
-<svg width="100%" viewBox="0 0 1280 780" xmlns="http://www.w3.org/2000/svg" role="img">
+<svg width="1280" height="780" viewBox="0 0 1280 780" xmlns="http://www.w3.org/2000/svg" role="img">
   <title>Kalio current module architecture</title>
   <desc>Session-centric system map showing the React client, runtime event lane, backend orchestration, shared contracts, and persistence.</desc>
 

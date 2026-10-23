@@ -32,6 +32,31 @@ function makeMsg(overrides: TestChatMessageOverrides): ChatMessage {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('mergeFetchedMessages', () => {
+  it('retains tools added after approval when durable history catches up with the local assistant', () => {
+    const beforeApproval = { id: 'call-read', name: 'fs_read', args: { path: 'package.json' } };
+    const afterApproval = { id: 'call-build', name: 'terminal_spawn', args: { command: 'npm' } };
+    const output = { id: 'call-output', name: 'terminal_output', args: { id: 'terminal-1' } };
+    const local = makeMsg({ id: 'a1', turnId: 'turn-1', promptMessageId: 'u1',
+      createdAt: 20, content: 'Build finished', toolCalls: [beforeApproval] });
+    const durable = { ...local, toolCalls: [beforeApproval, afterApproval, output] };
+    const messages = mergeFetchedMessages([local], [durable, makeMsg({
+      id: 'r-output', role: 'tool_result', toolCallId: output.id,
+      turnId: 'turn-1', promptMessageId: 'u1', content: '{"status":"exited","exitCode":0}', createdAt: 30,
+    })]);
+    expect(messages.find((message) => message.id === 'a1')?.toolCalls).toEqual(durable.toolCalls);
+    expect(buildTurnsFromHistory(messages, 's1')[0].items.filter((item) => item.kind === 'tool'))
+      .toEqual(durable.toolCalls.map((call) => ({ kind: 'tool', callId: call.id })));
+  });
+
+  it('does not lose live calls when the loaded tool list is stale and repeated merges do not duplicate calls', () => {
+    const first = { id: 'read', name: 'fs_read', args: { path: 'package.json' } };
+    const second = { id: 'build', name: 'terminal_spawn', args: { command: 'npm' } };
+    const local = makeMsg({ id: 'a1', toolCalls: [first, second] });
+    const stale = { ...local, toolCalls: [first] };
+    const merged = mergeFetchedMessages([local], [stale]);
+    expect(mergeFetchedMessages(merged, [stale])[0].toolCalls).toEqual([first, second]);
+  });
+
   it('REGRESSION: preserves an optimistic user prompt when fetched history is stale or empty', () => {
     const currentMessages = [
       makeMsg({ id: 'u-local', role: 'user', content: 'Build a calculator app', createdAt: 10 }),

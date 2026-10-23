@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionPipelineService } from '../session-pipeline.service';
+import { SessionProfileAdmissionService } from '../session-profile-admission.service';
 import type { ChatService } from '../chat.service';
 import type { EmitFn } from '../interfaces/stream-context.interface';
 
@@ -59,7 +60,7 @@ describe('SessionPipelineService - Bug Reproductions', () => {
 
   beforeEach(() => {
     harness = makeBlockingChatService();
-    svc = new SessionPipelineService(harness.chat);
+    svc = new SessionPipelineService(harness.chat, undefined, undefined, new SessionProfileAdmissionService());
   });
 
   /**

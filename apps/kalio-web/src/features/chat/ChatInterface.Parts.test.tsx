@@ -4,7 +4,7 @@ import type { ChatMessage, ChatSession, Persona } from '@kalio/types';
 import type { ArchitectSchema } from '../architect/architect.types';
 import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
-import { buildCopiedChatText, ChatSessionHeader, ChatWelcomeScreen } from './ChatInterface.Parts';
+import { buildCopiedChatText, ChatSessionHeader, ChatWelcomeScreen, PendingAssistantBubble } from './ChatInterface.Parts';
 import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
 vi.mock('../vfs/ConversationFilesBar', () => ({
@@ -18,6 +18,22 @@ vi.mock('./TokenBadge', () => ({
 vi.mock('./ContextStats', () => ({
   ContextStats: () => <div data-testid="context-stats" />,
 }));
+
+describe('PendingAssistantBubble approval state', () => {
+  it.each(['fs_write', null])('shows an idle approval wait for %s rather than running animation', (toolName) => {
+    render(<PendingAssistantBubble liveTurnState={{
+      sessionId: 'sess-1', phase: 'awaiting_confirmation', stoppable: true,
+      previewText: 'Stale thinking content', toolName, queuedDepth: 0,
+      showPlaceholderBubble: true, workflowActive: false,
+    }} />);
+    expect(screen.getByTestId('pending-agent-phase')).toHaveTextContent('waiting for approval');
+    expect(screen.getByTestId('pending-agent-bubble')).toHaveTextContent(
+      toolName ? `Kalio is waiting for your approval to use ${toolName}.` : 'Kalio is waiting for your approval.',
+    );
+    expect(screen.queryByText('Stale thinking content')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pending-agent-bubble').querySelector('.loading')).toBeNull();
+  });
+});
 
 function msg(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -546,6 +562,7 @@ describe('ChatSessionHeader', () => {
     );
 
     expect(screen.getByTestId('chat-runtime-label')).toHaveTextContent('Codex · gpt-5.6-luna');
+    expect(screen.getByTestId('chat-runtime-label').parentElement).toHaveClass('flex-wrap', 'min-w-0');
     expect(screen.queryByText('mock')).not.toBeInTheDocument();
   });
 

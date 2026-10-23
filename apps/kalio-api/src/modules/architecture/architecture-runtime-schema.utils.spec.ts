@@ -3,6 +3,7 @@ import type { ArchitectureSchema, CreateArchitectureRunDto } from '@kalio/types'
 import { describe, expect, it } from 'vitest';
 import {
   cloneArchitectureRuntimeSchema,
+  isArchitectureRuntimeSchema,
   validateArchitectureCreateRunDto,
   validateArchitectureCreateRunSlotOverrides,
 } from './architecture-runtime-schema.utils';
@@ -82,6 +83,74 @@ const validSchema: ArchitectureSchema = {
 };
 
 describe('architecture runtime schema utils', () => {
+  const autoSchema = (): ArchitectureSchema => ({
+    ...validSchema,
+    nodes: [
+      { id: 'auto', label: 'Auto', kind: 'auto_router', autoRouting: { confidenceThreshold: 0.7, instructions: 'Choose the best route.' } },
+      ...validSchema.nodes.map((node) => ({ ...node })),
+    ],
+    edges: [
+      { id: 'choice', fromNodeId: 'auto', toNodeId: 'router-node', selection: 'choice' },
+      { id: 'fallback', fromNodeId: 'auto', toNodeId: 'final-node', selection: 'default' },
+      ...validSchema.edges,
+    ],
+  });
+
+  it('accepts auto-routing schemas and independently clones their metadata', () => {
+    const schema = autoSchema();
+    expect(isArchitectureRuntimeSchema(schema)).toBe(true);
+    const clone = cloneArchitectureRuntimeSchema(schema);
+    expect(clone.nodes[0]?.autoRouting).toEqual(schema.nodes[0]?.autoRouting);
+    expect(clone.nodes[0]?.autoRouting).not.toBe(schema.nodes[0]?.autoRouting);
+  });
+
+  it.each([0, 1])('accepts threshold boundary %s and 2000 instruction characters', (threshold) => {
+    const schema = autoSchema();
+    schema.nodes[0]!.autoRouting = { confidenceThreshold: threshold, instructions: 'a'.repeat(2000) };
+    expect(isArchitectureRuntimeSchema(schema)).toBe(true);
+  });
+
+  it('accepts multiple choices and omitted optional settings', () => {
+    const schema = autoSchema();
+    delete schema.nodes[0]!.autoRouting;
+    schema.edges.push({ id: 'choice2', fromNodeId: 'auto', toNodeId: 'final-node', selection: 'choice' });
+    expect(isArchitectureRuntimeSchema(schema)).toBe(true);
+  });
+
+  it.each([-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid threshold %s', (threshold) => {
+    const schema = autoSchema();
+    schema.nodes[0]!.autoRouting!.confidenceThreshold = threshold;
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+  });
+
+  it('rejects overlong instructions, role ownership and misplaced configuration', () => {
+    const schema = autoSchema();
+    schema.nodes[0]!.autoRouting!.instructions = 'a'.repeat(2001);
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+    schema.nodes[0]!.autoRouting!.instructions = '';
+    schema.nodes[0]!.roleSlotId = 'router';
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+    delete schema.nodes[0]!.roleSlotId;
+    schema.nodes[1]!.autoRouting = schema.nodes[0]!.autoRouting;
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+  });
+
+  it('requires choices and exactly one default, and rejects other outgoing roles', () => {
+    for (const selection of [undefined, 'converge', 'continuation'] as const) {
+      const schema = autoSchema();
+      schema.edges[0]!.selection = selection;
+      expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+    }
+    const schema = autoSchema();
+    schema.edges = schema.edges.filter((edge) => edge.id !== 'fallback');
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+    schema.edges[0]!.selection = 'default';
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+    const duplicate = autoSchema();
+    duplicate.edges.push({ id: 'second-default', fromNodeId: 'auto', toNodeId: 'router-node', selection: 'default' });
+    expect(isArchitectureRuntimeSchema(duplicate)).toBe(false);
+  });
+
   it('validates and clones inline run schemas without sharing nested mutable policy objects', () => {
     const dto: CreateArchitectureRunDto = {
       schemaId: validSchema.id,

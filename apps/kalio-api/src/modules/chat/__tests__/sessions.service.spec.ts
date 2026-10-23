@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { SessionsService } from '../sessions.service';
+import { SessionProfileAdmissionService } from '../session-profile-admission.service';
 import type { IMessageRepository } from '../interfaces/message-repository.interface';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { SessionManagerService } from '../session-manager.service';
@@ -42,15 +43,15 @@ function makeDrizzle(rows: FakeRow[]): { drizzle: DrizzleService; rows: FakeRow[
       where: () => ({
         orderBy: () => rowQuery(rows.filter((row) => row.archivedAt == null)),
         limit: (limit: number) => Promise.resolve(rows.slice(0, limit)),
+        get: () => rows[0] ? { id: rows[0].id, parent: rows[0].parentSessionId ?? null } : undefined,
       }),
     }),
   });
   const insert = () => ({
-    values: (row: FakeRow) => {
+    values: (row: FakeRow) => ({ run: () => {
       ops.push('insert');
       rows.push(row);
-      return Promise.resolve();
-    },
+    } }),
   });
   const update = () => ({
     set: (patch: Partial<FakeRow>) => ({
@@ -98,6 +99,7 @@ describe('SessionsService', () => {
   let projects: { assertAssignable: ReturnType<typeof vi.fn> };
   let personas: { getSessionConfig: ReturnType<typeof vi.fn> };
   let activeSessionRegistry: { isActive: ReturnType<typeof vi.fn> };
+  let executionProfiles: { assertEnabled: ReturnType<typeof vi.fn>; getDefaultId: ReturnType<typeof vi.fn>; resolveId: ReturnType<typeof vi.fn> };
   let rows: FakeRow[];
   let ops: string[];
 
@@ -105,6 +107,7 @@ describe('SessionsService', () => {
     rows = [];
     repo = {
       ensureSession: vi.fn().mockResolvedValue(undefined),
+      loadMessagesForTurn: vi.fn().mockResolvedValue([]),
       loadHistory: vi.fn().mockResolvedValue([]),
       loadHistoryPage: vi.fn().mockResolvedValue({
         messages: [],
@@ -145,6 +148,14 @@ describe('SessionsService', () => {
     }) };
     personas = { getSessionConfig: vi.fn().mockResolvedValue({ executionProfileId: 'persona-profile' }) };
     activeSessionRegistry = { isActive: vi.fn().mockReturnValue(false) };
+    executionProfiles = {
+      getDefaultId: vi.fn().mockResolvedValue(null),
+      resolveId: vi.fn().mockImplementation(selection =>
+        selection.explicitProfileId ?? selection.personaProfileId ?? selection.projectProfileId),
+      assertEnabled: vi.fn().mockImplementation(async (id: string) => ({
+        id, kind: 'devin-cli-acp', model: 'swe-2', enabled: true,
+      })),
+    };
     service = new SessionsService(
       fixture.drizzle,
       sessionManager,
@@ -156,10 +167,22 @@ describe('SessionsService', () => {
       activeSessionRegistry as never,
       undefined,
       personas as unknown as PersonaService,
+      executionProfiles as never,
+      new SessionProfileAdmissionService(),
     );
   });
 
   describe('create', () => {
+    it('uses the saved default agent for new top-level sessions but preserves explicit choices', async () => {
+      executionProfiles.getDefaultId.mockResolvedValue('devin-swe-2');
+      const withDefault = new SessionsService(
+        makeDrizzle(rows).drizzle, {} as SessionManagerService, sessionEvents, repo, llm, allowedPaths,
+        projects as never, activeSessionRegistry as never, undefined,
+        personas as unknown as PersonaService, executionProfiles as never, new SessionProfileAdmissionService(),
+      );
+      expect((await withDefault.create({ personaId: 'p1' })).executionProfileId).toBe('devin-swe-2');
+      expect((await withDefault.create({ personaId: 'p1', executionProfileId: 'explicit' })).executionProfileId).toBe('explicit');
+    });
     it('inserts a session row and returns ChatSession', async () => {
       const result = await service.create({ personaId: 'p1', title: 'Test' });
       expect(result.personaId).toBe('p1');
@@ -266,6 +289,43 @@ describe('SessionsService', () => {
       });
 
       expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
+    });
+  });
+
+  describe('execution profile selection', () => {
+    it('persists a validated provider/model profile while the new conversation is empty', async () => {
+      const session = await service.create({ personaId: 'p1', title: 'New Chat' });
+
+      await service.update(session.id, { executionProfileId: 'selected-profile' });
+
+      expect(executionProfiles.assertEnabled).toHaveBeenCalledWith('selected-profile');
+      expect(rows[0]?.executionProfileId).toBe('selected-profile');
+      expect(sessionEvents.emitSessionUpdated).toHaveBeenCalledWith(expect.objectContaining({
+        id: session.id,
+        executionProfileId: 'selected-profile',
+      }));
+    });
+
+    it('rejects changing provider/model after a conversation has messages', async () => {
+      const session = await service.create({ personaId: 'p1', title: 'Started' });
+      vi.mocked(repo.loadHistory).mockResolvedValueOnce([{
+        id: 'message-1', sessionId: session.id, role: 'user', content: 'Already started', createdAt: 1,
+      }]);
+
+      await expect(service.update(session.id, { executionProfileId: 'selected-profile' }))
+        .rejects.toThrow('Execution profile cannot change after a conversation has started.');
+      expect(executionProfiles.assertEnabled).not.toHaveBeenCalled();
+    });
+
+    it('rejects mock profiles even when the API profile is enabled', async () => {
+      const session = await service.create({ personaId: 'p1', title: 'New Chat' });
+      executionProfiles.assertEnabled.mockResolvedValueOnce({
+        id: 'mock-profile', kind: 'direct-llm', provider: 'mock', model: 'mock', enabled: true,
+      });
+
+      await expect(service.update(session.id, { executionProfileId: 'mock-profile' }))
+        .rejects.toThrow('Mock execution profiles are not available for user conversations.');
+      expect(rows[0]?.executionProfileId).not.toBe('mock-profile');
     });
   });
 

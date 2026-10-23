@@ -13,7 +13,7 @@ export const ROW_GAP = 44;
 export const BOARD_PADDING_X = 28;
 export const BOARD_PADDING_Y = 28;
 
-export type ExecutionGraphNodeStatus = 'idle' | 'running' | 'waiting' | 'success' | 'error';
+export type ExecutionGraphNodeStatus = 'idle' | 'running' | 'waiting' | 'success' | 'error' | 'cancelled';
 
 export function statusFromRuntimeChildExecution(
   status: RuntimeChildExecution['status'],
@@ -27,7 +27,8 @@ export function statusFromRuntimeChildExecution(
   if (status === 'completed') {
     return 'success';
   }
-  if (status === 'failed' || status === 'blocked' || status === 'stopped' || status === 'cancelled') {
+  if (status === 'stopped' || status === 'cancelled') return 'cancelled';
+  if (status === 'failed' || status === 'blocked') {
     return 'error';
   }
   return 'idle';
@@ -223,7 +224,8 @@ function statusFromCliChild(
   if (cliStatus === 'completed') {
     return 'success';
   }
-  if (cliStatus === 'failed' || cliStatus === 'stopped') {
+  if (cliStatus === 'stopped') return 'cancelled';
+  if (cliStatus === 'failed') {
     return 'error';
   }
   return 'idle';
@@ -231,7 +233,7 @@ function statusFromCliChild(
 
 export function statusFromActivity(
   activity: ToolActivity | null,
-  _hasResult: boolean,
+  hasResult: boolean,
   resultData?: unknown,
   toolName?: string,
 ): ExecutionGraphNodeStatus {
@@ -239,7 +241,8 @@ export function statusFromActivity(
   if (cliStatus) {
     return cliStatus;
   }
-  if (activity?.status === 'error' || activity?.status === 'cancelled' || activity?.status === 'expired') {
+  if (activity?.status === 'cancelled') return 'cancelled';
+  if (activity?.status === 'error' || activity?.status === 'expired') {
     return 'error';
   }
   if (activity?.status === 'running') {
@@ -250,6 +253,10 @@ export function statusFromActivity(
   }
   if (activity?.status === 'success') {
     return 'success';
+  }
+  if (hasResult) {
+    const status = extractPersistedToolResultMeta(resultData)?.status;
+    return status === 'cancelled' ? 'cancelled' : status === 'error' ? 'error' : 'success';
   }
   return 'idle';
 }
@@ -315,7 +322,16 @@ export function buildToolSnapshots(messages: ChatMessage[], toolActivities: Tool
               startedAt: cliAgentResult.startedAt ?? message.createdAt,
             }
           : null
-      : existing?.activity ?? null;
+      : isCliChildToolName(existing?.toolName ?? '')
+        ? existing?.activity ?? null
+        : {
+            callId: message.toolCallId,
+            toolName: existing?.toolName ?? 'tool',
+            args: existing?.args ?? {},
+            sessionId: message.sessionId,
+            status: extractPersistedToolResultMeta(result)?.status ?? 'success',
+            startedAt: existing?.activity?.startedAt ?? message.createdAt,
+          };
     snapshots.set(message.toolCallId, {
       callId: message.toolCallId,
       toolName: existing?.toolName ?? 'tool',
@@ -345,7 +361,7 @@ export function getFinalAnswerMessage(turn: AgentTurn, messageById: Map<string, 
 }
 
 export function getTurnStatus(turn: AgentTurn, toolSnapshots: Map<string, ToolSnapshot>): ExecutionGraphNodeStatus {
-  if (turn.error) return 'error';
+  if (turn.error) return turn.error.code === 'INTERRUPTED' || turn.error.code === 'CANCELLED' ? 'cancelled' : 'error';
   if (!turn.done) return 'running';
 
   const toolStatuses = turn.items
@@ -363,6 +379,7 @@ export function getTurnStatus(turn: AgentTurn, toolSnapshots: Map<string, ToolSn
   if (toolStatuses.includes('error')) return 'error';
   if (toolStatuses.includes('waiting')) return 'waiting';
   if (toolStatuses.includes('running')) return 'running';
+  // A refused tool does not interrupt a completed turn; turn.error owns cancellation.
   return 'success';
 }
 
@@ -390,11 +407,13 @@ export function buildTurnIdentity(
   turn: AgentTurn,
   sessionById: Map<string, ChatSession>,
   personaById: Map<string, Persona>,
+  recordedModel?: string | null,
 ): { subtitle: string; detail?: string; actorLabel: string | null; modelLabel: string | null } {
   const session = sessionById.get(turn.sessionId) ?? null;
   const persona = session ? personaById.get(session.personaId) ?? null : null;
   const actorLabel = turn.agentRun?.label ?? persona?.name ?? session?.personaId ?? null;
-  const modelLabel = persona?.model ?? null;
+  // TODO: legacy fallback — sessions without an explicit runtime retain the old persona-based label until audited identity is hydrated.
+  const modelLabel = recordedModel !== undefined ? recordedModel : session?.executionProfileId ? null : persona?.model ?? null;
 
   if (actorLabel && modelLabel) {
     return {

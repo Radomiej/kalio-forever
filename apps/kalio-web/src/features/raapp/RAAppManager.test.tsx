@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { RAAppManager } from './RAAppManager';
 import type { RAAppGroup, VFSListResult } from '@kalio/types';
-import { createAndActivateEmptyHostSession } from '../chat/activeConversationSession';
+import { createRAAppHostSession } from './raappExecutionProfile';
 import {
   approveRAAppDraft,
   deleteRAAppGroup,
@@ -12,6 +12,7 @@ import {
   getSessionVfsFiles,
   rollbackRAApp,
   uploadRAApp,
+  getExecutionProfiles,
 } from '../../services/apiClient';
 
 vi.mock('../../services/apiClient', () => ({
@@ -23,10 +24,11 @@ vi.mock('../../services/apiClient', () => ({
   discardRAAppDraft: vi.fn(),
   rollbackRAApp: vi.fn(),
   deleteRAAppGroup: vi.fn(),
+  getExecutionProfiles: vi.fn(),
 }));
 
-vi.mock('../chat/activeConversationSession', () => ({
-  createAndActivateEmptyHostSession: vi.fn(),
+vi.mock('./raappExecutionProfile', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./raappExecutionProfile')>(), createRAAppHostSession: vi.fn(),
 }));
 
 const setPendingMessage = vi.fn();
@@ -62,6 +64,7 @@ vi.mock('../../store/sessionStore', () => ({
     {
       getState: () => ({
         activeSessionId: 'session-1',
+        sessions: [{ id: 'session-1', executionProfileId: 'openrouter-profile' }],
         messages: [],
         addSession,
         setActiveSession,
@@ -104,7 +107,8 @@ function makeVfsResult(): VFSListResult {
 describe('RAAppManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(createAndActivateEmptyHostSession).mockResolvedValue({ id: 'session-run' } as never);
+    vi.mocked(createRAAppHostSession).mockResolvedValue({ id: 'session-run' } as never);
+    vi.mocked(getExecutionProfiles).mockResolvedValue([]);
     vi.mocked(getRAApps).mockResolvedValue([]);
     vi.mocked(getRAAppGroups).mockResolvedValue([makeGroup()]);
     vi.mocked(getSessionVfsFiles).mockResolvedValue(makeVfsResult());
@@ -168,12 +172,13 @@ describe('RAAppManager', () => {
     fireEvent.change(input, { target: { value: '{"value":5}' } });
     fireEvent.click(await screen.findByTestId('raapp-run-my-app'));
 
-    await waitFor(() => expect(createAndActivateEmptyHostSession).toHaveBeenCalled());
-    expect(createAndActivateEmptyHostSession).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createRAAppHostSession).toHaveBeenCalled());
+    expect(createRAAppHostSession).toHaveBeenCalledWith(expect.objectContaining({
+      executionProfileId: 'openrouter-profile',
       runtimeContext: expect.objectContaining({
         architectureContext: expect.objectContaining({ raAppLaunchInputs: '{"value":5}' }),
       }),
-    }));
+    }), expect.any(Object));
     expect(setPendingRAAppLaunchIntent).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.stringContaining('Use these JSON inputs: {"value":5}.'),
     }));

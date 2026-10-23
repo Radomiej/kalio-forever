@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Project } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { assignSessionProject } from '../../../services/apiClient';
@@ -18,6 +18,9 @@ import { focusExecutionGraphMessages, type ExecutionGraphFocusMode } from './exe
 import { extractArchitectureBranchSessionIds, extractExecutionGraphHydrationStatus } from './executionGraphHydration';
 import { architectureRunIdFromRootSession, buildArchitectureRootGraphModel } from './executionGraphArchitectureRoot';
 import { useExecutionGraphLaunch } from './useExecutionGraphLaunch';
+import { useExecutionGraphViewport } from './useExecutionGraphViewport';
+import { useExecutionGraphTurnModels } from './useExecutionGraphTurnModels';
+import { withRecordedTurnModels, withWaitingGraphSessions } from './executionGraphTurnModels';
 import type { TalkView } from '../../../App.types';
 import {
   mergeRuntimeChildExecutions,
@@ -28,12 +31,6 @@ import {
   selectPendingConfirmationsForSession,
   selectRunningLoops,
 } from '../../../store/agentRuntimeSelectors';
-
-const DEFAULT_GRAPH_ZOOM = 0.82;
-const MIN_GRAPH_ZOOM = 0.58;
-const MAX_GRAPH_ZOOM = 1.6;
-const GRAPH_ZOOM_STEP = 0.15;
-const DEFAULT_INSPECTOR_WIDTH = 280;
 
 interface ExecutionGraphViewProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
@@ -80,14 +77,13 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
     setSelectedArchitectureId,
     sendEmptyGraphPrompt,
   } = useExecutionGraphLaunch();
-  const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
-  const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
+  const { zoom, setZoom, inspectorWidth, resetViewportToken, collapseTools, decreaseZoom, increaseZoom,
+    resetZoom, fitAll, handleWheelZoom, startInspectorResize } = useExecutionGraphViewport();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState<ExecutionGraphFocusMode>('latest-architecture');
   const [cardDensity, setCardDensity] = useState<GraphCardDensity>('compact');
-  const [resetViewportToken, setResetViewportToken] = useState(0);
-  const inspectorResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const hydrationInFlightRef = useRef<Set<string>>(new Set());
+  const runtimeAudit = useExecutionGraphTurnModels(activeSessionId, getSessionAgentTurns(activeSessionId).map((turn) => `${turn.id}:${turn.done}`).join('|'));
 
   const requestSessionHydration = (
     sessionId: string,
@@ -169,58 +165,6 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
     setAgentTurns,
     setMessages,
   ]);
-
-  useEffect(() => {
-    const handleMouseMove = (event: globalThis.MouseEvent) => {
-      const dragState = inspectorResizeRef.current;
-      if (!dragState) {
-        return;
-      }
-
-      const nextWidth = dragState.startWidth + (dragState.startX - event.clientX);
-      setInspectorWidth(Math.max(280, Math.min(500, nextWidth)));
-    };
-
-    const stopResize = () => {
-      inspectorResizeRef.current = null;
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', stopResize);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', stopResize);
-    };
-  }, []);
-
-  const clampZoom = (value: number) => Math.max(MIN_GRAPH_ZOOM, Math.min(MAX_GRAPH_ZOOM, Number(value.toFixed(2))));
-  const collapseTools = zoom <= 0.85;
-  const decreaseZoom = () => setZoom((value) => clampZoom(value - GRAPH_ZOOM_STEP));
-  const increaseZoom = () => setZoom((value) => clampZoom(value + GRAPH_ZOOM_STEP));
-  const resetZoom = () => {
-    setZoom(DEFAULT_GRAPH_ZOOM);
-    setResetViewportToken((value) => value + 1);
-  };
-  const fitAll = () => {
-    setZoom(DEFAULT_GRAPH_ZOOM);
-    setResetViewportToken((value) => value + 1);
-  };
-  const handleWheelZoom = (deltaY: number) => {
-    if (deltaY === 0) {
-      return zoom;
-    }
-
-    const nextZoom = clampZoom(zoom + (deltaY < 0 ? GRAPH_ZOOM_STEP : -GRAPH_ZOOM_STEP));
-    setZoom(nextZoom);
-    return nextZoom;
-  };
-  const startInspectorResize = (event: ReactMouseEvent<HTMLDivElement>) => {
-    inspectorResizeRef.current = {
-      startX: event.clientX,
-      startWidth: inspectorWidth,
-    };
-  };
 
   const runningLoops = useMemo(
     () => selectRunningLoops({ runtimeActivitySnapshots }),
@@ -445,20 +389,14 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
     personas,
     collapseTools,
   });
-  const baseModel = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
+  const selectedModel = architectureRootModel && messageModel.nodes.every((node) => node.kind === 'prompt')
     ? architectureRootModel
     : messageModel;
+  const baseModel = withRecordedTurnModels(selectedModel, runtimeAudit.entries, sessions, personas, runtimeAudit.loading);
   const waitingSessionIds = new Set(Object.entries(pendingConfirmations)
     .filter(([, requests]) => requests.length > 0)
     .map(([sessionId]) => sessionId));
-  const model = waitingSessionIds.size > 0
-    ? {
-        ...baseModel,
-        nodes: baseModel.nodes.map((node) => waitingSessionIds.has(node.sessionId ?? '')
-          ? { ...node, status: 'waiting' as const }
-          : node),
-      }
-    : baseModel;
+  const model = withWaitingGraphSessions(baseModel, waitingSessionIds);
 
   const effectiveSelectedId = model.nodes.some((node) => node.id === selectedNodeId)
     ? selectedNodeId
@@ -526,7 +464,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
     <div data-testid="execution-graph-view" className="flex h-full flex-col overflow-y-auto bg-base-100 xl:flex-row xl:overflow-hidden">
       <div className="flex-1 min-w-0 flex flex-col overflow-visible xl:overflow-hidden">
         {header}
-
+        {runtimeAudit.error && <p role="alert" className="px-4 text-xs text-warning">Runtime model evidence: {runtimeAudit.error}</p>}
         <ExecutionGraphBoard
           cardDensity={cardDensity}
           model={model}

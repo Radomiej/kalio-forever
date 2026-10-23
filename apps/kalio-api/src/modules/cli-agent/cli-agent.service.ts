@@ -1,34 +1,29 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { spawn, execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { spawn } from 'node:child_process';
 import type { CLIAgentAdapterInfo } from '@kalio/types';
 import { CopilotAdapter } from './adapters/copilot.adapter';
 import { GeminiAdapter } from './adapters/gemini.adapter';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
-import { CodexAdapter, defaultCodexCommand } from './adapters/codex.adapter';
+import { CodexAdapter } from './adapters/codex.adapter';
 import type { ICLIAgentAdapter } from './adapters/cli-agent.adapter';
 import { CLIAgentConfigService } from './cli-agent-config.service';
 import { terminateCliAgentProcess, type KillableProcess } from './cli-agent-process-kill';
 import { compressOutput } from './output-compressor';
 import {
   EXIT_FALLBACK_GRACE_MS,
-  WINDOWS_POWERSHELL_EXE,
   extractCodexAgentMessage,
-  normalizeTimeoutMs,
-  quotePowerShellArg,
 } from './cli-agent-utils';
 import type { CLIAgentRunLimits, RunCliAgentRequest } from './cli-agent.types';
 import { CLIAgentPtyService } from './cli-agent-pty.service';
 import { applySemanticCliOutcome, type CLIAgentRunResult } from './cli-agent-outcome';
+import { CLIAgentProbeService } from './cli-agent-probe.service';
+import { CLIAgentLaunchPreparationService } from './cli-agent-launch-preparation.service';
+import { CmdInvocationAuditService } from '../chat/cmd-invocation-audit.service';
 import { createWorkflowError } from '../../common/utils/workflow-error.util';
 export type { ProgressEmitFn } from './cli-agent.types';
 export { applySemanticCliOutcome, type CLIAgentRunResult, type CLIAgentSemanticFailureCode } from './cli-agent-outcome';
 
 export const CLI_AGENT_STOPPED_ERROR = 'CLI_AGENT_STOPPED';
-const WINDOWS_TEMP_PROMPT_THRESHOLD = 7_000;
-
 function createCliStoppedError(): Error {
   return createWorkflowError('CLI_AGENT_STOPPED', CLI_AGENT_STOPPED_ERROR, {
     source: 'cli-agent',
@@ -57,11 +52,9 @@ interface ActiveRunState {
 }
 
 @Injectable()
-export class CLIAgentService implements OnApplicationBootstrap {
+export class CLIAgentService {
   private readonly logger = new Logger(CLIAgentService.name);
   private readonly adapters: Map<string, ICLIAgentAdapter>;
-  /** Probe results cached at startup and on explicit refresh. */
-  private readonly probeCache = new Map<string, CLIAgentAdapterInfo>();
   private readonly activeRuns = new Map<string, ActiveRunState>();
 
   constructor(
@@ -71,6 +64,9 @@ export class CLIAgentService implements OnApplicationBootstrap {
     claude: ClaudeCodeAdapter,
     codex: CodexAdapter,
     private readonly pty: CLIAgentPtyService,
+    private readonly probes: CLIAgentProbeService,
+    private readonly launchPreparation: CLIAgentLaunchPreparationService,
+    @Optional() private readonly cmdAudit?: CmdInvocationAuditService,
   ) {
     this.adapters = new Map<string, ICLIAgentAdapter>([
       [copilot.id, copilot],
@@ -80,45 +76,19 @@ export class CLIAgentService implements OnApplicationBootstrap {
     ]);
   }
 
-  /** Probe all adapters in parallel at application start so the first FE request is instant. */
-  onApplicationBootstrap(): void {
-    void this.refreshAllProbes().catch((err: unknown) => {
-      this.logger.warn(`[CLIAgentService] startup probe failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
-  }
-
   /** Re-probe every adapter and update the cache. Returns the fresh results. */
   async refreshAllProbes(): Promise<CLIAgentAdapterInfo[]> {
-    const ids = [...this.adapters.keys()];
-    const results = await Promise.all(ids.map((id) => this.refreshProbe(id)));
-    return results.filter((r): r is CLIAgentAdapterInfo => r !== null);
+    return this.probes.refreshAllProbes();
   }
 
   /** Re-probe a single adapter, update cache, return result. */
   async refreshProbe(agentId: string): Promise<CLIAgentAdapterInfo | null> {
-    const adapter = this.adapters.get(agentId);
-    if (!adapter) return null;
-    const probe = await this.probe(agentId);
-    const info: CLIAgentAdapterInfo = {
-      id: agentId,
-      displayName: adapter.displayName,
-      installUrl: adapter.installUrl,
-      available: probe.available,
-      version: probe.version,
-      supportsModelSelection: adapter.supportsModelSelection,
-    };
-    this.probeCache.set(agentId, info);
-    return info;
+    return this.probes.refreshProbe(agentId);
   }
 
   /** Return cached probe results. If cache is empty (first request beat startup), probe fresh. */
   async listAll(): Promise<CLIAgentAdapterInfo[]> {
-    if (this.probeCache.size === 0) {
-      return this.refreshAllProbes();
-    }
-    return [...this.adapters.keys()]
-      .map((id) => this.probeCache.get(id))
-      .filter((r): r is CLIAgentAdapterInfo => r !== undefined);
+    return this.probes.listAll();
   }
 
   getAdapter(agentId: string): ICLIAgentAdapter | undefined {
@@ -170,13 +140,13 @@ export class CLIAgentService implements OnApplicationBootstrap {
       );
     }
 
-    const limits = this.resolveRunLimits(agentId, request, agentConfig);
+    const limits = this.launchPreparation.resolveRunLimits(agentId, request, agentConfig);
 
     const platform = this.getPlatform();
     const executable = agentConfig.cliPath || adapter.executable(platform);
     const wrapperArgs = agentConfig.cliPath ? [] : adapter.wrapperArgs(platform);
     const model = adapter.supportsModelSelection ? (request.model ?? agentConfig.model) : '';
-    const preparedPrompt = await this.preparePromptForAgent(agentId, platform, prompt);
+    const preparedPrompt = await this.launchPreparation.preparePromptForAgent(agentId, platform, prompt);
     const extraArgs = preparedPrompt.includeDirectory
       ? [...agentConfig.extraArgs, '--include-directories', preparedPrompt.includeDirectory]
       : agentConfig.extraArgs;
@@ -188,7 +158,16 @@ export class CLIAgentService implements OnApplicationBootstrap {
     );
 
     if (agentId === 'codex') {
-      const ptyLaunch = await this.buildCodexPtyLaunch(platform, agentConfig.cliPath, promptArgs, preparedPrompt.prompt);
+      const ptyLaunch = await this.launchPreparation.buildCodexPtyLaunch(platform, agentConfig.cliPath, promptArgs, preparedPrompt.prompt);
+      void this.cmdAudit?.recordInvocation({
+        command: ptyLaunch.auditCommand,
+        source: 'cli-agent.pty',
+        launcher: 'pty',
+        agentId,
+        sessionId,
+        turnId,
+        callId,
+      });
       try {
         return await this.runCodexWithPty({
           request,
@@ -204,11 +183,21 @@ export class CLIAgentService implements OnApplicationBootstrap {
     }
 
     const startedAt = Date.now();
+    void this.cmdAudit?.recordInvocation({
+      command: executable,
+      source: 'cli-agent.run',
+      launcher: 'spawn',
+      agentId,
+      sessionId,
+      turnId,
+      callId,
+    });
 
     try {
       return await new Promise<CLIAgentRunResult>((resolve, reject) => {
       const proc = spawn(executable, allArgs, {
         cwd: workdir,
+        windowsHide: true,
         // pipe stdin so the process doesn't hang waiting for input
         stdio: ['pipe', 'pipe', 'pipe'],
         // Use UTF-8 on all platforms to avoid Windows codepage issues
@@ -395,73 +384,6 @@ export class CLIAgentService implements OnApplicationBootstrap {
     }
   }
 
-  private async preparePromptForAgent(
-    agentId: string,
-    platform: NodeJS.Platform,
-    prompt: string,
-  ): Promise<{ prompt: string; includeDirectory?: string; cleanup?: () => Promise<void> }> {
-    if (platform !== 'win32' || agentId !== 'gemini' || prompt.length <= WINDOWS_TEMP_PROMPT_THRESHOLD) {
-      return { prompt };
-    }
-
-    const promptDir = await mkdtemp(join(tmpdir(), 'kalio-gemini-prompt-'));
-    const promptPath = join(promptDir, 'prompt.txt');
-    await writeFile(promptPath, prompt, 'utf8');
-
-    return {
-      prompt: `Read and follow the complete implementation instructions from this file: ${promptPath}`,
-      includeDirectory: promptDir,
-      cleanup: () => rm(promptDir, { recursive: true, force: true }),
-    };
-  }
-
-  private async buildCodexPtyLaunch(
-    platform: NodeJS.Platform,
-    cliPath: string,
-    promptArgs: string[],
-    prompt: string,
-  ): Promise<{ executable: string; args: string[]; cleanup?: () => Promise<void> }> {
-    if (platform !== 'win32') {
-      return { executable: cliPath || 'codex', args: promptArgs };
-    }
-
-    const promptDir = await mkdtemp(join(tmpdir(), 'kalio-codex-prompt-'));
-    const promptPath = join(promptDir, 'prompt.txt');
-    await writeFile(promptPath, prompt, 'utf8');
-
-    const codexCommand = cliPath || defaultCodexCommand(platform);
-    const argsWithoutPrompt = promptArgs.at(-1) === prompt ? promptArgs.slice(0, -1) : promptArgs;
-    const command = [
-      `$prompt = Get-Content -Raw -LiteralPath ${quotePowerShellArg(promptPath)}`,
-      `$prompt | & ${quotePowerShellArg(codexCommand)} ${[...argsWithoutPrompt, '-'].map(quotePowerShellArg).join(' ')}`,
-    ].join('; ');
-    return {
-      executable: WINDOWS_POWERSHELL_EXE,
-      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
-      cleanup: () => rm(promptDir, { recursive: true, force: true }),
-    };
-  }
-
-  private resolveRunLimits(
-    agentId: string,
-    request: RunCliAgentRequest,
-    agentConfig: { timeoutMs: number; hardTimeoutEnabled?: boolean; hardTimeoutMs?: number },
-  ): CLIAgentRunLimits {
-    const inactivityTimeoutMs = normalizeTimeoutMs(
-      agentId,
-      request.inactivityTimeoutMs ?? request.timeoutMs ?? agentConfig.timeoutMs,
-    );
-    const requestedHardTimeout = request.hardTimeoutMs
-      ?? (agentConfig.hardTimeoutEnabled ? agentConfig.hardTimeoutMs : undefined);
-
-    return {
-      inactivityTimeoutMs,
-      ...(requestedHardTimeout !== undefined
-        ? { hardTimeoutMs: normalizeTimeoutMs(agentId, requestedHardTimeout) }
-        : {}),
-    };
-  }
-
   private async runCodexWithPty(params: {
     request: RunCliAgentRequest;
     executable: string;
@@ -538,39 +460,6 @@ export class CLIAgentService implements OnApplicationBootstrap {
         this.activeRuns.delete(request.sessionId);
       }
     }
-  }
-
-  /**
-   * Probe whether a given CLI agent is installed and return its version.
-   *
-   * Uses execFile with an explicit args array — no shell interpolation.
-   * On Windows, CopilotAdapter.executable() returns 'cmd' and wrapperArgs() returns ['/c', 'copilot'],
-   * so the full invocation becomes: execFile('cmd', ['/c', 'copilot', '--version']).
-   * This correctly resolves the .cmd shim without shell:true injection risk.
-   */
-  async probe(agentId: string): Promise<{ available: boolean; version: string | null }> {
-    const adapter = this.adapters.get(agentId);
-    if (!adapter) return { available: false, version: null };
-
-    const agentConfig = await this.config.getConfig(agentId);
-    const platform = this.getPlatform();
-
-    // If cliPath override is set, call it directly with just probe args.
-    // Otherwise use the adapter's full executable + wrapperArgs chain.
-    const executable = agentConfig.cliPath || adapter.executable(platform);
-    const wrapperArgs = agentConfig.cliPath ? [] : adapter.wrapperArgs(platform);
-    const allArgs = [...wrapperArgs, ...adapter.probeArgs()];
-
-    return new Promise((resolve) => {
-      execFile(executable, allArgs, { timeout: 5000 }, (err, stdout, stderr) => {
-        if (err) {
-          resolve({ available: false, version: null });
-          return;
-        }
-        const version = (stdout || stderr).trim() || null;
-        resolve({ available: true, version });
-      });
-    });
   }
 
   private getPlatform(): NodeJS.Platform {

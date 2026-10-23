@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { LandingPage } from './LandingPage';
 import type { RAAppGroup, RAAppSummary } from '@kalio/types';
 
@@ -13,6 +14,7 @@ const {
   markSessionHydrated,
   getRAApps,
   getRAAppGroups,
+  getExecutionProfiles,
   getPendingRAAppApprovals,
   apiPost,
   confirmTool,
@@ -34,6 +36,7 @@ const {
   markSessionHydrated: vi.fn(),
   getRAApps: vi.fn<() => Promise<RAAppSummary[]>>(),
   getRAAppGroups: vi.fn<() => Promise<RAAppGroup[]>>(),
+  getExecutionProfiles: vi.fn(),
   getPendingRAAppApprovals: vi.fn().mockResolvedValue([]),
   apiPost: vi.fn(),
   confirmTool: vi.fn(),
@@ -133,6 +136,7 @@ vi.mock('../../services/eventBus', () => ({
 vi.mock('../../services/apiClient', () => ({
   getRAApps,
   getRAAppGroups,
+  getExecutionProfiles,
   getPendingRAAppApprovals,
   apiClient: {
     post: apiPost,
@@ -157,8 +161,101 @@ function makeSummary(id: string, source: 'core' | 'user', name = id): RAAppSumma
 describe('LandingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.setAttribute('open', ''); });
+    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
+    getExecutionProfiles.mockResolvedValue([{ id: 'enabled-profile', name: 'Enabled', kind: 'devin-cli-acp', model: 'swe-2', enabled: true }]);
     agentStoreState.pendingConfirmations = {};
     agentStoreState.sessionToolActivities = {};
+  });
+
+  it('keeps configuration collapsed and opens and closes it with keyboard focus return', async () => {
+    const user = userEvent.setup();
+    getRAApps.mockResolvedValue([makeSummary('core-calc', 'core', 'Calculator')]);
+    getRAAppGroups.mockResolvedValue([]);
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: 'Home app settings' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: 'App execution profile' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('quick-chat-widget')).toBeVisible();
+    expect(await screen.findByTestId('tile-core-calc')).toBeVisible();
+    await user.tab();
+    expect(trigger).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog', { name: 'Home app settings' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Close Home app settings' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('combobox', { name: 'App execution profile' })).toHaveFocus();
+    await user.tab({ shift: true });
+    await user.keyboard(' ');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.keyboard(' ');
+    // jsdom has no native Escape-to-cancel default action; dispatch the browser event.
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { bubbles: true, cancelable: true }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+  });
+
+  it('persists the selected profile when launching from Home', async () => {
+    getRAApps.mockResolvedValue([makeSummary('qa-interactive', 'core', 'Q&A')]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockResolvedValue({ data: { id: 'qa-session', title: 'Q&A' } });
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Home app settings' }));
+    await screen.findByRole('option', { name: /Enabled/ });
+    fireEvent.change(screen.getByRole('combobox', { name: 'App execution profile' }), { target: { value: 'enabled-profile' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close Home app settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Home app settings' }));
+    expect(screen.getByRole('combobox', { name: 'App execution profile' })).toHaveValue('enabled-profile');
+    fireEvent.click(screen.getByRole('button', { name: 'Close Home app settings' }));
+    fireEvent.click(await screen.findByTestId('tile-qa-interactive'));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ executionProfileId: 'enabled-profile' })));
+    expect(setPendingRAAppLaunchIntent).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('Generate missing values using this conversation runtime') }));
+  });
+
+  it('shows profile loading and errors and explains backend-default inheritance', async () => {
+    getRAApps.mockResolvedValue([]);
+    getRAAppGroups.mockResolvedValue([]);
+    getExecutionProfiles.mockRejectedValue(new Error('Profiles offline'));
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Home app settings' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading execution profiles');
+    expect(screen.getByRole('combobox', { name: 'App execution profile' })).toBeDisabled();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Profiles offline');
+    expect(screen.getByRole('option', { name: 'Use saved default execution profile' })).toBeInTheDocument();
+  });
+
+  it('excludes disabled profiles and leaves blank selection to backend defaults', async () => {
+    getExecutionProfiles.mockResolvedValue([
+      { id: 'disabled', name: 'Disabled', enabled: false },
+      { id: 'enabled-profile', name: 'Enabled', enabled: true, kind: 'devin-cli-acp', model: 'swe-2' },
+    ]);
+    getRAApps.mockResolvedValue([makeSummary('core-calc', 'core', 'Calculator')]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockResolvedValue({ data: { id: 'default-session', title: 'Calculator' } });
+    render(<LandingPage onNavigateToChat={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Home app settings' }));
+    await screen.findByRole('option', { name: /Enabled/ });
+    expect(screen.queryByRole('option', { name: /Disabled/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'App execution profile' })).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Close Home app settings' }));
+    fireEvent.click(await screen.findByTestId('tile-core-calc'));
+    await waitFor(() => expect(setPendingRAAppLaunchIntent).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0]?.[1]).not.toHaveProperty('executionProfileId');
+  });
+
+  it('displays a launch failure without navigating or queuing an intent', async () => {
+    getRAApps.mockResolvedValue([makeSummary('core-calc', 'core', 'Calculator')]);
+    getRAAppGroups.mockResolvedValue([]);
+    apiPost.mockRejectedValueOnce(new Error('Profile unavailable'));
+    const navigate = vi.fn();
+    render(<LandingPage onNavigateToChat={navigate} />);
+    fireEvent.click(await screen.findByTestId('tile-core-calc'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('App launch failed: Profile unavailable');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(setPendingRAAppLaunchIntent).not.toHaveBeenCalled();
   });
 
   it('renders home tiles from the same catalog system as RA-App manager', async () => {
@@ -407,16 +504,14 @@ describe('LandingPage', () => {
     });
     fireEvent.click(screen.getByTestId('home-hitl-approve-req-approve'));
 
-    expect(updateToolActivity).toHaveBeenCalledWith('call-approve', {
-      status: 'running',
-      startedAt: expect.any(Number),
-    });
+    expect(updateToolActivity).not.toHaveBeenCalled();
     expect(confirmTool).toHaveBeenCalledWith({
       requestId: 'req-approve',
       sessionId: 'session-hitl',
       message: 'Looks safe, continue.',
     });
-    expect(removePendingConfirmation).toHaveBeenCalledWith('session-hitl', 'req-approve');
+    expect(removePendingConfirmation).not.toHaveBeenCalled();
+    expect(screen.getByTestId('home-hitl-approve-req-approve')).toBeInTheDocument();
   });
 
   it('rejects a pending tool from Home and sends the rejection note to the agent', async () => {

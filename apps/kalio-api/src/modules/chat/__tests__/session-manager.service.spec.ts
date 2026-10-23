@@ -12,6 +12,7 @@ import { RunJournalService } from '../run-journal.service';
 function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
     ensureSession: vi.fn().mockResolvedValue(undefined),
+    loadMessagesForTurn: vi.fn().mockResolvedValue([]),
     loadHistory: vi.fn().mockResolvedValue(messages),
     loadHistoryPage: vi.fn().mockResolvedValue({
       messages,
@@ -327,6 +328,7 @@ describe('SessionManagerService', () => {
     it('merges host conversation history with branch-local history when historySessionId is provided', async () => {
       const nextRepo: IMessageRepository = {
         ensureSession: vi.fn().mockResolvedValue(undefined),
+        loadMessagesForTurn: vi.fn().mockResolvedValue([]),
         loadHistory: vi.fn(async (sessionId: string) => {
           if (sessionId === 'host') {
             return [
@@ -379,6 +381,22 @@ describe('SessionManagerService', () => {
   });
 
   describe('saveToolResult', () => {
+    it('returns the durable message identity only after persistence acknowledges', async () => {
+      let acknowledge!: () => void;
+      const save = vi.fn((_message: ChatMessage) => new Promise<void>(resolve => { acknowledge = resolve; }));
+      repo.saveMessage = save;
+      let returned = false;
+      const pending = service.saveToolResult('sid', 'call', 'result').then(id => { returned = true; return id; });
+      expect(returned).toBe(false);
+      acknowledge();
+      const id = await pending;
+      expect(id).toEqual(save.mock.calls[0][0].id);
+      expect(typeof id).toBe('string');
+    });
+    it('returns no identity when persistence fails', async () => {
+      repo.saveMessage = vi.fn(async () => { throw new Error('write failed'); });
+      await expect(service.saveToolResult('sid', 'call', 'result')).rejects.toThrow('write failed');
+    });
     it('saves a tool_result message with correct fields', async () => {
       await service.saveToolResult('sid-1', 'call-abc', '{"result":"ok"}', {
         turnId: 'turn-1',

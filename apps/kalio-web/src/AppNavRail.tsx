@@ -24,7 +24,7 @@ export function AppNavRail({
   talkAttentionTitle: string;
   recentTalkCount: number;
   onGoHome: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (opener: HTMLButtonElement) => void;
   onSelectSection: (section: ActiveSection) => void;
 }) {
   return (
@@ -94,7 +94,7 @@ export function AppNavRail({
         <button
           className="btn btn-ghost btn-sm w-10 h-10 p-0 flex items-center justify-center tooltip tooltip-right text-base-content/60 hover:text-primary"
           data-tip="Settings"
-          onClick={onOpenSettings}
+          onClick={(event) => onOpenSettings(event.currentTarget)}
           data-testid="nav-settings"
           aria-label="Settings"
           title="Settings"

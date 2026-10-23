@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Loader2, Save, ShieldAlert } from 'lucide-react';
-import type { Persona } from '@kalio/types';
+import type { Persona, UpdateHitlConfigDto } from '@kalio/types';
 import { HITLUnattendedSection, MAX_RAAPP_APPROVAL_TIMEOUT_MINUTES } from './HITLSettingsPanel.Unattended';
-import type { HitlConfig, HitlMode, HitlNotificationChannel, HitlUnattendedFallback } from './hitl-settings.types';
+import { HITLJevSettings } from './HITLSettingsPanel.Jev';
+import { HITLHardRules } from './HITLSettingsPanel.Rules';
+import { decisionSettingsRequest } from './decision-settings.transport';
+import type { HitlConfig } from './hitl-settings.types';
 
 const DEFAULT_CONFIG: HitlConfig = {
   mode: 'manual',
@@ -13,13 +16,20 @@ const DEFAULT_CONFIG: HitlConfig = {
   externalPolicyEnabled: false,
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
+  jevApprovalThreshold: 0.95,
+  jevInstructions: '',
+  jevFallbackToPersona: false,
+  rules: [],
 };
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const options: RequestInit = {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
-  });
+  };
+  const response = path === '/hitl/config'
+    ? await decisionSettingsRequest('/api/hitl/config', options)
+    : await fetch(`/api${path}`, options);
 
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
@@ -40,9 +50,12 @@ export function HITLSettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoaded(false);
+    setSaved(false);
     setError(null);
     try {
       const [loadedConfig, loadedPersonas] = await Promise.all([
@@ -58,8 +71,14 @@ export function HITLSettingsPanel() {
         externalPolicyEnabled: loadedConfig.externalPolicyEnabled,
         externalPolicyPersonaId: loadedConfig.externalPolicyPersonaId ?? null,
         raAppApprovalTimeoutMs: loadedConfig.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
+        // TODO: legacy fallback — older persisted HITL configs predate Jev and rules.
+        jevApprovalThreshold: loadedConfig.jevApprovalThreshold ?? 0.95,
+        jevInstructions: loadedConfig.jevInstructions ?? '',
+        jevFallbackToPersona: loadedConfig.jevFallbackToPersona ?? false,
+        rules: loadedConfig.rules ?? [],
       });
       setPersonas(loadedPersonas);
+      setLoaded(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HITL settings');
     } finally {
@@ -81,6 +100,17 @@ export function HITLSettingsPanel() {
     ? 'Choose a representative persona for unattended approvals.'
     : null;
   const timeoutMinutes = Math.round(config.raAppApprovalTimeoutMs / 60_000);
+  const jevThreshold = config.jevApprovalThreshold ?? 0.95;
+  const jevValidationMessage = !Number.isFinite(jevThreshold) || jevThreshold <= 0.5 || jevThreshold > 1
+    ? 'Jev approval threshold must be greater than 0.5 and at most 1.'
+    : (config.jevInstructions?.length ?? 0) > 2000
+      ? 'Jev instructions must be at most 2000 characters.'
+      : null;
+  const rulesValidationMessage = (config.rules?.length ?? 0) > 100 || config.rules?.some((rule) => !rule.name.trim()
+    || (rule.executable !== undefined && !rule.executable.trim())
+    || (rule.argumentsContains !== undefined && !rule.argumentsContains.trim()))
+    ? 'Hard rules require an operation name and non-empty optional filters (at most 100 rules).'
+    : null;
   const timeoutValidationMessage = config.raAppApprovalTimeoutMs < 0
     || config.raAppApprovalTimeoutMs > MAX_RAAPP_APPROVAL_TIMEOUT_MINUTES * 60_000
     || !Number.isInteger(config.raAppApprovalTimeoutMs)
@@ -88,8 +118,9 @@ export function HITLSettingsPanel() {
     : null;
 
   const handleSave = async () => {
-    if (personaValidationMessage || externalPolicyValidationMessage || representativeValidationMessage || timeoutValidationMessage) {
-      setError(personaValidationMessage ?? externalPolicyValidationMessage ?? representativeValidationMessage ?? timeoutValidationMessage);
+    if (!loaded || saving) return;
+    if (personaValidationMessage || externalPolicyValidationMessage || representativeValidationMessage || timeoutValidationMessage || jevValidationMessage || rulesValidationMessage) {
+      setError(personaValidationMessage ?? externalPolicyValidationMessage ?? representativeValidationMessage ?? timeoutValidationMessage ?? jevValidationMessage ?? rulesValidationMessage);
       return;
     }
 
@@ -97,16 +128,7 @@ export function HITLSettingsPanel() {
     setError(null);
     setSaved(false);
     try {
-      const payload: {
-        mode: HitlMode;
-        autoPersonaId?: string | null;
-        unattendedFallback: HitlUnattendedFallback;
-        representativePersonaId?: string | null;
-        notificationChannel: HitlNotificationChannel;
-        externalPolicyEnabled: boolean;
-        externalPolicyPersonaId?: string | null;
-        raAppApprovalTimeoutMs: number;
-      } = {
+      const payload: UpdateHitlConfigDto = {
         mode: config.mode,
         unattendedFallback: config.unattendedFallback,
         representativePersonaId: config.representativePersonaId,
@@ -114,6 +136,10 @@ export function HITLSettingsPanel() {
         externalPolicyEnabled: config.externalPolicyEnabled,
         externalPolicyPersonaId: config.externalPolicyPersonaId,
         raAppApprovalTimeoutMs: config.raAppApprovalTimeoutMs,
+        jevApprovalThreshold: jevThreshold,
+        jevInstructions: config.jevInstructions,
+        jevFallbackToPersona: config.jevFallbackToPersona,
+        rules: config.rules ?? [],
       };
       if (config.mode === 'auto') {
         payload.autoPersonaId = config.autoPersonaId;
@@ -131,6 +157,10 @@ export function HITLSettingsPanel() {
         externalPolicyEnabled: updated.externalPolicyEnabled,
         externalPolicyPersonaId: updated.externalPolicyPersonaId ?? null,
         raAppApprovalTimeoutMs: updated.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
+        jevApprovalThreshold: updated.jevApprovalThreshold ?? 0.95,
+        jevInstructions: updated.jevInstructions ?? '',
+        jevFallbackToPersona: updated.jevFallbackToPersona ?? false,
+        rules: updated.rules ?? [],
       });
       setSaved(true);
     } catch (err) {
@@ -156,26 +186,36 @@ export function HITLSettingsPanel() {
         <p className="text-xs text-base-content/50">
           Choose how approval-gated tools and RA-App native operations are resolved.
           Manual keeps the current user confirmation flow, auto delegates the decision to one persona,
-          and bypass approves every approval-gated operation.
+          Jev uses typed decisions with manual fallback, and bypass skips prompts only after permission and hard-rule checks.
         </p>
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-xs">
+        <div role="alert" className="flex items-start gap-2 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-xs">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <span>{error}</span>
+          {!loaded && <button type="button" className="btn btn-xs" onClick={() => void load()}>Retry</button>}
         </div>
       )}
 
       {saved && !error && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-success/10 border border-success/20 text-success text-xs">
+        <div role="status" className="flex items-start gap-2 p-3 rounded-lg bg-success/10 border border-success/20 text-success text-xs">
           <ShieldAlert size={14} className="mt-0.5 shrink-0" />
           <span>HITL settings saved.</span>
         </div>
       )}
 
+      <fieldset disabled={saving || !loaded} className="space-y-5">
       <div className="space-y-3 rounded-lg border border-base-300/50 bg-base-200/30 p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-base-content/60">Approval mode</h3>
+        <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
+          <input aria-label="Jev typed decisions" type="radio" name="hitl-mode" className="radio radio-sm mt-0.5"
+            checked={config.mode === 'jev'} onChange={() => {
+              setConfig((current) => ({ ...current, mode: 'jev' })); setError(null); setSaved(false);
+            }} />
+          <span><span className="block text-sm font-medium">Jev typed decisions</span>
+            <span className="block text-xs text-base-content/60">Use typed decisions; uncertain requests return to manual approval.</span></span>
+        </label>
 
         <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
           <input
@@ -230,7 +270,7 @@ export function HITLSettingsPanel() {
           />
           <span>
             <span className="block text-sm font-medium">Bypass all</span>
-            <span className="block text-xs text-base-content/50">Approve every gated operation without prompting.</span>
+            <span className="block text-xs text-base-content/50">Skip prompts after permission and hard-rule checks. Destructive operations still require confirmation.</span>
           </span>
         </label>
       </div>
@@ -264,6 +304,12 @@ export function HITLSettingsPanel() {
         </p>
       </div>
 
+      {config.mode === 'jev' && <HITLJevSettings config={config} onChange={(next) => {
+        setConfig(next); setError(null); setSaved(false);
+      }} />}
+      <HITLHardRules config={config} onChange={(next) => {
+        setConfig(next); setError(null); setSaved(false);
+      }} />
       <HITLUnattendedSection
         config={config}
         personas={personas}
@@ -337,6 +383,7 @@ export function HITLSettingsPanel() {
           Save
         </button>
       </div>
+      </fieldset>
     </div>
   );
 }

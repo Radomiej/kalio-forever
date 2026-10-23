@@ -63,7 +63,9 @@ describe('TerminalSpawnTool', () => {
         makeRequest('terminal_spawn', { command: 'node', args: ['app.js'], cwd: '/app' }),
       );
 
-      expect(terminals.spawn).toHaveBeenCalledWith('node', ['app.js'], '/app');
+      expect(terminals.spawn).toHaveBeenCalledWith('node', ['app.js'], '/app', false, {
+        sessionId: 'sess-term', turnId: undefined, callId: 'call-1',
+      });
       expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command });
     });
 
@@ -74,7 +76,9 @@ describe('TerminalSpawnTool', () => {
         makeRequest('terminal_spawn', { command: 'python', args: ['-m', 'http.server'], cwd: '/app' }),
       );
 
-      expect(terminals.spawn).toHaveBeenCalledWith('python', ['-m', 'http.server'], '/app');
+      expect(terminals.spawn).toHaveBeenCalledWith('python', ['-m', 'http.server'], '/app', false, {
+        sessionId: 'sess-term', turnId: undefined, callId: 'call-1',
+      });
     });
   });
 
@@ -84,7 +88,9 @@ describe('TerminalSpawnTool', () => {
 
       await tool.execute(makeRequest('terminal_spawn', { command: 'bash', cwd: '/app' }));
 
-      expect(terminals.spawn).toHaveBeenCalledWith('bash', [], '/app');
+      expect(terminals.spawn).toHaveBeenCalledWith('bash', [], '/app', false, {
+        sessionId: 'sess-term', turnId: undefined, callId: 'call-1',
+      });
     });
   });
 
@@ -208,11 +214,21 @@ describe('TerminalOutputTool', () => {
   beforeEach(() => {
     terminals = {
       get: vi.fn(),
+      observeUntilExit: vi.fn(),
     };
     tool = new TerminalOutputTool(terminals as TerminalService);
   });
 
   describe('positive scenarios', () => {
+    it('waits for a final snapshot when waitMs is explicitly requested', async () => {
+      const session = makeSession({ status: 'exited', exitCode: 0, output: 'built\n' });
+      (terminals.observeUntilExit as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+      const result = await tool.execute(makeRequest('terminal_output', { id: 'term-abc', waitMs: 30000 }));
+      expect(terminals.observeUntilExit).toHaveBeenCalledWith('term-abc', 30000, undefined);
+      expect(result.exitCode).toBe(0);
+      expect(terminals.get).not.toHaveBeenCalled();
+    });
+
     it('returns id, status, exitCode and output for a running session', async () => {
       const session = makeSession({ output: 'log line 1\nlog line 2\n' });
       (terminals.get as ReturnType<typeof vi.fn>).mockReturnValue(session);
@@ -245,6 +261,12 @@ describe('TerminalOutputTool', () => {
       await expect(
         tool.execute(makeRequest('terminal_output', { id: 'nonexistent-id' })),
       ).rejects.toThrow('Terminal session not found: nonexistent-id');
+    });
+
+    it.each([-1, 30001, 1.5, '1000', null, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid waitMs %s before observing a process', async (waitMs) => {
+      await expect(tool.execute(makeRequest('terminal_output', { id: 'term-abc', waitMs }))).rejects.toThrow('INVALID_WAIT');
+      expect(terminals.get).not.toHaveBeenCalled();
+      expect(terminals.observeUntilExit).not.toHaveBeenCalled();
     });
 
     it.each([

@@ -25,6 +25,8 @@ export interface StreamChatOptions {
   modelOverride?: string;
   /** Optional hard cap for provider-generated output tokens. */
   maxOutputTokens?: number;
+  /** Deadline for each provider HTTP attempt, including its response stream. */
+  requestTimeoutMs?: number;
   /** Optional provider-native JSON-schema response contract. */
   structuredOutput?: LLMStructuredOutputRequest;
   /** Called once with parsed provider-native structured output when requested. */
