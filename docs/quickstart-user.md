@@ -16,6 +16,10 @@ Autostart after Windows sign-in is enabled by default. To opt out explicitly:
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" -NoAutostart && del "%TEMP%\kalio-install.cmd"
 ```
 
+The opt-out is saved in `%LocalAppData%\Kalio\data\autostart-disabled` and is
+kept by later updates and repairs. Pass `-EnableAutostart` instead to turn
+autostart back on.
+
 For the Bun runtime, add `-Runtime bun` after the `call` command. PowerShell is
 also available as an alternative:
 

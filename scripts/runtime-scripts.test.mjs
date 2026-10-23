@@ -111,8 +111,9 @@ test('installer hides the immediate stable launcher window', () => {
   assert.match(installScriptSource, /Start-Process -FilePath \$stableLauncher -ArgumentList 'start' -WindowStyle Hidden/);
 });
 
-test('explicit autostart opt-out removes an existing Startup shortcut', () => {
-  assert.match(installScriptSource, /if \(\$NoAutostart\) \{\s*Remove-AutostartShortcut/s);
+test('saved autostart opt-out removes an existing Startup shortcut', () => {
+  assert.match(installScriptSource, /\$autostartEnabled = Set-AutostartPreference -DataRoot \$dataRoot -NoAutostart:\$NoAutostart -EnableAutostart:\$EnableAutostart/);
+  assert.match(installScriptSource, /if \(-not \$autostartEnabled\) \{\s*Remove-AutostartShortcut/s);
   assert.match(uninstallScriptSource, /Remove-AutostartShortcut/);
 });
 

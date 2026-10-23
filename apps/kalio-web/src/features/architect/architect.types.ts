@@ -70,6 +70,7 @@ export interface ArchitectRunResult {
   run: ArchitectureRun;
   agentFlowRunId?: string;
   agentFlowStatus?: AgentFlowRunStatus;
+  agentFlowAwaitingHumanInput?: boolean;
   agentFlowSummary?: string;
   events: ArchitectureExecutionEvent[];
   graph: ArchitectureGraphProjection;

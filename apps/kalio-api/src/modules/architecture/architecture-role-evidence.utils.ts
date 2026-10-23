@@ -249,10 +249,7 @@ function trimTrailingSlash(value: string): string {
 }
 
 function isSuccessfulToolResultEvent(event: ArchitectureBranchStreamSnapshot['events'][number]): boolean {
-  if (event.status === 'success') {
-    return true;
-  }
-  return event.status !== 'failed' && event.status !== 'error';
+  return event.status !== 'failed' && event.status !== 'error' && event.status !== 'cancelled';
 }
 
 function summarizeChildCliSessions(

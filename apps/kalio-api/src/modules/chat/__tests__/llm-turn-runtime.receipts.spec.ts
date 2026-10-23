@@ -25,6 +25,7 @@ function fixture(options: { receiptService?: HostDispatchReceiptService; native?
   };
   const repo: IMessageRepository = {
     ensureSession: async () => undefined,
+    loadMessagesForTurn: async () => [],
     loadHistory: async sessionId => [...rows.values()].filter(row => row.sessionId === sessionId),
     loadHistoryPage: async () => ({ messages: [], totalCount: 0, hasMoreBefore: false, oldestLoadedMessageId: null }),
     saveMessage: async row => {

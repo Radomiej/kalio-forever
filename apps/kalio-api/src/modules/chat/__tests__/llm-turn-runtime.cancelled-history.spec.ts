@@ -14,6 +14,7 @@ it.each(['text_delta', 'thinking_delta'] as const)('preserves cancelled %s conte
   const saved: ChatMessage[] = [];
   const repo: IMessageRepository = {
     ensureSession: async () => undefined,
+    loadMessagesForTurn: async () => [],
     loadHistory: async () => saved,
     loadHistoryPage: async () => ({ messages: saved, totalCount: saved.length, hasMoreBefore: false, oldestLoadedMessageId: saved[0]?.id ?? null }),
     saveMessage: async (message) => { const index = saved.findIndex((entry) => entry.id === message.id);

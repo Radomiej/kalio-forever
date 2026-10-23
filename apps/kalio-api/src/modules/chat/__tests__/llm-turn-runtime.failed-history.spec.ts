@@ -20,6 +20,7 @@ it.each([
   const saved: ChatMessage[] = [];
   const repo: IMessageRepository = {
     ensureSession: async () => undefined,
+    loadMessagesForTurn: async () => [],
     loadHistory: async () => saved,
     loadHistoryPage: async () => ({ messages: saved, totalCount: saved.length, hasMoreBefore: false, oldestLoadedMessageId: saved[0]?.id ?? null }),
     saveMessage: async message => {

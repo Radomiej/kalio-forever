@@ -8,7 +8,8 @@ param(
     [string]$ArchivePath,
     [string]$InstallRoot = '',
     [switch]$NoLaunch,
-    [switch]$NoAutostart
+    [switch]$NoAutostart,
+    [switch]$EnableAutostart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,6 +130,21 @@ function Remove-LegacyScheduledTasks {
     }
 }
 
+function Set-AutostartPreference {
+    param([string]$DataRoot, [switch]$NoAutostart, [switch]$EnableAutostart)
+
+    if ($NoAutostart -and $EnableAutostart) {
+        throw 'Choose either -NoAutostart or -EnableAutostart'
+    }
+    $optOutPath = Join-Path $DataRoot 'autostart-disabled'
+    if ($NoAutostart) {
+        [IO.File]::WriteAllText($optOutPath, 'disabled')
+    } elseif ($EnableAutostart -and (Test-Path -LiteralPath $optOutPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $optOutPath -Force
+    }
+    return -not (Test-Path -LiteralPath $optOutPath -PathType Leaf)
+}
+
 function Register-AutostartShortcut {
     param([string]$LauncherScript)
 
@@ -238,9 +254,10 @@ exit /b %ERRORLEVEL%
 '@
         Set-Content -LiteralPath $stableLauncher -Value $stableLauncherContent -Encoding ASCII
         Remove-LegacyScheduledTasks
-        if ($NoAutostart) {
+        $autostartEnabled = Set-AutostartPreference -DataRoot $dataRoot -NoAutostart:$NoAutostart -EnableAutostart:$EnableAutostart
+        if (-not $autostartEnabled) {
             Remove-AutostartShortcut
-            Write-Ok 'Autostart disabled by explicit request'
+            Write-Ok 'Autostart disabled by saved user preference'
         } else {
             Register-AutostartShortcut -LauncherScript $stableLauncherScript
         }

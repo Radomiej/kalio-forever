@@ -213,7 +213,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       gatewaySocketId: client.id,
       toolDispatch: this.toolDispatch,
       chatService: this.chatService,
-      emit: ((event, data) => client.emit(event, data)) as EmitFn,
+      emit: ((event, data) => this.emitToInitiatorAndSessionSubscribers(client.id, payload.sessionId, event, data)) as EmitFn,
     });
   }
 

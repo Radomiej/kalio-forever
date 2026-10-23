@@ -18,6 +18,7 @@ import { makeContextAssembly } from './llm-runtime-test-harness';
 function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
     ensureSession: vi.fn().mockResolvedValue(undefined),
+    loadMessagesForTurn: vi.fn().mockResolvedValue([]),
     loadHistory: vi.fn().mockResolvedValue(messages),
     loadHistoryPage: vi.fn().mockResolvedValue({
       messages,
@@ -286,6 +287,7 @@ describe('ContextPreviewService', () => {
       });
     const repo: IMessageRepository = {
       ensureSession: vi.fn().mockResolvedValue(undefined),
+      loadMessagesForTurn: vi.fn().mockResolvedValue([]),
       loadHistory,
       loadHistoryPage: vi.fn(async (sessionId: string) => {
         const messages = await loadHistory(sessionId);

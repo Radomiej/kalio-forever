@@ -81,7 +81,8 @@ curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scr
 ~~~
 
 Autostart after Windows sign-in is enabled by default. To install without it,
-pass `-NoAutostart` to the downloaded CMD wrapper. To use Bun instead of the
+pass `-NoAutostart` to the downloaded CMD wrapper. The opt-out is remembered
+across updates and repairs; pass `-EnableAutostart` to turn it back on. To use Bun instead of the
 default Node runtime, pass `-Runtime bun`.
 
 ~~~bat
@@ -405,6 +406,7 @@ files past the repository's 500 LOC limit; split a touched slice first.
 | Document | Purpose |
 | --- | --- |
 | [Quick start for users](docs/quickstart-user.md) | Windows install, autostart, upgrades, uninstall, and troubleshooting. |
+| [Testing Kalio on Windows](docs/testing-kalio.md) | QA stack, manual smoke test, and installed-release checks. |
 | [Local development guide](docs/local-dev-guide.md) | Dev, QA, prod, CI, release, and test entry points. |
 | [AgentFlow architecture](docs/agentflow-architecture-and-workflow.md) | Architecture schemas, workflow execution, and delegation. |
 | [Runtime stack](docs/architecture-runtime-stack.md) | Registry, runtime, branch execution, and projections. |

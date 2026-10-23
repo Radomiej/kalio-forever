@@ -12,6 +12,7 @@ import { RunJournalService } from '../run-journal.service';
 function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
     ensureSession: vi.fn().mockResolvedValue(undefined),
+    loadMessagesForTurn: vi.fn().mockResolvedValue([]),
     loadHistory: vi.fn().mockResolvedValue(messages),
     loadHistoryPage: vi.fn().mockResolvedValue({
       messages,
@@ -327,6 +328,7 @@ describe('SessionManagerService', () => {
     it('merges host conversation history with branch-local history when historySessionId is provided', async () => {
       const nextRepo: IMessageRepository = {
         ensureSession: vi.fn().mockResolvedValue(undefined),
+        loadMessagesForTurn: vi.fn().mockResolvedValue([]),
         loadHistory: vi.fn(async (sessionId: string) => {
           if (sessionId === 'host') {
             return [

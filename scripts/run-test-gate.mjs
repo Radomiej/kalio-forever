@@ -52,6 +52,8 @@ const scriptTests = await run(process.execPath, [
   './scripts/kalio-updater.test.mjs',
   './scripts/kalio-cli.test.mjs',
   './scripts/runtime-scripts.test.mjs',
+  './scripts/runtime-lock.integration.test.mjs',
+  './scripts/windows-autostart.test.mjs',
   './scripts/release-experienced-qa.test.mjs',
   './scripts/code-audit/audit-scripts.test.mjs',
   './scripts/agentflow-paid-readiness.test.mjs',

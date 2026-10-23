@@ -15,7 +15,7 @@ import {
   stopArchitectureRun,
   stopGoalGuardAgentFlowRun,
 } from './architect.api';
-import { resumeAgentFlowWithQualityGate } from './ArchitectPage.agentFlowResume';
+import { resumeAgentFlowWithQualityGate, shouldContinueAgentFlowRun } from './ArchitectPage.agentFlowResume';
 import { ArchitectGraphCanvas } from './ArchitectGraphCanvas';
 import { ArchitectInspector } from './ArchitectInspector';
 import { ArchitectRegistryPanel } from './ArchitectRegistryPanel';
@@ -169,10 +169,7 @@ export function ArchitectPage() {
       setRun(result);
       setProjectionTab('events');
       await refreshConversationSessions(result.run.rootSessionId);
-      while (
-        (result.agentFlowStatus ?? result.run.status) === 'running'
-        || (result.agentFlowStatus ?? result.run.status) === 'queued'
-      ) {
+      while (shouldContinueAgentFlowRun(result)) {
         await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
         result = result.agentFlowRunId
           ? await getGoalGuardAgentFlowRunResult(result.agentFlowRunId, runOptions.taskPrompt, runOptions.runContext())
@@ -210,10 +207,7 @@ export function ArchitectPage() {
       setRun(result);
       setProjectionTab('events');
       await refreshConversationSessions(result.run.rootSessionId);
-      while (
-        (result.agentFlowStatus ?? result.run.status) === 'running'
-        || (result.agentFlowStatus ?? result.run.status) === 'queued'
-      ) {
+      while (shouldContinueAgentFlowRun(result)) {
         await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
         result = result.agentFlowRunId
           ? await getGoalGuardAgentFlowRunResult(result.agentFlowRunId, runOptions.taskPrompt, runOptions.runContext())
