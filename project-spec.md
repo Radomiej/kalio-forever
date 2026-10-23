@@ -60,6 +60,7 @@ flowchart LR
 - Backend state is authoritative. Resolve and snapshot the effective selection and relevant capability/permission context at launch; later settings changes do not rewrite an in-flight run. The UI must show the effective choice and typed readiness/progress/result.
 - This direction supersedes persona-bound provider/model selection as an enforced choice for new chats after the compatible session contract is implemented. Existing persona profile/model fields remain as recommendations, and historical session bindings remain readable until compatibility tests prove safe retirement.
 - Mock providers remain available to tests/development but are not ordinary user-facing provider choices.
+- Mock selection is explicit, not ambient: only `provider=mock` (or an unconfigured env with no real API key, which defaults to `mock`) resolves to `MockLLMProvider`. Placeholder `mock` values in `apiKey`/`baseUrl`/`model` never override a named provider.
 - Product terminology separates Integration (connection/auth), Development environment (VS Code, workspaces/projects), Agent runtime (Devin CLI, Codex App Server, Claude Code, hosted agents), and LLM provider. A runtime may use an LLM provider; the two are not interchangeable concepts.
 - Full UX scope, evidence, open questions, and acceptance criteria: `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
 
