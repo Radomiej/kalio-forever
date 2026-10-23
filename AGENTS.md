@@ -168,7 +168,7 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 - QA (built dist): `pnpm qa` / `pnpm qa:rebuild` (API :3316, web :5288)
 - Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`
 - Prod (built dist): `pnpm prod` / `pnpm prod:rebuild` (API :4016, web :6188)
-- Windows user install: `scripts/install.ps1` → Scheduled Task autostart after reboot
+- Windows user install: `scripts/install.ps1` → per-user Startup shortcut after sign-in; `-NoAutostart` saves `data/autostart-disabled`, `-EnableAutostart` re-enables
 - Release version sync: `node scripts/bump-version.mjs <MAJOR.MINOR.PATCH>` or `node scripts/bump-version.mjs --check`
 
 Full local workflow: `docs/local-dev-guide.md`. User install: `docs/quickstart-user.md`.
@@ -254,7 +254,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Keep `docs/technical-documentation-kalio.md` strictly as-built for MVP; move coding-agent prescriptions to `AGENTS.md` and future-direction items to `docs/post-mvp-plans.md`.
 - Whenever a compatibility fallback is added, include a `TODO: legacy fallback` code comment with the reason.
 - For architecture/runtime/appflow changes, prove reconnect/F5 hydration, stop/follow-up drain, queue state, and child-session visibility from the FE before calling the slice release-ready.
-- For Kalio dev MCP, treat `.kalio/config.toml` as the canonical repo/dev-managed store, keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback, and never infer Kalio state from `~/.codex/config.toml`.
+- For Kalio dev MCP, treat `.kalio/config.toml` as the canonical dev-managed store (gitignored — keep it local, never commit it), keep `mcp_servers` SQLite as the app-local store, use `.vscode/mcp.json` import only as a legacy/manual fallback (also gitignored), and never infer Kalio state from `~/.codex/config.toml`.
 - For Devin ACP runs through Kalio, reconcile agent prose with `devin-cli-acp.mcp_bridge`, `mcp_approval`, `native_approval`, HITL, and runtime tool counts; `native_approval.decision=decline` alone does not prove a user rejected a tool.
 - For Devin QA readiness, use `--resume-session` only with an already-online host; after resetting to zero hosts use the existing cold-start variant without that flag, even when reusing a persisted conversation. Do not weaken the gate to fix a mismatched invocation.
 - Workspace package scripts invoked by root gates must call local tools directly and never invoke nested `pnpm`/`npm` orchestration; root workspace commands own package order and dependency resolution.
