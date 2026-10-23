@@ -49,6 +49,7 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
+        "createDesktopShortcut": "always",
         "compression": "zlib"
       }
     },

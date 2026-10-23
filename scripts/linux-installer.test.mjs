@@ -19,11 +19,12 @@ function fixture(t, version = '1.2.3') {
   writeFileSync(join(runtime, 'bin/kalio-node'), `#!/bin/sh\nexec '${process.execPath}' "$@"\n`, { mode: 0o755 });
   writeFileSync(join(runtime, 'bin/kalio'), '#!/bin/sh\ndir=$(dirname "$0")\nexec "$dir/kalio-node" "$dir/kalio-cli.mjs" "$@"\n', { mode: 0o755 });
   writeFileSync(join(runtime, 'bin/kalio-cli.mjs'), 'console.log(JSON.stringify({home:process.env.KALIO_HOME,args:process.argv.slice(2)}));\n');
+  writeFileSync(join(runtime, 'bin/kalio.png'), 'png-bytes');
   const archive = join(root, 'runtime.tar.gz');
   assert.equal(spawnSync('tar', ['-czf', archive, '-C', root, 'runtime']).status, 0);
   const home = join(root, 'custom install');
   const digest = createHash('sha256').update(readFileSync(archive)).digest('hex');
-  const install = (...args) => spawnSync('bash', [installer, '--archive', archive, '--install-root', home, '--no-launch', ...args], { encoding: 'utf8' });
+  const install = (...args) => spawnSync('bash', [installer, '--archive', archive, '--install-root', home, '--no-launch', ...args], { encoding: 'utf8', env: { ...process.env, XDG_DATA_HOME: join(root, 'xdg-data') } });
   return { root, archive, home, digest, install };
 }
 
@@ -95,7 +96,7 @@ else throw new Error('Unexpected download '+url); }
 `);
   writeFileSync(join(bin, 'curl'), `#!/bin/sh\nexec '${process.execPath}' '${fetcher}' "$@"\n`, { mode: 0o755 });
   const run = (...extra) => spawnSync('bash', [resolve('scripts/install-release.sh'), '--install-root', f.home, '--no-launch', ...extra], {
-    encoding: 'utf8', env: { ...process.env, PATH: bin + delimiter + process.env.PATH, TEST_MANIFEST: manifest, TEST_ARCHIVE: f.archive },
+    encoding: 'utf8', env: { ...process.env, PATH: bin + delimiter + process.env.PATH, TEST_MANIFEST: manifest, TEST_ARCHIVE: f.archive, XDG_DATA_HOME: join(f.root, 'xdg-data') },
   });
   return { ...f, run, manifest };
 }
@@ -142,4 +143,17 @@ test('signed releases require a trusted public key and reject an invalid signatu
   writeFileSync(f.manifest, JSON.stringify(manifest));
   assert.notEqual(f.run('--public-key', key).status, 0);
   assert.deepEqual(readFileSync(join(f.home, 'current.json')), current);
+});
+
+test('install creates a desktop entry launching kalio start and --no-desktop-icon removes it', { skip: process.platform !== 'linux' }, (t) => {
+  const f = fixture(t);
+  assert.equal(f.install().status, 0);
+  const desktopFile = join(f.root, 'xdg-data', 'applications', 'kalio.desktop');
+  assert.equal(existsSync(desktopFile), true);
+  const entry = readFileSync(desktopFile, 'utf8');
+  assert.match(entry, /^Exec="[^"]*kalio" start$/m);
+  assert.match(entry, /^Icon=.*bin\/kalio\.png$/m);
+  assert.equal(existsSync(join(f.home, 'bin/kalio.png')), true);
+  assert.equal(f.install('--no-desktop-icon').status, 0);
+  assert.equal(existsSync(desktopFile), false);
 });

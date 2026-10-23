@@ -9,7 +9,8 @@ param(
     [string]$InstallRoot = '',
     [switch]$NoLaunch,
     [switch]$NoAutostart,
-    [switch]$EnableAutostart
+    [switch]$EnableAutostart,
+    [switch]$NoDesktopIcon
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,6 +94,14 @@ function Get-AutostartShortcutPath {
     return Join-Path $startupRoot 'Kalio Forever.lnk'
 }
 
+function Get-DesktopShortcutPath {
+    $desktopRoot = [Environment]::GetFolderPath('Desktop')
+    if (-not $desktopRoot) {
+        $desktopRoot = Join-Path $env:USERPROFILE 'Desktop'
+    }
+    return Join-Path $desktopRoot 'Kalio.lnk'
+}
+
 function Expand-RuntimeArchive {
     param([string]$ArchivePath, [string]$DestinationPath)
 
@@ -111,6 +120,10 @@ function Expand-RuntimeArchive {
 function Remove-AutostartShortcut {
     $shortcutPath = Get-AutostartShortcutPath
     Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
+}
+
+function Remove-DesktopShortcut {
+    Remove-Item -LiteralPath (Get-DesktopShortcutPath) -Force -ErrorAction SilentlyContinue
 }
 
 function Remove-LegacyScheduledTasks {
@@ -161,6 +174,26 @@ function Register-AutostartShortcut {
     $shortcut.Description = 'Start Kalio after Windows sign-in'
     $shortcut.Save()
     Write-Ok "Registered per-user Startup shortcut: $shortcutPath"
+}
+
+function Register-DesktopShortcut {
+    param([string]$LauncherScript)
+
+    $shortcutPath = Get-DesktopShortcutPath
+    $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $powershellPath
+    $shortcut.Arguments = ('-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" start' -f $LauncherScript)
+    $shortcut.WorkingDirectory = Split-Path -Parent $LauncherScript
+    $shortcut.WindowStyle = 7
+    $iconPath = Join-Path (Split-Path -Parent $LauncherScript) 'kalio.ico'
+    if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+        $shortcut.IconLocation = $iconPath
+    }
+    $shortcut.Description = 'Start Kalio and open the app'
+    $shortcut.Save()
+    Write-Ok "Created Desktop shortcut: $shortcutPath"
 }
 
 try {
@@ -253,6 +286,10 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0kalio-laun
 exit /b %ERRORLEVEL%
 '@
         Set-Content -LiteralPath $stableLauncher -Value $stableLauncherContent -Encoding ASCII
+        $packagedIcon = Join-Path $versionRoot 'bin\kalio.ico'
+        if (Test-Path -LiteralPath $packagedIcon -PathType Leaf) {
+            Copy-Item -LiteralPath $packagedIcon -Destination (Join-Path $InstallRoot 'bin\kalio.ico') -Force
+        }
         Remove-LegacyScheduledTasks
         $autostartEnabled = Set-AutostartPreference -DataRoot $dataRoot -NoAutostart:$NoAutostart -EnableAutostart:$EnableAutostart
         if (-not $autostartEnabled) {
@@ -260,6 +297,11 @@ exit /b %ERRORLEVEL%
             Write-Ok 'Autostart disabled by saved user preference'
         } else {
             Register-AutostartShortcut -LauncherScript $stableLauncherScript
+        }
+        if ($NoDesktopIcon) {
+            Remove-DesktopShortcut
+        } else {
+            Register-DesktopShortcut -LauncherScript $stableLauncherScript
         }
         Write-Ok "Kalio runtime installed at $InstallRoot"
         Write-Host "  data -> $dataRoot" -ForegroundColor Green

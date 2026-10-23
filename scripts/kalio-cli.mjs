@@ -139,7 +139,16 @@ async function runServer(openUi) {
   const port = process.env.KALIO_PORT ?? '4016';
   await stat(bootstrap);
   await stat(runtimePath);
-  const lock = await acquireLock(home);
+  let lock;
+  try {
+    lock = await acquireLock(home);
+  } catch (error) {
+    if (openUi && error instanceof Error && error.message.includes('Another Kalio runtime appears to be running')) {
+      openBrowser('http://127.0.0.1:' + port);
+      return;
+    }
+    throw error;
+  }
   const child = spawn(runtimePath, [bootstrap], {
     cwd: serverRoot,
     env: {
@@ -258,6 +267,20 @@ async function uninstall(args) {
   await rm(appRoot, { recursive: true, force: true });
   await rm(join(home, 'bin'), { recursive: true, force: true });
   await rm(join(home, 'current.json'), { force: true });
+  if (process.platform === 'win32') {
+    const startupDir = join(
+      process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'),
+      'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup',
+    );
+    await rm(join(startupDir, 'Kalio Forever.lnk'), { force: true });
+    await rm(join(homedir(), 'Desktop', 'Kalio.lnk'), { force: true });
+  } else {
+    const applicationsDir = join(
+      process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'),
+      'applications',
+    );
+    await rm(join(applicationsDir, 'kalio.desktop'), { force: true });
+  }
   if (purgeData) {
     const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await prompt.question('Delete Kalio data at ' + join(home, 'data') + '? [y/N] ');

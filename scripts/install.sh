@@ -5,6 +5,7 @@ archive=""
 expected_sha256=""
 install_root="${KALIO_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/kalio}"
 no_launch=0
+no_desktop_icon=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -18,6 +19,7 @@ while [ "$#" -gt 0 ]; do
     --sha256) expected_sha256="$2"; shift 2 ;;
     --install-root) install_root="$2"; shift 2 ;;
     --no-launch) no_launch=1; shift ;;
+    --no-desktop-icon) no_desktop_icon=1; shift ;;
     *) echo "[kalio] unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -137,6 +139,29 @@ exec "$KALIO_HOME/app/versions/$version/bin/kalio" "$@"
 EOF
 chmod 755 "$install_root/bin/kalio.tmp"
 mv -f "$install_root/bin/kalio.tmp" "$install_root/bin/kalio"
+
+applications_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+desktop_file="$applications_dir/kalio.desktop"
+if [ "$no_desktop_icon" -eq 1 ]; then
+  rm -f "$desktop_file"
+else
+  mkdir -p "$applications_dir"
+  if [ -f "$version_root/bin/kalio.png" ]; then
+    cp "$version_root/bin/kalio.png" "$install_root/bin/kalio.png"
+  fi
+  cat > "$desktop_file" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Kalio
+Comment=Local-first agent workflows
+Exec="$install_root/bin/kalio" start
+Icon=$install_root/bin/kalio.png
+Terminal=false
+Categories=Development;
+EOF
+  chmod 644 "$desktop_file"
+  echo "[kalio] desktop entry: $desktop_file"
+fi
 
 echo "[kalio] runtime $version installed at $install_root"
 echo "[kalio] data preserved at $install_root/data"
