@@ -44,7 +44,10 @@ curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scr
 
 Autostart after Windows sign-in is enabled by default. To install without it,
 pass `-NoAutostart` to the downloaded CMD wrapper. The opt-out is remembered
-across updates and repairs; pass `-EnableAutostart` to turn it back on. To use
+across updates and repairs; pass `-EnableAutostart` to turn it back on. The
+installer also places a **Kalio icon on the Desktop**: double-clicking it starts
+the server and opens the app in your browser (clicking again while Kalio is
+running just opens the page). Opt out with `-NoDesktopIcon`. To use
 Bun instead of the default Node runtime, pass `-Runtime bun`.
 
 ~~~bat
@@ -92,6 +95,9 @@ For the Bun runtime:
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-release.sh -o /tmp/kalio-install.sh && bash /tmp/kalio-install.sh --runtime bun
 ~~~
+
+The installer also creates a **Kalio desktop entry** (application menu icon)
+that starts Kalio and opens the app. Opt out with `--no-desktop-icon`.
 
 See the [Linux installation guide](docs/linux-installation.md).
 

@@ -32,7 +32,17 @@ src-tauri/target/release/bundle/nsis/Kalio_1.0.3_x64-setup.exe
 
 The NSIS bundle uses `zlib` compression instead of the slower default LZMA
 compression so local and CI release builds finish predictably. The trade-off
-is a larger installer file.
+is a larger installer file. The NSIS installer always creates a desktop
+shortcut (`createDesktopShortcut: "always"`).
+
+The script installers provide the same entry point without the desktop shell:
+`install.ps1` registers a `Kalio.lnk` desktop shortcut that runs
+`kalio-launcher.ps1 start` (starts the server and opens the app; opt out with
+`-NoDesktopIcon`), and `install.sh` writes a freedesktop
+`applications/kalio.desktop` entry with `Exec=.../bin/kalio start` (opt out
+with `--no-desktop-icon`). A repeated `start` while Kalio is already running
+just opens the app page instead of failing on the runtime lock. Uninstall
+paths (`uninstall.ps1`, `kalio uninstall`) remove the shortcut/entry.
 
 ## Runtime data
 
