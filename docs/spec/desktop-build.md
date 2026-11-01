@@ -32,8 +32,9 @@ src-tauri/target/release/bundle/nsis/Kalio_1.0.3_x64-setup.exe
 
 The NSIS bundle uses `zlib` compression instead of the slower default LZMA
 compression so local and CI release builds finish predictably. The trade-off
-is a larger installer file. The NSIS installer always creates a desktop
-shortcut (`createDesktopShortcut: "always"`).
+is a larger installer file. On the NSIS finish page the installer offers a
+desktop shortcut checkbox that is checked by default — Tauri v2 has no
+`createDesktopShortcut` config option.
 
 The script installers provide the same entry point without the desktop shell:
 `install.ps1` registers a `Kalio.lnk` desktop shortcut that runs
