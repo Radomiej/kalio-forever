@@ -23,8 +23,12 @@ test('uninstaller removes the desktop shortcut', () => {
   assert.match(uninstallPs1, /Remove-DesktopShortcut[\r\n]/);
 });
 
-test('NSIS installer always creates a desktop shortcut', () => {
-  assert.equal(tauriConf.bundle.windows.nsis.createDesktopShortcut, 'always');
+test('NSIS config stays within the Tauri v2 schema', () => {
+  // Tauri v2 NsisConfig has no createDesktopShortcut option and rejects
+  // unknown keys; the installer finish page offers the desktop shortcut
+  // checkbox (checked by default).
+  assert.deepEqual(Object.keys(tauriConf.bundle.windows.nsis).sort(),
+    ['compression', 'installMode']);
 });
 
 test('runtime package ships an icon per platform', () => {
