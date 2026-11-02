@@ -2,6 +2,7 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
 export { architectureGoalStates } from './schema.architecture-goal';
 export { hostDispatchReceipts } from './schema.host-dispatch';
 export { goalLaunchReservations } from './schema.goal-launch-reservation';
+export { goalReviewerAdmissions } from './schema.goal-reviewer-admission';
 import type {
   AgentFlowRun,
   AgentFlowPhase,

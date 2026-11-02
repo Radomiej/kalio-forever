@@ -4,6 +4,10 @@ Last updated: 2026-11-02
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
+## Goal Reviewer Admission
+
+- Goal reviewer admission has a local, additive storage boundary: a committed one-use start capability, immutable metadata/hash tombstone and start/cancel CAS; it does not yet dispatch a reviewer or authorize goal completion. Normal session deletion remains allowed, but reserved reviewer IDs cannot be resurrected. Runtime wiring and deployment remain separate gates; see `docs/spec/jev-devin-goal-loop.md`.
+
 ## CLI-only Startup
 
 - Direct LLM env credentials are optional at boot, including production. CLI
