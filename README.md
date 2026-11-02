@@ -105,7 +105,7 @@ See the [Linux installation guide](docs/linux-installation.md).
 
 The Tauri/NSIS desktop installer is optional. Use it when you specifically want
 the native desktop shell; the CMD installation above is the primary Windows path.
-Releases ship `Kalio_1.0.3_x64-setup.exe` on the
+Releases ship `Kalio_1.0.5_x64-setup.exe` on the
 [releases page](https://github.com/Radomiej/kalio-forever/releases). The desktop
 backend uses `http://127.0.0.1:4516`.
 

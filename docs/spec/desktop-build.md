@@ -17,7 +17,7 @@ pnpm desktop:build
 The installer is created at:
 
 ```text
-src-tauri/target/release/bundle/nsis/Kalio_1.0.3_x64-setup.exe
+src-tauri/target/release/bundle/nsis/Kalio_1.0.5_x64-setup.exe
 ```
 
 `desktop:build` performs the following release steps:
