@@ -335,7 +335,7 @@ export function HistoryToolCallBubble({
         badge={
           <>
             <ToolCallStatusBadge {...status} />
-            {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">answered</span>}
+            {isAnswered && <span className="text-[10px] font-mono text-base-content/60 bg-base-200/60 rounded px-1">answered</span>}
             {displayedSubAgentFlowResult != null && agentFlowOpenChatSessionId && (
               <button
                 className="ml-1 text-[10px] text-sky-400/60 hover:text-sky-400 flex items-center gap-0.5"
@@ -407,7 +407,7 @@ export function HistoryToolCallBubble({
       </Chip>
       )}
       {raapp && isAnswered && (
-        <div className="border-l-[3px] border-l-emerald-500/20 pl-3 py-1 my-0.5 text-xs text-base-content/40 italic">
+        <div className="border-l-[3px] border-l-emerald-500/20 pl-3 py-1 my-0.5 text-xs text-base-content/60 italic">
           Interactive app — answer submitted
         </div>
       )}

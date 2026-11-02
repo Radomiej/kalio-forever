@@ -314,6 +314,7 @@ describe('SessionPanel', () => {
     expect(screen.getByText('Chat about React')).toBeTruthy();
     expect(screen.getByText('New Chat')).toBeTruthy();
     expect(screen.getByTestId('session-kind-icon-s1')).toHaveAttribute('aria-label', 'Root chat');
+    expect(screen.getByTestId('session-kind-icon-s1')).toHaveRole('img');
     expect(screen.getByTestId('session-kind-icon-s2')).toHaveAttribute('aria-label', 'Root chat');
   });
 
@@ -991,6 +992,9 @@ describe('SessionPanel', () => {
     expect(screen.getByTestId('session-kind-icon-flow-root')).toHaveAttribute('aria-label', 'AgentFlow');
     expect(screen.getByTestId('session-kind-icon-orchestrator')).toHaveAttribute('aria-label', 'Sub-agent');
     expect(screen.getByTestId('session-kind-icon-cli-proof')).toHaveAttribute('aria-label', 'CLI agent');
+    for (const id of ['flow-root', 'orchestrator', 'cli-proof']) {
+      expect(screen.getByTestId(`session-kind-icon-${id}`)).toHaveRole('img');
+    }
     expect(screen.getByTestId('cli-agent-session-badge-cli-proof')).toBeTruthy();
   });
 

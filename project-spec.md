@@ -12,6 +12,10 @@ This file records durable product and architecture decisions that should guide a
 
 - Interactive Q&A preserves nonempty answer strings such as `no`, `false` and `0` as visible choices. A validated, immutable GUI projection handles legacy option-presence bindings in fresh and restored history without changing global DSL truthiness. `run_raapp` requires an explicit nonblank string ID before lookup; no app-ID fallback is allowed. See `docs/spec/raapp-design-current.md`.
 
+## Chat Accessibility
+
+- Session-kind icons expose a named image role; small metadata and selected-view labels retain readable foregrounds without global theme overrides. Verify actual rendered contrast and semantics; see `docs/spec/chat-accessibility.md`.
+
 ## CLI-only Startup
 
 - Direct LLM env credentials are optional at boot, including production. CLI

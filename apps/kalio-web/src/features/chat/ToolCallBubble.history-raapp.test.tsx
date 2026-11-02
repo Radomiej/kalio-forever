@@ -89,11 +89,13 @@ describe('REGRESSION: HistoryToolCallBubble RA-App widget inside chip', () => {
     render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
     expect(screen.queryByTestId('raapp-renderer')).not.toBeInTheDocument();
     expect(screen.getByText(/Interactive app/)).toBeInTheDocument();
+    expect(screen.getByText(/Interactive app/)).toHaveClass('text-base-content/60');
   });
 
   it('shows answered badge when isAnswered=true', () => {
     render(<HistoryToolCallBubble toolName="run_raapp" content={GUI_TOOL_RESULT} isAnswered={true} />);
     expect(screen.getByText(/answered/)).toBeInTheDocument();
+    expect(screen.getByText(/answered/)).toHaveClass('text-base-content/60');
   });
 
   it('collapses widget when isAnswered flips from false to true', () => {

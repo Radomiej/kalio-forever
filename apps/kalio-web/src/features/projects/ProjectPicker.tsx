@@ -135,7 +135,7 @@ export function ProjectPicker({ value, onChange, disabled = false, testId = 'pro
       >
         <Folder size={15} className="shrink-0 text-base-content/55" />
         <span className="min-w-0 flex-1 truncate">{selected?.name ?? 'Bez projektu'}</span>
-        <span className="max-w-[45%] truncate text-[11px] text-base-content/45">{selected ? displayPath(selected) : 'Sandbox VFS'}</span>
+        <span className="max-w-[45%] truncate text-[11px] text-base-content/60">{selected ? displayPath(selected) : 'Sandbox VFS'}</span>
         <ChevronDown size={14} className="shrink-0 text-base-content/45" />
       </button>
 

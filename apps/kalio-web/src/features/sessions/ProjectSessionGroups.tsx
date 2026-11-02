@@ -45,7 +45,7 @@ export function ProjectSessionGroups({ groups, children }: ProjectSessionGroupsP
               <ChevronDown size={13} className={`shrink-0 transition-transform ${expanded ? '' : '-rotate-90'}`} />
               <Folder size={14} className="shrink-0 text-base-content/50" />
               <span className="min-w-0 flex-1 truncate text-xs font-semibold">{group.project.name}</span>
-              <span className="text-[10px] text-base-content/40">{group.entries.length}</span>
+              <span className="text-[10px] text-base-content/60">{group.entries.length}</span>
             </button>
             {expanded && children(group.entries, group.project)}
           </section>
