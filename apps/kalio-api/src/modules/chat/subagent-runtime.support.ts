@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type {
   AgentRunContext,
   ArchitectureRuntimeContext,
@@ -28,9 +29,18 @@ export interface ActiveSubagentRunInput {
 interface ActiveSubagentRun extends ActiveSubagentRunInput {
   donePromise: Promise<void>;
   resolveDone: () => void;
+  exclusive?: true;
+  cleanupError?: Error;
+}
+
+export interface ActiveSubagentRunOwner {
+  assertCurrent(): void;
+  bindPromptMessageId(id: string): void;
+  complete(): void;
 }
 
 export class ActiveSubagentRunRegistry {
+  private readonly logger = new Logger(ActiveSubagentRunRegistry.name);
   private readonly active = new Map<string, ActiveSubagentRun>();
   private readonly cancellationRecording = new WeakMap<ActiveSubagentRun, HostCancellationLifecycleHandle>();
 
@@ -46,6 +56,9 @@ export class ActiveSubagentRunRegistry {
   }
 
   register(input: ActiveSubagentRunInput): () => void {
+    if (this.active.get(input.childSessionId)?.exclusive) {
+      throw new Error('SUBAGENT_RUN_EXCLUSIVE_CONFLICT');
+    }
     let resolveDone!: () => void;
     const donePromise = new Promise<void>((resolve) => {
       resolveDone = resolve;
@@ -64,6 +77,44 @@ export class ActiveSubagentRunRegistry {
       }
       resolveDone();
     };
+  }
+
+  registerExclusive(input: Omit<ActiveSubagentRunInput, 'promptMessageId'>): ActiveSubagentRunOwner | null {
+    if (this.active.has(input.childSessionId)) return null;
+    let resolveDone!: () => void;
+    const donePromise = new Promise<void>((resolve) => { resolveDone = resolve; });
+    const run: ActiveSubagentRun = { ...input, promptMessageId: undefined, exclusive: true, donePromise, resolveDone };
+    this.active.set(run.childSessionId, run);
+    let completed = false;
+    const assertCurrent = (): void => {
+      if (completed || this.active.get(run.childSessionId) !== run) throw new Error('SUBAGENT_RUN_OWNER_STALE');
+    };
+    return Object.freeze({
+      assertCurrent,
+      bindPromptMessageId: (id: string): void => {
+        assertCurrent();
+        if (!id.trim()) throw new Error('SUBAGENT_RUN_PROMPT_INVALID');
+        if (run.promptMessageId !== undefined && run.promptMessageId !== id) {
+          throw new Error('SUBAGENT_RUN_PROMPT_ALREADY_BOUND');
+        }
+        run.promptMessageId = id;
+      },
+      complete: (): void => {
+        if (completed) return;
+        completed = true;
+        try { this.cancellationRecording.get(run)?.close(); }
+        catch {
+          run.cleanupError = new Error('SUBAGENT_RUN_CLEANUP_FAILED');
+          this.logger.error('SUBAGENT_RUN_CLEANUP_FAILED');
+        }
+        finally {
+          this.cancellationRecording.delete(run);
+          if (this.active.get(run.childSessionId) === run) this.active.delete(run.childSessionId);
+          // Owner settlement is not proof that outstanding persistence work drained.
+          run.resolveDone();
+        }
+      },
+    });
   }
 
   getStatus(sessionId: string): ActiveSubagentRunStatus | null {
@@ -107,6 +158,8 @@ export class ActiveSubagentRunRegistry {
     }
     await Promise.all(matchedRuns.map((run) => run.donePromise));
     if (recordingFailed) throw recordingError;
+    const cleanupError = matchedRuns.find((run) => run.cleanupError)?.cleanupError;
+    if (cleanupError) throw cleanupError;
   }
 }
 

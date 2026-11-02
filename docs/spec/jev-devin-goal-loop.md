@@ -10,6 +10,14 @@ The internal turn/source contract can only narrow execution with `toolsDisabled:
 
 Focused tests cover these runtime/adapter mechanics and actual private configuration with mocked CLI processes. This prerequisite does not prove real CLI denial, reviewer dispatch, admission ownership, goal completion or target deployment. Runtime activation requires the separate trusted issuer/lifecycle, migration and browser acceptance gates below.
 
+### Unwired reviewer lifecycle foundations
+
+- A database-owned synchronous classifier identifies reserved reviewer child IDs. It verifies the digest of the original descriptor bytes and supported metadata/linkage; successful no-row lookup alone returns null. Missing schema, deleted reserved child or malformed data fails closed. Classification is not full fresh binding validation or launch authority.
+- The admission repository can assert that the original insertion winner's ID/hash is still started and current inside one read snapshot. It reconstructs every original binding, performs no writes/CAS and returns no capability.
+- The active-run registry supports an exclusive captured owner and one-time prompt binding. Ordinary registration cannot overwrite that owner. Completion settles its own barrier despite synchronous cleanup failure, records a static error and preserves the primary execution failure; settlement alone does not prove outstanding work drained.
+
+These foundations are not wired into the production runtime. Mandatory reader injection must not activate before migration0039 on the target. A trusted issuer, actual winner capability, immutable pins, prompt/profile/VFS validation and abort/drain integration remain required before reviewer execution or goal acceptance.
+
 ### Durable reviewer admission — local storage boundary, 2026-11-02
 
 The additive `goal_reviewer_admissions` storage and migration0039 are implemented locally. This is not runtime/module wiring or proof of the complete goal loop. Promotion requires reviewed migration, runtime capability and real child-execution tests.

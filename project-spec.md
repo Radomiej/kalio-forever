@@ -10,6 +10,8 @@ This file records durable product and architecture decisions that should guide a
 
 - Internal constrained reviewer execution narrows the turn and final Devin adapter to no tools, native permissions or MCP. Unsupported adapters reject before activation. This prerequisite is not reviewer authorization or proof of the complete goal workflow.
 
+- Unwired reviewer foundations distinguish reservation classification, read-only full binding validation and exclusive active-run ownership. They grant no start authority and must not activate before target migration and trusted issuer/lifecycle integration.
+
 ## Interactive Apps
 
 - Interactive Q&A preserves nonempty answer strings such as `no`, `false` and `0` as visible choices. A validated, immutable GUI projection handles legacy option-presence bindings in fresh and restored history without changing global DSL truthiness. `run_raapp` requires an explicit nonblank string ID before lookup; no app-ID fallback is allowed. See `docs/spec/raapp-design-current.md`.

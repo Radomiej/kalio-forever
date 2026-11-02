@@ -25,11 +25,68 @@ function descriptor(binding: string, row: Pick<Admission, 'childSessionId' | 'pl
     plannedTurnId: row.plannedTurnId, createdAt: row.createdAt });
 }
 
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function text(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) unavailable();
+  return value;
+}
+function positive(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) unavailable();
+  return value;
+}
+/** Decode only original input. Full metadata authority is the exact reconstruction
+ * using binding()/descriptor() below, never a second descriptor schema. */
+function originalInput(json: string): ReviewerAdmissionInput {
+  const value: unknown = JSON.parse(json);
+  if (!record(value) || !record(value.binding) || value.binding.version !== 1
+    || !record(value.binding.input) || !record(value.binding.input.worker)) unavailable();
+  const input = value.binding.input;
+  const worker = input.worker;
+  if (!record(worker)) unavailable();
+  const canonical: ReviewerAdmissionInput = { runId: text(input.runId), rootSessionId: text(input.rootSessionId),
+    expectedStateRevision: positive(input.expectedStateRevision), reviewerPromptFingerprint: text(input.reviewerPromptFingerprint),
+    worker: { chatRunId: text(worker.chatRunId), sessionId: text(worker.sessionId), turnId: text(worker.turnId),
+      revision: positive(worker.revision), promptMessageId: text(worker.promptMessageId), terminalMessageId: text(worker.terminalMessageId) } };
+  if (JSON.stringify(canonical) !== JSON.stringify(input)) unavailable();
+  return canonical;
+}
+
 /** Unwired durable storage. No provider calls, goal acceptance or completion proof.
  * The insert winner alone receives a one-use start closure AFTER commit. Reopened
  * or orphaned rows are read-only: there is deliberately no resume/retry API. */
 export class ArchitectureGoalReviewerRepository {
   constructor(private readonly db: KalioDrizzleDatabase) {}
+
+  /** Read validation only: never mints launch, completion or retry authority. */
+  assertStartedCurrent(admissionId: string, descriptorSha256: string): void {
+    try {
+      text(admissionId);
+      if (typeof descriptorSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(descriptorSha256)) unavailable();
+      // Own a deferred read snapshot. BEGIN failure (including an outer caller
+      // transaction) must not commit or roll back somebody else's work.
+      this.db.run(sql`BEGIN DEFERRED`);
+      try {
+        const row = this.db.select().from(goalReviewerAdmissions)
+          .where(eq(goalReviewerAdmissions.admissionId, admissionId)).get();
+        if (!row || row.admissionId !== admissionId || row.state !== 'started' || row.revision !== 1
+          || row.descriptorSha256 !== descriptorSha256 || hash(row.descriptorJson) !== descriptorSha256
+          || !Number.isSafeInteger(row.createdAt) || row.createdAt < 0) unavailable();
+        text(row.childSessionId); text(row.plannedTurnId);
+        const input = originalInput(row.descriptorJson);
+        const current = this.binding(input);
+        if (row.runId !== input.runId || row.rootSessionId !== input.rootSessionId
+          || row.goalVersion !== current.goal.sourceVersion || row.sourceFingerprint !== current.goal.sourceFingerprint
+          || row.workerFingerprint !== current.workerFingerprint
+          || descriptor(current.json, row) !== row.descriptorJson || !this.childCurrent(row, current)) unavailable();
+        this.db.run(sql`COMMIT`);
+      } catch {
+        this.db.run(sql`ROLLBACK`);
+        unavailable();
+      }
+    } catch { unavailable(); }
+  }
 
   admit(raw: ReviewerAdmissionInput): ReviewerAdmissionResult {
     try {
