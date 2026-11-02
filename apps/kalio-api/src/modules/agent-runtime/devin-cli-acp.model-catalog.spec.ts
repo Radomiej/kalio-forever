@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock('./devin-cli-config', () => ({
-  createDevinCliConfig: vi.fn(async (_model, _servers, _policy, allocated) => {
+  createDevinCliMetadataConfig: vi.fn(async (allocated) => {
     const handle = { cwd: process.cwd(), cleanup: fixture.cleanup };
     allocated(handle);
     return handle;
@@ -60,7 +60,7 @@ describe('Devin ACP catalog metadata transport', () => {
         { value: 'fusion-sidekick-swe-2-medium', name: 'Fusion Medium' },
       ],
     }];
-    await expect(readDevinAcpModelCatalog('devin.exe', 'swe-2-medium')).resolves.toEqual([
+    await expect(readDevinAcpModelCatalog('devin.exe')).resolves.toEqual([
       'glm-5-2', 'swe-2-high', 'fusion-sidekick-swe-2-medium',
     ]);
     expect(fixture.cleanup).toHaveBeenCalledOnce();
@@ -71,7 +71,7 @@ describe('Devin ACP catalog metadata transport', () => {
       id: 'reasoning', name: 'Reasoning', type: 'select', currentValue: 'medium',
       options: [{ value: 'medium', name: 'Medium' }],
     }];
-    await expect(readDevinAcpModelCatalog('devin.exe', 'swe-2-medium')).rejects.toThrow('metadata is missing');
+    await expect(readDevinAcpModelCatalog('devin.exe')).rejects.toThrow('metadata is missing');
     expect(fixture.cleanup).toHaveBeenCalledOnce();
   });
 });

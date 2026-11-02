@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDevinCliConfig } from './devin-cli-config';
+import { createDevinCliConfig, createDevinCliMetadataConfig } from './devin-cli-config';
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
@@ -23,6 +23,27 @@ afterEach(async () => {
 });
 
 describe('Devin CLI ephemeral config', () => {
+  it('omits model only for explicit isolated metadata intent and retains deny/suppression', async () => {
+    const config = await createDevinCliMetadataConfig();
+    try {
+      const initial = JSON.parse(await readFile(config.path, 'utf8')) as Record<string, unknown>;
+      expect(initial).not.toHaveProperty('agent.model');
+      expect(initial.mcpServers).toEqual({});
+      expect(initial.permissions).toEqual({ ask: [], deny: ['read', 'grep', 'glob', 'edit', 'write', 'exec', 'webfetch', 'web_search'] });
+      expect(initial.read_config_from).toEqual({ cursor: false, windsurf: false, claude: false, copilot: false, opencode: false, zed: false });
+      await config.suppressMcpServers(['foreign-server']);
+      const suppressed = JSON.parse(await readFile(config.path, 'utf8')) as Record<string, unknown>;
+      expect(suppressed).not.toHaveProperty('agent.model');
+      expect(suppressed).toHaveProperty('mcpServers.foreign-server.disabled', true);
+      expect(suppressed.permissions).toEqual(initial.permissions);
+    } finally { await config.cleanup(); }
+    await expect(stat(config.cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([undefined, null, '', '  '])('rejects runtime config without an explicit model: %j', async (model) => {
+    await expect(createDevinCliConfig(model as unknown as string, [])).rejects.toThrow('explicit model');
+    expect(mkdtemp).not.toHaveBeenCalled();
+  });
   it('retains the standalone cleanup handle when rollback itself fails', async () => {
     const failure = new Error('mkdir fixture failure');
     vi.mocked(mkdir).mockRejectedValueOnce(failure);

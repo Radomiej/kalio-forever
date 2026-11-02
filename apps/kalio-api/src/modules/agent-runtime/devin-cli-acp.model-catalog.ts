@@ -1,17 +1,17 @@
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import { client, methods, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import { createDevinCliConfig } from './devin-cli-config';
+import { createDevinCliMetadataConfig } from './devin-cli-config';
 import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import { createNdjsonFrameGuard, DevinCliAcpLifecycle } from './devin-cli-acp.lifecycle';
 import { devinAcpChildEnv, readDevinSelectableModels } from './devin-cli-acp.model-selection';
 
 /** Read session metadata without a prompt, tools, or access to the user's project. */
-export async function readDevinAcpModelCatalog(executable: string, seedModel: string): Promise<string[]> {
+export async function readDevinAcpModelCatalog(executable: string): Promise<string[]> {
   const lifecycle = new DevinCliAcpLifecycle();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const config = await createDevinCliConfig(seedModel, [], undefined, handle => { lifecycle.config = handle; });
+    const config = await createDevinCliMetadataConfig(handle => { lifecycle.config = handle; });
     await suppressInheritedDevinMcp(executable, config, []);
     const child = spawn(executable, ['acp'], {
       cwd: config.cwd, env: devinAcpChildEnv(process.env),

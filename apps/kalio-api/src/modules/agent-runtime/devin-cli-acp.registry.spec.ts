@@ -33,7 +33,7 @@ describe('DevinAcpHostRegistry status reads', () => {
   });
   function createRegistry(): DevinAcpHostRegistry {
     const commands = new DevinCliCommandQueueService();
-    const catalog = new DevinCliModelCatalogService(commands);
+    const catalog = new DevinCliModelCatalogService();
     return new DevinAcpHostRegistry(new DevinCliProbeService(catalog, commands));
   }
 
@@ -78,13 +78,13 @@ describe('DevinAcpHostRegistry status reads', () => {
       models: ['swe-2-high'],
       modelCatalogStatus: 'ready',
     });
-    expect(execFileAsyncMock).toHaveBeenCalledTimes(4);
+    expect(execFileAsyncMock).toHaveBeenCalledTimes(3);
 
     await expect(registry.getStatus()).resolves.toMatchObject({
       probeChecked: true,
       models: ['swe-2-high'],
     });
-    expect(execFileAsyncMock).toHaveBeenCalledTimes(4);
+    expect(execFileAsyncMock).toHaveBeenCalledTimes(3);
   });
 
   it('coalesces concurrent explicit refresh requests into one CLI probe set', async () => {
@@ -93,7 +93,7 @@ describe('DevinAcpHostRegistry status reads', () => {
     const statuses = await Promise.all([registry.getStatus(true), registry.getStatus(true)]);
 
     expect(statuses.every((status) => status.probeChecked)).toBe(true);
-    expect(execFileAsyncMock).toHaveBeenCalledTimes(4);
+    expect(execFileAsyncMock).toHaveBeenCalledTimes(3);
   });
 
   it('keeps Devin status and model probes to one active CLI process', async () => {
@@ -110,7 +110,7 @@ describe('DevinAcpHostRegistry status reads', () => {
 
     await registry.getStatus(true);
 
-    expect(execFileAsyncMock).toHaveBeenCalledTimes(4);
+    expect(execFileAsyncMock).toHaveBeenCalledTimes(3);
     expect(maxActive).toBe(1);
   });
 });

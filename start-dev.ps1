@@ -411,7 +411,7 @@ while ($retries -lt $maxRetries) {
     }
 
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$BE_PORT/api/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
         if ($response.StatusCode -eq 200) { break }
     } catch { }
     $retries++

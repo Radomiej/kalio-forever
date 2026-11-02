@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DevinCliCommandQueueService } from './devin-cli-command-queue.service';
 import { readDevinAcpModelCatalog } from './devin-cli-acp.model-catalog';
 
 const MODEL_CATALOG_CACHE_TTL_MS = 30_000;
-const MODEL_CATALOG_TIMEOUT_MS = 10_000;
-const MODEL_CATALOG_MAX_BUFFER = 1024 * 1024;
 
 export type DevinCliModelCatalogStatus = 'ready' | 'command-failed' | 'unrecognized-output';
 
@@ -24,27 +21,11 @@ export function resolveDevinCliPath(): string {
   return process.env['DEVIN_CLI_PATH']?.trim() || (process.platform === 'win32' ? 'devin.exe' : 'devin');
 }
 
-export function parseDevinCliModelCatalog(output: string): string[] {
-  const escape = String.fromCharCode(27);
-  const ansiSequence = new RegExp(`${escape}(?:\\[[0-?]*[ -/]*[@-~]|[@-_])`, 'g');
-  const text = output.replace(ansiSequence, '');
-  const models = new Set<string>();
-
-  for (const line of text.split(/\r?\n/)) {
-    const modelId = line.match(/^\s{2,}([^\s]+)\s{2,}\S/)?.[1];
-    if (modelId && modelId !== 'aliases:' && isModelToken(modelId)) models.add(modelId);
-  }
-
-  return [...models];
-}
-
 @Injectable()
 export class DevinCliModelCatalogService {
   private readonly logger = new Logger(DevinCliModelCatalogService.name);
   private cached?: CachedCatalog;
   private pending?: { executable: string; request: Promise<DevinCliModelCatalog> };
-
-  constructor(private readonly commands: DevinCliCommandQueueService) {}
 
   async getCatalog(executable = resolveDevinCliPath(), refresh = false): Promise<DevinCliModelCatalog> {
     const now = Date.now();
@@ -79,15 +60,7 @@ export class DevinCliModelCatalogService {
   private async discover(executable: string): Promise<DevinCliModelCatalog> {
     const startedAt = Date.now();
     try {
-      const result = await this.commands.run(executable, ['models', 'list'], {
-        timeout: MODEL_CATALOG_TIMEOUT_MS,
-        windowsHide: true,
-        maxBuffer: MODEL_CATALOG_MAX_BUFFER,
-      }, 'devin.cli.models');
-      // CLI rows include reasoning variants that ACP may not expose as models.
-      // Use them only to seed an isolated metadata session, never as admission proof.
-      const seedModel = parseDevinCliModelCatalog(result.stdout)[0];
-      const models = seedModel ? await readDevinAcpModelCatalog(executable, seedModel) : [];
+      const models = await readDevinAcpModelCatalog(executable);
       const discoveredAt = Date.now();
       if (models.length === 0) {
         return { models, status: 'unrecognized-output', discoveredAt, stale: false };
@@ -106,10 +79,6 @@ export class DevinCliModelCatalogService {
       return { models: [], status: 'command-failed', discoveredAt: null, stale: false };
     }
   }
-}
-
-function isModelToken(value: string): boolean {
-  return value.length <= 200 && /^[\p{L}\p{N}][\p{L}\p{N}._:/+-]*$/u.test(value);
 }
 
 function copyCatalog(catalog: DevinCliModelCatalog): DevinCliModelCatalog {

@@ -41,6 +41,8 @@ cp .env.example .env         # optional; mock LLM works offline
 
 Launcher: `start-dev.ps1` (also exposed as root `pnpm dev`).
 
+The launcher checks API readiness at `http://127.0.0.1:3016/api/health` (or the selected backend port), so a host-specific `localhost` resolution failure cannot block frontend startup.
+
 | | |
 |---|---|
 | Backend | `nest start --watch` |

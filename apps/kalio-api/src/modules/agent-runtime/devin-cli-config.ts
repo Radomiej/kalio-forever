@@ -27,6 +27,22 @@ export async function createDevinCliConfig(
   nativePolicy: DevinNativeToolsPolicy = DEFAULT_DEVIN_NATIVE_TOOLS_POLICY,
   onAllocated?: (handle: DevinCliConfigHandle) => void,
 ): Promise<DevinCliConfigHandle> {
+  if (typeof model !== 'string' || !model.trim()) throw new Error('Devin runtime config requires an explicit model.');
+  return prepareDevinCliConfig({ kind: 'runtime', model }, mcpServers, nativePolicy, onAllocated);
+}
+
+/** Metadata discovery never selects a runtime model or enables native tools. */
+export function createDevinCliMetadataConfig(
+  onAllocated?: (handle: DevinCliConfigHandle) => void,
+): Promise<DevinCliConfigHandle> {
+  return prepareDevinCliConfig({ kind: 'metadata' }, [], DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, onAllocated);
+}
+
+async function prepareDevinCliConfig(
+  intent: { kind: 'runtime'; model: string } | { kind: 'metadata' },
+  mcpServers: readonly McpServer[], nativePolicy: DevinNativeToolsPolicy,
+  onAllocated?: (handle: DevinCliConfigHandle) => void,
+): Promise<DevinCliConfigHandle> {
   const directory = await mkdtemp(join(tmpdir(), 'kalio-devin-acp-'));
   const cwd = join(directory, 'workspace');
   const configDirectory = join(cwd, '.devin');
@@ -69,7 +85,9 @@ export async function createDevinCliConfig(
       }]));
       const servers = { ...disabled, ...mcpConfig };
       const writes = await Promise.allSettled([
-        writeFile(path, JSON.stringify({ version: 1, agent: { model }, read_config_from, permissions, mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
+        writeFile(path, JSON.stringify({ version: 1,
+          ...(intent.kind === 'runtime' ? { agent: { model: intent.model } } : {}),
+          read_config_from, permissions, mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
         writeFile(dedicatedMcpPath, JSON.stringify({ mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
       ]);
       const failed = writes.find((result): result is PromiseRejectedResult => result.status === 'rejected');

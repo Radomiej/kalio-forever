@@ -33,6 +33,7 @@ Make it obvious which connected service will execute a chat/run, which model is 
 
 ## Compatibility and architecture constraints
 
+- Devin model discovery reads the ACP session model selector directly in an isolated metadata-only configuration. It omits `agent.model` and never sends a prompt; CLI `models list` is not a prerequisite. Metadata retains empty MCP and default-denied native tools. Conversation configuration still requires an explicit nonblank model, and failed or stale discovery never admits a different model. Existing cache TTL, request deduplication and stale/error reporting remain in force.
 - Backend remains the source of truth for persisted selection and runtime state; UI is a projection.
 - Treat provider + model as one validated execution pair and persist a run/session snapshot. A later settings change must not rewrite the identity of an already-started run.
 - A persona recommendation seeds a new conversation only. Persist the user's explicit conversation choice; if there is no valid recommended or saved choice, require selection. An invalid chosen pair blocks execution and does not fall through to another target.
