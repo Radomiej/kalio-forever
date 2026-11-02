@@ -14,7 +14,9 @@ const arg = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 
 const archive = arg('--archive');
 if (process.platform !== 'linux' || !archive) throw new Error('Usage: node scripts/smoke-linux-runtime.mjs --archive <linux-runtime.tar.gz> [--output receipt.json] [--keep]');
 const directory = await mkdtemp(join(tmpdir(), 'kalio-linux-runtime-'));
-const home = join(directory, 'install with spaces');
+// Hidden directory on purpose: the default install root (~/.local/share/kalio)
+// is hidden too, and sendFile dotfile rules have broken UI rendering there.
+const home = join(directory, '.install with spaces');
 const output = resolve(arg('--output', join(directory, 'receipt.json')));
 const receipt = { archive: resolve(archive), home, startedAt: new Date().toISOString(), checks: [] };
 let child;

@@ -1,7 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { HttpAdapterHost } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { existsSync } from 'fs';
+import { Request, Response } from 'express';
 import { resolve } from 'path';
 import { envSchema } from './config/env.schema';
 import { EmbeddedUiModule } from './runtime/embedded-ui.module';
@@ -34,11 +36,18 @@ const shouldServeUi = process.env['KALIO_SERVE_UI'] === 'true';
 const webRoot = resolve(
   process.env['KALIO_WEB_ROOT'] ?? resolve(__dirname, '../../../apps/kalio-web/dist'),
 );
-const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.html'))
+const uiRenderPath = /^\/(?!api(?:\/|$)|health(?:\/|$)|socket\.io(?:\/|$))(?!.*\.[^/]+$).*/;
+const embeddedUiAvailable = shouldServeUi && existsSync(resolve(webRoot, 'index.html'));
+const embeddedUiModule = embeddedUiAvailable
   ? [
       ServeStaticModule.forRoot({
         rootPath: webRoot,
-        renderPath: /^\/(?!api(?:\/|$)|health(?:\/|$)|socket\.io(?:\/|$))(?!.*\.[^/]+$).*/,
+        // Never matches: this module's renderPath handler calls res.sendFile()
+        // without a root option, so send(1) applies dotfile rules to the
+        // absolute path and 404s every UI route under a hidden install root
+        // (the default is ~/.local/share/kalio). AppModule.onModuleInit
+        // registers the equivalent route with a root option instead.
+        renderPath: /$^/,
         exclude: ['/api', '/api/*path', '/health', '/health/*path', '/socket.io', '/socket.io/*path'],
         serveStaticOptions: {
           index: false,
@@ -49,6 +58,12 @@ const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.htm
       }),
     ]
   : [];
+
+// Serving index.html relative to the web root keeps send(1)'s dotfile check
+// on the request path, which never contains a hidden segment.
+const renderEmbeddedUiIndex = (_req: Request, res: Response) => {
+  res.sendFile('index.html', { root: webRoot, dotfiles: 'allow' });
+};
 
 @Module({
   imports: [
@@ -86,4 +101,18 @@ const embeddedUiModule = shouldServeUi && existsSync(resolve(webRoot, 'index.htm
     RelayModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements OnModuleInit {
+  constructor(private readonly httpAdapterHost?: HttpAdapterHost) {}
+
+  onModuleInit() {
+    if (!embeddedUiAvailable) {
+      return;
+    }
+    // ServeStaticModule's renderPath never matches, so UI routes render here.
+    // Registered after Nest's controllers, so /api/*, /health and files are
+    // unaffected; the regex excludes them regardless.
+    this.httpAdapterHost?.httpAdapter
+      .getInstance()
+      .get(uiRenderPath, renderEmbeddedUiIndex);
+  }
+}
