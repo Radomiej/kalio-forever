@@ -14,6 +14,7 @@ interface ChatInputProps {
   onArchitectureChange?: (schemaId: string) => void;
   onArchitectureRun?: (content: string, schemaId: string) => void;
   onDraftChange?: (content: string) => void;
+  architectureLocked?: boolean;
 }
 
 export function ChatInput({
@@ -26,6 +27,7 @@ export function ChatInput({
   onDraftChange,
   onSend,
   onStop,
+  architectureLocked = false,
   selectedArchitectureId = 'single-chat',
 }: ChatInputProps) {
   const [value, setValue] = useState('');
@@ -94,7 +96,7 @@ export function ChatInput({
               className="select select-bordered select-xs h-8 min-h-8 w-full shrink-0 bg-base-200 text-[11px] sm:w-48"
               value={selectedArchitectureId}
               onChange={(event) => onArchitectureChange(event.target.value)}
-              disabled={disabled}
+              disabled={disabled || architectureLocked}
               data-testid="chat-architecture-select"
             >
               <option value="single-chat">Single Chat</option>
@@ -154,6 +156,11 @@ export function ChatInput({
           </button>
         </div>
       </div>
+      {architectureLocked && (
+        <p data-testid="chat-mode-lock-guidance" className="px-4 pb-2 text-xs text-base-content/55">
+          This chat’s mode is fixed. Start a new chat to choose another mode.
+        </p>
+      )}
     </div>
   );
 }

@@ -76,10 +76,7 @@ MEMORY_DB_PATH=$memoryPath
 EMBEDDING_CACHE_DIR=$embeddingPath
 CREDENTIALS_MASTER_KEY=$masterKey
 CORS_ORIGIN=http://127.0.0.1:4016
-LLM_PROVIDER=mock
-LLM_API_KEY=mock
-LLM_BASE_URL=mock
-LLM_MODEL=mock
+# Configure a direct LLM provider in Settings if needed. CLI agents use their own login.
 "@
     New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
     [IO.File]::WriteAllText($envPath, $content, (New-Object Text.UTF8Encoding($false)))

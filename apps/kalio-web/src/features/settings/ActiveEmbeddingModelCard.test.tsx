@@ -19,7 +19,7 @@ describe('ActiveEmbeddingModelCard', () => {
     ['ready', true, 'Installed · ready to use'],
     ['missing', false, 'Not installed · install below'],
     ['installing', false, 'Installing…'],
-    ['error', false, 'Installation failed'],
+    ['error', false, 'Model unavailable · reinstall below'],
     ['ready', false, 'Not installed · install below'],
   ] as const)('reports %s installation with installed=%s', (state, installed, label) => {
     render(<ActiveEmbeddingModelCard status={status} localAvailability={{ ...ready, status: state, installed }} />);

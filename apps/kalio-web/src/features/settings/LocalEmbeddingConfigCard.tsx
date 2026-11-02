@@ -69,6 +69,9 @@ export function LocalEmbeddingConfigCard({
   const runtimeDiffers = status?.source === 'local'
     && (status.model !== form.model || status.dimensions !== form.dimensions || (status.backend && status.backend !== form.backend));
   const canUseLocal = localAvailability?.status === 'ready';
+  const availabilityMessage = localAvailability?.message?.includes('tokenizer_class')
+    ? 'The saved model could not be loaded because its tokenizer metadata is unavailable. Reinstall it or choose another local model.'
+    : localAvailability?.message;
 
   return (
     <div className="border border-base-300 rounded-lg p-3 flex flex-col gap-3" data-testid="embedding-local-config">
@@ -109,18 +112,18 @@ export function LocalEmbeddingConfigCard({
             {localTestMessage}
           </span>
         )}
-        {localAvailability?.message && localTestState === 'idle' && (
+        {availabilityMessage && localTestState === 'idle' && (
           <span
             className={
-              localAvailability.status === 'ready'
+              localAvailability?.status === 'ready'
                 ? 'text-success'
-                : localAvailability.status === 'error'
+                : localAvailability?.status === 'error'
                   ? 'text-error'
                   : ''
             }
             data-testid="embedding-local-availability-message"
           >
-            {localAvailability.message}
+            {availabilityMessage}
           </span>
         )}
       </div>

@@ -16,6 +16,10 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, execFile: execFileMock, spawn: spawnMock };
 });
 
+vi.mock('./devin-cli-acp.model-catalog', () => ({
+  readDevinAcpModelCatalog: vi.fn(async () => ['swe-2-high']),
+}));
+
 describe('DevinAcpHostRegistry status reads', () => {
   it('copies the policy and rejects reusing a host after a category changes', async () => {
     const registry = createRegistry();

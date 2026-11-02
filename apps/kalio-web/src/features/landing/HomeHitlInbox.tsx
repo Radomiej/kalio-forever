@@ -147,7 +147,7 @@ export function HomeHitlInbox({
           return (
             <article
               key={`budget:${approval.requestId}`}
-              className="rounded-xl border border-warning/35 bg-warning/10 p-3"
+              className="rounded-xl border border-warning/55 border-l-4 border-l-warning bg-warning/10 p-3 shadow-sm"
             >
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
@@ -207,7 +207,7 @@ export function HomeHitlInbox({
           return (
             <article
               key={`raapp:${approval.sessionId}:${approval.requestId}`}
-              className="rounded-xl border border-base-300/70 bg-base-100/80 p-3"
+              className="rounded-xl border border-warning/55 border-l-4 border-l-warning bg-warning/10 p-3 shadow-sm"
             >
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
@@ -272,7 +272,7 @@ export function HomeHitlInbox({
           return (
             <article
               key={confirmation.requestId}
-              className="rounded-xl border border-base-300/70 bg-base-100/80 p-3"
+              className="rounded-xl border border-warning/55 border-l-4 border-l-warning bg-warning/10 p-3 shadow-sm"
             >
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">

@@ -15,6 +15,21 @@ describe('ChatInput', () => {
     expect(screen.getByTestId('chat-input')).toHaveClass('min-w-0');
   });
 
+  it('locks the runtime picker and explains how to change mode for a started chat', () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        disabled={false}
+        architectureLocked
+        onArchitectureChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('chat-architecture-select')).toBeDisabled();
+    expect(screen.getByTestId('chat-mode-lock-guidance')).toHaveTextContent(
+      'This chat’s mode is fixed. Start a new chat to choose another mode.',
+    );
+  });
+
   it('shows stop and send buttons together while streaming', () => {
     render(<ChatInput onSend={vi.fn()} disabled={false} isStreaming={true} onStop={vi.fn()} />);
     expect(screen.getByTestId('chat-stop-btn')).toBeInTheDocument();

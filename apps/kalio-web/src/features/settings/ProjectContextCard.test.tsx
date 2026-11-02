@@ -152,6 +152,16 @@ describe('ProjectContextCard', () => {
     expect(screen.getByText('Project').closest('label')).toHaveAttribute('for', selector.id);
   });
 
+  it('explains how to resolve an empty project list', async () => {
+    api.getProjects.mockResolvedValue([]);
+    await ready();
+
+    expect(screen.getByText(
+      'No projects with a workspace path are registered. Register a project in Projects, then return here to enable indexing.',
+    )).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh project index' })).toBeDisabled();
+  });
+
   it('lays out each field label and control vertically with explicit flex classes', async () => {
     await ready();
     for (const name of ['Project', 'Search project context']) {

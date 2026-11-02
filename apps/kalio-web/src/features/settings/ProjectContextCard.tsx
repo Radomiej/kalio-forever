@@ -135,7 +135,7 @@ export function ProjectContextCard({ status, onApplied }: { status: EmbeddingSta
             {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
         </label>
-        {projects.length === 0 && <p className="text-xs">No registered projects with a workspace path.</p>}
+        {projects.length === 0 && <p className="text-xs">No projects with a workspace path are registered. Register a project in Projects, then return here to enable indexing.</p>}
         {!busy && saved && !projectIndexSupported && <p role="status" className="text-xs text-warning">Project indexing is not ready for this model yet. It stays disabled to avoid mixing results from different model versions. No model details need to be entered here.</p>}
         {indexStatus && projectIndexSupported && <div role="status" className="rounded border border-base-300 p-3 space-y-1 text-sm">
           <p className="font-medium">{indexStatus.indexedAt === null ? 'Not indexed for this model' : 'Project index ready'}</p>

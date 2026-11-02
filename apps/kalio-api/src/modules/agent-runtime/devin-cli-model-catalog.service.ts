@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DevinCliCommandQueueService } from './devin-cli-command-queue.service';
+import { readDevinAcpModelCatalog } from './devin-cli-acp.model-catalog';
 
 const MODEL_CATALOG_CACHE_TTL_MS = 30_000;
 const MODEL_CATALOG_TIMEOUT_MS = 10_000;
@@ -83,7 +84,10 @@ export class DevinCliModelCatalogService {
         windowsHide: true,
         maxBuffer: MODEL_CATALOG_MAX_BUFFER,
       }, 'devin.cli.models');
-      const models = parseDevinCliModelCatalog(result.stdout);
+      // CLI rows include reasoning variants that ACP may not expose as models.
+      // Use them only to seed an isolated metadata session, never as admission proof.
+      const seedModel = parseDevinCliModelCatalog(result.stdout)[0];
+      const models = seedModel ? await readDevinAcpModelCatalog(executable, seedModel) : [];
       const discoveredAt = Date.now();
       if (models.length === 0) {
         return { models, status: 'unrecognized-output', discoveredAt, stale: false };

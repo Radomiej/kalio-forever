@@ -1,4 +1,13 @@
 import test from 'node:test';
+test('fresh installers do not silently configure mock for CLI-only users', () => {
+  for (const path of ['./install.ps1', './install.sh']) {
+    const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /^LLM_(?:PROVIDER|API_KEY|BASE_URL|MODEL)=mock\s*$/m);
+  }
+  const dev = readFileSync(new URL('../start-dev.ps1', import.meta.url), 'utf8');
+  assert.doesNotMatch(dev, /if\s*\(-not\s+\$env:LLM_/);
+  assert.match(dev, /if\s*\(\$UseMockLLM\)/);
+});
 import './packaged-types.test.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';

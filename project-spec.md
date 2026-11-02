@@ -4,6 +4,14 @@ Last updated: 2026-10-18
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
+## CLI-only Startup
+
+- Direct LLM env credentials are optional at boot, including production. CLI
+  adapters authenticate independently. No missing field implies mock; only
+  explicit `LLM_PROVIDER=mock` selects mock. Active DB credentials retain their
+  precedence. Direct inference reports missing remote credentials/model at use;
+  local no-auth endpoints remain supported. See `docs/spec/cli-only-startup.md`.
+
 ## Runtime Source Of Truth
 
 - Backend durable runtime state is the source of truth for chat, workflow, AgentFlow, CLI children, tool approvals, HITL, and reconnect/F5 recovery.
@@ -270,6 +278,12 @@ classDiagram
 - Embedding identity is SHA256-bound to provider/scope/endpoint/model/revision,
   dimensions/backend and transform versions. Mutable/unresolved revisions are not
   immutable producer proof; model updates require explicit reindex.
+- New installations default to Google EmbeddingGemma 2 text embeddings via
+  `onnx-community/embeddinggemma-2-ONNX`, 768 dimensions, CPU. Saved local model
+  selections and explicit embedding environment overrides retain precedence;
+  E5-small remains available with its original pinned revision/tokenizer identity.
+  Changing defaults does not migrate saved selections or existing vector spaces.
+  This is text-only inference, not multimodal retrieval.
 - Persona memory, conversations and web results are partitioned by current space
   and resource kind; old databases remain read-only reembed sources.
 - Project assets are explicitly indexed through VFS-scoped bounded snapshots and
@@ -283,8 +297,9 @@ classDiagram
   the model; backend derives identity without manual digest/scope fields.
   Loopback Ollama metadata is resolved automatically, but mutable-tag inference
   is not immutable proof; project indexing remains blocked until a trusted
-  inference binding exists. The catalog-pinned local E5-small CPU/q8 adapter has
-  a trusted inference binding; other unresolved local/remote models stay blocked.
+  inference binding exists. The catalog-pinned local E5-small CPU/q8 and Gemma2
+  CPU/q4 adapters have trusted inference bindings; other unresolved local/remote
+  models stay blocked.
   Selected model and installation readiness are visible at the top of Embeddings.
   Confirmed refresh/search
   tools resolve the project from the durable calling session, not agent arguments.

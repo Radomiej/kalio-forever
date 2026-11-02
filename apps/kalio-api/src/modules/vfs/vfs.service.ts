@@ -16,6 +16,7 @@ import type { Readable } from 'node:stream';
 import archiver from 'archiver';
 import { eq } from 'drizzle-orm';
 import type { VFSWriteRequest, VFSReadResult, VFSListResult, VFSFile } from '@kalio/types';
+import { assertSandboxPath } from './session-sandbox-path';
 import { shouldSkipTraversalDirectory } from '../../common/utils/traversal-exclusions.util';
 import { DrizzleService } from '../../database/drizzle.service';
 import { sessions } from '../../database/schema';
@@ -82,6 +83,49 @@ export class VFSService {
       .update(sessions)
       .set({ updatedAt: new Date() })
       .where(eq(sessions.id, sessionId));
+  }
+
+  /** Backend-owned cwd, created only when the durable session starts work. */
+  async prepareSessionSandbox(sessionId: string): Promise<void> {
+    const [session] = await this.drizzle.db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    if (!session) throw new Error('SESSION_NOT_FOUND');
+    if (session.projectId && session.projectId !== 'system:none') return;
+    const cwd = this.ensureSessionSandbox(sessionId);
+    const context = session.runtimeContext;
+    if (context?.architectureContext?.['executionCwd'] === cwd
+      && context.architectureContext['projectPath'] === undefined) return;
+    const architectureContext = { ...context?.architectureContext, executionCwd: cwd };
+    delete architectureContext['projectPath'];
+    await this.drizzle.db.update(sessions).set({
+      runtimeContext: { ...(context ?? { runtimeKind: 'chat' as const }), architectureContext },
+    }).where(eq(sessions.id, sessionId));
+  }
+
+  ensureSessionSandbox(sessionId: string): string {
+    const root = resolve(this.workspaceRoot);
+    const dir = assertSandboxPath(root, this.sessionDir(sessionId));
+    if (relative(realpathSync(root), dir) !== join('sessions', sessionId, 'files')) {
+      throw new Error('ACCESS_DENIED: session sandbox root is redirected');
+    }
+    mkdirSync(dir, { recursive: true });
+    return realpathSync(dir);
+  }
+
+  /** No-project access never consults or extends the global allowed-path registry. */
+  async resolveFilesystemPath(sessionId: string, path: string): Promise<{ path: string; sandboxRoot?: string }> {
+    const [session] = await this.drizzle.db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    if (!session) throw new Error('SESSION_NOT_FOUND');
+    if (session.projectId && session.projectId !== 'system:none') {
+      const context = session.runtimeContext?.architectureContext;
+      const cwd = context?.['executionCwd'] ?? context?.['projectPath'];
+      return { path: typeof cwd === 'string' && cwd.trim() ? resolve(cwd, path) : resolve(path) };
+    }
+    const sandboxRoot = this.ensureSessionSandbox(sessionId);
+    return { path: assertSandboxPath(sandboxRoot, resolve(sandboxRoot, path.replace(/\\/g, '/'))), sandboxRoot };
+  }
+
+  assertSandboxPath(root: string, path: string): string {
+    return assertSandboxPath(root, path);
   }
 
   writeFile(req: VFSWriteRequest): void {
@@ -171,7 +215,7 @@ export class VFSService {
       this.logger.error(`[VFSService] Archive error for session ${sessionId}`, err);
     });
     if (existsSync(dir)) {
-      archive.directory(dir, false);
+      archive.directory(this.ensureSessionSandbox(sessionId), false);
     }
     archive.finalize();
     return archive;
@@ -187,7 +231,8 @@ export class VFSService {
     const dir = this.sessionDir(sessionId);
     if (!existsSync(dir)) return { sessionId, files: [] };
 
-    const files: VFSFile[] = this.walkDir(dir, dir, sessionId);
+    const safeDir = this.ensureSessionSandbox(sessionId);
+    const files: VFSFile[] = this.walkDir(safeDir, safeDir, sessionId);
     return { sessionId, files };
   }
 
@@ -228,6 +273,7 @@ export class VFSService {
         continue;
       }
       const fullPath = join(currentDir, entry);
+      assertSandboxPath(baseDir, fullPath);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
         result.push(...this.walkDir(baseDir, fullPath, sessionId));
@@ -244,6 +290,7 @@ export class VFSService {
   }
 
   private sessionDir(sessionId: string): string {
+    if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new Error('ACCESS_DENIED: invalid session id');
     return join(this.workspaceRoot, 'sessions', sessionId, 'files');
   }
 
@@ -301,6 +348,6 @@ export class VFSService {
       (err as NodeJS.ErrnoException).code = PATH_TRAVERSAL_ERROR;
       throw err;
     }
-    return resolved;
+    return assertSandboxPath(this.ensureSessionSandbox(sessionId), resolved);
   }
 }

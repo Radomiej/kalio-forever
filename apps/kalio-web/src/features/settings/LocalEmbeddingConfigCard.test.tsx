@@ -126,4 +126,35 @@ describe('LocalEmbeddingConfigCard', () => {
     expect(screen.getByTestId('embedding-local-test-btn')).toBeDisabled();
     expect(screen.getByTestId('embedding-local-availability-message')).toHaveTextContent('Model not installed yet.');
   });
+
+  it('turns a tokenizer initialization exception into a recovery instruction', () => {
+    render(<LocalEmbeddingConfigCard
+      form={INITIAL_FORM}
+      dirty={false}
+      syncing={null}
+      reindexResult={null}
+      status={LOCAL_STATUS}
+      localTestState="idle"
+      localTestMessage={null}
+      localConfigWarning={null}
+      localAvailability={{
+        status: 'error', installed: false, model: INITIAL_FORM.model,
+        dimensions: 384, backend: 'cpu', message: "Cannot read properties of undefined (reading 'tokenizer_class')",
+      }}
+      onChange={vi.fn()}
+      onDirtyChange={vi.fn()}
+      onSave={vi.fn()}
+      onInstall={vi.fn()}
+      onTest={vi.fn()}
+      onUseLocal={vi.fn()}
+      onReindexAll={vi.fn()}
+    />);
+
+    expect(screen.getByTestId('embedding-local-availability-message')).toHaveTextContent(
+      'The saved model could not be loaded because its tokenizer metadata is unavailable. Reinstall it or choose another local model.',
+    );
+    expect(screen.getByTestId('embedding-local-availability-message')).not.toHaveTextContent('tokenizer_class');
+    expect(screen.getByTestId('embedding-local-install-btn')).toHaveTextContent('Install model');
+    expect(screen.getByTestId('embedding-local-test-btn')).toBeDisabled();
+  });
 });

@@ -61,16 +61,16 @@ function makeLocalEmbeddingInstall() {
     getAvailability: vi.fn().mockResolvedValue({
       status: 'ready',
       installed: true,
-      model: 'Xenova/multilingual-e5-small',
-      dimensions: 384,
+      model: 'onnx-community/embeddinggemma-2-ONNX',
+      dimensions: 768,
       backend: 'cpu',
       message: 'Model installed and ready.',
     }),
     install: vi.fn().mockResolvedValue({
       status: 'installing',
       installed: false,
-      model: 'Xenova/multilingual-e5-small',
-      dimensions: 384,
+      model: 'onnx-community/embeddinggemma-2-ONNX',
+      dimensions: 768,
       backend: 'cpu',
       message: 'Installing local model...',
     }),
@@ -216,8 +216,8 @@ describe('MemoryController', () => {
       const result = await controller.getLocalEmbeddingAvailability();
 
       expect(localInstall.getAvailability).toHaveBeenCalledWith(expect.objectContaining({
-        model: 'Xenova/multilingual-e5-small',
-        dimensions: 384,
+        model: 'onnx-community/embeddinggemma-2-ONNX',
+        dimensions: 768,
         backend: 'cpu',
       }));
       expect(result).toMatchObject({

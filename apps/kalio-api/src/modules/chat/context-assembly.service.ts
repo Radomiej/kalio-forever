@@ -183,6 +183,16 @@ function buildLaunchScopePrompt(architectureContext: Record<string, unknown> | u
     ? architectureContext['executionCwd'].trim()
     : '';
 
+  if (!architectureContext?.['projectPath'] && executionCwd) {
+    return [
+      '## Session sandbox',
+      `Execution working directory: ${executionCwd}`,
+      'This conversation has no local project. Use this session sandbox as the default root for all file operations.',
+      'Relative fs_list, fs_read and fs_write paths resolve here. Use fs_list with path "." to inspect the root.',
+      'Do not access the application server, other sessions, or paths outside this sandbox.',
+    ].join('\n');
+  }
+
   const scopeLines = [
     '## Launch scope',
     `Local project path: ${projectPath}`,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolve } from 'node:path';
 import { methods, type ClientConnection, type SessionConfigOption, type SessionNotification } from '@agentclientprotocol/sdk';
 import { DevinAcpHost } from './devin-cli-acp.host';
-import { bindDevinSessionModel, devinAcpChildEnv } from './devin-cli-acp.model-selection';
+import { bindDevinSessionModel, devinAcpChildEnv, readDevinSelectableModels } from './devin-cli-acp.model-selection';
 
 const options = (currentValue = 'swe-2'): SessionConfigOption[] => [{
   id: 'model', name: 'Model', category: 'model', type: 'select', currentValue,
@@ -28,6 +28,38 @@ function setup(configOptions: SessionConfigOption[] | undefined, restore?: 'resu
 }
 
 describe('Devin exact session model binding', () => {
+  it('reproduces the 122-option audit: Medium is not a standalone model or a reasoning alias', async () => {
+    const modelOptions = [
+      { value: 'glm-5-2', name: 'GLM-5.2' },
+      { value: 'swe-2-high', name: 'SWE-2' },
+      { value: 'fusion-gpt-6-sol-high-sidekick-swe-2-medium', name: 'Fusion (SWE-2 Medium)' },
+      ...Array.from({ length: 119 }, (_, index) => ({ value: `fixture-${index}`, name: `Fixture ${index}` })),
+    ];
+    const metadata: SessionConfigOption[] = [{
+      id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'glm-5-2',
+      options: [{ group: 'models', name: 'Models', options: modelOptions }],
+    }, {
+      id: 'reasoning', name: 'Reasoning', category: 'thought_level', type: 'select', currentValue: 'high',
+      options: [{ value: 'medium', name: 'Medium' }, { value: 'high', name: 'High' }],
+    }];
+    expect(readDevinSelectableModels(metadata)).toEqual(modelOptions.map(option => option.value));
+    expect(readDevinSelectableModels(metadata)).toHaveLength(122);
+    expect(readDevinSelectableModels(metadata)).not.toContain('swe-2-medium');
+    expect(readDevinSelectableModels(metadata)).not.toContain('medium');
+    const test = setup(metadata, undefined, 'swe-2-medium');
+    await expect(test.ensure()).rejects.toThrow('"exactMatches":0');
+    await expect(test.prompt()).rejects.toThrow();
+    expect(test.request.mock.calls.map(([method]) => method)).toEqual([methods.agent.session.new]);
+  });
+
+  it('rejects duplicate ACP catalog IDs instead of advertising an unbindable model', () => {
+    const metadata = options();
+    const selector = metadata[0];
+    if (selector.type !== 'select') throw new Error('fixture');
+    selector.options = [{ value: 'swe-2-high', name: 'A' }, { value: 'swe-2-high', name: 'B' }];
+    expect(() => readDevinSelectableModels(metadata)).toThrow('catalog blocked');
+    expect(() => readDevinSelectableModels([...options(), ...options()])).toThrow('ambiguous');
+  });
   for (const duringSetter of [false, true]) {
     it(`distinguishes initial GLM notification from drift during setter (${duringSetter})`, async () => {
       const test = setup(options('glm-5-2'), undefined, 'swe-2-high');

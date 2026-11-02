@@ -11,13 +11,30 @@ function modelDiagnostic(model: string, selector: SessionConfigOption & { type: 
     optionCount: values.length, exactMatches: values.filter(option => option.value === model).length, candidates });
 }
 
-function modelSelector(model: string, options: ConfigOptions) {
+function getModelSelector(options: ConfigOptions) {
   const selectors = options?.filter(option => option.category === 'model' || option.id === 'model') ?? [];
   const selector = selectors[0];
   if (selectors.length !== 1 || selector?.type !== 'select' || !selector.id
     || options?.filter(option => option.id === selector.id).length !== 1) {
     throw new Error('Devin ACP model metadata is missing or ambiguous; prompt blocked.');
   }
+  return selector;
+}
+
+/** Only exact values from ACP's model selector are admissible, never reasoning or sidekick labels. */
+export function readDevinSelectableModels(options: ConfigOptions): string[] {
+  const selector = getModelSelector(options);
+  const values = selector.options.flatMap(option => 'group' in option ? option.options : [option]);
+  const models = values.map(option => option.value);
+  if (models.some(model => !model || model.length > 200 || !/^[\p{L}\p{N}][\p{L}\p{N}._:/+-]*$/u.test(model))
+    || new Set(models).size !== models.length) {
+    throw new Error('Devin ACP model values are invalid or ambiguous; catalog blocked.');
+  }
+  return models;
+}
+
+function modelSelector(model: string, options: ConfigOptions) {
+  const selector = getModelSelector(options);
   const values = selector.options.flatMap(option => 'group' in option ? option.options : [option]);
   if (values.filter(option => option.value === model).length !== 1) {
     throw new Error(`Devin ACP exact model ID is unavailable or ambiguous; prompt blocked. Model selection: ${modelDiagnostic(model, selector, 'selector_validation')}`);

@@ -12,8 +12,8 @@ Persisted manual identity fields are accepted only as a legacy input format;
 they never establish the current model's identity.
 
 Integrity checking a descriptor does not establish producer trust. Local
-Transformers models other than the catalog-pinned E5-small CPU adapter, and
-remote providers, remain unresolved. Project indexing/search rejects unresolved identity with
+Transformers models other than the catalog-pinned E5-small and Gemma2 CPU
+adapters, and remote providers, remain unresolved. Project indexing/search rejects unresolved identity with
 `EMBEDDING_REVISION_REQUIRED` (409). Ollama metadata alone also cannot prove which
 weights `/api/embed` used: a mutable tag could change A→B→A during inference.
 Project indexing/search therefore rejects Ollama with
@@ -33,6 +33,25 @@ tables per resource type and an FTS index. Type filtering happens before top-k.
 Text and supported source code embed content. Image/audio/video/PDF entries embed
 file path, type and size **only** and return `representation: metadata`. This is
 not OCR, transcription or native multimodal semantic retrieval.
+
+## New-install local embedding default
+
+With no saved selection or explicit embedding configuration, the runtime and
+`GET /api/memory/embedding-local` select Google EmbeddingGemma 2 text embeddings:
+`onnx-community/embeddinggemma-2-ONNX`, 768 dimensions, CPU. Installation remains
+explicit; the default selection alone does not prove that weights are installed.
+The existing Gemma2 adapter retains its catalog revision, text-only q4 loading
+and token budget. No image/audio/video understanding is implied.
+
+Persisted local settings remain authoritative. Active DB credentials and remote
+environment configuration retain their existing precedence. `EMBEDDING_LOCAL_*`
+overrides and legacy local `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`,
+`EMBEDDING_BACKEND` and `EMBEDDING_CACHE_DIR` remain supported; remote model and
+dimensions never leak into forced-local defaults. Without an explicit dimension,
+Gemma2 uses 768 and E5-small uses 384. E5-small stays selectable with the unchanged
+pinned revision and tokenizer rules; its adapter identity constant is not the
+new-install model recommendation. Existing saved selections are not migrated,
+and existing embedding spaces still require explicit reembed after model changes.
 
 ## API
 

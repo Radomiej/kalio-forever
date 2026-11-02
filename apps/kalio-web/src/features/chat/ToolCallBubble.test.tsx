@@ -491,7 +491,7 @@ describe('HistoryToolCallBubble - persisted tool status', () => {
 
   it.each(['', '   '])('does not report success when a restored tool call has no result', (content) => {
     const { container } = render(<HistoryToolCallBubble toolName="fs_write" content={content} />);
-    expect(screen.getByText('unconfirmed')).toBeInTheDocument();
+    expect(screen.getByText('result unavailable')).toBeInTheDocument();
     expect(container.querySelector('.lucide-circle-check')).toBeNull();
   });
 

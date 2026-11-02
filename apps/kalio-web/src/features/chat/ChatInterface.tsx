@@ -39,6 +39,7 @@ import { useChatAutoScroll } from './useChatAutoScroll';
 import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
 import { useChatProjectSelection } from './useChatProjectSelection';
 import { useConversationRuntimeLabel } from './useConversationRuntimeLabel';
+import { findArchitectureRunInMessages } from './architectureChatSummary';
 
 export { computeAnsweredCallIds } from './chatUtils';
 export { buildArchitectureRunContext, buildGoalGuardRunContext } from './launch/launchContext';
@@ -230,6 +231,10 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
     liveTurnState,
   });
   const hasRenderableConversation = conversationShellState.mode === 'timeline';
+  const chatModeLocked = messages.length > 0 || agentTurns.length > 0;
+  const effectiveArchitectureId = chatModeLocked
+    ? findArchitectureRunInMessages(messages)?.schemaId ?? 'single-chat'
+    : selectedArchitectureId;
   const composerBusy = liveTurnState.stoppable;
 
   const { tokenCount: fallbackTokenCount, compactMessages } = useContextUsage();
@@ -579,10 +584,11 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
           queuedDepth={queuedDepth}
           onArchitectureChange={setSelectedArchitectureId}
           onArchitectureRun={(content) => void handleComposerSend(content, activeSession?.personaId ?? 'default')}
+          architectureLocked={chatModeLocked}
           onDraftChange={setDraftUserMessage}
           onSend={handleComposerSend}
           onStop={handleStop}
-          selectedArchitectureId={selectedArchitectureId}
+          selectedArchitectureId={effectiveArchitectureId}
         />
       )}
     </div>

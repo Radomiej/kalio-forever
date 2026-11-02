@@ -292,6 +292,7 @@ export class SessionsService {
 
   async registerRuntimeProjectPathForSession(id: string): Promise<void> {
     const row = await this.getRow(id);
+    if (!row.projectId || row.projectId === SYSTEM_PROJECT_IDS.none) return;
     await this.registerRuntimeProjectPathIfRequested(row.runtimeContext ?? undefined, {
       registerRuntimeProjectPath: true,
     });

@@ -6,6 +6,7 @@ import { createRuntimeLLMProvider } from './providers/provider-factory';
 import { CredentialsService } from '../credentials/credentials.service';
 import { TimeoutSettingsService } from '../credentials/timeout-settings.service';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
+import { assertDirectLLMConfig } from './direct-llm-config';
 import { ProviderStreamLimiterService } from './provider-stream-limiter.service';
 
 export type { ILLMProvider, StreamChatOptions, LLMToolDef } from './llm.types';
@@ -14,8 +15,8 @@ export type { ILLMProvider, StreamChatOptions, LLMToolDef } from './llm.types';
 export class LLMService {
   private readonly logger = new Logger(LLMService.name);
   /** Cached fallback provider built from the current effective .env config. */
-  private envProvider: ILLMProvider;
-  private envProviderKey: string;
+  private envProvider: ILLMProvider | null = null;
+  private envProviderKey = '';
   private readonly envConfig: ProviderConfig;
   private readonly forceEnvLlm: boolean;
 
@@ -25,25 +26,22 @@ export class LLMService {
     private readonly timeoutSettings: TimeoutSettingsService,
     private readonly streamLimiter: ProviderStreamLimiterService,
   ) {
-    const apiKey = this.config.get<string>('LLM_API_KEY', 'mock');
-    const provider = this.config.get<string>(
-      'LLM_PROVIDER',
-      apiKey === 'mock' ? 'mock' : 'openai',
-    ) as LLMProviderType;
-    const configuredBaseUrl = this.config.get<string>('LLM_BASE_URL', 'mock');
-    const model = this.config.get<string>('LLM_MODEL', 'mock');
+    const apiKey = this.config.get<string>('LLM_API_KEY', '').trim();
+    const provider = (this.config.get<string>('LLM_PROVIDER', '').trim() || 'openai') as LLMProviderType;
+    const configuredBaseUrl = this.config.get<string>('LLM_BASE_URL', '').trim();
+    const model = this.config.get<string>('LLM_MODEL', '').trim();
     this.forceEnvLlm = this.config.get<string>('KALIO_FORCE_ENV_LLM', '') === '1';
 
     const baseUrl = configuredBaseUrl === 'mock' ? undefined : configuredBaseUrl;
 
     this.envConfig = { provider, apiKey, model, baseUrl };
-    this.envProviderKey = this.getProviderConfigKey(this.envConfig);
-    this.envProvider = createRuntimeLLMProvider(this.envConfig);
 
     if (this.forceEnvLlm) {
       this.logger.warn('LLM provider forced to env config; active DB credential is ignored');
     } else if (provider === 'mock') {
-      this.logger.warn('Env LLM config incomplete — will use active DB credential if set');
+      this.logger.log('Explicit mock LLM provider configured');
+    } else if (!model) {
+      this.logger.log('Direct LLM not configured; CLI agents remain available');
     } else {
       this.logger.log(`LLM provider (env fallback): ${provider} / ${model}`);
     }
@@ -69,7 +67,7 @@ export class LLMService {
 
   private getOrCreateEnvProvider(config: ProviderConfig): ILLMProvider {
     const nextKey = this.getProviderConfigKey(config);
-    if (nextKey !== this.envProviderKey) {
+    if (!this.envProvider || nextKey !== this.envProviderKey) {
       this.envProvider = createRuntimeLLMProvider(config);
       this.envProviderKey = nextKey;
     }
@@ -189,7 +187,9 @@ export class LLMService {
   }
 
   async getActiveModels(): Promise<string[]> {
-    const { config } = await this.getActiveProvider();
+    const dbConfig = this.forceEnvLlm ? null : await this.credentialsService.getActiveProviderConfig();
+    const config = dbConfig ?? await this.getEffectiveEnvConfig();
+    if (!config.model && config.provider !== 'mock') return [];
     return this.credentialsService.getModelsForProviderConfig(config);
   }
 
@@ -210,6 +210,7 @@ export class LLMService {
   }
 
   createProvider(config: ProviderConfig): ILLMProvider {
+    assertDirectLLMConfig(config);
     return createRuntimeLLMProvider(config);
   }
 
@@ -224,6 +225,7 @@ export class LLMService {
     const effectiveConfig = override && override !== config.model
       ? { ...config, model: override }
       : config;
+    assertDirectLLMConfig(effectiveConfig);
     const providerToUse = override && override !== config.model
       ? this.createProvider(effectiveConfig)
       : (provider ?? this.createProvider(effectiveConfig));

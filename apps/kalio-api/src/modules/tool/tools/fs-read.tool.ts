@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { VFSService } from '../../vfs/vfs.service';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
@@ -43,15 +43,16 @@ function getLineArg(args: ToolCallRequest['args'], key: 'startLine' | 'endLine')
   requiresConfirmation: false,
 })
 export class FsReadTool {
-  constructor(private readonly allowedPaths: AllowedPathsService) {}
+  constructor(private readonly allowedPaths: AllowedPathsService, private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; content: string; lines: number }> {
     const rawPath = getPathArg(request.args);
     const startLine = getLineArg(request.args, 'startLine');
     const endLine = getLineArg(request.args, 'endLine');
 
-    const absPath = resolve(rawPath);
-    const allowed = await this.allowedPaths.isAllowed(absPath);
+    const scope = await this.vfs.resolveFilesystemPath(request.sessionId, rawPath);
+    const absPath = scope.path;
+    const allowed = scope.sandboxRoot !== undefined || await this.allowedPaths.isAllowed(absPath);
     if (!allowed) {
       throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
     }

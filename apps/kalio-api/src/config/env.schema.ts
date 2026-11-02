@@ -23,11 +23,11 @@ export const envSchema = Joi.object({
   WORKSPACE_ROOT:      Joi.string().required(),
   MEMORY_DB_PATH:      Joi.string().default('./data/memory'),
   EMBEDDING_ENABLED:   Joi.boolean().default(true),
-  EMBEDDING_MODEL:     Joi.string().default('Xenova/multilingual-e5-small'),
-  EMBEDDING_DIMENSIONS: Joi.number().default(384),
+  EMBEDDING_MODEL:     Joi.string().optional(),
+  EMBEDDING_DIMENSIONS: Joi.number().optional(),
   EMBEDDING_CACHE_DIR: Joi.string().default('./data/embeddings-cache'),
   EMBEDDING_BACKEND:   Joi.string().valid('auto', 'webgpu', 'cpu').default('cpu'),
-  // Dedicated embedding provider (optional — falls back to LLM config if not set)
+  // Dedicated remote embedding provider; local selection defaults belong to Memory.
   EMBEDDING_BASE_URL:  Joi.string().optional(),
   EMBEDDING_API_KEY:   Joi.string().optional(),
   KALIO_ENABLE_TEST_SUPPORT: Joi.boolean().default(false),
@@ -39,19 +39,9 @@ export const envSchema = Joi.object({
     then: Joi.string().required(),
     otherwise: Joi.string().optional(),
   }),
-  LLM_API_KEY:         Joi.string().when('NODE_ENV', {
-    is: 'test',
-    then: Joi.string().optional().default('mock'),
-    otherwise: Joi.string().required(),
-  }),
-  LLM_BASE_URL:        Joi.string().when('NODE_ENV', {
-    is: 'test',
-    then: Joi.string().optional().default('mock'),
-    otherwise: Joi.string().required(),
-  }),
-  LLM_MODEL:           Joi.string().when('NODE_ENV', {
-    is: 'test',
-    then: Joi.string().optional().default('mock'),
-    otherwise: Joi.string().required(),
-  }),
+  // CLI agents authenticate independently. Direct LLM configuration is optional at boot.
+  LLM_PROVIDER:        Joi.string().allow('').optional(),
+  LLM_API_KEY:         Joi.string().allow('').optional(),
+  LLM_BASE_URL:        Joi.string().allow('').optional(),
+  LLM_MODEL:           Joi.string().allow('').optional(),
 }).unknown(true);

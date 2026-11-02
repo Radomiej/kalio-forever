@@ -12,6 +12,7 @@ import { DrizzleService } from '../../../database/drizzle.service';
 import { sessions } from '../../../database/schema';
 import { shouldSkipTraversalDirectory } from '../../../common/utils/traversal-exclusions.util';
 import { escapeRegex, globToRegex } from './search.utils';
+import { VFSService } from '../../vfs/vfs.service';
 
 function walkDir(dir: string, maxDepth: number, depth = 0): string[] {
   if (depth > maxDepth) return [];
@@ -75,9 +76,12 @@ async function resolveScopedRoots(
   request: ToolCallRequest,
   allowedPaths: AllowedPathsService,
   drizzle: DrizzleService,
+  vfs: VFSService,
 ): Promise<string[]> {
-  const scopedRoot = await resolveSessionScopedRoot(request.sessionId, drizzle);
   const explicitScope = optionalStringArg(request.args, 'path') ?? optionalStringArg(request.args, 'workdir');
+  const scope = await vfs.resolveFilesystemPath(request.sessionId, explicitScope ?? '.');
+  if (scope.sandboxRoot) return [scope.path];
+  const scopedRoot = await resolveSessionScopedRoot(request.sessionId, drizzle);
   if (explicitScope) {
     const resolvedExplicitScope = resolveExplicitScopePath(explicitScope, scopedRoot);
     if (!resolvedExplicitScope) {
@@ -142,6 +146,7 @@ export class GrepSearchTool {
   constructor(
     private readonly allowedPaths: AllowedPathsService,
     private readonly drizzle: DrizzleService,
+    private readonly vfs: VFSService,
   ) {}
 
   async execute(request: ToolCallRequest): Promise<{ matches: Array<{ file: string; line: number; text: string }>; total: number }> {
@@ -150,7 +155,7 @@ export class GrepSearchTool {
     const includePattern = request.args['includePattern'] as string | undefined;
     const maxResults = (request.args['maxResults'] as number) ?? 50;
 
-    const roots = await resolveScopedRoots(request, this.allowedPaths, this.drizzle);
+    const roots = await resolveScopedRoots(request, this.allowedPaths, this.drizzle, this.vfs);
     if (roots.length === 0) {
       return { matches: [], total: 0 };
     }
@@ -172,7 +177,8 @@ export class GrepSearchTool {
 
       for (const absPath of allFiles) {
         if (matches.length >= maxResults) break;
-        if (!(await this.allowedPaths.isAllowed(absPath))) continue;
+        const scope = await this.vfs.resolveFilesystemPath(request.sessionId, absPath);
+        if (!scope.sandboxRoot && !(await this.allowedPaths.isAllowed(absPath))) continue;
         const relPath = relative(root, absPath) || absPath.split(/[\\/]/).at(-1) || absPath;
         if (globRe && !globRe.test(relPath) && !globRe.test(absPath)) continue;
 
@@ -219,13 +225,14 @@ export class FileSearchTool {
   constructor(
     private readonly allowedPaths: AllowedPathsService,
     private readonly drizzle: DrizzleService,
+    private readonly vfs: VFSService,
   ) {}
 
   async execute(request: ToolCallRequest): Promise<{ files: string[]; total: number }> {
     const pattern = request.args['pattern'] as string;
     const maxResults = (request.args['maxResults'] as number) ?? 100;
 
-    const roots = await resolveScopedRoots(request, this.allowedPaths, this.drizzle);
+    const roots = await resolveScopedRoots(request, this.allowedPaths, this.drizzle, this.vfs);
     if (roots.length === 0) {
       return { files: [], total: 0 };
     }
@@ -239,7 +246,8 @@ export class FileSearchTool {
 
       for (const absPath of allFiles) {
         if (matched.length >= maxResults) break;
-        if (!(await this.allowedPaths.isAllowed(absPath))) continue;
+        const scope = await this.vfs.resolveFilesystemPath(request.sessionId, absPath);
+        if (!scope.sandboxRoot && !(await this.allowedPaths.isAllowed(absPath))) continue;
         const relPath = relative(root, absPath) || absPath.split(/[\\/]/).at(-1) || absPath;
         if (globRe.test(relPath) || globRe.test(absPath)) {
           matched.push(absPath);

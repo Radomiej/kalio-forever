@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
+import { envSchema } from '../../config/env.schema';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from '../../database/schema';
@@ -25,16 +26,21 @@ vi.mock('@huggingface/transformers', () => ({
     allowRemoteModels: true,
   },
   pipeline: pipelineMock,
-  AutoTokenizer: { from_pretrained: vi.fn(async () => ({})) },
-  AutoModel: { from_pretrained: vi.fn(async (_model: string, options: unknown) => ({ dispose: vi.fn(), options })) },
-  FeatureExtractionPipeline: function (args: { task: string; model: { options: unknown } }) {
-    return pipelineMock(args.task, 'local', args.model.options);
+  AutoConfig: { from_pretrained: vi.fn(async () => ({})) },
+  AutoTokenizer: { from_pretrained: vi.fn(async () => (text: string) => ({ input_ids: { size: text.length } })) },
+  AutoModel: { from_pretrained: vi.fn(async (model: string, options: unknown) => ({ dispose: vi.fn(), model, options })) },
+  FeatureExtractionPipeline: function (args: { task: string; model: { model: string; options: unknown } }) {
+    return pipelineMock(args.task, args.model.model, args.model.options);
   },
 }));
 
-pipelineMock.mockImplementation(async () => Object.assign(async () => ({
-  data: new Float32Array(384).fill(0.01),
-}), { tokenizer: (text: string) => ({ input_ids: { size: text.length } }) }));
+pipelineMock.mockImplementation(async (_task: string, model: string) => {
+  const dimensions = model === 'Xenova/multilingual-e5-small' ? 384
+    : model === 'onnx-community/embeddinggemma-2-ONNX' ? 768 : undefined;
+  if (!dimensions) throw new Error(`Missing embedding fixture for ${model}`);
+  return Object.assign(async () => ({ data: new Float32Array(dimensions).fill(0.01) }),
+    { tokenizer: (text: string) => ({ input_ids: { size: text.length } }) });
+});
 
 // â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -246,7 +252,7 @@ describe('EmbeddingService', () => {
       await svc.reloadFromCredential(); await svc.ensureCurrentIdentity();
       const space = svc.captureSpace(); const size = await svc.getDocumentSizer(space);
       expect(size?.('document')).toBe(true);
-      expect(fits).toHaveBeenCalledWith('document');
+      expect(fits).toHaveBeenCalledWith('title: none | text: document');
       await svc.reloadFromCredential();
       expect(() => size?.('document')).toThrow('EMBEDDING_SPACE_CHANGED');
     } finally { spy.mockRestore(); }
@@ -261,8 +267,18 @@ describe('EmbeddingService', () => {
       expect(inference).not.toHaveBeenCalled();
     } finally { sizing.mockRestore(); inference.mockRestore(); }
   });
-  it('derives the default local CPU space from the same revision used for inference', async () => {
+  it('binds the new Gemma2 default to its own pinned CPU inference space', async () => {
     const { svc } = makeService();
+    await svc.reloadFromCredential();
+    await svc.ensureCurrentIdentity();
+    const space = svc.captureSpace();
+    expect(space).toMatchObject({ model: 'onnx-community/embeddinggemma-2-ONNX',
+      modelRevision: 'daa72c51243991dfcaf9f9137d2c573d8f7790c0', dimensions: 768, backend: 'cpu' });
+    expect((await svc.embedPinned(space, ['text document']))[0]).toHaveLength(768);
+    expect(svc.captureSpace().id).toBe(space.id);
+  });
+  it('preserves the pinned E5 CPU space when explicitly selected', async () => {
+    const { svc } = makeService({ EMBEDDING_LOCAL_MODEL: 'Xenova/multilingual-e5-small' });
     await svc.reloadFromCredential();
     await svc.ensureCurrentIdentity();
     const space = svc.captureSpace();
@@ -279,8 +295,8 @@ describe('EmbeddingService', () => {
       const status = svc.getStatus();
       expect(status.source).toBe('local');
       expect(status.configured).toBe(true);
-      expect(status.model).toBe('Xenova/multilingual-e5-small');
-      expect(status.dimensions).toBe(384);
+      expect(status.model).toBe('onnx-community/embeddinggemma-2-ONNX');
+      expect(status.dimensions).toBe(768);
     });
 
     it('getStatus returns the local default model shape', async () => {
@@ -289,7 +305,7 @@ describe('EmbeddingService', () => {
       const s = svc.getStatus();
       expect(s.provider).toBe('local-transformers');
         expect(s.source).toBe('local');
-        expect(s.model).toBe('Xenova/multilingual-e5-small');
+        expect(s.model).toBe('onnx-community/embeddinggemma-2-ONNX');
         expect(s.backend).toBe('cpu');
         expect(s.gpuAvailable).toBeUndefined();
         expect(s.cacheDir).toBe('./data/embeddings-cache');
@@ -390,7 +406,7 @@ describe('EmbeddingService', () => {
       const status = svc.getStatus();
       expect(status.source).toBe('local');      // must NOT pick up LLM vars
       expect(status.configured).toBe(true);
-      expect(status.model).toBe('Xenova/multilingual-e5-small');
+      expect(status.model).toBe('onnx-community/embeddinggemma-2-ONNX');
     });
 
     it('treats "mock" as missing for env fallback', async () => {
@@ -400,7 +416,7 @@ describe('EmbeddingService', () => {
       });
       await svc.reloadFromCredential();
       expect(svc.getStatus().source).toBe('local');
-      expect(svc.getStatus().model).toBe('Xenova/multilingual-e5-small');
+      expect(svc.getStatus().model).toBe('onnx-community/embeddinggemma-2-ONNX');
     });
 
     it('does not leak remote EMBEDDING_MODEL into forced-local runtime defaults', async () => {
@@ -415,8 +431,8 @@ describe('EmbeddingService', () => {
 
       const status = svc.getStatus();
       expect(status.source).toBe('local');
-      expect(status.model).toBe('Xenova/multilingual-e5-small');
-      expect(status.dimensions).toBe(384);
+      expect(status.model).toBe('onnx-community/embeddinggemma-2-ONNX');
+      expect(status.dimensions).toBe(768);
     });
 
     it('prefers explicit EMBEDDING_LOCAL_* overrides for local runtime defaults', async () => {
@@ -441,6 +457,46 @@ describe('EmbeddingService', () => {
   });
 
   describe('buildDefaultLocalEmbeddingConfig', () => {
+    it.each([
+      [{}, 'onnx-community/embeddinggemma-2-ONNX', 768],
+      [{ EMBEDDING_MODEL: 'Xenova/multilingual-e5-small' }, 'Xenova/multilingual-e5-small', 384],
+    ] as const)('resolves schema-validated embedding selection %j', (env, model, dimensions) => {
+      const { error, value } = envSchema.validate({ DATABASE_PATH: './data/test.sqlite', WORKSPACE_ROOT: './sessions', ...env });
+      expect(error).toBeUndefined();
+      expect(buildDefaultLocalEmbeddingConfig(new ConfigService(value)))
+        .toMatchObject({ model, dimensions, backend: 'cpu' });
+    });
+
+    it('defaults new installs to Gemma2 text embeddings on CPU', () => {
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig())).toEqual({
+        enabled: true, model: 'onnx-community/embeddinggemma-2-ONNX', dimensions: 768,
+        backend: 'cpu', cacheDir: './data/embeddings-cache',
+      });
+    });
+
+    it.each(['EMBEDDING_MODEL', 'EMBEDDING_LOCAL_MODEL'])('preserves E5 selected via %s without dimensions', key => {
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig({ [key]: 'Xenova/multilingual-e5-small' })))
+        .toMatchObject({ model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' });
+    });
+
+    it('preserves legacy dimensions, backend and cache overrides', () => {
+      expect(buildDefaultLocalEmbeddingConfig(makeConfig({
+        EMBEDDING_MODEL: 'custom/model', EMBEDDING_DIMENSIONS: '512',
+        EMBEDDING_BACKEND: 'auto', EMBEDDING_CACHE_DIR: './custom-cache',
+      }))).toMatchObject({ model: 'custom/model', dimensions: 512, backend: 'auto', cacheDir: './custom-cache' });
+    });
+
+    it('keeps saved E5 settings across reload with the new install default', async () => {
+      const { svc, credentials } = makeService();
+      const saved = { enabled: true, model: 'Xenova/multilingual-e5-small', dimensions: 384, backend: 'cpu' as const };
+      await credentials.updateLocalConfig(saved);
+      await svc.reloadFromCredential();
+      await svc.reloadFromCredential();
+      expect(svc.getStatus()).toMatchObject({ source: 'local', model: saved.model, dimensions: 384, backend: 'cpu', configured: true });
+      expect(await credentials.getLocalConfig(buildDefaultLocalEmbeddingConfig(makeConfig())))
+        .toMatchObject(saved);
+    });
+
     it('treats EMBEDDING_ENABLED=false as disabled regardless of string casing', () => {
       expect(buildDefaultLocalEmbeddingConfig(makeConfig({ EMBEDDING_ENABLED: 'false' })).enabled).toBe(false);
       expect(buildDefaultLocalEmbeddingConfig(makeConfig({})).enabled).toBe(true);
@@ -545,7 +601,7 @@ describe('EmbeddingService', () => {
     it('returns local default dimensions when not configured', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
-      expect(svc.getDimensions()).toBe(384);
+      expect(svc.getDimensions()).toBe(768);
     });
   });
 
@@ -569,7 +625,7 @@ describe('EmbeddingService', () => {
     it('returns local default when not configured', async () => {
       const { svc } = makeService();
       await svc.reloadFromCredential();
-      expect(await svc.getModelName()).toBe('Xenova/multilingual-e5-small');
+      expect(await svc.getModelName()).toBe('onnx-community/embeddinggemma-2-ONNX');
     });
   });
 

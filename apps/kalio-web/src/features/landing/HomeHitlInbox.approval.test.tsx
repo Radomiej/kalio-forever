@@ -49,6 +49,8 @@ describe('Home approval preservation with the real runtime store', () => {
     expect(useAgentStore.getState().getToolActivitiesForSession('child-session')[0].status).toBe('awaiting_confirmation');
     expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
     expect(screen.getByTestId('home-hitl-note-request-child')).toHaveValue('  Approved scope only.  ');
+    expect(screen.getByRole('button', { name: 'Approve' }).closest('article'))
+      .toHaveClass('border-l-4', 'border-l-warning', 'shadow-sm');
   });
 
   it('removes the request when the authoritative pending projection is cleared', () => {

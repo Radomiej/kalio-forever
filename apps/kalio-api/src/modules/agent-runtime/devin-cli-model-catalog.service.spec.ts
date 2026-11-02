@@ -2,6 +2,38 @@ import { Logger } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { DevinCliCommandQueueService } from './devin-cli-command-queue.service';
 import { DevinCliModelCatalogService, parseDevinCliModelCatalog } from './devin-cli-model-catalog.service';
+import { readDevinAcpModelCatalog } from './devin-cli-acp.model-catalog';
+
+vi.mock('./devin-cli-acp.model-catalog', () => ({ readDevinAcpModelCatalog: vi.fn() }));
+
+describe('ACP-authoritative model catalog', () => {
+  it('does not advertise CLI-only Medium/Max variants or invent models from sidekick names', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: [
+      '  swe-2-high    SWE-2 High', '  swe-2-medium    SWE-2 Medium', '  swe-2-max    SWE-2 Max',
+    ].join('\n'), stderr: '' });
+    vi.mocked(readDevinAcpModelCatalog).mockResolvedValueOnce([
+      'glm-5-2', 'swe-2-high', 'fusion-gpt-6-sol-high-sidekick-swe-2-medium',
+    ]);
+    const service = new DevinCliModelCatalogService({ run } as unknown as DevinCliCommandQueueService);
+    const catalog = await service.getCatalog('devin.exe', true);
+    expect(catalog).toMatchObject({ status: 'ready', stale: false, models: [
+      'glm-5-2', 'swe-2-high', 'fusion-gpt-6-sol-high-sidekick-swe-2-medium',
+    ] });
+    expect(readDevinAcpModelCatalog).toHaveBeenCalledWith('devin.exe', 'swe-2-high');
+    catalog.models.push('swe-2-medium');
+    expect((await service.getCatalog('devin.exe')).models).not.toContain('swe-2-medium');
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when CLI rows exist but ACP metadata cannot be obtained', async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: '  swe-2-medium    SWE-2 Medium', stderr: '' });
+    vi.mocked(readDevinAcpModelCatalog).mockRejectedValueOnce(new Error('fixture metadata failure'));
+    const service = new DevinCliModelCatalogService({ run } as unknown as DevinCliCommandQueueService);
+    await expect(service.getCatalog('devin.exe', true)).resolves.toMatchObject({
+      status: 'command-failed', models: [], stale: false,
+    });
+  });
+});
 
 describe('model catalog failure diagnostics', () => {
   it.each([

@@ -13,7 +13,7 @@
  *   HistoryToolCallBubble â€” tool finished (tool_result ChatMessage)
  */
 import { useEffect, useState, useMemo } from 'react';
-import { CheckCircle2, XCircle, Loader2, ExternalLink, AlertTriangle } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import type { AgentFlowRunSnapshot, SubAgentFlowResult } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -28,13 +28,13 @@ import {
   extractCLIAgentResult,
   extractCLIAgentSessionSnapshot,
   extractImageResult,
-  extractPersistedToolResultMeta,
   extractRAAppBlock,
   extractSubAgentFlowResult,
   extractSubagentResult,
   extractWebSearchResult,
 } from './ToolCallBubble.parsers';
 import { Chip, ConfirmationInlineBubble, FullToolArguments } from './ToolCallBubble.Chrome';
+import { historyToolCallStatus, liveToolCallStatus, toolCallStatusDetails, ToolCallStatusBadge, ToolCallStatusDetails, ToolCallStatusIcon } from './ToolCallBubble.Status';
 import { SubagentResultBlock, CLIAgentSessionStatusBlock, SubAgentFlowResultBlock } from './ToolCallBubble.ResultBlocks';
 import { getToolTargetLabel } from './toolTargetLabel';
 import { CLIChildConversationCard } from './CLIChildConversationCard';
@@ -111,24 +111,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
     return <ConfirmationInlineBubble activity={activity} />;
   }
 
-  const icon =
-    activity.status === 'running' ? (
-      <Loader2 size={12} className="text-sky-400 animate-spin shrink-0" />
-    ) : activity.status === 'success' ? (
-      <CheckCircle2 size={12} className="text-success shrink-0" />
-    ) : activity.status === 'expired' ? (
-      <AlertTriangle size={12} className="text-warning shrink-0" />
-    ) : (
-      <XCircle size={12} className={activity.status === 'cancelled' ? 'text-base-content/40 shrink-0' : 'text-error shrink-0'} />
-    );
-
-  const badge = activity.status === 'expired'
-    ? <span className="text-[10px] font-mono text-warning/70 bg-warning/10 rounded px-1">confirmation expired</span>
-    : activity.status === 'cancelled'
-      ? <span className="text-[10px] font-mono text-base-content/55 bg-base-200/70 rounded px-1">cancelled</span>
-      : activity.status === 'error'
-        ? <span className="text-[10px] font-mono text-error/80 bg-error/10 rounded px-1">failed</span>
-        : undefined;
+  const status = liveToolCallStatus(activity);
 
   const hasArgs = Object.keys(activity.args).length > 0;
   const isRunningCliAgent = activity.toolName === 'run_cli_agent' && activity.status === 'running';
@@ -157,7 +140,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       || activity.status === 'expired'
       || activity.status === 'error';
   const open = manualOpen ?? defaultOpen;
-  const expandable = hasArgs || hasNonRaappResult || isRunningCliAgent || descendantActivities.length > 0 || cliSessionSnapshot != null;
+  const expandable = Boolean(toolCallStatusDetails(status)) || hasArgs || hasNonRaappResult || isRunningCliAgent || descendantActivities.length > 0 || cliSessionSnapshot != null;
   const imageResult = activity.result?.data != null ? extractImageResult(activity.result.data) : null;
 
   return (
@@ -175,10 +158,10 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
       )}
       {(!showCliChildCard || manualOpen) && (
       <Chip
-        icon={icon}
+        icon={<ToolCallStatusIcon {...status} />}
         toolName={activity.toolName}
         targetLabel={getToolTargetLabel(activity.toolName, activity.args)}
-        badge={badge}
+        badge={<ToolCallStatusBadge {...status} />}
         elapsed={elapsed}
         expandable={expandable}
         open={open}
@@ -212,15 +195,7 @@ export function LiveToolCallBubble({ activity }: { activity: ToolActivity }) {
           {JSON.stringify(activity.result.data, null, 2)}
         </div>
       )}
-      {activity.result?.errorMessage && (
-        <div className={`text-xs ${activity.status === 'cancelled' ? 'text-base-content/50' : 'text-error'}`}>{activity.result.errorMessage}</div>
-      )}
-      {activity.status === 'cancelled' && !activity.result?.errorMessage && (
-        <div className="text-xs text-base-content/50">Tool call was cancelled before it completed.</div>
-      )}
-      {activity.status === 'expired' && !activity.result?.errorMessage && (
-        <div className="text-xs text-warning/80">Confirmation timed out before the tool could run.</div>
-      )}
+      <ToolCallStatusDetails value={status} />
       </Chip>
       )}
     </div>
@@ -276,7 +251,11 @@ export function HistoryToolCallBubble({
   const webSearchResult = toolName === 'web_search' ? extractWebSearchResult(parsed) : null;
   const subagentResult = isSubagent ? extractSubagentResult(parsed) : null;
   const subAgentFlowResult = isSubAgentFlow ? extractSubAgentFlowResult(parsed) : null;
-  const persistedToolResultMeta = extractPersistedToolResultMeta(parsed);
+  const matchingActivity = useAgentStore((s) => s.toolActivities.find((activity) =>
+    Boolean(callId) && activity.callId === callId && activity.toolName === toolName
+      && activity.sessionId === (parentSessionIdProp ?? activeSessionId),
+  ));
+  const status = historyToolCallStatus(parsed, matchingActivity);
   const [refreshedSubAgentFlowResult, setRefreshedSubAgentFlowResult] = useState<SubAgentFlowResult | null>(null);
   const displayedSubAgentFlowResult = refreshedSubAgentFlowResult ?? subAgentFlowResult;
   const hasArgs = args != null && Object.keys(args).length > 0;
@@ -289,32 +268,15 @@ export function HistoryToolCallBubble({
       || webSearchResult != null
       || subagentResult != null
       || displayedSubAgentFlowResult != null
-      || persistedToolResultMeta?.status === 'error'
-      || persistedToolResultMeta?.status === 'cancelled';
+      || Boolean(toolCallStatusDetails(status));
   const defaultOpen = defaultOpenOverride ?? inferredDefaultOpen;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const open = isAnswered ? false : (manualOpen ?? defaultOpen);
 
-  const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !webSearchResult && !subagentResult && !displayedSubAgentFlowResult && content.length > 0;
-  const expandable = hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
+  const hasResult = !raapp && !cliResult && !cliSessionSnapshot && !imageResult && !webSearchResult && !subagentResult && !displayedSubAgentFlowResult && parsed != null && !(typeof parsed === 'string' && !parsed.trim());
+  const expandable = Boolean(toolCallStatusDetails(status)) || hasArgs || hasResult || (raapp != null && !isAnswered) || cliResult != null || cliSessionSnapshot != null || imageResult != null || webSearchResult != null || subagentResult != null || displayedSubAgentFlowResult != null;
   const agentFlowOpenGraphRunId = displayedSubAgentFlowResult?.openGraphRunId ?? displayedSubAgentFlowResult?.flowRunId;
   const agentFlowOpenChatSessionId = displayedSubAgentFlowResult?.openChatSessionId ?? displayedSubAgentFlowResult?.childSessionId;
-  const resultUnconfirmed = content.trim().length === 0;
-  const historyIcon = resultUnconfirmed
-    ? <AlertTriangle size={12} className="text-warning shrink-0" />
-    : persistedToolResultMeta?.status === 'error'
-    ? <XCircle size={12} className="text-error shrink-0" />
-    : persistedToolResultMeta?.status === 'cancelled'
-      ? <XCircle size={12} className="text-base-content/40 shrink-0" />
-      : <CheckCircle2 size={12} className="text-success shrink-0" />;
-  const historyStatusBadge = resultUnconfirmed
-    ? <span className="text-[10px] font-mono text-warning">unconfirmed</span>
-    : persistedToolResultMeta?.status === 'error'
-    ? <span className="text-[10px] font-mono text-error/80 bg-error/10 rounded px-1">failed</span>
-    : persistedToolResultMeta?.status === 'cancelled'
-      ? <span className="text-[10px] font-mono text-base-content/55 bg-base-200/70 rounded px-1">cancelled</span>
-      : null;
-
   useEffect(() => {
     if (!isSubAgentFlow || !subAgentFlowResult || !shouldPollSubAgentFlowResult(subAgentFlowResult)) return;
     const runId = subAgentFlowResult?.openGraphRunId ?? subAgentFlowResult?.flowRunId;
@@ -367,12 +329,12 @@ export function HistoryToolCallBubble({
       )}
       {(!showsCliChildCard || manualOpen) && (
       <Chip
-        icon={historyIcon}
+        icon={<ToolCallStatusIcon {...status} />}
         toolName={toolName}
         targetLabel={getToolTargetLabel(toolName, args)}
         badge={
           <>
-            {historyStatusBadge}
+            <ToolCallStatusBadge {...status} />
             {isAnswered && <span className="text-[10px] font-mono text-base-content/40 bg-base-200/60 rounded px-1">answered</span>}
             {displayedSubAgentFlowResult != null && agentFlowOpenChatSessionId && (
               <button
@@ -441,12 +403,7 @@ export function HistoryToolCallBubble({
         {imageResult && <ImageResultRenderer data={imageResult} />}
         {webSearchResult && <WebSearchResultRenderer data={webSearchResult} />}
         {raapp && !isAnswered && <RAAppRenderer block={raapp} />}
-        {persistedToolResultMeta?.errorMessage && (
-          <div className={`text-xs ${persistedToolResultMeta.status === 'cancelled' ? 'text-base-content/50' : 'text-error'}`}>{persistedToolResultMeta.errorMessage}</div>
-        )}
-        {persistedToolResultMeta?.status === 'cancelled' && !persistedToolResultMeta.errorMessage && (
-          <div className="text-xs text-base-content/50">Tool call was cancelled before it completed.</div>
-        )}
+        <ToolCallStatusDetails value={status} />
       </Chip>
       )}
       {raapp && isAnswered && (

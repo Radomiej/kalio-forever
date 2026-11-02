@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { readdirSync, statSync, existsSync } from 'node:fs';
-import { resolve, relative, join } from 'node:path';
+import { relative, join } from 'node:path';
+import { VFSService } from '../../vfs/vfs.service';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { shouldSkipTraversalDirectory } from '../../../common/utils/traversal-exclusions.util';
@@ -43,6 +44,7 @@ function walkDir(
   maxDepth: number,
   depth: number,
   state: { listed: number; omitted: number },
+  assertPath: (path: string) => void,
 ): FileEntry[] {
   const entries: FileEntry[] = [];
   if (depth > maxDepth) return entries;
@@ -58,12 +60,13 @@ function walkDir(
       break;
     }
     const full = join(dir, item);
+    assertPath(full);
     const stat = statSync(full);
     const rel = toEntryPath(relative(root, full));
     if (stat.isDirectory()) {
       entries.push({ path: rel, type: 'directory' });
       state.listed++;
-      const childEntries = walkDir(full, root, maxDepth, depth + 1, state);
+      const childEntries = walkDir(full, root, maxDepth, depth + 1, state, assertPath);
       entries.push(...childEntries);
     } else {
       entries.push({ path: rel, type: 'file', sizeBytes: stat.size });
@@ -89,14 +92,15 @@ function walkDir(
   requiresConfirmation: false,
 })
 export class FsListTool {
-  constructor(private readonly allowedPaths: AllowedPathsService) {}
+  constructor(private readonly allowedPaths: AllowedPathsService, private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; entries: FileEntry[]; omitted: number }> {
     const rawPath = getPathArg(request.args);
     const recursive = getRecursiveArg(request.args);
 
-    const absPath = resolve(rawPath);
-    const allowed = await this.allowedPaths.isAllowed(absPath);
+    const scope = await this.vfs.resolveFilesystemPath(request.sessionId, rawPath);
+    const absPath = scope.path;
+    const allowed = scope.sandboxRoot !== undefined || await this.allowedPaths.isAllowed(absPath);
     if (!allowed) {
       throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
     }
@@ -105,7 +109,9 @@ export class FsListTool {
     if (!stat.isDirectory()) throw new Error(`NOT_A_DIRECTORY: ${rawPath}`);
 
     const state = { listed: 0, omitted: 0 };
-    const entries = walkDir(absPath, absPath, recursive ? 10 : 0, 0, state);
+    const entries = walkDir(absPath, absPath, recursive ? 10 : 0, 0, state, path => {
+      if (scope.sandboxRoot) this.vfs.assertSandboxPath(scope.sandboxRoot, path);
+    });
     return { path: absPath, entries, omitted: state.omitted };
   }
 }

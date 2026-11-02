@@ -228,18 +228,7 @@ if (-not $env:EMBEDDING_CACHE_DIR) {
 if (-not $env:CORS_ORIGIN) {
     $env:CORS_ORIGIN = "http://localhost:$FE_PORT,http://127.0.0.1:$FE_PORT"
 }
-if (-not $env:LLM_PROVIDER) {
-    $env:LLM_PROVIDER = 'mock'
-}
-if (-not $env:LLM_API_KEY) {
-    $env:LLM_API_KEY = 'mock'
-}
-if (-not $env:LLM_BASE_URL) {
-    $env:LLM_BASE_URL = 'mock'
-}
-if (-not $env:LLM_MODEL) {
-    $env:LLM_MODEL = 'mock'
-}
+# CLI runtimes authenticate independently; mock is enabled only by -UseMockLLM.
 
 $env:PORT = "$BE_PORT"
 $env:KALIO_DECISION_FRONTEND_ORIGINS = "http://localhost:$FE_PORT,http://127.0.0.1:$FE_PORT"

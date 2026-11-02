@@ -870,7 +870,7 @@ describe('ChatInterface event wiring', () => {
     expect(optimisticWorkflowMessage?.architectureRun).toBeUndefined();
   });
 
-  it('fail-first: does not start architecture run while streaming and keeps composer draft', async () => {
+  it('locks a started single chat mode even while streaming', async () => {
     mockGetArchitectureSchemas.mockResolvedValue([
       {
         id: 'strategic-decision-council',
@@ -886,24 +886,37 @@ describe('ChatInterface event wiring', () => {
     getSessionMessages.mockReturnValue(mockMessages);
     agentStoreState.isStreaming = true;
     agentStoreState.streamingSessionId = 'session-1';
-    mockStartArchitectureRun.mockClear();
 
     await renderChatInterface();
-    await screen.findByTestId('chat-architecture-select');
-    await screen.findByRole('option', { name: 'Strategic Decision Council' });
-    await act(async () => {
-      fireEvent.change(screen.getByTestId('chat-architecture-select'), {
-        target: { value: 'strategic-decision-council' },
-      });
-      fireEvent.change(screen.getByTestId('chat-input'), {
-        target: { value: 'keep this architecture draft' },
-      });
-      fireEvent.click(screen.getByTestId('chat-send-btn'));
-      await flushReactEffects();
-    });
+    expect(await screen.findByTestId('chat-architecture-select')).toBeDisabled();
+    expect(screen.getByTestId('chat-architecture-select')).toHaveValue('single-chat');
+    expect(screen.getByTestId('chat-mode-lock-guidance')).toBeVisible();
+  });
 
-    expect(mockStartArchitectureRun).not.toHaveBeenCalled();
-    expect((screen.getByTestId('chat-input') as HTMLTextAreaElement).value).toBe('keep this architecture draft');
+  it('hydrates and locks workflow mode from the saved architecture run', async () => {
+    mockGetArchitectureSchemas.mockResolvedValue([
+      {
+        id: 'strategic-decision-council',
+        name: 'Strategic Decision Council',
+        version: '0.1.0',
+        description: '',
+        nodes: [],
+        edges: [],
+        roleSlots: [],
+      },
+    ]);
+    mockMessages = [{
+      id: 'u1', sessionId: 'session-1', role: 'user', content: 'Decide.', createdAt: 1,
+      architectureRun: {
+        runId: 'run-1', schemaId: 'strategic-decision-council', status: 'completed', trace: [], routeHops: [],
+      },
+    }];
+    getSessionMessages.mockReturnValue(mockMessages);
+
+    await renderChatInterface();
+    const selector = await screen.findByTestId('chat-architecture-select');
+    expect(selector).toHaveValue('strategic-decision-council');
+    expect(selector).toBeDisabled();
   });
 
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {

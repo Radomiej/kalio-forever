@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveQaEnvValues } from './stack-qa-env.mjs';
 import { readStackState, resolveStackPaths } from './stack-state.mjs';
 import { buildStackStatusReport, hasAliveChild, renderEffectiveLlmLine, renderStateProcesses } from './stack-status.mjs';
 import { ensureRequestedPortsAreFree, resolveListeningPids } from './stack-port-owners.mjs';
@@ -291,20 +292,16 @@ function resolveQaEnv() {
     ...readEnvFile(resolveEnvFilePath(envFile)),
     ...readEnvFile(resolveEnvFilePath(testEnvFile)),
   };
-  const llmEnv = useEnvLlm ? { ...fileEnv, ...process.env } : {};
-
-  return {
-    ...process.env,
-    ...fileEnv,
-    LLM_PROVIDER: getArgValue(args, '--provider', llmEnv.LLM_PROVIDER ?? 'mock'),
-    LLM_API_KEY: getArgValue(args, '--api-key', llmEnv.LLM_API_KEY ?? 'mock'),
-    LLM_BASE_URL: getArgValue(args, '--base-url', llmEnv.LLM_BASE_URL ?? 'mock'),
-    LLM_MODEL: getArgValue(args, '--model', llmEnv.LLM_MODEL ?? 'mock'),
-    KALIO_FORCE_ENV_LLM: forceEnvLlm ? '1' : (process.env.KALIO_FORCE_ENV_LLM ?? fileEnv.KALIO_FORCE_ENV_LLM ?? ''),
-    KALIO_MOCK_LLM_FAST: getArgValue(args, '--provider', llmEnv.LLM_PROVIDER ?? 'mock') === 'mock'
-      ? '1'
-      : (process.env.KALIO_MOCK_LLM_FAST ?? fileEnv.KALIO_MOCK_LLM_FAST ?? ''),
-  };
+  return resolveQaEnvValues({
+    fileEnv,
+    processEnv: process.env,
+    useEnvLlm,
+    forceEnvLlm,
+    provider: getArgValue(args, '--provider', undefined),
+    apiKey: getArgValue(args, '--api-key', undefined),
+    baseUrl: getArgValue(args, '--base-url', undefined),
+    model: getArgValue(args, '--model', undefined),
+  });
 }
 
 function resolveCredentialsMasterKey(qaEnv) {
