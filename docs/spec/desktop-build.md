@@ -92,7 +92,7 @@ additionally produce Tauri `.sig` files and the release job generates
 `latest.json` from those signed assets. A matching version tag creates or
 updates a draft GitHub Release.
 
-The tag must match `src-tauri/tauri.conf.json`, for example `v1.0.3` for
+The tag must match `src-tauri/tauri.conf.json`, for example `v1.0.5` for
 version `1.0.3`. The following three Actions secrets are the optional Tauri
 updater-signing set:
 
