@@ -195,7 +195,12 @@ export class RunRaAppTool {
   ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
-    const id = request.args['id'] as string;
+    const id = request.args['id'];
+    if (typeof id !== 'string' || !id.trim()) {
+      return { status: 'error',
+        message: 'run_raapp requires a non-empty string id. Call list_raapps and retry with an exact app ID.',
+      };
+    }
     const inputs = (request.args['inputs'] ?? {}) as Record<string, unknown>;
     const sessionId = request.sessionId;
     const app = this.raapp.getById(id);

@@ -8,6 +8,10 @@ This file records durable product and architecture decisions that should guide a
 
 - Goal reviewer admission has a local, additive storage boundary: a committed one-use start capability, immutable metadata/hash tombstone and start/cancel CAS; it does not yet dispatch a reviewer or authorize goal completion. Normal session deletion remains allowed, but reserved reviewer IDs cannot be resurrected. Runtime wiring and deployment remain separate gates; see `docs/spec/jev-devin-goal-loop.md`.
 
+## Interactive Apps
+
+- Interactive Q&A preserves nonempty answer strings such as `no`, `false` and `0` as visible choices. A validated, immutable GUI projection handles legacy option-presence bindings in fresh and restored history without changing global DSL truthiness. `run_raapp` requires an explicit nonblank string ID before lookup; no app-ID fallback is allowed. See `docs/spec/raapp-design-current.md`.
+
 ## CLI-only Startup
 
 - Direct LLM env credentials are optional at boot, including production. CLI

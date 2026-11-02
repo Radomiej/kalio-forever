@@ -79,6 +79,31 @@ describe('RunRaAppTool', () => {
     expect(result.message as string).toContain('other-app');
   });
 
+  it.each([undefined, null, 42, '', '  '])('rejects missing, non-string or blank app id before lookup: %j', async (id) => {
+    const result = await tool.execute(makeRequest({ id })) as Record<string, unknown>;
+    expect(result).toMatchObject({ status: 'error', message: expect.stringContaining('non-empty string') });
+    expect(result.message).toContain('id');
+    expect(result.message).toContain('list_raapps');
+    expect(raapp.getById).not.toHaveBeenCalled();
+    expect(raapp.execute).not.toHaveBeenCalled();
+    expect(raapp.init).not.toHaveBeenCalled();
+  });
+
+  it('does not treat name as an id alias or choose an app when id is absent', async () => {
+    const result = await tool.execute(makeRequest({ name: 'qa-interactive' })) as Record<string, unknown>;
+    expect(result).toMatchObject({ status: 'error', message: expect.stringContaining('non-empty string') });
+    expect(raapp.getById).not.toHaveBeenCalled();
+    expect(raapp.execute).not.toHaveBeenCalled();
+  });
+
+  it('keeps a literal unknown id distinct from an absent id', async () => {
+    const result = await tool.execute(makeRequest({ id: 'undefined' })) as Record<string, unknown>;
+    expect(raapp.getById).toHaveBeenCalledWith('undefined');
+    expect(result).toMatchObject({ status: 'error', message: expect.stringContaining('not found') });
+    expect(result.message).not.toContain('non-empty string');
+    expect(raapp.execute).not.toHaveBeenCalled();
+  });
+
   it('returns error when app has no htmlContent and no guiContent', async () => {
     (raapp.getById as ReturnType<typeof vi.fn>).mockReturnValue(makeApp({ htmlContent: null, guiContent: null }));
 
