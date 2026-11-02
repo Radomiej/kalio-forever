@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { AgentTurnBubble } from './AgentTurnBubble';
+import { PendingAssistantBubble } from './ChatInterface.Parts';
 import type { ChatMessage, ChatSession } from '@kalio/types';
 import type { ToolActivity } from '../../store/agentStore';
 import type { AgentTurn, AgentTurnItem } from '../../store/sessionStore';
@@ -657,10 +658,33 @@ describe('AgentTurnBubble', () => {
     expect(screen.getByTestId('history-tool-spawn_cli_agent')).toBeInTheDocument();
   });
 
-  it('shows streaming indicator when message is streaming with no content', () => {
+  it.each([
+    { items: [] },
+    { items: [{ kind: 'text' as const, messageId: 'msg-1' }] },
+  ])('keeps exactly one pending card without an empty assistant bubble ($items)', ({ items }) => {
     mockMessages.push(makeMsg({ id: 'msg-1', streaming: true, content: '' }));
-    render(<AgentTurnBubble turn={makeTurn([{ kind: 'text', messageId: 'msg-1' }], false)} toolActivities={[]} />);
-    expect(screen.getByTestId('streaming-indicator')).toBeInTheDocument();
+    const view = (done: boolean) => {
+      const turn = makeTurn(items, done);
+      // Reproduce the observed caller state: the conversation already owns Pending.
+      const liveTurnState = {
+        sessionId: 's1', phase: done ? 'completed' as const : 'pending' as const,
+        stoppable: !done, previewText: null, toolName: null, queuedDepth: 0,
+        showPlaceholderBubble: !done, workflowActive: false,
+      };
+      return <>
+        <AgentTurnBubble turn={turn} toolActivities={[]} />
+        {liveTurnState.showPlaceholderBubble && <PendingAssistantBubble liveTurnState={liveTurnState} />}
+      </>;
+    };
+    const { rerender } = render(view(false));
+    expect(screen.getAllByTestId('pending-agent-bubble')).toHaveLength(1);
+    expect(screen.getByText('Kalio is responding.')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-turn-bubble')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('streaming-indicator')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('turn-loading-indicator')).not.toBeInTheDocument();
+    rerender(view(true));
+    expect(screen.queryByTestId('pending-agent-bubble')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('streaming-indicator')).not.toBeInTheDocument();
   });
 
   it('REGRESSION: hides streaming indicator after agent:done even if msg.streaming is still true', () => {

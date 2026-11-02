@@ -217,6 +217,20 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
       : []
   ), [sessions, turnArchitectureRun]);
 
+  // The conversation owns pending feedback; retain only material turn content here.
+  const hasContent = visibleItems.some((item) => {
+    if (item.kind === 'tool') return true;
+    const message = turnMessages.find((entry) => entry.id === item.messageId);
+    if (!message && item.kind === 'text') return false;
+    if (item.kind === 'thinking') return Boolean(thinkingChunks[item.messageId] || message?.thinking);
+    return Boolean(message && isMessageLiveStreaming(item.messageId, message, streamingChunks, turn.done)
+      ? streamingChunks[item.messageId] : message?.content);
+  });
+  if (!hasContent && !turnArchitectureRun && !turn.error && !toolArgProgress
+    && turnContinuationActions.length === 0 && pendingBudgetApprovalsForTurn.length === 0) {
+    return <NativeToolAuditPanel key={`${turn.sessionId}:${turn.id}`} sessionId={turn.sessionId} turnId={turn.id} />;
+  }
+
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
       <div className="min-w-0 w-full max-w-none">
@@ -251,8 +265,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
             </>
           )}
           {/* Loading indicator while turn is active but no items have arrived yet */}
-          {!turn.done && turn.items.length === 0 && (
-            toolArgProgress ? (
+          {!turn.done && turn.items.length === 0 && toolArgProgress && (
               <span data-testid="turn-loading-indicator" className="text-xs text-base-content/60 font-mono tabular-nums">
                 {toolArgProgress.totalChars > 0 ? (
                   <>
@@ -265,9 +278,6 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                   </>
                 )}
               </span>
-            ) : (
-              <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
-            )
           )}
           {visibleItems.map((item, idx) => {
             if (item.kind === 'tool') {
@@ -355,12 +365,11 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
             
             const isStreaming = isMessageLiveStreaming(messageId, msg, streamingChunks, turn.done);
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
+            if (!displayContent) return null;
 
             return (
               <div key={`text-${messageId}`} className="flex flex-col gap-2">
-                {isStreaming && !displayContent ? (
-                  <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
-                ) : displayContent ? (
+                {displayContent ? (
                   <div className="max-w-[78ch]">
                     <MarkdownViewer content={displayContent} />
                     {isStreaming && <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current" />}

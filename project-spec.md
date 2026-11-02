@@ -1,6 +1,6 @@
 # Kalio Project Spec
 
-Last updated: 2026-10-18
+Last updated: 2026-11-02
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
@@ -18,6 +18,7 @@ This file records durable product and architecture decisions that should guide a
 - Frontend may render projections, but it must not infer runtime routing, terminal state, retryability, or approvals from prose, prompt text, message ids, tool-call id prefixes, or UI-local timers.
 - Runtime decisions use typed status, reason code, error code, evidence, structured output, and durable event history.
 - Display text can explain a decision, but changing display text must not change system behavior.
+- The conversation owns one pending/waiting status indicator. Empty assistant turns must not add duplicate dots or blank bubbles; material text, reasoning, tool progress, errors, approvals and native audit remain visible. See `docs/spec/chat-turn-feedback.md`.
 
 ## Canonical Runtime Contract
 

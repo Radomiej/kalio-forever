@@ -58,3 +58,5 @@ tmp-*.json
 
 # local working notes (untracked)
 docs/todos/
+# Private user corrections and project/workflow decisions; never publish by default.
+docs/cto/

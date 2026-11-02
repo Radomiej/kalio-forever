@@ -100,9 +100,17 @@ For every task:
 ## 6. Session hygiene
 
 - Context is the constraint. Long sessions with accumulated failed attempts perform worse than fresh sessions with a better prompt.
-- After two failed corrections on the same issue, stop. Summarize what you learned and ask the user to reset the session with a sharper prompt.
+- After two failed corrections on the same issue, record the evidence and change the diagnostic approach; ask the user only when an actual decision or external blocker requires it. Save a handoff before context compaction.
 - Use subagents (Claude Code: "use subagents to investigate X") for exploration tasks that would otherwise pollute the main context with dozens of file reads.
 - When committing, write descriptive commit messages (subject under 72 chars, body explains the why). No "update file" or "fix bug" commits. No "Co-Authored-By: Claude" attribution unless the project explicitly wants it.
+
+### Local task, session and CTO records
+
+- Immediately record each actionable user request in `docs/todos/active.md`, before implementation or delegation. Give it a stable ID, date in Europe/Warsaw, acceptance criteria, owner and status. Update it on scope changes and handoffs; check it off only with observed evidence, distinguishing local, DEV, QA and production. Never use conversation memory as the only task ledger.
+- Every agent, including subagents and reviewers, owns a separate `docs/sessions/YYYY-MM-DD-<agent>-<task>.md`. Create it at work start; update it after meaningful analysis, changes, verification and before pause/handoff/final response, including incomplete work. Record scope, branch, files inspected/changed, findings, decisions, actual commands/results, summary and remaining work. Record observable rationale, never hidden chain-of-thought, credentials or raw private payloads.
+- Append user corrections, project direction and workflow decisions to `docs/cto/YYYY-MM-DD-decisions.md` immediately. Include a stable ID, received date/time when known, source, short faithful quote or explicitly labelled paraphrase, classification (request/correction/decision/question), impact, linked TODO IDs and status. Do not invent past timestamps or treat a question as an accepted decision; append superseding entries instead of silently rewriting history.
+- These records are local only: no upload, Board/Notion synchronization, forced Git add, commit or push without a separate explicit instruction. Keep new records ignored and verify with `git check-ignore`; do not delete or untrack historical committed records. Versioned product specs remain separate and must still be updated when behavior changes.
+- Read the relevant local TODO, CTO and latest session handoff on resume. When delegating, require the agent's record path and verification boundary in its final report. A coordinator must not overwrite another agent's session file.
 
 ---
 
@@ -234,7 +242,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Before Playwright screenshot capture, inspect the live browser accessibility tree and derive selectors from observed controls; close the browser in `finally` so a failed locator cannot leave capture processes running.
 - When preserving Playwright failure artifacts, use absolute source/destination paths and verify the copied file before starting another run that clears test-results.
 - When the user asks to test Devin through Kalio, acceptance requires a real Devin CLI/ACP run driven through Kalio's UI against the exact approved project; mock E2E validates Kalio only and cannot close Devin QA.
-- For important architecture/runtime changes, write or update a `docs/sessions/YYYY-MM-DD-*.md` note with what changed, verification evidence, live-readiness status, and remaining blockers before ending the work slice.
+- Apply section 6 local recording rules to every agent's work, including analysis and incomplete runtime work; completion-only session-skill triggers do not replace this project requirement.
 - For `C:\Projekty\TurboProject2` demo runs, create each `demoN` branch from the last verified clean baseline and preserve older demo branches for review.
 - Target nested delegation architecture is `sub_agentflow`: parent sees one tool call, system creates a child `ChatSession` plus full `AgentFlowRun` trace; start from docs/spec/sub-agentflow-target-architecture.md before implementing it.
 - Repo copy of the manual QA skill lives at `docs/agent-skills/kalio-manual-qa.md`; keep it aligned with the installed `kalio-manual-qa` skill.
@@ -246,7 +254,7 @@ When the user corrects your approach, append a one-line rule here before ending 
 - Manual QA stacks must prove the effective provider at `/api/llm/config`; stack/env overrides must not be shadowed by `.env`, and localhost QA must allow both `localhost` and `127.0.0.1` origins.
 - For AgentFlow MVP release, separate runtime lifecycle proof from generated-project quality; first verify clean start/trace/wait/resume/final-or-block behavior, and defer LLM/persona output quality to a later hardening pass.
 - Treat `C:\Projekty\Agent-Architecture-Lab` as the high-level role/agent reference; adapt Kalio runtime and UI around that model instead of inventing new top-level roles.
-- For subagent acceleration, use GPT-5.4 mini for simple isolated checks and GPT-5.3 Codex or GPT-5.4 for normal implementation/review work; do not use GPT-5.5.
+- Delegate disjoint bounded work using models actually available in the current tool catalog; inherit the parent model unless the user requests an override. Never substitute an unavailable named advisor silently.
 - Treat `.\start-dev.ps1` ports `3016/5188` as the official manual-dev hot-reload stack; treat `node scripts/stack-manager.mjs start --backend-port 0 --frontend-port 0` as an isolated built QA stack on random ports using `NODE_ENV=production`, `data/kalio-qa.db`, and `data/workspaces-qa`.
 - For failing CI work, start with `superpowers:systematic-debugging` and finish with `superpowers:verification-before-completion` before claiming the pipeline is fixed.
 - On Windows, always use system Node (`C:\Program Files\nodejs\node.exe`) for `node`/`pnpm`/`npm` installs and rebuilds; never Cursor's bundled Node 22 — prepend that directory to PATH when the agent shell resolves the wrong `node`.
