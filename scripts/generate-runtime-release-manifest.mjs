@@ -63,6 +63,7 @@ function parseRuntimeAsset(name, version) {
 export async function createRuntimeManifest(directory, tag, privateKeyText = '') {
   const version = versionFromTag(tag);
   const assets = [];
+  const seen = new Map();
   for (const path of await collectFiles(directory)) {
     const name = path.slice(directory.length + 1).replaceAll('\\', '/');
     const fileName = name.split('/').at(-1);
@@ -71,12 +72,24 @@ export async function createRuntimeManifest(directory, tag, privateKeyText = '')
       continue;
     }
     const fileStats = await stat(path);
-    assets.push({
+    const asset = {
       ...parsed,
       name: fileName,
       sha256: await sha256(path),
       size: fileStats.size,
-    });
+    };
+    // Downloaded artifacts can place the same archive under different paths
+    // (e.g. an early runtime upload merged with the final artifact upload);
+    // identical duplicates collapse to one manifest entry.
+    const existing = seen.get(asset.name);
+    if (existing) {
+      if (existing.sha256 !== asset.sha256) {
+        throw new Error('Conflicting duplicate runtime asset: ' + asset.name);
+      }
+      continue;
+    }
+    seen.set(asset.name, asset);
+    assets.push(asset);
   }
   assets.sort((left, right) => left.name.localeCompare(right.name));
   if (assets.length === 0) {

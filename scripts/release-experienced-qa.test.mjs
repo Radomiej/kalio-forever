@@ -132,6 +132,33 @@ test('runtime manifest includes only the tagged archives and detects payload tam
   });
 });
 
+test('runtime manifest collapses identical duplicate archives and rejects conflicting ones', async () => {
+  await withTempDirectory(async (directory) => {
+    const nestedDirectory = join(directory, 'nested');
+    await mkdir(nestedDirectory);
+    await writeFile(join(directory, 'kalio-runtime-1.0.2-linux-x64.tar.gz'), 'linux runtime');
+    await writeFile(join(nestedDirectory, 'kalio-runtime-1.0.2-linux-x64.tar.gz'), 'linux runtime');
+
+    const manifest = await createRuntimeManifest(directory, `v${expectedVersion}`);
+    const payload = JSON.parse(Buffer.from(manifest.payload, 'base64').toString('utf8'));
+    const linuxAssets = payload.assets.filter(
+      (asset) => asset.name === 'kalio-runtime-1.0.2-linux-x64.tar.gz',
+    );
+
+    assert.equal(linuxAssets.length, 1);
+    assert.equal(
+      linuxAssets[0].sha256,
+      createHash('sha256').update('linux runtime').digest('hex'),
+    );
+
+    await writeFile(join(nestedDirectory, 'kalio-runtime-1.0.2-linux-x64.tar.gz'), 'tampered runtime');
+    await assert.rejects(
+      createRuntimeManifest(directory, `v${expectedVersion}`),
+      /Conflicting duplicate runtime asset: kalio-runtime-1\.0\.2-linux-x64\.tar\.gz/,
+    );
+  });
+});
+
 test('updater rejects draft and unsigned releases unless the unsigned path is explicit', async () => {
   await withTempDirectory(async (directory) => {
     const platform = process.platform === 'win32' ? 'windows' : 'linux';
