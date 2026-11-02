@@ -8,6 +8,16 @@ import type {
 } from './codex-app-server.host';
 import { CodexAppServerLLMSource } from './codex-app-server.llm-source';
 
+it('rejects toolsDisabled on generator advance before opening any Codex host', async () => {
+  const host = { get: vi.fn(), ensure: vi.fn(), onConnectionLost: vi.fn() };
+  const source = new CodexAppServerLLMSource(host as never);
+  const stream = source.stream({ toolsDisabled: true, messages: [], tools: [], sessionId: 'review', messageId: 'answer' });
+  expect(host.get).not.toHaveBeenCalled();
+  await expect(stream.next()).rejects.toThrow('LLM_TOOLS_DISABLED_UNSUPPORTED');
+  expect(host.get).not.toHaveBeenCalled(); expect(host.ensure).not.toHaveBeenCalled();
+  expect(host.onConnectionLost).not.toHaveBeenCalled();
+});
+
 // Lifecycle fixtures use a verified catalog; real admission is covered separately.
 vi.mock('./codex-model-catalog', () => ({
   readCodexModels: vi.fn().mockResolvedValue(['gpt-5.4', 'gpt-5.6-luna']),

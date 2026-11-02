@@ -39,6 +39,8 @@ export class LLMTurnRuntimeService {
   ) {}
 
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
+    const toolsDisabled = request.toolsDisabled === true;
+    if (toolsDisabled) request = { ...request, toolsDisabled: true, toolMetas: [], providerToolNames: [], rawXmlToolNames: [] };
     if (request.hostRuntimeReceiptObserver && !request.hostDispatchReceiptRecorder && this.hostDispatchReceipts) {
       request = { ...request, hostDispatchReceiptRecorder: this.hostDispatchReceipts.recorder };
     }
@@ -164,6 +166,7 @@ export class LLMTurnRuntimeService {
 
       const streamModel = async (messagesForAttempt: ContextManagedLLMMessage[]): Promise<void> => {
         for await (const chunk of this.llmSource.stream({
+          ...(toolsDisabled ? { toolsDisabled: true as const } : {}),
           messages: messagesForAttempt,
           tools: request.toolMetas,
            sessionId: request.sessionId,
@@ -174,18 +177,19 @@ export class LLMTurnRuntimeService {
           runId: request.runId,
           turnId: request.turnId,
           promptMessageId: request.promptMessageId,
-          dispatchNativeTool: dispatchToolCall,
+          dispatchNativeTool: toolsDisabled ? undefined : dispatchToolCall,
           externalThreadId: request.externalThreadId,
            cwd: request.cwd,
            onExternalThreadBound: request.onExternalThreadBound,
            onExternalRuntimeLost: request.onExternalRuntimeLost,
            onNativeApprovalRequested: request.onNativeApprovalRequested,
           onExternalAudit: request.onExternalAudit,
-          toolResultChannel,
+          toolResultChannel: toolsDisabled ? undefined : toolResultChannel,
           abortSignal: request.abortSignal,
           structuredOutput: request.structuredOutput,
         })) {
           if (request.abortSignal.aborted) break;
+          if (toolsDisabled && chunk.type === 'tool_call') throw new Error('LLM_TOOLS_DISABLED');
           if (chunk.type === 'structured_output') {
             latestStructuredOutput = chunk.value;
             hasStructuredOutput = true;

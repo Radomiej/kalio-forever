@@ -60,6 +60,7 @@ export class LLMServiceAdapter implements ILLMSource {
   }
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
+    if (params.toolsDisabled) throw new Error('LLM_TOOLS_DISABLED_UNSUPPORTED');
     const pending: Array<InternalLLMChunk | null> = [];
     let notify: (() => void) | null = null;
     let streamError: Error | null = null;

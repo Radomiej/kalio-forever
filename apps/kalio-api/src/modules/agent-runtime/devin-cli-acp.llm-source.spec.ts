@@ -17,6 +17,62 @@ describe('DevinCliAcpLLMSource', () => {
   const nativeToolsPolicy: DevinNativeToolsPolicy = { filesystem: false, web: false, terminal: false, source: 'default' };
   type AuditEvent = { eventName?: string; data?: Record<string, unknown> };
 
+  it('clamps tools at final adapter despite global policy flip while host awaits', async () => {
+    let release!: () => void; let entered!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const requested = new Promise<void>(resolve => { entered = resolve; });
+    const globalPolicy = { filesystem: false, web: false, terminal: false, source: 'settings' as const };
+    const getPolicy = vi.fn(async () => globalPolicy);
+    const getToken = vi.fn(async () => 'private-token');
+    const contexts = new KalioMcpBridgeContextRegistry(); const activate = vi.spyOn(contexts, 'activate');
+    const approval = vi.fn(async () => 'accept' as const); const dispatch = vi.fn();
+    const audit = vi.fn(); const privateMaterial = 'private-reviewer-material-sentinel';
+    const decisions: string[] = [];
+    const host = { ensureSession: vi.fn(async () => ({ sessionId: 'review-acp', cwd: 'C:/fixture', processEpoch: 'epoch', resumed: false })),
+      prompt: vi.fn(async (_id: string, _text: string, input: DevinAcpPromptInput) => {
+        expect(input.onTurnStart).toBeUndefined();
+        input.onToolActivity?.({ toolCallId: privateMaterial, title: privateMaterial, name: privateMaterial,
+          kind: 'execute', status: 'failed', rawInput: { body: privateMaterial }, rawOutput: privateMaterial });
+        for (const name of ['exec', 'mcp_call_tool', 'unknown-tool']) decisions.push(await input.onPermission({
+          sessionId: 'review-acp', toolCall: { toolCallId: name, title: name, name, kind: 'execute' },
+          options: [{ optionId: 'accept', kind: 'allow_once', name: 'Allow' }],
+        }));
+        input.onText('Review result'); return 'end_turn' as const;
+      }) };
+    const registry = { get: vi.fn(async (_model: string, _scope?: string, _policy?: DevinNativeToolsPolicy) => { entered(); await pending; return host; }) };
+    const source = new DevinCliAcpLLMSource(registry as never, { get: getPolicy } as never,
+      { getToken } as never, contexts);
+    const result = collect(source.stream({ toolsDisabled: true, messages: [{ role: 'user', content: 'Review' }],
+      tools: [{ name: 'fs_read', description: 'read', parameters: {}, requiresConfirmation: false }],
+      providerToolNames: ['web'], sessionId: 'review-child', messageId: 'answer', dispatchNativeTool: dispatch,
+      toolResultChannel: { setHandler: vi.fn() }, onNativeApprovalRequested: approval, onExternalAudit: audit,
+      executionProfile: { id: 'worker', name: 'Worker', kind: 'devin-cli-acp', model: 'exact-model',
+        approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0 } }));
+    await requested;
+    globalPolicy.filesystem = true; globalPolicy.web = true; globalPolicy.terminal = true;
+    release(); await expect(result).resolves.toContainEqual({ type: 'done' });
+    expect(registry.get).toHaveBeenCalledWith('exact-model', 'reviewer-deny-all:review-child',
+      { filesystem: false, web: false, terminal: false, source: 'default' });
+    expect(Object.isFrozen(registry.get.mock.calls[0]?.[2])).toBe(true);
+    expect(host.ensureSession).toHaveBeenCalledWith(expect.any(String), undefined, []);
+    expect(decisions).toEqual(['decline', 'decline', 'decline']);
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ eventName: 'devin-cli-acp.tool.blocked',
+      data: expect.objectContaining({ toolsDisabled: true }) }));
+    expect(JSON.stringify(audit.mock.calls)).not.toContain(privateMaterial);
+    for (const fn of [getPolicy, getToken, activate, approval, dispatch]) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it.each(['thread', 'preaborted'])('rejects constrained %s before host/token/global policy effects', async mode => {
+    const get = vi.fn(); const getToken = vi.fn(); const controller = new AbortController();
+    if (mode === 'preaborted') controller.abort();
+    const source = new DevinCliAcpLLMSource({ get } as never, { get } as never, { getToken } as never,
+      new KalioMcpBridgeContextRegistry());
+    await expect(source.stream({ toolsDisabled: true, messages: [], tools: [], sessionId: 'review', messageId: 'answer',
+      ...(mode === 'thread' ? { externalThreadId: 'privileged-worker-thread' } : {}), abortSignal: controller.signal }).next())
+      .rejects.toThrow(mode === 'thread' ? 'LLM_TOOLS_DISABLED_THREAD_REUSE' : 'LLM_TOOLS_DISABLED_ABORTED');
+    expect(get).not.toHaveBeenCalled(); expect(getToken).not.toHaveBeenCalled();
+  });
+
   it.each([
     { tool: true, before: ['Checking output.'], after: ['## Preview', ' ready'], expected: 'Checking output.\n\n## Preview ready' },
     { tool: true, before: ['Checking output.\n\n'], after: ['## Preview'], expected: 'Checking output.\n\n## Preview' },

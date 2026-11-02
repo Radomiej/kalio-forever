@@ -4,6 +4,12 @@ Source: USER-20261004-03/05 in ../meetings/2026-10-04-user-notes.md. Status: par
 
 ## User outcome
 
+### Constrained reviewer adapter — local prerequisite, 2026-11-02
+
+The internal turn/source contract can only narrow execution with `toolsDisabled: true`. It is not a user/tool argument or a capability grant. The loop removes advertised tools and result channels through every retry/repair and rejects generated tool calls before persistence or dispatch. Devin ACP additionally uses a dedicated deny-all host scope, refuses thread reuse, avoids bridge-token/config/context activation, and declines native permissions. Constrained activity/error audits contain static metadata rather than provider-controlled tool titles or output. Other final adapters currently reject this mode before activation; ordinary execution is unchanged when the flag is absent.
+
+Focused tests cover these runtime/adapter mechanics and actual private configuration with mocked CLI processes. This prerequisite does not prove real CLI denial, reviewer dispatch, admission ownership, goal completion or target deployment. Runtime activation requires the separate trusted issuer/lifecycle, migration and browser acceptance gates below.
+
 ### Durable reviewer admission — local storage boundary, 2026-11-02
 
 The additive `goal_reviewer_admissions` storage and migration0039 are implemented locally. This is not runtime/module wiring or proof of the complete goal loop. Promotion requires reviewed migration, runtime capability and real child-execution tests.

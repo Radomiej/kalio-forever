@@ -37,6 +37,12 @@ async function collect(stream: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe('DevinApiLLMSource', () => {
+  it('rejects toolsDisabled on generator advance before any remote API or polling', async () => {
+    const client = { createSession: vi.fn(), sendMessage: vi.fn(), getPollOptions: vi.fn() };
+    await expect(new DevinApiLLMSource(client as never).stream({ toolsDisabled: true, messages: [], tools: [],
+      sessionId: 'review', messageId: 'answer', executionProfile: profile }).next()).rejects.toThrow('LLM_TOOLS_DISABLED_UNSUPPORTED');
+    for (const call of Object.values(client)) expect(call).not.toHaveBeenCalled();
+  });
   it('creates, binds, polls, deduplicates remote messages, and completes a turn', async () => {
     const client: DevinApiClientPort = {
       getIntegrationStatus: () => ({ configured: true, organizationId: 'org-1', maxAcuLimit: 2 }),

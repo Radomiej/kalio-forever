@@ -35,6 +35,7 @@ export class ClaudeAgentSdkLLMSource implements ILLMSource {
   private readonly logger = new Logger(ClaudeAgentSdkLLMSource.name);
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
+    if (params.toolsDisabled) throw new Error('LLM_TOOLS_DISABLED_UNSUPPORTED');
     const profile = params.executionProfile;
     if (!profile || profile.kind !== 'claude-agent-sdk') {
       throw new Error('Claude Agent SDK source requires a claude-agent-sdk execution profile.');

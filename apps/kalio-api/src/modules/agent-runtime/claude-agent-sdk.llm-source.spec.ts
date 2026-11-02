@@ -41,6 +41,12 @@ function messages() {
 }
 
 describe('ClaudeAgentSdkLLMSource', () => {
+  it('rejects toolsDisabled on generator advance before SDK or bridge creation', async () => {
+    const counts = [sdk.query.mock.calls.length, sdk.tool.mock.calls.length, sdk.createSdkMcpServer.mock.calls.length];
+    await expect(new ClaudeAgentSdkLLMSource().stream({ toolsDisabled: true, messages: [], tools: [],
+      sessionId: 'review', messageId: 'answer', executionProfile: profile }).next()).rejects.toThrow('LLM_TOOLS_DISABLED_UNSUPPORTED');
+    expect([sdk.query.mock.calls.length, sdk.tool.mock.calls.length, sdk.createSdkMcpServer.mock.calls.length]).toEqual(counts);
+  });
   it('maps SDK streaming messages and binds the external session without loading user settings', async () => {
     sdk.query.mockReturnValue((async function* () {
       yield { type: 'system', subtype: 'init', session_id: 'claude-session-1', claude_code_version: '2.1.220', model: 'claude-sonnet-4-6' };

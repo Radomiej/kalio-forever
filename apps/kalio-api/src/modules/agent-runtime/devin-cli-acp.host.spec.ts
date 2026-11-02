@@ -1,8 +1,39 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createDevinCliConfig } from './devin-cli-config';
+import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { buildDevinCliLaunchSpec, DevinAcpHost, parseDevinCliProbe } from './devin-cli-acp.host';
 
+const catalog = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>();
+  const { promisify } = await import('node:util');
+  const execFile = vi.fn();
+  Object.defineProperty(execFile, promisify.custom, { value: catalog.read });
+  return { ...actual, execFile };
+});
+
 describe('Devin CLI ACP host contract', () => {
+  it('suppresses all inherited MCP entries with empty allowlist and blocks failed verification', async () => {
+    const enabled = 'Configured MCP servers:\n  • inherited\n    Command: private-command\n';
+    const disabled = 'Configured MCP servers:\n  ✗ inherited  (disabled)\n    Command: private-command\n';
+    const config = await createDevinCliConfig('exact-model', [], { filesystem: false, web: false, terminal: false, source: 'default' });
+    try {
+      catalog.read.mockReset().mockResolvedValueOnce({ stdout: 'devin 3000.11.1', stderr: '' })
+        .mockResolvedValueOnce({ stdout: enabled, stderr: '' }).mockResolvedValueOnce({ stdout: disabled, stderr: '' });
+      await expect(suppressInheritedDevinMcp('fixture-not-executed', config, [])).resolves.toBe(1);
+      const overlay = JSON.parse(await readFile(join(config.cwd, '.devin', 'mcp_config.local.json'), 'utf8')) as {
+        mcpServers: Record<string, { disabled?: boolean }>;
+      };
+      expect(Object.keys(overlay.mcpServers)).toEqual(['inherited']);
+      expect(Object.values(overlay.mcpServers).every(server => server.disabled === true)).toBe(true);
+      catalog.read.mockReset().mockResolvedValueOnce({ stdout: 'devin 3000.11.1', stderr: '' })
+        .mockResolvedValueOnce({ stdout: enabled, stderr: '' }).mockResolvedValueOnce({ stdout: enabled, stderr: '' });
+      await expect(suppressInheritedDevinMcp('fixture-not-executed', config, [])).rejects.toThrow('suppression did not take effect');
+    } finally { await config.cleanup(); }
+  });
   it('propagates initialization failure instead of exposing the assigned transport', async () => {
     let fail!: (error: Error) => void;
     const host = new DevinAcpHost('swe-2');

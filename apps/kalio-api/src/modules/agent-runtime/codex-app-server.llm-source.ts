@@ -23,6 +23,7 @@ export class CodexAppServerLLMSource implements ILLMSource {
   constructor(private readonly host: CodexAppServerHost) {}
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
+    if (params.toolsDisabled) throw new Error('LLM_TOOLS_DISABLED_UNSUPPORTED');
     const profile = params.executionProfile;
     if (!profile || profile.kind !== 'codex-app-server') {
       throw new Error('Codex App Server source requires a codex-app-server execution profile.');

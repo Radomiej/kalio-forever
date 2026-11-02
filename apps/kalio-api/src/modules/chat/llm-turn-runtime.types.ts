@@ -20,6 +20,8 @@ export interface LLMAgentLoopCallbacks {
 }
 
 export interface LLMAgentLoopRequest {
+  /** Backend-only, one-way narrowing; not a setting or model/tool argument. */
+  toolsDisabled?: true;
   /** In-memory host capability, intentionally excluded from provider params. */
   hostRuntimeReceiptObserver?: HostRuntimeReceiptObserver;
   /** Host-only dispatcher recorder; never forwarded to provider parameters. */

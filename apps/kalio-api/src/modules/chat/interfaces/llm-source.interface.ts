@@ -4,6 +4,8 @@ import type { ContextManagedLLMMessage } from '../../../common/utils/context-man
 import type { NativeToolDispatch } from '../../../common/kalio-mcp-bridge-context';
 
 export interface LLMSourceParams {
+  /** Backend-only, one-way narrowing; never grants host admission authority. */
+  toolsDisabled?: true;
   messages: ContextManagedLLMMessage[];
   tools: ToolMeta[];
   sessionId: string;
