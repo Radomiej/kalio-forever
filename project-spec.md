@@ -12,6 +12,8 @@ This file records durable product and architecture decisions that should guide a
 
 - Unwired reviewer foundations distinguish reservation classification, read-only full binding validation and exclusive active-run ownership. They grant no start authority and must not activate before target migration and trusted issuer/lifecycle integration.
 
+- Coding goals require a successful build and an independently verified reviewer result by default. Commit and publication are required only when explicitly requested. The host policy uses BUILD_RESULT and QUALITY_GATE; labels alone never prove either condition.
+
 ## Interactive Apps
 
 - Interactive Q&A preserves nonempty answer strings such as `no`, `false` and `0` as visible choices. A validated, immutable GUI projection handles legacy option-presence bindings in fresh and restored history without changing global DSL truthiness. `run_raapp` requires an explicit nonblank string ID before lookup; no app-ID fallback is allowed. See `docs/spec/raapp-design-current.md`.

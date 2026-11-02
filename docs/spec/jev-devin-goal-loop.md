@@ -4,6 +4,10 @@ Source: USER-20261004-03/05 in ../meetings/2026-10-04-user-notes.md. Status: par
 
 ## User outcome
 
+### Coding-goal default — user decision, 2026-11-02
+
+Coding goals require a successful build and an independent reviewer. The host policy requires BUILD_RESULT and QUALITY_GATE for each active criterion; a kind label alone is never evidence. QUALITY_GATE must resolve to the actual independently completed reviewer and its durable result. Commit and publication are required only when explicitly requested. The coding policy factory implements these requirements, but production composition and evidence binding remain separate activation gates; it does not infer build commands or authorize tools.
+
 ### Constrained reviewer adapter — local prerequisite, 2026-11-02
 
 The internal turn/source contract can only narrow execution with `toolsDisabled: true`. It is not a user/tool argument or a capability grant. The loop removes advertised tools and result channels through every retry/repair and rejects generated tool calls before persistence or dispatch. Devin ACP additionally uses a dedicated deny-all host scope, refuses thread reuse, avoids bridge-token/config/context activation, and declines native permissions. Constrained activity/error audits contain static metadata rather than provider-controlled tool titles or output. Other final adapters currently reject this mode before activation; ordinary execution is unchanged when the flag is absent.
