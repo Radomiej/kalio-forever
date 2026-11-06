@@ -5,7 +5,7 @@ import { extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:p
 import { eq } from 'drizzle-orm';
 import type { ProjectResourceReaderPort, ProjectResourceSnapshot } from '@kalio/types';
 import { DrizzleService } from '../../database/drizzle.service';
-import { projects } from '../../database/schema';
+import { projects, sessions } from '../../database/schema';
 
 const MAX_FILES = 500;
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -38,7 +38,21 @@ function limit(): never { throw new Error('PROJECT_RESOURCE_LIMIT'); }
 export class ProjectResourceReaderService implements ProjectResourceReaderPort {
   constructor(private readonly database: DrizzleService) {}
 
-  async readProject(projectId: string, signal?: AbortSignal): Promise<ProjectResourceSnapshot> {
+  async previewSessionFile(sessionId: string, path: string): Promise<string> {
+    if (typeof path !== 'string' || path.length > 512
+      || path.split('/').some(part => !part || part === '.' || part === '..' || /[\\:\x00-\x1f]/.test(part))) {
+      throw new Error('PROJECT_PREVIEW_PATH_INVALID');
+    }
+    const session = this.database.db.select({ projectId: sessions.projectId }).from(sessions)
+      .where(eq(sessions.id, sessionId)).get();
+    if (!session?.projectId) throw new Error('PROJECT_NOT_REGISTERED');
+    const snapshot = await this.readProject(session.projectId, undefined, path);
+    const file = snapshot.files[0];
+    if (!file || file.content.includes(0)) throw new Error('PROJECT_PREVIEW_NOT_TEXT');
+    return new TextDecoder('utf-8', { fatal: true }).decode(file.content);
+  }
+
+  async readProject(projectId: string, signal?: AbortSignal, targetPath?: string): Promise<ProjectResourceSnapshot> {
     signal?.throwIfAborted();
     if (typeof projectId !== 'string' || !projectId.trim()) throw new Error('PROJECT_NOT_REGISTERED');
     const project = this.database.db.select({ path: projects.path }).from(projects).where(eq(projects.id, projectId)).get();
@@ -77,6 +91,7 @@ export class ProjectResourceReaderService implements ProjectResourceReaderPort {
         signal?.throwIfAborted();
         if (++entries > MAX_ENTRIES) limit();
         const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (targetPath && targetPath !== path && !targetPath.startsWith(`${path}/`)) continue;
         if (excluded(entry.name)) { skipped.push({ path, reason: 'excluded' }); continue; }
         const absolute = join(directory, entry.name);
         const stat = await lstat(absolute, { bigint: true });

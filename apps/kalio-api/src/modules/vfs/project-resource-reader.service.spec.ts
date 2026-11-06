@@ -42,6 +42,18 @@ describe('ProjectResourceReaderService registered project boundary', () => {
   it('does not interpret arbitrary paths as project IDs', async () => {
     await expect(service.readProject(root)).rejects.toThrow('PROJECT_NOT_REGISTERED');
   });
+  it('previews one text file within the persisted session project', async () => {
+    sql.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT); INSERT INTO sessions VALUES ('chat', 'approved')");
+    await mkdir(join(root, 'src'));
+    await writeFile(join(root, 'src', 'app.ts'), 'export const x = 1;');
+    await writeFile(join(root, '.env'), 'secret');
+    await writeFile(join(root, 'unrelated.png'), Buffer.alloc(1024 * 1024 + 1));
+    await expect(service.previewSessionFile('chat', 'src/app.ts')).resolves.toBe('export const x = 1;');
+    await expect(service.previewSessionFile('chat', '.env')).rejects.toThrow('PROJECT_PREVIEW_NOT_TEXT');
+    await expect(service.previewSessionFile('chat', '../src/app.ts')).rejects.toThrow('PROJECT_PREVIEW_PATH_INVALID');
+    await expect(service.previewSessionFile('chat', 'C:/src/app.ts')).rejects.toThrow('PROJECT_PREVIEW_PATH_INVALID');
+    await expect(service.previewSessionFile('unknown', 'src/app.ts')).rejects.toThrow('PROJECT_NOT_REGISTERED');
+  });
   it.each(['mts', 'cts'])('includes .%s modules in the supported code snapshot', async extension => {
     const path = `module.${extension}`;
     await writeFile(join(root, path), 'export const moduleValue = 1;');

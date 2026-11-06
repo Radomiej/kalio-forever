@@ -120,7 +120,7 @@ export function ExecutionGraphHeader({
                 onChange={onProjectChange}
                 disabled={projectPickerDisabled}
                 testId="graph-header-project-picker"
-                label="Projekt"
+                label=""
               />
             </div>
           )}

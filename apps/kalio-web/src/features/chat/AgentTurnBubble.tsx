@@ -5,6 +5,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
+import { FinalAnswerCard } from './FinalAnswerCard';
+import { readWorkflowTrace, WorkflowTraceCard } from './WorkflowTraceCard';
 import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
@@ -257,10 +259,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                 }}
               />
               {architectureFinalAnswer && (
-                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-3 py-2" data-testid="architecture-final-answer">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">Final answer</p>
-                  <MarkdownViewer content={architectureFinalAnswer} />
-                </div>
+                <FinalAnswerCard content={architectureFinalAnswer} sessionId={turn.sessionId} />
               )}
             </>
           )}
@@ -366,6 +365,13 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
             const isStreaming = isMessageLiveStreaming(messageId, msg, streamingChunks, turn.done);
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
             if (!displayContent) return null;
+            const trace = turnArchitectureRun ? readWorkflowTrace(displayContent) : null;
+            if (trace) {
+              if (trace.kind === 'finalizer' && architectureFinalAnswer && trace.body.trim() === architectureFinalAnswer.trim()) return null;
+              const routerOutput = turnArchitectureRun?.trace.find(step =>
+                step.eventId && messageId === `architecture:${turnArchitectureRun.runId}:text:${step.eventId}`)?.routerOutput;
+              return <WorkflowTraceCard key={messageId} trace={trace} output={routerOutput} />;
+            }
 
             return (
               <div key={`text-${messageId}`} className="flex flex-col gap-2">

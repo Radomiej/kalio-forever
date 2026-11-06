@@ -382,3 +382,7 @@ Single Chat sends pasted or selected images via multipart upload to the session 
 Background child turn activity resets preserve the visible conversation's tool argument progress. Visible-session lifecycle and connection resets still clear it.
 
 The empty-chat form dispatches the selected workflow for the first prompt, including when the empty session already exists. The conversation composer hides the runtime selector after the chat starts.
+
+Workflow final answers display the structured outcome, evidence and optional blocking reason in Talk and the graph inspector. Referenced project files can be previewed as text through the persisted session project.
+
+Workflow routing and final responses are visually distinct from ordinary agent messages.

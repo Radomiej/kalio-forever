@@ -250,3 +250,11 @@ Target delegation kinds:
 `sub_agentflow` should reuse the existing session isolation model: history, VFS, KV, approvals, lineage, and graph evidence stay tied to sessions. The parent receives a summary/result while the user can open the child flow as chat or graph.
 
 The first product-critical flow is `goal_guard_delivery_loop`: a two-agent Dev/Implementer and Goal Guard loop. Five Minds-style debate flows remain useful for analysis, but they are not valid substitutes when the user asks to validate implementation/guard ping-pong behavior.
+
+Talk and the graph inspector share the structured final-answer presentation. A file preview resolves relative paths against the persisted session project and uses the bounded project resource reader. Plain-text legacy artifacts remain readable.
+
+Legacy audit projections capped at 800 characters show a labeled excerpt when the status and complete evidence entries can be recovered. The UI never reconstructs missing evidence.
+
+Router decisions and finalizer output are visually marked as Kalio workflow events, with explicit route transitions in Talk and the graph inspector.
+
+Router detail cards present confidence, input counts and available action/strategy as fields, preferring the typed event output. Final-answer evidence rows attach each file preview action to the evidence that references it.

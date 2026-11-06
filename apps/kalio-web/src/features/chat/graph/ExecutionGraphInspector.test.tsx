@@ -280,8 +280,7 @@ describe('ExecutionGraphInspector', () => {
 
     expect(screen.getByText('Tool proof')).toBeTruthy();
     expect(screen.getByText('2 result(s), success: vfs_write, vfs_read')).toBeTruthy();
-    expect(screen.getByText('Flow')).toBeTruthy();
-    expect(screen.getByText('materializer -> verifier')).toBeTruthy();
+    expect(screen.getByTestId('workflow-trace-router')).toHaveTextContent('materializer → verifier');
     expect(screen.queryByText(/"toolEvidence"/)).toBeNull();
   });
 
@@ -333,7 +332,7 @@ describe('ExecutionGraphInspector', () => {
       />,
     );
 
-    expect(screen.getByText('router -> final artifact')).toBeTruthy();
+    expect(screen.getByTestId('workflow-trace-router')).toHaveTextContent('router → final artifact');
     expect(screen.queryByText('Stream')).toBeNull();
     expect(screen.queryByText('Branch')).toBeNull();
 
@@ -436,7 +435,7 @@ describe('ExecutionGraphInspector', () => {
       />,
     );
 
-    expect(screen.getByText('unknown -> unknown')).toBeTruthy();
+    expect(screen.getByTestId('workflow-trace-router')).toHaveTextContent('unknown → unknown');
   });
 
   it('shows incomplete architecture evidence without expanding raw payload', () => {
