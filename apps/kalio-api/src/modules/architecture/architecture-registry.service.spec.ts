@@ -57,6 +57,7 @@ describe('ArchitectureRegistryService', () => {
       'coding_review',
       'deep_research',
       'release_guard',
+      'game-development-2',
       ...LAB_PRESET_IDS,
     ]);
 
@@ -267,6 +268,7 @@ describe('ArchitectureRegistryService', () => {
       'coding_review',
       'deep_research',
       'release_guard',
+      'game-development-2',
       ...LAB_PRESET_IDS,
       'strategic-decision-council-variant-1',
     ]);

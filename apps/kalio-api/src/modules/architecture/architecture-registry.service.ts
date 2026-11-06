@@ -17,6 +17,7 @@ import {
   RELEASE_GUARD,
 } from './architecture-seed-schemas.lab';
 import { LAB_PRESET_SCHEMAS } from './architecture-seed-schemas.lab-presets';
+import { GAME_DEVELOPMENT_2 } from './architecture-seed-schemas.game-development';
 import { cloneArchitectureContextPolicy, isArchitectureContextPolicy } from './architecture-context-policy';
 import { hasValidAutoRoutingTopology, isAutoRoutingConfig } from './architecture-runtime-schema.utils';
 
@@ -38,6 +39,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
     [CODING_REVIEW.id, CODING_REVIEW],
     [DEEP_RESEARCH_FLOW.id, DEEP_RESEARCH_FLOW],
     [RELEASE_GUARD.id, RELEASE_GUARD],
+    [GAME_DEVELOPMENT_2.id, GAME_DEVELOPMENT_2],
     ...LAB_PRESET_SCHEMAS.map((schema) => [schema.id, schema] as const),
   ]);
   private readonly variantCounters = new Map<string, number>();

@@ -386,3 +386,5 @@ The empty-chat form dispatches the selected workflow for the first prompt, inclu
 Workflow final answers display the structured outcome, evidence and optional blocking reason in Talk and the graph inspector. Referenced project files can be previewed as text through the persisted session project.
 
 Workflow routing and final responses are visually distinct from ordinary agent messages.
+
+Game Development 2 is a built-in workflow preset for game design, core and UX implementation, Jev readiness routing, independent input/visual and core-loop QA, and orchestrator-led rework. Its requested mixed-model deployment and acceptance checks are documented in docs/spec/game-development-2.md.
