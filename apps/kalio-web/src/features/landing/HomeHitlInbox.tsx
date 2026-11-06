@@ -70,6 +70,7 @@ export function HomeHitlInbox({
   };
 
   const approve = (confirmation: ToolConfirmationRequest) => {
+    eventBus.identifySession(confirmation.sessionId);
     eventBus.confirmTool({
       requestId: confirmation.requestId,
       sessionId: confirmation.sessionId,
@@ -78,6 +79,7 @@ export function HomeHitlInbox({
   };
 
   const reject = (confirmation: ToolConfirmationRequest) => {
+    eventBus.identifySession(confirmation.sessionId);
     updateToolActivity(confirmation.toolCallId, {
       status: 'cancelled',
       finishedAt: Date.now(),

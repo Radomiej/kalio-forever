@@ -76,6 +76,7 @@ export class ArchitectureGoalReviewService {
     try {
       const connection = await this.decisions.resolve();
       signal?.throwIfAborted();
+      if (connection.protocol !== 'jev-decisions') return pendingUser('provider_error', disclosure);
       if (!stillCurrent()) return pendingUser('stale_input', disclosure);
       const wireQuestions = Object.fromEntries(QUESTIONS.map(q => [q.questionId, { type: 'noul', instructions: q.instructions, criteria: q.criteria }]));
       const bytes = new TextEncoder().encode(JSON.stringify({ model: connection.model, questions: wireQuestions, state: sanitized })).byteLength;

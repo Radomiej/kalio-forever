@@ -1,5 +1,6 @@
 import type { ChatSession } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
+import { isStaleRuntimeSnapshot } from '../../../store/agentRuntimeStore.mutators';
 import { useSessionStore } from '../../../store/sessionStore';
 import { apiClient } from '../../../services/apiClient';
 import { backendHealth } from '../../../services/backendHealth';
@@ -10,11 +11,13 @@ import {
   handleSessionStatusEvent,
   handleConnectionStateEvent,
   runtimeSnapshotKeepsSessionLive,
+  sessionStatusKeepsSessionLive,
   type ReconnectUiState,
 } from './useChatSocketEvents.helpers';
 import { handleCliChildSessionCreated } from './useChatSocketEvents.cliChild';
 import { handleSocketReconnect } from './useChatSocketEvents.reconnect';
 import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from '../sessionHistoryApi';
+import { reconcileTerminalTurnChunks, terminalTurnCanReleaseSession } from './useChatSocketEvents.turnLifecycle';
 
 type AgentStoreState = ReturnType<typeof useAgentStore.getState>;
 type SessionStoreState = ReturnType<typeof useSessionStore.getState>;
@@ -65,6 +68,12 @@ export function registerSessionLifecycleHandlers({
   clearBufferedSessionStatusSnapshots: AgentStoreState['clearBufferedSessionStatusSnapshots'];
 }): () => void {
   const offSessionStatus = eventBus.onSessionStatus((payload) => {
+    if (!sessionStatusKeepsSessionLive(payload)) {
+      reconcileTerminalTurnChunks(payload.sessionId, payload.turnId);
+      if (!terminalTurnCanReleaseSession(payload.sessionId, payload.turnId)) {
+        recordSessionStatusSnapshot(payload); return;
+      }
+    }
     handleSessionStatusEvent(payload, {
       getActiveSessionId: () => useSessionStore.getState().activeSessionId,
       isSessionHydrated: (sessionId) => useSessionStore.getState().isSessionHydrated(sessionId),
@@ -83,8 +92,12 @@ export function registerSessionLifecycleHandlers({
   });
 
   const offRuntimeSnapshot = eventBus.onRuntimeActivitySnapshot((payload) => {
+    const current = useAgentStore.getState().getRuntimeActivitySnapshot(payload.sessionId);
+    if (isStaleRuntimeSnapshot(current ?? undefined, payload)) return;
     setRuntimeActivitySnapshot(payload);
     if (!runtimeSnapshotKeepsSessionLive(payload)) {
+      reconcileTerminalTurnChunks(payload.sessionId, payload.turnId);
+      if (!terminalTurnCanReleaseSession(payload.sessionId, payload.turnId)) return;
       finalizeAgentTurn(payload.sessionId, payload.turnId);
       removeActiveAgentLoop(payload.sessionId);
       setStreaming(false, undefined, payload.sessionId);

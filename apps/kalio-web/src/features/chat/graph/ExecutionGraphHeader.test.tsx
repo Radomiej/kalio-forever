@@ -62,11 +62,13 @@ describe('ExecutionGraphHeader', () => {
           ['session-2', 'Branch read'],
         ])}
         showFocusToggle
+        sidebarExpand={<button type="button">Show conversations</button>}
         zoom={1.15}
       />,
     );
 
-    expect(screen.getByText('Execution Graph')).toBeInTheDocument();
+    const heading = screen.getByRole('heading', { name: 'Execution Graph' });
+    expect(heading.previousElementSibling).toBe(screen.getByRole('button', { name: 'Show conversations' }));
     expect(screen.getByTestId('talk-graph-switcher')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('talk-conversation-switcher')).toBeInTheDocument();
     expect(screen.queryByText('Prompts, turns, tools, subagents, artifacts and final responses.')).toBeNull();

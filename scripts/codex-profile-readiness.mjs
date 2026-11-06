@@ -5,6 +5,9 @@ export async function collectCodexProfileReadinessChecks(options = {}) {
   const checks = [];
   const argv = options.argv ?? [];
   const check = (ok, message) => checks.push({ ok: Boolean(ok), message });
+  const contextFlags = argv.filter(arg => arg === '--include-project-context').length;
+  check(contextFlags <= 1, 'Project context scope is explicit and unique');
+  const allowedTools = contextFlags === 1 ? [...names, 'search_project_context'] : names;
   const value = flag => {
     if (argv.filter(arg => arg === flag).length !== 1) return null;
     const candidate = argv[argv.indexOf(flag) + 1];
@@ -81,16 +84,16 @@ export async function collectCodexProfileReadinessChecks(options = {}) {
   'Unique approved workspace exists');
   const persona = await read(`/personas/${personaId}`);
   check(persona?.id === personaId && persona.mcpPolicy === 'allow_list' && Array.isArray(persona.allowedTools)
-    && persona.allowedTools.length === names.length && new Set(persona.allowedTools).size === names.length
-    && names.every(name => persona.allowedTools.includes(name)) && Array.isArray(persona.providerToolNames)
-    && persona.providerToolNames.length === 0, 'Persona exposes only six Kalio tools');
+    && persona.allowedTools.length === allowedTools.length && new Set(persona.allowedTools).size === allowedTools.length
+    && allowedTools.every(name => persona.allowedTools.includes(name)) && Array.isArray(persona.providerToolNames)
+    && persona.providerToolNames.length === 0, `Persona exposes only the ${allowedTools.length} approved Kalio tools`);
   const hitl = await read('/hitl/config');
   check(hitl?.mode === 'manual' && hitl.unattendedFallback === 'pause' && hitl.externalPolicyEnabled === false, 'Manual HITL pauses unattended requests');
   const tools = await read('/tools');
-  check(Array.isArray(tools) && names.every(name => {
+  check(Array.isArray(tools) && allowedTools.every(name => {
     const matches = tools.filter(tool => tool.name === name);
-    return matches.length === 1 && (!['fs_write', 'terminal_spawn'].includes(name) || matches[0].requiresConfirmation === true);
-  }), 'Approved tools unique; writes/spawns require confirmation');
+    return matches.length === 1 && (!['fs_write', 'terminal_spawn', 'search_project_context'].includes(name) || matches[0].requiresConfirmation === true);
+  }), 'Approved tools unique; writes/spawns/context search require confirmation');
   check(true, 'Snapshot only; UI session binding, authorization and live execution still require proof');
   return checks;
 }

@@ -1,7 +1,8 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { HitlConfigService } from './hitl-config.service';
 import { HitlDecisionService } from './hitl-decision.service';
-import { HitlJevService } from './hitl-jev.service';
+import { HitlDecisionProtocolError, HitlJevService } from './hitl-jev.service';
+import { HitlLocalDecisionService } from './hitl-local-decision.service';
 import type { HitlApprovalRequest, HitlApprovalResolution, HitlConfig } from './hitl.types';
 import { matchingHitlHardRule } from './hitl-rules.utils';
 
@@ -13,6 +14,7 @@ export class HitlPolicyService {
     private readonly hitlConfig: HitlConfigService,
     private readonly decisionService: HitlDecisionService,
     @Optional() private readonly jevService?: HitlJevService,
+    @Optional() private readonly localDecision?: HitlLocalDecisionService,
   ) {}
 
   async resolveApproval(_request: HitlApprovalRequest): Promise<HitlApprovalResolution> {
@@ -37,6 +39,28 @@ export class HitlPolicyService {
 
       if (config.mode === 'bypass') return { status: 'approved', source: 'bypass' };
       if (config.mode === 'manual') return { status: 'manual', source: 'manual' };
+      if (config.mode === 'ollama') {
+        if (!this.localDecision || this.hitlConfig.changing || request.kind !== 'tool' || this.requiresHumanToolApproval(request)) return { status: 'manual', source: 'manual' };
+        const before = JSON.stringify(config);
+        const revision = this.hitlConfig.revision;
+        const result = await this.localDecision.evaluateApproval(request);
+        try {
+          request.abortSignal?.throwIfAborted();
+          if (JSON.stringify(await this.hitlConfig.getConfig()) !== before || this.hitlConfig.changing || this.hitlConfig.revision !== revision) return { status: 'manual', source: 'manual', reason: 'Local decision policy changed.' };
+          request.abortSignal?.throwIfAborted();
+          if (result.status === 'evaluated' && (!await this.localDecision.consume(result) || this.hitlConfig.changing || this.hitlConfig.revision !== revision)) {
+            return { status: 'manual', source: 'manual', reason: 'Local decision is no longer current.' };
+          }
+          request.abortSignal?.throwIfAborted();
+          if (result.status === 'evaluated') {
+            const reason = `Local decision (${result.model}): ${result.verdict}. ${result.reason}`;
+            if (result.verdict === 'allow') return { status: 'approved', source: 'ollama', reason };
+            if (result.verdict === 'deny') return { status: 'rejected', source: 'ollama', reason };
+            return { status: 'manual', source: 'manual', reason };
+          }
+          return { status: 'manual', source: 'manual', reason: 'Local decision requires manual review.' };
+        } finally { this.localDecision.discard(result); }
+      }
       if (config.mode === 'auto') {
         return this.resolveWithPersona(config.autoPersonaId, request, 'auto');
       }
@@ -69,7 +93,7 @@ export class HitlPolicyService {
       }
 
       if (config.mode === 'bypass') return { status: 'approved', source: 'bypass' };
-      if (config.mode === 'jev') return { status: 'manual', source: 'manual' };
+      if (config.mode === 'jev' || config.mode === 'ollama') return { status: 'manual', source: 'manual' };
       if (config.unattendedFallback !== 'representative' || !config.representativePersonaId) {
         return { status: 'manual', source: 'manual', reason: 'Unattended HITL fallback is paused.' };
       }
@@ -128,6 +152,7 @@ export class HitlPolicyService {
         : { status: 'manual', source: 'manual', reason };
     } catch (err) {
       request.abortSignal?.throwIfAborted();
+      if (err instanceof HitlDecisionProtocolError) return { status: 'manual', source: 'manual' };
       const error = err instanceof Error ? err : new Error(String(err));
       this.logger.error('Jev HITL evaluation failed; falling back to the configured persona or manual review', error);
       return config.jevFallbackToPersona === true

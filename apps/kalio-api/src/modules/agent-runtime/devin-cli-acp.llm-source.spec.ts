@@ -73,6 +73,26 @@ describe('DevinCliAcpLLMSource', () => {
     expect(get).not.toHaveBeenCalled(); expect(getToken).not.toHaveBeenCalled();
   });
 
+  it('captures the currentness callback before audit awaits and blocks stale session setup', async () => {
+    let current = true; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const host = { ensureSession: vi.fn(), prompt: vi.fn() }; const get = vi.fn(async () => host);
+    const audit = vi.fn(async (event: { eventName: string }) => { if (event.eventName === 'devin-cli-acp.mcp_bridge') await gate; });
+    const token = vi.fn(); const policy = vi.fn();
+    const source = new DevinCliAcpLLMSource({ get } as never, { get: policy } as never,
+      { getToken: token } as never, new KalioMcpBridgeContextRegistry());
+    const params: LLMSourceParams = { toolsDisabled: true, assertExecutionCurrent: () => { if (!current) throw new Error('private'); },
+      tools: [], messages: [], sessionId: 'review', messageId: 'answer', onExternalAudit: audit,
+      executionProfile: { id: 'profile', name: 'Profile', kind: 'devin-cli-acp', model: 'exact-model', approvalMode: 'kalio_strict',
+        enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0 } };
+    const running = collect(source.stream(params));
+    await vi.waitFor(() => expect(audit).toHaveBeenCalled());
+    params.assertExecutionCurrent = () => undefined; current = false; release();
+    await expect(running).rejects.toThrow('DEVIN_TOOLS_DISABLED_FAILED');
+    expect(get).toHaveBeenCalledWith('exact-model', 'reviewer-deny-all:review', expect.any(Object), expect.any(Function));
+    for (const fn of [host.ensureSession, host.prompt, token, policy]) expect(fn).not.toHaveBeenCalled();
+  });
+
   it.each([
     { tool: true, before: ['Checking output.'], after: ['## Preview', ' ready'], expected: 'Checking output.\n\n## Preview ready' },
     { tool: true, before: ['Checking output.\n\n'], after: ['## Preview'], expected: 'Checking output.\n\n## Preview' },

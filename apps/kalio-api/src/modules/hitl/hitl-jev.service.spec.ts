@@ -6,7 +6,7 @@ import { HitlJevService } from './hitl-jev.service';
 
 describe('HitlJevService', () => {
   let service: HitlJevService;
-  let decisions: { resolve: ReturnType<typeof vi.fn> };
+  let decisions: { resolve: ReturnType<typeof vi.fn>; getConfig: ReturnType<typeof vi.fn> };
   let client: { decideNoul: ReturnType<typeof vi.fn> };
   const config: HitlConfig = {
     mode: 'jev',
@@ -31,12 +31,20 @@ describe('HitlJevService', () => {
 
   beforeEach(() => {
     decisions = {
-      resolve: vi.fn().mockResolvedValue({ endpoint: 'https://api.typesafe.ai/v1/systemone', model: 'jev-1.13.0', apiKey: 'management-key' }),
+      getConfig: vi.fn().mockResolvedValue({ provider: 'typesafe' }),
+      resolve: vi.fn().mockResolvedValue({ protocol: 'jev-decisions', endpoint: 'https://api.typesafe.ai/v1/systemone', model: 'jev-1.13.0', apiKey: 'management-key' }),
     };
     client = {
       decideNoul: vi.fn().mockResolvedValue({ probability: 0.92, model: 'typesafe/jev-1.13' }),
     };
     service = new HitlJevService(decisions as unknown as DecisionSettingsPort, client as unknown as JevDecisionsClient);
+  });
+
+  it('keeps native tools out of the Jev transport', async () => {
+    decisions.getConfig.mockResolvedValue({ provider: 'ollama' });
+    await expect(service.evaluateApproval(config, request)).rejects.toThrow('Jev requires');
+    expect(client.decideNoul).not.toHaveBeenCalled();
+    expect(decisions.resolve).not.toHaveBeenCalled();
   });
 
   it('sends redacted operation state with the shared native provider and model', async () => {

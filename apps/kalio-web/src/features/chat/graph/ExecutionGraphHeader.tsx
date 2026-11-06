@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Maximize2, MoreHorizontal, RefreshCw, Wrench, ZoomIn, ZoomOut, Zap } from 'lucide-react';
 import { useState } from 'react';
 import type { ToolActivity } from '../../../store/agentStore';
@@ -26,6 +27,7 @@ interface ExecutionGraphHeaderProps {
   showFocusToggle: boolean;
   zoom: number;
   talkView?: TalkView;
+  sidebarExpand?: ReactNode;
   onTalkViewChange?: (view: TalkView) => void;
   projectId?: string;
   onProjectChange?: (project: Project) => void;
@@ -66,6 +68,7 @@ export function ExecutionGraphHeader({
   showFocusToggle,
   zoom,
   talkView,
+  sidebarExpand,
   onTalkViewChange = () => undefined,
   projectId,
   onProjectChange,
@@ -104,8 +107,11 @@ export function ExecutionGraphHeader({
   return (
     <>
       <div className="px-3 py-2 border-b border-base-300 bg-base-100 flex flex-wrap items-center justify-between gap-2 shrink-0">
-        <div className="flex min-w-0 items-center gap-3">
-          <h2 className="text-lg font-semibold tracking-tight">Execution Graph</h2>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {sidebarExpand}
+            <h2 className="text-base font-semibold tracking-tight sm:text-lg">Execution Graph</h2>
+          </div>
           <TalkViewSwitcher value={talkView} onChange={onTalkViewChange} />
           {projectId && onProjectChange && (
             <div className="hidden w-56 md:block">

@@ -172,6 +172,28 @@ describe('KalioMcpBridgeService', () => {
     });
   });
 
+  it('transports an allowed image_view result as MCP image content', async () => {
+    const imageTool = { ...tools[0]!, name: 'image_view' };
+    tools.push(imageTool);
+    const client = new Client({ name: 'image-result-test', version: '1.0.0' });
+    try {
+      dispatchSpy.mockResolvedValueOnce({ callId: 'image', status: 'success', data: {
+        output_type: 'image', path: 'images/fixture.png', image_url: 'data:image/png;base64,aGVsbG8=',
+      } });
+      await client.connect(new StreamableHTTPClientTransport(new URL(baseUrl), {
+        requestInit: { headers: { Authorization: 'Bearer test-bridge-token', 'x-kalio-tool-names': 'image_view' } },
+      }));
+      const result = await client.callTool({ name: 'image_view', arguments: { filePath: 'images/fixture.png' } });
+      expect(result.content).toEqual([
+        { type: 'text', text: JSON.stringify({ output_type: 'image', path: 'images/fixture.png' }) },
+        { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+      ]);
+    } finally {
+      tools.pop();
+      await client.close();
+    }
+  });
+
   it.each([
     [{ errorMessage: 'Read failed.', errorCode: 'READ_FAILED' }, 'Read failed.'],
     [{ errorCode: 'READ_FAILED' }, 'READ_FAILED'],

@@ -335,7 +335,9 @@ vi.mock('../../store/sessionStore', () => ({
     },
     {
       getState: () => buildSessionStoreState(),
-      setState: (patch: Partial<ReturnType<typeof buildSessionStoreState>>) => {
+      setState: (update: Partial<ReturnType<typeof buildSessionStoreState>>
+        | ((state: ReturnType<typeof buildSessionStoreState>) => Partial<ReturnType<typeof buildSessionStoreState>>)) => {
+        const patch = typeof update === 'function' ? update(buildSessionStoreState()) : update;
         if (Array.isArray(patch.messages)) {
           mockMessages = patch.messages as ChatMessage[];
         }
@@ -345,6 +347,8 @@ vi.mock('../../store/sessionStore', () => ({
         if ('activeTurnId' in patch) {
           mockActiveTurnId = (patch.activeTurnId ?? null) as string | null;
         }
+        if (patch.streamingChunks) mockStreamingChunks = patch.streamingChunks;
+        if (patch.chunkSessionIds) mockChunkSessionIds = patch.chunkSessionIds;
       },
     },
   ),
@@ -424,8 +428,8 @@ vi.mock('./ChatInput', () => ({
     onSend: (content: string, personaId: string) => void;
     selectedArchitectureId?: string;
   }) => (
-    <div>
-      <select
+    <div data-testid="chat-input-fixture" data-architecture={props.selectedArchitectureId}>
+      {!mockActiveSessionId && props.onArchitectureChange && <select
         data-testid="chat-architecture-select"
         value={props.selectedArchitectureId ?? 'single-chat'}
         onChange={(event) => props.onArchitectureChange?.(event.target.value)}
@@ -434,7 +438,7 @@ vi.mock('./ChatInput', () => ({
         {(props.architectures ?? []).map((schema) => (
           <option key={schema.id} value={schema.id}>{schema.name}</option>
         ))}
-      </select>
+      </select>}
       <textarea data-testid="chat-input" />
       <button
         data-testid="chat-send-btn"
@@ -725,11 +729,16 @@ describe('ChatInterface event wiring', () => {
       fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
         target: { value: 'Pick a stack.' },
       });
-      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+    });
+    const runButton = await screen.findByTestId('welcome-run-prompt');
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(runButton);
       await flushReactEffects();
     });
 
     expect(mockStartArchitectureRun).toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
     expect(screen.queryByTestId('chat-recovery-notice')).toBeNull();
   });
 
@@ -803,7 +812,11 @@ describe('ChatInterface event wiring', () => {
       fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
         target: { value: 'Pick a stack.' },
       });
-      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+    });
+    const runButton = await screen.findByTestId('welcome-run-prompt');
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(runButton);
       await flushReactEffects();
     });
 
@@ -848,7 +861,11 @@ describe('ChatInterface event wiring', () => {
       fireEvent.change(await screen.findByTestId('welcome-prompt-input'), {
         target: { value: 'Follow up workflow.' },
       });
-      fireEvent.click(await screen.findByTestId('welcome-run-prompt'));
+    });
+    const runButton = await screen.findByTestId('welcome-run-prompt');
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(runButton);
       await flushReactEffects();
     });
 
@@ -888,9 +905,9 @@ describe('ChatInterface event wiring', () => {
     agentStoreState.streamingSessionId = 'session-1';
 
     await renderChatInterface();
-    expect(await screen.findByTestId('chat-architecture-select')).toBeDisabled();
-    expect(screen.getByTestId('chat-architecture-select')).toHaveValue('single-chat');
-    expect(screen.getByTestId('chat-mode-lock-guidance')).toBeVisible();
+    expect(await screen.findByTestId('chat-input-fixture')).toHaveAttribute('data-architecture', 'single-chat');
+    expect(screen.queryByTestId('chat-architecture-select')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-mode-lock-guidance')).not.toBeInTheDocument();
   });
 
   it('hydrates and locks workflow mode from the saved architecture run', async () => {
@@ -914,9 +931,8 @@ describe('ChatInterface event wiring', () => {
     getSessionMessages.mockReturnValue(mockMessages);
 
     await renderChatInterface();
-    const selector = await screen.findByTestId('chat-architecture-select');
-    expect(selector).toHaveValue('strategic-decision-council');
-    expect(selector).toBeDisabled();
+    expect(await screen.findByTestId('chat-input-fixture')).toHaveAttribute('data-architecture', 'strategic-decision-council');
+    expect(screen.queryByTestId('chat-architecture-select')).not.toBeInTheDocument();
   });
 
   it('routes Goal Master Delivery Loop from Talk through canonical AgentFlow with strict proof context', async () => {
@@ -954,10 +970,13 @@ describe('ChatInterface event wiring', () => {
     await act(async () => {
       const select = screen.getByTestId('welcome-architecture-select');
       const input = screen.getByTestId('welcome-prompt-input');
-      const send = screen.getByTestId('welcome-run-prompt');
       fireEvent.change(select, { target: { value: 'goal-master-delivery-loop' } });
       fireEvent.change(input, { target: { value: 'Deliver with proof.' } });
-      fireEvent.click(send);
+    });
+    const runButton = await screen.findByTestId('welcome-run-prompt');
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(runButton);
       await flushReactEffects();
     });
 
@@ -2814,16 +2833,20 @@ describe('REGRESSION: pendingConfirmations cleared on agent:done', () => {
   });
 
   it('agent:done flushes pending chunks and stops streaming when chat:complete never arrived', async () => {
+    await renderChatInterface();
+    mockActiveTurnId = 'turn-done';
+    mockMessages = [{ id: 'msg-1', role: 'assistant', sessionId: 'session-1',
+      turnId: 'turn-done', content: '', streaming: true, createdAt: 1 }];
+    getSessionMessages.mockReturnValue(mockMessages);
     mockStreamingChunks = { 'msg-1': 'partial' };
     mockChunkSessionIds = { 'msg-1': 'session-1' };
 
-    await renderChatInterface();
     setStreaming.mockClear();
-    flushStreamingChunks.mockClear();
 
     await emitEvent('agent:done', { sessionId: 'session-1', turnId: 'turn-done' });
 
-    expect(flushStreamingChunks).toHaveBeenCalledWith('session-1');
+    expect(mockMessages[0]).toMatchObject({ content: 'partial', streaming: false });
+    expect(mockStreamingChunks).toEqual({});
     expect(setStreaming).toHaveBeenCalledWith(false, undefined, 'session-1');
   });
 });

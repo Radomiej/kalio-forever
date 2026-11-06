@@ -12,8 +12,49 @@ import type { RunSubagentRequest, RunSubagentResult, SubagentRuntimePort } from 
 import { ArchitectureRegistryService } from './architecture-registry.service';
 import { ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { DevinStructuredOutput } from '../agent-runtime/devin-structured-output';
 
 describe('Architecture graph runtime LLM integration', () => {
+  it('fails an invalid guard response after reads at that node without starting implementation', async () => {
+    const registry = new ArchitectureRegistryService();
+    const base = registry.findOne('coding_review');
+    if (!base) throw new Error('Expected Coding Review');
+    const schema: ArchitectureSchema = { ...base, id: 'invalid-guard-proof',
+      roleSlots: base.roleSlots.filter(slot => ['release_guard', 'implementer', 'finalizer'].includes(slot.id)),
+      nodes: [
+        { id: 'guard', label: 'Guard', kind: 'router', roleSlotId: 'release_guard', behavior: { mode: 'choose_one' } },
+        { id: 'implementer', label: 'Implementer', kind: 'role', roleSlotId: 'implementer' },
+        { id: 'artifact', label: 'Artifact', kind: 'artifact', roleSlotId: 'finalizer', behavior: { mode: 'finalize' } },
+      ],
+      edges: [
+        { id: 'revision', fromNodeId: 'guard', toNodeId: 'implementer' },
+        { id: 'accept', fromNodeId: 'guard', toNodeId: 'artifact' },
+        { id: 'delivery', fromNodeId: 'implementer', toNodeId: 'artifact' },
+      ],
+    };
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async request => {
+      for (let index = 0; index < 4; index++) request.emit?.('tool:result', {
+        callId: `read-${index}`, toolName: 'fs_read', data: 'source evidence', status: 'success', sessionId: request.childSessionId,
+      });
+      if (!request.structuredOutput) throw new Error('Expected guard contract');
+      const output = new DevinStructuredOutput(request.structuredOutput);
+      output.onText('Judgment below. {"nextAction":"route_to"}');
+      output.result();
+      throw new Error('Invalid output unexpectedly accepted');
+    });
+    const sessions = createSessionStore();
+    const runtime = new ArchitectureRuntimeService(registry, sessions.service as unknown as SessionsService,
+      { persistMessage: vi.fn().mockResolvedValue(undefined) } as never,
+      new ArchitectureRoleExecutorService({ runSubagent }));
+    const run = await runtime.createRun({ schemaId: base.id, schema, prompt: 'Review without inventing implementation intent.', executionMode: 'subagent_execution' });
+    const events = runtime.getEvents(run.id);
+    expect(run.status).toBe('failed');
+    expect(events.some(event => event.type === 'node_failed' && event.nodeId === 'guard'
+      && event.detail?.includes('one complete JSON value'))).toBe(true);
+    expect(events.some(event => event.type === 'node_started' && event.nodeId === 'implementer')).toBe(false);
+    expect(runSubagent).toHaveBeenCalledOnce();
+  });
+
   it('runs a graph role through MockLLM-backed chat and preserves normal chat compatibility', async () => {
     const harness = createMockChatHarness(vi.fn().mockResolvedValue(undefined));
     const roleExecutor = new ArchitectureRoleExecutorService(createSubagentRuntime(harness.chat));

@@ -83,6 +83,35 @@ function makeModel(): ExecutionGraphModel {
 }
 
 describe('ExecutionGraphBoard', () => {
+  it.each(['compact', 'detailed'] as const)('names status and detail icons semantically in %s cards', (cardDensity) => {
+    const model = makeModel();
+    const detail = 'Read the project files before editing.';
+    model.nodes[0].detail = detail;
+    const onSelectNode = vi.fn();
+    const { rerender } = render(<ExecutionGraphBoard model={model} cardDensity={cardDensity} selectedNodeId="turn-1" onSelectNode={onSelectNode} zoom={1} />);
+    const states = [
+      ['idle', 'idle'], ['running', 'running'], ['waiting', 'waiting'],
+      ['success', 'ready'], ['error', 'error'], ['cancelled', 'cancelled'],
+    ] as const;
+    for (const [status, label] of states) {
+      const updated = { ...model, nodes: model.nodes.map((node) => node.id === 'turn-1' ? { ...node, status } : node) };
+      rerender(<ExecutionGraphBoard model={updated} cardDensity={cardDensity} selectedNodeId="turn-1" onSelectNode={onSelectNode} zoom={1} />);
+      const icon = screen.getByTestId('graph-node-status-turn-1');
+      expect(icon).toHaveRole('img');
+      expect(icon).toHaveAccessibleName(`Status: ${label}`);
+      expect(icon).toHaveAttribute('title', `Status: ${label}`);
+      expect(icon).not.toHaveAttribute('aria-hidden', 'true');
+      const detailIcon = screen.getByRole('img', { name: `Node detail: ${detail}` });
+      expect(detailIcon).toHaveAttribute('data-tip', detail);
+      expect(detailIcon).not.toHaveAttribute('aria-hidden', 'true');
+    }
+    fireEvent.click(screen.getByRole('img', { name: `Node detail: ${detail}` }));
+    expect(onSelectNode).toHaveBeenCalledWith('turn-1');
+    const noDetail = { ...model, nodes: model.nodes.map((node) => ({ ...node, detail: undefined })) };
+    rerender(<ExecutionGraphBoard model={noDetail} cardDensity={cardDensity} selectedNodeId="turn-1" onSelectNode={onSelectNode} zoom={1} />);
+    expect(screen.queryByRole('img', { name: /^Node detail:/ })).not.toBeInTheDocument();
+  });
+
   it('renders prompt roots, dashed fallback edges, and final responses while preserving node selection clicks', () => {
     const promptMessage = {
       id: 'prompt-1',
@@ -386,6 +415,22 @@ describe('ExecutionGraphBoard', () => {
     );
 
     expect(stage.style.transform).toContain('translate(0px, 0px)');
+  });
+
+  it('keeps manual zoom after Fit even when the inspector changes the viewport height', () => {
+    const onFitZoom = vi.fn();
+    const props = { model: makeModel(), selectedNodeId: 'turn-1', onSelectNode: noop, onFitZoom };
+    const { rerender } = render(<ExecutionGraphBoard {...props} zoom={1} />);
+    const viewport = screen.getByTestId('execution-graph-viewport');
+    let height = 160;
+    vi.spyOn(viewport, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 220, height));
+    rerender(<ExecutionGraphBoard {...props} zoom={1} resetViewportToken={1} />);
+    expect(onFitZoom).toHaveBeenCalledOnce();
+    onFitZoom.mockClear();
+    height = 100;
+    rerender(<ExecutionGraphBoard {...props} zoom={1.3} resetViewportToken={1} />);
+    expect(onFitZoom).not.toHaveBeenCalled();
+    expect(parseFloat(screen.getByTestId('execution-graph-stage').style.width)).toBeCloseTo(546);
   });
 
   it('does not start panning when a graph node receives the initial press', () => {

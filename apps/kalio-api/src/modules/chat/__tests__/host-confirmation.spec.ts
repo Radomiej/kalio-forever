@@ -183,10 +183,29 @@ describe('host-only BUILD confirmation', () => {
   });
 
   it('Stop cancels a genuine gated wait and removes pending state', async () => {
-    const f = fixture(); const run = f.dispatch.dispatch('call', 'terminal_spawn', {}, f.ctx);
+    const f = fixture();
+    let cancelledDurably = false;
+    const resolve = f.requests.resolve.bind(f.requests);
+    vi.spyOn(f.requests, 'resolve').mockImplementation(async (...args) => {
+      const result = await resolve(...args);
+      if (result && args[2] === 'cancelled') cancelledDurably = true;
+      return result;
+    });
+    const emit: StreamContext['emit'] = vi.fn((event) => {
+      if (event === 'tool:confirmation_invalidated') {
+        expect(cancelledDurably).toBe(true);
+        expect(f.confirmations.getPendingConfirmations('session')).toEqual([]);
+      }
+    });
+    const run = f.dispatch.dispatch('call', 'terminal_spawn', {}, { ...f.ctx, emit });
     const id = await f.pending(); f.controller.abort();
     expect((await run).status).toBe('cancelled'); expect(f.effects).toBe(0);
     expect(await f.requests.getById(id)).toMatchObject({ status: 'cancelled' });
     expect(f.confirmations.getPendingConfirmations('session')).toEqual([]);
+    expect(emit).toHaveBeenCalledWith('tool:confirmation_invalidated', expect.objectContaining({
+      sessionId: 'session', requestId: id, reason: 'cancelled',
+    }));
+    expect(await f.confirmations.resolveConfirmationFromGateway(id, 'session', 'socket')).toBe('not_found');
+    expect(f.effects).toBe(0);
   });
 });

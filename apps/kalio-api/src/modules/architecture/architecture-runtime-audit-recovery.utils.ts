@@ -37,7 +37,6 @@ export function statusFromArchitectureEvents(
 export function statusFromArchitectureAuditEventSummary(
   events: ArchitectureAuditEventSummary[],
 ): ArchitectureRun['status'] {
-  const hasFinalArtifact = events.some((event) => event.type === 'final_artifact');
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event?.status === 'failed' || event?.status === 'blocked') {
@@ -61,11 +60,23 @@ export function statusFromArchitectureAuditEventSummary(
     ) {
       return 'failed';
     }
-    if (event && !hasFinalArtifact) {
-      return 'running';
-    }
   }
   return 'running';
+}
+
+export function architectureAuditStatusField(record: Record<string, unknown>): ArchitectureExecutionEvent['status'] {
+  const value = record['status'];
+  return value === 'queued' || value === 'running' || value === 'waiting_on_orchestrator'
+    || value === 'done' || value === 'failed' || value === 'cancelled' || value === 'blocked' ? value : undefined;
+}
+
+export function architectureAuditLifecycleField(record: Record<string, unknown>): ArchitectureExecutionEvent['lifecycle'] {
+  const value = record['lifecycle'];
+  return value === 'started' || value === 'node_started' || value === 'node_completed' || value === 'edge_taken'
+    || value === 'guard_result' || value === 'tool_called' || value === 'return_to_orchestrator'
+    || value === 'waiting_on_orchestrator' || value === 'resume_input' || value === 'done' || value === 'blocked'
+    || value === 'failed' || value === 'cancelled' || value === 'runtime_missing' || value === 'runtime_stalled'
+    || value === 'copy_back' ? value : undefined;
 }
 
 export function architectureAuditPromptFromRecords(

@@ -170,6 +170,14 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     } catch (error) {
       if (input.hostRuntimeReceiptObserver) throw error;
       if (goalContract) throw createWorkflowError('CONTRACT_VIOLATION', 'Goal proposal worker failed.', { source: 'architecture-goal-worker' });
+      const routingRole = input.slot.slotType === 'router' || input.slot.slotType === 'judge' || input.node?.kind === 'router';
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+      if (routingRole && code === 'LLM_BAD_STRUCTURED_OUTPUT') throw error;
+      if (routingRole && code === 'LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID') {
+        throw createWorkflowError('CONTRACT_VIOLATION', error instanceof Error ? error.message : 'Invalid structured output schema.', {
+          source: 'architecture-role-executor', retryable: false, cause: error,
+        });
+      }
       const streamSnapshot = streamHook.snapshot();
       const toolEvidence = summarizeToolEvidence(streamSnapshot);
       if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0) {

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Send, Square, Zap } from 'lucide-react';
+import { useComposerImages, type ComposerSendOptions } from './composerImages';
+import { VoiceInputControl } from '../voice/VoiceInputControl';
 import { useSessionStore } from '../../store/sessionStore';
 import type { ArchitectSchema } from '../architect/architect.types';
 
 interface ChatInputProps {
-  onSend: (content: string, personaId: string, options?: { interrupt?: boolean }) => void;
+  onSend: (content: string, personaId: string, options?: ComposerSendOptions) => boolean | void | Promise<boolean | void>;
+  imageInputBlockReason?: string;
   disabled: boolean;
   isStreaming?: boolean;
   queuedDepth?: number;
@@ -20,6 +23,7 @@ interface ChatInputProps {
 export function ChatInput({
   architectures = [],
   disabled,
+  imageInputBlockReason,
   isStreaming = false,
   queuedDepth = 0,
   onArchitectureChange,
@@ -31,15 +35,32 @@ export function ChatInput({
   selectedArchitectureId = 'single-chat',
 }: ChatInputProps) {
   const [value, setValue] = useState('');
+  const [sendingImages, setSendingImages] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { activeSessionId, sessions } = useSessionStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const blockReason = imageInputBlockReason ?? (selectedArchitectureId !== 'single-chat'
+    ? 'Image attachments are unavailable in this workflow.'
+    : !activeSessionId ? 'Select a session to add images.' : undefined);
+  const imageDraft = useComposerImages(blockReason, disabled || sendingImages);
   const hasText = value.trim().length > 0;
   const showStopButton = Boolean(onStop) && isStreaming;
 
   const handleSend = (interrupt = false) => {
     const trimmed = value.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || disabled || sendingImages) return;
+    if (imageDraft.images.length) {
+      if (blockReason) return;
+      setSendingImages(true);
+      void Promise.resolve(onSend(trimmed, activeSession?.personaId ?? 'default', { interrupt, images: imageDraft.images }))
+        .then((sent) => {
+          if (sent !== false) {
+            imageDraft.clear();
+            clearText();
+          }
+        }).finally(() => setSendingImages(false));
+      return;
+    }
 
     const activeArchitecture = architectures.find((schema) => schema.id === selectedArchitectureId) ?? null;
     if (activeArchitecture && onArchitectureRun) {
@@ -50,6 +71,10 @@ export function ChatInput({
     } else {
       onSend(trimmed, activeSession?.personaId ?? 'default', { interrupt });
     }
+    clearText();
+  };
+
+  const clearText = () => {
     setValue('');
     onDraftChange?.('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -88,9 +113,10 @@ export function ChatInput({
           Queued ({queuedDepth})
         </p>
       )}
+      {imageDraft.preview && <div className="px-3 pt-2">{imageDraft.preview}</div>}
       <div className="flex items-center gap-2 px-3 pb-3 pt-2">
         <div className="min-w-0 flex-1 flex flex-wrap sm:flex-nowrap items-center border-2 border-base-300 rounded-2xl bg-base-100 focus-within:border-sky-500/60 transition-colors px-3 py-1.5 gap-2 min-h-[44px]">
-          {onArchitectureChange && (
+          {!activeSessionId && onArchitectureChange && (
             <select
               aria-label="Architecture runtime"
               className="select select-bordered select-xs h-8 min-h-8 w-full shrink-0 bg-base-200 text-[11px] sm:w-48"
@@ -109,11 +135,12 @@ export function ChatInput({
             ref={textareaRef}
             aria-label="Chat message"
             data-testid="chat-input"
-            className="min-w-0 flex-1 resize-none min-h-6 max-h-40 text-sm bg-transparent border-0 outline-none focus:outline-none leading-6 py-0 placeholder:text-base-content/45"
+            className="min-w-0 basis-full sm:basis-0 flex-1 resize-none min-h-6 max-h-40 text-sm bg-transparent border-0 outline-none focus:outline-none leading-6 py-0 placeholder:text-base-content/45"
             placeholder={disabled && !activeSessionId ? 'Select a session first…' : 'Ask Kalio…'}
             rows={1}
             value={value}
-            disabled={disabled}
+            disabled={disabled || sendingImages}
+            onPaste={imageDraft.onPaste}
             onChange={(e) => {
               setValue(e.target.value);
               onDraftChange?.(e.target.value);
@@ -136,6 +163,7 @@ export function ChatInput({
             <button
               data-testid="chat-interrupt-btn"
               className="btn btn-sm h-[32px] px-2 bg-warning border-none text-warning-content hover:bg-warning/80 rounded-full shrink-0 gap-1"
+              disabled={sendingImages || Boolean(blockReason && imageDraft.images.length)}
               onClick={() => handleSend(true)}
               aria-label="Interrupt and send"
               type="button"
@@ -144,23 +172,24 @@ export function ChatInput({
               <span className="hidden sm:inline text-[11px]">Interrupt</span>
             </button>
           )}
-          <button
-            data-testid="chat-send-btn"
-            className="btn btn-sm h-[32px] w-[32px] p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
-            disabled={disabled || !hasText}
-            onClick={() => handleSend(false)}
-            aria-label="Send message"
-            type="button"
-          >
-            <Send size={16} />
-          </button>
+          {imageDraft.picker}
+          <div data-testid="chat-voice-send" className="ml-auto flex flex-wrap min-w-0 max-w-full items-center justify-end gap-2">
+            <VoiceInputControl scope={activeSessionId ? { sessionId: activeSessionId } : null} draft={value} disabled={disabled || sendingImages} onDraft={(text) => {
+              setValue(text); onDraftChange?.(text);
+            }} />
+            <button
+              data-testid="chat-send-btn"
+              className="btn btn-sm h-11 min-h-11 w-11 p-0 bg-[#00D535] border-none text-white hover:bg-[#00C030] rounded-full shrink-0 disabled:opacity-40"
+              disabled={disabled || sendingImages || !hasText || Boolean(blockReason && imageDraft.images.length)}
+              onClick={() => handleSend(false)}
+              aria-label="Send message"
+              type="button"
+            >
+              <Send size={16} />
+            </button>
+          </div>
         </div>
       </div>
-      {architectureLocked && (
-        <p data-testid="chat-mode-lock-guidance" className="px-4 pb-2 text-xs text-base-content/55">
-          This chat’s mode is fixed. Start a new chat to choose another mode.
-        </p>
-      )}
     </div>
   );
 }

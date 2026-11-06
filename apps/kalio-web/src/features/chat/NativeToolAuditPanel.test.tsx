@@ -26,14 +26,14 @@ it('does not suggest MCP-only Kalio activity is native execution', async () => {
   render(<NativeToolAuditPanel sessionId="session" turnId="turn" />);
   fireEvent.click(screen.getByRole('button', { name: 'Devin tool permissions' }));
   expect(await screen.findByText(/No correlated native evidence/)).toBeVisible();
-  expect(screen.getByText(/opening this panel does not mean a native tool ran/)).toBeVisible();
+  expect(screen.getByText(/Kalio tool executions appear separately in chat/)).toBeVisible();
   expect(screen.queryByText(/Native Devin · completed/)).toBeNull();
 });
 it('explicitly limits this audit to Devin rather than claiming all providers are covered', async () => {
   vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
   render(<NativeToolAuditPanel sessionId="session" turnId="turn" />);
   fireEvent.click(screen.getByRole('button', { name: 'Devin tool permissions' }));
-  expect(await screen.findByText(/does not report native tools from other providers/)).toBeVisible();
+  expect(await screen.findByText(/Devin reports skills, tool discovery and permission decisions/)).toBeVisible();
 });
 it('loads only on demand with durable session/turn filters and displays policy block', async () => {
   vi.mocked(apiClient.get).mockResolvedValue({ data: [{ id: 'audit', sessionId: 'session', label: 'devin-cli-acp.native_approval', data: { turnId: 'turn', processEpoch: 'epoch', toolCallId: 'call', toolCallName: 'Read', decision: 'decline', decisionSource: 'policy' }, createdAt: 1 }] });

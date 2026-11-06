@@ -32,6 +32,16 @@ describe('native tool audit projection', () => {
   it('does not label MCP wrapper activity as native', () => {
     expect(projectNativeToolAudit([entry('devin-cli-acp.tool', { ...scope, kind: 'read', name: 'mcp_call_tool', title: 'Calling fs_read from kalio-runtime' })], 'session', 'turn')).toEqual([]);
   });
+
+  it.each(['Invoked skill frontend-ui-engineering', 'Listed MCP tools for kalio-runtime'])(
+    'shows explicitly reported Devin activity: %s', (title) => {
+      const rows = [entry('devin-cli-acp.tool', { ...scope, title }),
+        entry('devin-cli-acp.tool', { ...scope, toolStatus: 'completed' }, 2)];
+      expect(projectNativeToolAudit(rows, 'session', 'turn')).toEqual([
+        expect.objectContaining({ name: title, status: 'completed' }),
+      ]);
+    },
+  );
   it('does not mistake permission acceptance for tool completion', () => {
     const rows = [entry('devin-cli-acp.native_approval', { ...scope, decision: 'accept' })];
     expect(projectNativeToolAudit(rows, 'session', 'turn')[0].status).toBe('approved');

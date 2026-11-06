@@ -12,12 +12,11 @@ import { useGraphPanController } from '../../graph/controllers/useGraphPanContro
 import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import { ExecutionGraphNodeCard } from './ExecutionGraphNodeCard';
 import { ExecutionGraphOverview } from './ExecutionGraphOverview';
+import { useExecutionGraphFit } from './useExecutionGraphFit';
 import {
   buildConnectorPreviewPath,
   buildEdgePath,
   clampGraphPan,
-  fitGraphPan,
-  fitGraphZoom,
   type GraphConnectorDirection,
 } from './ExecutionGraphBoard.geometry';
 
@@ -31,8 +30,6 @@ interface ExecutionGraphBoardProps {
   onFitZoom?: (zoom: number) => void;
   onWheelZoom?: (deltaY: number) => number;
 }
-
-const READABLE_AUTO_FIT_MIN_ZOOM = 0.58;
 
 type ExecutionConnectorDragState = {
   sourceNodeId: string;
@@ -53,7 +50,6 @@ export function ExecutionGraphBoard({
   onFitZoom,
   onWheelZoom,
 }: ExecutionGraphBoardProps) {
-  const fittedModelRef = useRef<string | null>(null);
   const previousZoomRef = useRef(zoom);
   const anchoredWheelZoomRef = useRef<number | null>(null);
   const spacePanning = useSpacePanning();
@@ -267,15 +263,16 @@ export function ExecutionGraphBoard({
 
     event.preventDefault();
     const nextZoom = onWheelZoom(event.deltaY);
-    if (typeof nextZoom !== 'number' || nextZoom === zoom) {
+    const currentZoom = anchoredWheelZoomRef.current ?? zoom;
+    if (typeof nextZoom !== 'number' || nextZoom === currentZoom) {
       return;
     }
 
     const bounds = viewport.getBoundingClientRect();
     anchoredWheelZoomRef.current = nextZoom;
-    setPan(clampPanToViewport(nextGraphPanForZoom({
+    setPan((currentPan) => clampPanToViewport(nextGraphPanForZoom({
       focalPoint: graphViewportPointFromClient(bounds, event.clientX, event.clientY),
-      camera: { pan, zoom },
+      camera: { pan: currentPan, zoom: currentZoom },
       nextZoom,
     }), nextZoom));
   });
@@ -335,78 +332,23 @@ export function ExecutionGraphBoard({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport || model.nodes.length === 0) {
-      return;
-    }
-
-    const fitKey = `${viewportSize.width}:${viewportSize.height}:${model.board.width}:${model.board.height}:${model.nodes.map((node) => `${node.id}:${node.x}:${node.y}:${node.width}:${node.height}`).join('|')}`;
-    if (fittedModelRef.current === fitKey) {
-      return;
-    }
-
-    const bounds = viewport.getBoundingClientRect();
-    if (bounds.width <= 0 || bounds.height <= 0) {
-      return;
-    }
-
-    fittedModelRef.current = fitKey;
-    const nextZoom = fitGraphZoom({
-      minZoom: Math.min(zoom, READABLE_AUTO_FIT_MIN_ZOOM),
-      nodes: model.nodes,
-      viewportHeight: bounds.height,
-      viewportWidth: bounds.width,
-      zoom,
-    });
-    if (onFitZoom && nextZoom < zoom) {
-      onFitZoom(nextZoom);
-      return;
-    }
-
-    setPan(fitGraphPan({
-      nodes: model.nodes,
-      viewportHeight: bounds.height,
-      viewportWidth: bounds.width,
-      zoom: nextZoom,
-    }));
-  }, [model.board.height, model.board.width, model.nodes, onFitZoom, viewportSize.height, viewportSize.width, zoom]);
-
-  useEffect(() => {
-    if (resetViewportToken === 0) {
-      return;
-    }
-
-    const viewport = viewportRef.current;
-    if (viewport) {
-      const bounds = viewport.getBoundingClientRect();
-      const nextZoom = fitGraphZoom({
-        minZoom: Math.min(zoom, READABLE_AUTO_FIT_MIN_ZOOM),
-        nodes: effectiveNodes,
-        viewportHeight: bounds.height,
-        viewportWidth: bounds.width,
-        zoom,
-      });
-      if (onFitZoom && nextZoom < zoom) {
-        onFitZoom(nextZoom);
-      }
-      setPan(fitGraphPan({
-        nodes: effectiveNodes,
-        viewportHeight: bounds.height,
-        viewportWidth: bounds.width,
-        zoom: nextZoom,
-      }));
-    } else {
-      setPan({ x: 0, y: 0 });
-    }
-    resetInteraction();
-  }, [effectiveNodes, onFitZoom, resetInteraction, resetViewportToken, zoom]);
-
+  useExecutionGraphFit({
+    viewportRef,
+    nodes: effectiveNodes,
+    zoom,
+    resetToken: resetViewportToken,
+    onFitZoom: onFitZoom && ((value) => {
+      anchoredWheelZoomRef.current = value;
+      onFitZoom(value);
+    }),
+    setPan,
+    resetInteraction,
+  });
   return (
     <div
       ref={viewportRef}
       data-testid="execution-graph-viewport"
-      className={graphViewportClassName({ dragging: panController.dragging, extraClassName: 'relative min-h-[320px] flex-1 xl:min-h-0' })}
+      className={graphViewportClassName({ dragging: panController.dragging, extraClassName: 'relative min-h-[320px] flex-1 overscroll-contain xl:min-h-0' })}
       data-space-panning={spacePanning ? 'true' : 'false'}
       onPointerDown={panController.handlers.onPointerDown}
       onPointerMove={panController.handlers.onPointerMove}

@@ -308,6 +308,74 @@ describe('SessionPanel', () => {
       .filter((url): url is string => typeof url === 'string' && url.includes('/api/architecture-runs/'));
   }
 
+  it.each([
+    { projectPath: '/synthetic/project', executionCwd: '/synthetic/project' },
+    { executionCwd: '/synthetic/project' },
+  ])('stays idle across repeated 1500ms recovery periods after reloading a completed project chat %j', async (architectureContext) => {
+    vi.useFakeTimers();
+    const session: ChatSession = {
+      id: 'idle-host', personaId: 'p1', title: 'Completed project chat', kind: 'chat',
+      executionProfileId: 'devin-fixture', createdAt: 1, updatedAt: 20,
+      runtimeContext: { runtimeKind: 'chat', architectureContext },
+    };
+    const messages: ChatMessage[] = [
+      { id: 'idle-user', sessionId: session.id, role: 'user', content: 'Read the file', turnId: 'idle-turn', createdAt: 10 },
+      { id: 'idle-answer', sessionId: session.id, role: 'assistant', content: 'Completed', turnId: 'idle-turn', promptMessageId: 'idle-user', createdAt: 20 },
+    ];
+    mockState.sessions = [session];
+    mockState.activeSessionId = session.id;
+    mockState.sessionMessages = { [session.id]: messages };
+    mockState.sessionAgentTurns = { [session.id]: [{ id: 'idle-turn', sessionId: session.id, items: [], done: true }] };
+    mockApiGet.mockImplementation(async (url: string) => {
+      if (url === '/api/sessions') return { data: [{ ...session }] };
+      if (url === '/api/personas') return { data: mockPersonas };
+      if (url === `/api/sessions/${session.id}/messages`) return { data: messages };
+      return { data: [] };
+    });
+    const view = render(<SessionPanel />);
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const sessionRequests: number[] = [];
+      for (let period = 0; period < 5; period++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+        sessionRequests.push(mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions').length);
+      }
+      expect(sessionRequests).toEqual([1, 1, 1, 1, 1]);
+      expectNoSessionHistoryRequest(session.id);
+      expect(mockApiGet.mock.calls.some(([url]) => url === `/api/sessions/${session.id}/runs/history`)).toBe(false);
+    } finally { view.unmount(); }
+  });
+
+  it('continues genuine prompt-only workflow recovery and cancels the timer on unmount', async () => {
+    vi.useFakeTimers();
+    const session: ChatSession = {
+      id: 'recovering-host', personaId: 'p1', title: 'Recovering workflow', createdAt: 1, updatedAt: 20,
+      runtimeContext: { runtimeKind: 'chat', architectureContext: { schemaId: 'strategic-decision-council' } },
+    };
+    const messages: ChatMessage[] = [{ id: 'workflow-prompt', sessionId: session.id, role: 'user', content: 'Assess repo', createdAt: 10 }];
+    mockState.sessions = [session]; mockState.activeSessionId = session.id;
+    mockState.sessionMessages = { [session.id]: messages };
+    mockApiGet.mockImplementation(async (url: string) => {
+      if (url === '/api/sessions') return { data: [session] };
+      if (url === '/api/personas') return { data: mockPersonas };
+      if (url === `/api/sessions/${session.id}/messages`) return { data: messages };
+      return { data: [] };
+    });
+    const view = render(<SessionPanel />);
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      for (let period = 0; period < 3; period++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+      }
+      expect(mockApiGet.mock.calls.filter(([url]) => url === '/api/sessions')).toHaveLength(4);
+      expectSessionHistoryRequest(session.id);
+      view.unmount();
+      const requestsAtUnmount = mockApiGet.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(4_500); });
+      expect(mockApiGet).toHaveBeenCalledTimes(requestsAtUnmount);
+    } finally { view.unmount(); }
+  });
+
   it('renders session titles', async () => {
     render(<SessionPanel />);
     await waitFor(() => expect(mockSetSessions).toHaveBeenCalledWith(mockSessions));

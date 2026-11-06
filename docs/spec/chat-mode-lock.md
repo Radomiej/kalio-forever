@@ -2,8 +2,8 @@
 
 ## Behavior
 
-- A new, empty chat keeps the runtime selector editable.
-- After a chat has messages or turns, its runtime selector is locked and the composer explains that a new chat is needed to choose another mode.
+- The empty-chat form keeps the runtime selector editable. Launching a workflow uses the selected workflow even when the empty session already exists.
+- After a chat has messages or turns, its composer hides the runtime selector. Start a new chat to choose another mode.
 - Restored sessions derive workflow mode from their persisted architecture run projection (`ChatMessage.architectureRun.schemaId`). Sessions without that durable workflow evidence use Single Chat.
 - The lock is reconstructed from the session’s hydrated messages and turns; it is not persisted as component-only mode state.
 

@@ -75,6 +75,94 @@ describe('reloadSessionHistoryWithArchitectureProjection', () => {
     mockAgentState.pendingBudgetApprovals = {};
   });
 
+  it.each([
+    { mixed: false, unavailable: false, unguarded: false, switched: false },
+    { mixed: true, unavailable: false, unguarded: false, switched: false },
+    { mixed: false, unavailable: true, unguarded: false, switched: false },
+    { mixed: false, unavailable: false, unguarded: true, switched: false },
+    { mixed: false, unavailable: false, unguarded: false, switched: true },
+    { mixed: false, unavailable: false, unguarded: false, switched: false, projectionOnly: true },
+  ])('hydrates raw run groups (mixed=$mixed, unavailable=$unavailable, unguarded=$unguarded, switched=$switched, projectionOnly=$projectionOnly)', async ({ mixed, unavailable, unguarded, switched, projectionOnly }) => {
+    let selectedSessionId = 'host';
+    const runIds = ['first-completed', 'middle-failed', 'last-completed'];
+    const statuses = ['completed', 'failed', 'completed'] as const;
+    const hostMessages: ChatMessage[] = runIds.flatMap((runId, index) => {
+      const turnId = `durable-turn-${index}`;
+      const promptMessageId = `real-user-${index}`;
+      if (projectionOnly && index === 1) {
+        const base = { sessionId: 'host', turnId: `architecture-turn-${runId}`, promptMessageId };
+        return [
+          { ...base, id: `architecture:${runId}:user`, role: 'user', content: 'Failed before any tool call.', createdAt: 100 },
+          { ...base, id: `architecture:${runId}:text:${runId}:event:6`, role: 'assistant', content: 'Workflow failed.', createdAt: 102 },
+        ];
+      }
+      const base = { sessionId: 'host', turnId, promptMessageId };
+      const toolCalls = ['implementer', 'qa', 'guard'].map((role) => ({
+        id: `opaque-call-${index}-${role}`, name: 'run_subagent',
+        args: { architectureRunId: runId, schemaName: 'Coding Review', nodeId: role,
+          childSessionId: `child-${index}-${role}` },
+      }));
+      return [
+        { ...base, id: promptMessageId, role: 'user', content: `Prompt ${index}`, createdAt: index * 100 },
+        { ...base, id: `raw-calls-${index}`, role: 'assistant', content: '', toolCalls, createdAt: index * 100 + 1 },
+        ...toolCalls.map((call, callIndex): ChatMessage => ({ ...base, id: `raw-result-${index}-${callIndex}`,
+          role: 'tool_result', toolCallId: call.id, createdAt: index * 100 + 2 + callIndex,
+          content: JSON.stringify({ result: `${runId} ${call.args.nodeId} evidence`, taskId: `event-${index}-${callIndex}`,
+            childSessionId: call.args.childSessionId, parentSessionId: 'host', vfsMode: 'shared',
+            vfsSessionId: 'host', copiedFiles: [], durationMs: 1 }),
+        })),
+        { ...base, id: `raw-router-${index}`, role: 'assistant', content: `Router ${index}`, createdAt: index * 100 + 6 },
+        { ...base, id: `raw-final-${index}`, role: 'assistant', content: `Answer ${runId}`, createdAt: index * 100 + 7 },
+      ];
+    });
+    expect(hostMessages.every(message => message.architectureRun === undefined)).toBe(true);
+    if (mixed) hostMessages.push({ id: 'already-projected-first', sessionId: 'host', role: 'assistant',
+      content: '', createdAt: 8, turnId: 'architecture-turn-first-completed', promptMessageId: 'real-user-0',
+      architectureRun: { runId: runIds[0], schemaId: 'coding_review', status: 'completed',
+        hostProjectionKind: 'workflow-envelope', trace: [], routeHops: [], graphNodes: [] },
+    });
+    const fetchProjection = vi.fn(async (runId: string) => {
+      const index = runIds.indexOf(runId);
+      if (index === -1) throw new Error('Unexpected run');
+      if (switched && index === 1) selectedSessionId = 'another-session';
+      if (unavailable && index === 1) throw new Error('Projection temporarily unavailable');
+      return {
+        graph: { runId, schemaId: 'coding_review', schemaName: 'Coding Review', status: statuses[index],
+          nodes: [{ id: 'guard', label: 'Guard', kind: 'router' as const, status: statuses[index], eventIds: [`${runId}-final`] }],
+          edges: [] } satisfies ArchitectureGraphProjection,
+        events: [{ id: `${runId}-final`, runId, sequence: 1, type: 'node_completed' as const,
+          message: `Answer ${runId}`, nodeId: 'guard', roleSlotId: 'guard', createdAt: index * 100 + 7 }],
+        chat: { runId, messages: [{ id: `${runId}-answer`, eventId: `${runId}-final`, speaker: 'finalizer' as const,
+          content: `Answer ${runId}`, roleSlotId: 'guard', createdAt: index * 100 + 7 }] },
+      };
+    });
+    const setMessages = vi.fn();
+    const messages = await reloadSessionHistoryWithArchitectureProjection({
+      sessionId: 'host', getActiveSessionId: unguarded ? undefined : () => selectedSessionId, getSessionMessages: () => [],
+      fetchMessages: async () => hostMessages, fetchArchitectureRunProjection: fetchProjection,
+      setMessages, setAgentTurns: vi.fn(),
+    });
+    if (switched) {
+      expect(messages).toBeNull();
+      expect(setMessages).not.toHaveBeenCalled();
+      return;
+    }
+    expect(fetchProjection.mock.calls.map(([runId]) => runId)).toEqual(projectionOnly ? [runIds[0], runIds[2], runIds[1]] : runIds);
+    const summaries = (messages ?? []).filter(message => message.architectureRun);
+    expect(summaries.map(message => message.architectureRun?.runId)).toEqual(runIds);
+    expect(summaries.map(message => message.architectureRun?.status))
+      .toEqual(unavailable ? ['completed', 'running', 'completed'] : statuses);
+    expect(summaries.map(message => message.promptMessageId)).toEqual(['real-user-0', 'real-user-1', 'real-user-2']);
+    summaries.forEach((message, index) => {
+      expect(message.architectureRun?.trace.map(step => step.content)).toEqual(unavailable && index === 1
+        ? ['implementer', 'qa', 'guard'].map(role => `${runIds[index]} ${role} evidence`)
+        : [`Answer ${runIds[index]}`]);
+    });
+    const turns = buildTurnsFromHistory(messages ?? [], 'host').filter(turn => turn.turnKind === 'workflow-envelope');
+    expect(turns).toHaveLength(3);
+    expect(turns.map(turn => turn.promptMessageId)).toEqual(['real-user-0', 'real-user-1', 'real-user-2']);
+  });
+
   it('keeps a rehydrated workflow envelope attached to its real user prompt after a follow-up prompt exists', async () => {
     mockState.sessions = [
       { id: 'host', personaId: 'default', title: 'Host', createdAt: 1, updatedAt: 1 },

@@ -30,6 +30,8 @@ Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
 
 ## Co jest czym
 
+`run_raapp` sprawdza obiekt `inputs` według schematu z katalogu przed uruchomieniem efektów. Brakujące pola, niewłaściwe typy, błędy kompilacji i jawny błąd obliczenia wracają jako nieudane wywołanie narzędzia. Kafelek Visual Calculator przekazuje przykładowe `12 + 4`, gdy użytkownik otwiera kalkulator bez własnych danych. Graf pokazuje podgląd z tego samego wyniku co czat. Automatyczne dopasowanie kamery odbywa się przy pierwszym pokazaniu grafu oraz na żądanie.
+
 ### Interactive Q&A: dane i widocznosc odpowiedzi
 
 - `run_raapp` wymaga jawnego, niepustego tekstowego `id`; brak lub zly typ zwraca wskazowke uzycia `list_raapps` przed lookupem. Nie ma aliasu `name`, domyslnej aplikacji ani konwersji typu.

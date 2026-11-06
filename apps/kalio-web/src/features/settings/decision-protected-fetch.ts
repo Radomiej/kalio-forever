@@ -12,7 +12,7 @@ export function createDecisionProtectedFetcher(fetcher: typeof fetch): typeof fe
   let token = '';
   return async (input, init = {}) => {
     if (!desktopLocation()) return fetcher(input, init);
-    if (typeof input !== 'string' || !/^\/api\/(?:decision\/(?:auth|config)|hitl\/config|runtime\/default-profile|projects|memory\/project-context\/settings|memory\/project-resources\/[A-Za-z0-9_-]{1,128}\/(?:status|index|search))$/.test(input)) {
+    if (typeof input !== 'string' || !/^\/api\/(?:decision\/(?:auth|config(?:\?purpose=(?:tools|goals))?)|hitl\/config|runtime\/default-profile|projects|memory\/project-context\/settings|memory\/project-resources\/[A-Za-z0-9_-]{1,128}\/(?:status|index|search))$/.test(input)) {
       throw new Error('Unsupported desktop protected route.');
     }
     const bootstrap = input === '/api/decision/auth';

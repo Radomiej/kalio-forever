@@ -195,6 +195,14 @@ export class ToolDispatchService {
     try {
       const data = observed ? await execute!.call(entry, req) : await entry.execute(req);
       if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+      if (toolName === 'run_raapp' && data && typeof data === 'object' && 'status' in data && data.status === 'error') {
+        return this.withMeta({
+          callId,
+          status: 'error',
+          errorCode: 'code' in data && typeof data.code === 'string' ? data.code : 'TOOL_EXECUTION_FAILED',
+          errorMessage: 'message' in data && typeof data.message === 'string' ? data.message : 'RA-App execution failed.',
+        }, toolName, ctx);
+      }
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
     } catch (err) {
       if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);

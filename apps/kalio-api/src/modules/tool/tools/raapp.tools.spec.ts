@@ -79,6 +79,24 @@ describe('RunRaAppTool', () => {
     expect(result.message as string).toContain('other-app');
   });
 
+  it.each([undefined, null, [], { a: '12', b: 4, operation: 'add' }, { a: 12, b: 4, operation: 'pow' }])(
+    'rejects invalid calculator inputs before execution: %j',
+    async (inputs) => {
+      vi.mocked(raapp.getById!).mockReturnValue(makeApp({
+        id: 'visual-calculator',
+        meta: { id: 'visual-calculator', name: 'Calculator', input_schema: {
+          type: 'object', required: ['a', 'b', 'operation'], properties: {
+            a: { type: 'number' }, b: { type: 'number' }, operation: { enum: ['add', 'subtract', 'multiply', 'divide'] },
+          },
+        } },
+      }));
+      await expect(tool.execute(makeRequest({ id: 'visual-calculator', inputs }))).resolves.toMatchObject({
+        status: 'error', code: 'RAAPP_INVALID_INPUT',
+      });
+      expect(raapp.execute).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([undefined, null, 42, '', '  '])('rejects missing, non-string or blank app id before lookup: %j', async (id) => {
     const result = await tool.execute(makeRequest({ id })) as Record<string, unknown>;
     expect(result).toMatchObject({ status: 'error', message: expect.stringContaining('non-empty string') });
@@ -247,6 +265,7 @@ describe('RunRaAppTool', () => {
       { a: 5, b: 3 },
       expect.objectContaining({ sessionId: expect.any(String) }),
       expect.any(Object), // EntityStore instance
+      true,
     );
     expect(raapp.execute).toHaveBeenCalledWith(
       { type: 'gui', mode: 'display', content: app.guiContent },

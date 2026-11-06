@@ -1,4 +1,4 @@
-export type HitlMode = 'manual' | 'auto' | 'bypass' | 'jev';
+export type HitlMode = 'manual' | 'auto' | 'bypass' | 'jev' | 'ollama';
 export type HitlApprovalKind = 'tool' | 'raapp_native' | 'external_security';
 export type HitlRuleDecision = 'allow' | 'deny' | 'ask_user';
 

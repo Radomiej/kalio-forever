@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, ChevronDown, Loader2, RefreshCw, RotateCcw, ServerCog, XCircle } from 'lucide-react';
 import type { DevinCliStatus } from '../../services/apiClient';
 import { DevinCliIntegrationCard, type DevinCliSettings, type DevinNativeToolsPolicy } from './DevinCliIntegrationCard';
@@ -38,54 +38,87 @@ export function NativeCliIntegrationsPanel() {
   const [devinStatusLoading, setDevinStatusLoading] = useState(false);
   const [recheckingAll, setRecheckingAll] = useState(false);
   const [pendingReset, setPendingReset] = useState<NativeCliIntegrationStatus | null>(null);
-
-  const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/runtime/native-cli-integrations');
-      if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
-      const loaded = await response.json() as NativeCliIntegrationStatus[];
-      setIntegrations(loaded);
-      return loaded;
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load native CLI integrations.');
-      return [];
-    } finally {
-      setLoading(false);
-    }
+  const mounted = useRef(true);
+  const requests = useRef(new Set<AbortController>());
+  const revisions = useRef(new Map<string, number>());
+  const reads = useRef({ integrations: 0, devin: 0, settings: 0 });
+  const devinRefresh = useRef(false);
+  const devinRevision = useRef(0);
+  const beginRequest = useCallback(() => {
+    const controller = new AbortController(); requests.current.add(controller);
+    return { signal: controller.signal, valid: () => mounted.current && !controller.signal.aborted,
+      close: () => requests.current.delete(controller) };
+  }, []);
+  useEffect(() => {
+    mounted.current = true;
+    const active = requests.current;
+    return () => { mounted.current = false; active.forEach((request) => request.abort()); active.clear(); };
   }, []);
 
+  const loadIntegrations = useCallback(async (): Promise<NativeCliIntegrationStatus[]> => {
+    const request = beginRequest(); const read = ++reads.current.integrations;
+    const before = new Map(revisions.current);
+    setLoading(true);
+    try {
+      const response = await fetch('/api/runtime/native-cli-integrations', { signal: request.signal });
+      if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
+      const loaded = await response.json() as NativeCliIntegrationStatus[];
+      if (!request.valid()) return [];
+      if (read === reads.current.integrations) setIntegrations((current) => {
+        const changed = (id: string) => (revisions.current.get(id) ?? 0) !== (before.get(id) ?? 0);
+        return [...loaded.filter((item) => !changed(item.authProfileId)), ...current.filter((item) => changed(item.authProfileId))];
+      });
+      return loaded;
+    } catch (err: unknown) {
+      if (request.valid() && read === reads.current.integrations) setError(err instanceof Error ? err.message : 'Failed to load native CLI integrations.');
+      return [];
+    } finally {
+      if (request.valid() && read === reads.current.integrations) setLoading(false);
+      request.close();
+    }
+  }, [beginRequest]);
+
   const loadDevinCliStatus = useCallback(async (refresh = false): Promise<DevinCliStatus | null> => {
+    if (!refresh && devinRefresh.current) return null;
+    const request = beginRequest(); const read = ++reads.current.devin;
+    if (refresh) { devinRefresh.current = true; devinRevision.current++; }
+    const revision = devinRevision.current;
     setDevinStatusLoading(true);
     try {
       const url = refresh ? '/api/runtime/devin-cli/status?refresh=true' : '/api/runtime/devin-cli/status';
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: request.signal });
       if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
       const loaded = await response.json() as DevinCliStatus;
-      setDevinCli(loaded);
+      if (request.valid() && revision === devinRevision.current && read === reads.current.devin) setDevinCli(loaded);
       return loaded;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load Devin CLI status.');
+      if (request.valid() && read === reads.current.devin) setError(err instanceof Error ? err.message : 'Failed to load Devin CLI status.');
       return null;
     } finally {
-      setDevinStatusLoading(false);
+      if (refresh) { devinRefresh.current = false; devinRevision.current++; }
+      if (request.valid() && read === reads.current.devin) setDevinStatusLoading(false);
+      request.close();
     }
-  }, []);
+  }, [beginRequest]);
 
   const loadDevinCliSettings = useCallback(async (): Promise<DevinCliSettings | null> => {
+    const request = beginRequest(); const read = ++reads.current.settings;
     try {
-      const response = await fetch('/api/runtime/devin-cli/settings');
+      const response = await fetch('/api/runtime/devin-cli/settings', { signal: request.signal });
       if (!response.ok) throw new Error(`${response.status}: ${response.statusText}`);
       const loaded = await response.json() as DevinCliSettings;
-      setDevinSettings(loaded);
+      if (request.valid() && read === reads.current.settings) setDevinSettings(loaded);
       return loaded;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load Devin CLI settings.');
+      if (request.valid() && read === reads.current.settings) setError(err instanceof Error ? err.message : 'Failed to load Devin CLI settings.');
       return null;
-    }
-  }, []);
+    } finally { request.close(); }
+  }, [beginRequest]);
 
   const runAction = useCallback(async (integration: NativeCliIntegrationStatus, kind: 'check' | 'reset') => {
+    if (!mounted.current) return;
+    const request = beginRequest(); const id = integration.authProfileId;
+    revisions.current.set(id, (revisions.current.get(id) ?? 0) + 1);
     const actionId = `${integration.authProfileId}:${kind}` as IntegrationAction;
     setAction(actionId);
     setError(null);
@@ -99,6 +132,7 @@ export function NativeCliIntegrationsPanel() {
     try {
       const response = await fetch(`/api/runtime/native-cli-integrations/${encodeURIComponent(integration.authProfileId)}/${kind}`, {
         method: 'POST',
+        signal: request.signal,
       });
       if (!response.ok) {
         const body = await response.json().catch((err: unknown) => {
@@ -108,14 +142,17 @@ export function NativeCliIntegrationsPanel() {
         throw new Error(body?.message ?? `${response.status}: ${response.statusText}`);
       }
       const updated = await response.json() as NativeCliIntegrationStatus;
+      if (!request.valid()) return;
       if (kind === 'check' && integration.provider === 'codex') {
-        const catalogResponse = await fetch(`/api/runtime/native-cli-integrations/${encodeURIComponent(integration.authProfileId)}/models/check`, { method: 'POST' });
+        const catalogResponse = await fetch(`/api/runtime/native-cli-integrations/${encodeURIComponent(integration.authProfileId)}/models/check`, { method: 'POST', signal: request.signal });
         if (!catalogResponse.ok) throw new Error(`Codex model catalog refresh failed (${catalogResponse.status}). Retry Recheck.`);
         const catalog = await catalogResponse.json() as { models: string[] };
         updated.models = catalog.models;
       }
+      if (!request.valid()) return;
       setIntegrations((current) => current.map((item) => item.authProfileId === updated.authProfileId ? updated : item));
     } catch (err: unknown) {
+      if (!request.valid()) return;
       const message = err instanceof Error ? err.message : `Failed to ${kind} native CLI integration.`;
       setError(message);
       if (kind === 'check') {
@@ -126,9 +163,11 @@ export function NativeCliIntegrationsPanel() {
         )));
       }
     } finally {
-      setAction(null);
+      revisions.current.set(id, (revisions.current.get(id) ?? 0) + 1);
+      if (request.valid()) setAction(null);
+      request.close();
     }
-  }, []);
+  }, [beginRequest]);
 
   const refreshStatus = useCallback(async () => {
     await Promise.all([loadIntegrations(), loadDevinCliStatus(), loadDevinCliSettings()]);
@@ -140,10 +179,11 @@ export function NativeCliIntegrationsPanel() {
     try {
       const [loaded] = await Promise.all([loadIntegrations(), loadDevinCliStatus(true), loadDevinCliSettings()]);
       for (const integration of loaded) {
+        if (!mounted.current) break;
         await runAction(integration, 'check');
       }
     } finally {
-      setRecheckingAll(false);
+      if (mounted.current) setRecheckingAll(false);
     }
   }, [loadDevinCliSettings, loadDevinCliStatus, loadIntegrations, runAction]);
 

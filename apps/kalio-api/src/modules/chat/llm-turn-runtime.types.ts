@@ -1,5 +1,5 @@
 import type { AgentRunContext, ExecutionProfile, HostRuntimeReceiptObserver, LLMContent, LLMStructuredOutputRequest, SessionRuntimeKind, ToolMeta } from '@kalio/types';
-import type { EmitFn } from './interfaces/stream-context.interface';
+import type { BeginManualToolWait, EmitFn } from './interfaces/stream-context.interface';
 import type { createHostDispatchReceiptRecorder } from './host-dispatch-receipts';
 import type { HostCancellationLifecycleHandle } from './host-cancellation-recording-scope';
 
@@ -11,6 +11,7 @@ export interface LLMAgentLoopResumeState {
 }
 
 export interface LLMAgentLoopCallbacks {
+  beginManualToolWait?: BeginManualToolWait;
   onBeforeIteration?: (iteration: number, messageId: string, currentLimit: number) => Promise<void>;
   onToolPending?: () => Promise<void>;
   onWaitingForHuman?: () => Promise<void>;
@@ -22,6 +23,8 @@ export interface LLMAgentLoopCallbacks {
 export interface LLMAgentLoopRequest {
   /** Backend-only, one-way narrowing; not a setting or model/tool argument. */
   toolsDisabled?: true;
+  /** Captured host check, never model/tool args or an authority lease. */
+  assertExecutionCurrent?: () => void;
   /** In-memory host capability, intentionally excluded from provider params. */
   hostRuntimeReceiptObserver?: HostRuntimeReceiptObserver;
   /** Host-only dispatcher recorder; never forwarded to provider parameters. */

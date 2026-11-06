@@ -22,6 +22,11 @@ export function needsWorkflowEnvelopeRecovery({
 
   const run = findArchitectureRunInMessages(messages);
   if (!run) {
+    const context = session.runtimeContext?.architectureContext;
+    const hasRunIdentity = [context?.schemaId, context?.architectureRunId]
+      .some((value) => typeof value === 'string' && value.trim().length > 0);
+    // Ordinary project chats also carry architectureContext for their filesystem scope.
+    if (!hasRunIdentity && visibleDescendantCount === 0) return false;
     return visibleDescendantCount > 0 || messages.some((message) => message.role === 'user');
   }
 

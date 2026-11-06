@@ -514,6 +514,17 @@ describe('ArchitectureRunTimeline', () => {
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Orchestrator');
     expect(screen.getByTestId('architecture-route-shell')).toHaveTextContent('Synthesizer');
     expect(screen.getAllByTestId('architecture-route-router')[1]).toHaveTextContent('Synthesizer');
+
+    render(
+      <ArchitectureRunTimeline
+        run={{ ...run, trace: [{ ...run.trace[0], nodeId: 'qa', nextNodeId: 'release-guard' }] }}
+        runSessions={runSessions}
+        onOpenCanvas={vi.fn()}
+        onOpenBranch={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByTestId('architecture-route-shell')[1]).toHaveTextContent('Qa');
+    expect(screen.getAllByTestId('architecture-route-shell')[1]).not.toHaveTextContent('Orchestrator');
   });
 
   it('keeps graph node session ids when matching trace steps do not carry them', () => {

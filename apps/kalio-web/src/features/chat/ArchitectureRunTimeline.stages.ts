@@ -1,4 +1,5 @@
-import type { ArchitectureChatRunSummary } from '@kalio/types';
+import { architectureSessionIdForRunSlot, type ArchitectureChatRunSummary, type ChatSession } from '@kalio/types';
+import { architectureContextStringField } from '../sessions/architectureSessionContext';
 import type { ArchitectureGraphNodeSummary, ArchitectureRunSummaryWithGraph } from './architectureChatSummary';
 
 export type TraceStep = ArchitectureChatRunSummary['trace'][number] & {
@@ -265,4 +266,97 @@ function routeSegmentTone(step: TraceStep): string {
   if (step.speaker === 'router') return 'text-amber-200 bg-amber-400/10 border-amber-400/20';
   if (step.speaker === 'finalizer') return 'text-emerald-200 bg-emerald-400/10 border-emerald-400/20';
   return 'text-base-content bg-base-100/50 border-base-content/20';
+}
+
+function stepSessionCandidates(runId: string, step: TraceStep): string[] {
+  const explicitSessionId = step.sessionId;
+  if (explicitSessionId) {
+    return [explicitSessionId];
+  }
+  const fromStream = step.stream?.branchSessionId;
+  if (fromStream) {
+    return [fromStream];
+  }
+  if (step.speaker !== 'participant' || !step.nodeId) {
+    return [];
+  }
+  const raw = step.nodeId;
+  const normalized = new Set([
+    raw,
+    raw.replace(/-/g, '_'),
+    raw.replace(/_/g, '-'),
+  ]);
+  return [...normalized]
+    .map((nodeId) => architectureSessionIdForRunSlot(runId, nodeId))
+    .filter((sessionId): sessionId is string => typeof sessionId === 'string');
+}
+
+export function resolveBranchSessionId(
+  runId: string,
+  step: TraceStep,
+  canOpenBranchSession: (sessionId: string | undefined) => boolean,
+): string | undefined {
+  return stepSessionCandidates(runId, step).find((sessionId) => canOpenBranchSession(sessionId));
+}
+
+export function normalizeArchitectureKey(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase().replace(/_/g, '-');
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+export function sessionDisplayLabel(session: ChatSession): string | undefined {
+  return architectureContextStringField(session, 'displayLabel')
+    ?? architectureContextStringField(session, 'roleLabel')
+    ?? session.title.split(':').at(-1)?.trim()
+    ?? undefined;
+}
+
+export function routerSessionForStep(
+  step: TraceStep,
+  runSessions: ReadonlyArray<ChatSession> | undefined,
+): ChatSession | undefined {
+  if (!runSessions || step.speaker !== 'router') {
+    return undefined;
+  }
+  const explicitId = step.sessionId ?? step.stream?.branchSessionId;
+  if (explicitId) {
+    return runSessions.find((session) => session.id === explicitId);
+  }
+  const stepNodeId = normalizeArchitectureKey(step.nodeId);
+  if (stepNodeId && stepNodeId !== 'router' && !stepNodeId.startsWith('router-')) {
+    return runSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === stepNodeId);
+  }
+  const routerSessions = runSessions.filter((session) => architectureContextStringField(session, 'roleSlotType') === 'router');
+  if (routerSessions.length === 0) {
+    return undefined;
+  }
+
+  const resolvedLabel = normalizeArchitectureKey(nodeLabel(step));
+  if (resolvedLabel) {
+    const matchingLabelSession = routerSessions.find((session) => normalizeArchitectureKey(sessionDisplayLabel(session)) === resolvedLabel);
+    if (matchingLabelSession) {
+      return matchingLabelSession;
+    }
+  }
+
+  if (stepNodeId && stepNodeId !== 'router') {
+    const matchingSlotSession = routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === stepNodeId);
+    if (matchingSlotSession) {
+      return matchingSlotSession;
+    }
+  }
+
+  const nextNodeId = normalizeArchitectureKey(step.nextNodeId);
+  if (nextNodeId === 'final-artifact') {
+    const mergeSession = routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) !== 'orchestrator');
+    if (mergeSession) {
+      return mergeSession;
+    }
+  }
+
+  return routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === 'orchestrator')
+    ?? routerSessions[0];
 }

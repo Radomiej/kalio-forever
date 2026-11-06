@@ -28,6 +28,61 @@ const schema: ArchitectureSchema = {
   memoryPolicy: { persistFinalArtifact: true, persistRouterDecision: true }, outputArtifactSchema: 'markdown',
 };
 
+describe('TASK59 ordinary durable audit reload', () => {
+  it.each(['legacy-node-failure', 'typed-router-failure', 'typed-router-cancel'] as const)(
+    'recovers %s after trailing neutral progress through real SQLite and a fresh reader', async shape => {
+      const client = new Database(':memory:');
+      try {
+        const db = drizzle(client, { schema: databaseSchema });
+        migrate(db, { migrationsFolder: resolve(__dirname, '../../database/migrations') });
+        const dependency = { db } as unknown as DrizzleService;
+        const audit = new DurableAuditService(dependency);
+        const writes = vi.spyOn(audit, 'log');
+        const writer = new ArchitectureRuntimeAuditWriterService(audit);
+        const run: ArchitectureRun = { id: 'run', schemaId: schema.id, prompt: 'Coding review',
+          status: 'failed', rootSessionId: 'host', executionMode: 'subagent_execution', createdAt: 1, updatedAt: 3 };
+        const status = shape === 'typed-router-cancel' ? 'cancelled' : 'failed';
+        if (shape === 'legacy-node-failure') {
+          await audit.log({ sessionId: 'host', type: 'architecture_event', label: 'Display only', data: {
+            domain: 'architecture', kind: 'architecture_event', runId: run.id, schemaId: schema.id, rootSessionId: 'host',
+            eventId: 'terminal', eventType: 'node_failed', sequence: 1, errorCode: 'CONTRACT_VIOLATION',
+          } });
+        } else {
+          writer.logEvent(schema, run, { id: 'terminal', runId: run.id, sequence: 1,
+            type: 'router_decision', message: 'Display only', createdAt: 1, lifecycle: status, status });
+        }
+        writer.logEvent(schema, run, { id: 'neutral', runId: run.id, sequence: 2,
+          type: 'router_decision', message: 'Routing decision recorded', createdAt: 2 });
+        await Promise.all(writes.mock.results.map(result => result.value));
+        const freshAudit = new DurableAuditService(dependency);
+        const rows = await freshAudit.listEntries({ runId: run.id, source: 'all', limit: 100 });
+        if (shape !== 'legacy-node-failure') expect(rows.find(row => row.data?.eventId === 'terminal')?.data)
+          .toMatchObject({ status, lifecycle: status });
+        const reader = new ArchitectureRuntimeAuditRecoveryService(
+          { listChildren: vi.fn().mockResolvedValue([]) } as unknown as SessionsService, freshAudit,
+        );
+        expect(await reader.reconstructRun(run.id)).toMatchObject({ id: run.id, status, completedAt: expect.any(Number) });
+        const events = await reader.reconstructEvents(run.id);
+        expect(events.map(event => event.id)).toEqual(['terminal', 'neutral']);
+        if (shape !== 'legacy-node-failure') expect(events[0]).toMatchObject({ status, lifecycle: status });
+      } finally { client.close(); }
+    },
+  );
+
+  it('omits unrecognized persisted lifecycle/status without promoting display prose to authority', async () => {
+    const { service } = recovery([{ id: 'bad', sessionId: 'host', type: 'architecture_event',
+      label: 'failed', createdAt: 1, durationMs: null, chunkCount: null, data: {
+        domain: 'architecture', kind: 'architecture_event', runId: 'run', schemaId: 'schema',
+        rootSessionId: 'host', eventId: 'bad', eventType: 'router_decision', sequence: 1,
+        lifecycle: 'made-up-failure', status: 'completed', messagePreview: 'failed',
+      } }]);
+    expect((await service.reconstructRun('run'))?.status).toBe('running');
+    const [event] = await service.reconstructEvents('run');
+    expect(event.lifecycle).toBeUndefined();
+    expect(event.status).toBeUndefined();
+  });
+});
+
 function checkpoint(patch: Record<string, unknown> = {}): AuditLogEntry {
   return {
     id: 'opaque-row', sessionId: 'host', type: 'architecture_event', label: 'Display only',

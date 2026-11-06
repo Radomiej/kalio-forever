@@ -32,8 +32,9 @@ export function projectNativeToolAudit(entries: AuditLogEntry[], sessionId: stri
     const data = entry.data!;
     const existing = activityOnly.get(key);
     const title = typeof data['title'] === 'string' ? data['title'] : '';
+    const reportedActivity = /^(?:Invoked skill [\w.-]+|Listed MCP tools for [\w.-]+)$/.test(title);
     if (!existing && (data['name'] === 'mcp_call_tool' || /^Calling .* from /.test(title)
-      || !['read', 'edit', 'delete', 'move', 'execute', 'fetch', 'search'].includes(String(data['kind'])))) continue;
+      || (!reportedActivity && !['read', 'edit', 'delete', 'move', 'execute', 'fetch', 'search'].includes(String(data['kind']))))) continue;
     const activity = sorted.filter(candidate => candidate.label === 'devin-cli-acp.tool' && callKey(candidate) === key);
     activityOnly.set(key, {
       key, callId: data['toolCallId'] as string,

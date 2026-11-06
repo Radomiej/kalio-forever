@@ -93,6 +93,14 @@ describe('ToolDispatchService', () => {
       expect(result).toEqual({ callId: 'call-1', status: 'success', data: { value: 42 } });
     });
 
+    it('returns RA-App input errors as tool failures', async () => {
+      const entry = makeEntry('run_raapp', false, { status: 'error', code: 'RAAPP_INVALID_INPUT', message: 'Supply inputs.a.' });
+      const dispatcher = new ToolDispatchService([entry], null, null, null, null, new ToolConfirmationService(null, null));
+      await expect(dispatcher.dispatch('call-1', 'run_raapp', {}, makeCtx())).resolves.toMatchObject({
+        status: 'error', errorCode: 'RAAPP_INVALID_INPUT', errorMessage: 'Supply inputs.a.',
+      });
+    });
+
     it.each(['resolve', 'reject'])('returns cancelled when execution finishes after abort (%s)', async (completion) => {
       const controller = new AbortController();
       const ctx = { ...makeCtx(), abortSignal: controller.signal };

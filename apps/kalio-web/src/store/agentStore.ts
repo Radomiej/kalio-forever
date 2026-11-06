@@ -410,7 +410,6 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       return {
         toolActivities: s.toolActivities.filter((activity) => activity.sessionId !== sessionId),
         sessionToolActivities: nextSessionToolActivities,
-        toolArgProgress: null,
         runtimeActivitySnapshots: updateRuntimeSnapshot(
           s.runtimeActivitySnapshots,
           sessionId,
@@ -757,16 +756,13 @@ export const useAgentStore = create<AgentState>()((set, get): AgentState => ({
       return applyRuntimeActivitySnapshotSync(s, snapshot, toolActivityFromRuntime);
     }),
 
-  recordSessionStatusSnapshot: (snapshot) => {
-    if (!isNonEmptyString(snapshot.sessionId)) {
-      return;
-    }
-
-    get().setSessionStatusSnapshot(snapshot);
-    set((s) => {
-      return applyRecordedSessionStatusSnapshot(s, snapshot);
-    });
-  },
+  recordSessionStatusSnapshot: (snapshot) => set((s) => {
+    if (!isNonEmptyString(snapshot.sessionId)) return s;
+    const next = applyRecordedSessionStatusSnapshot(s, snapshot);
+    return areSessionStatusSnapshotsEquivalent(s.sessionStatusSnapshots[snapshot.sessionId], snapshot)
+      ? next
+      : { ...next, sessionStatusSnapshots: { ...s.sessionStatusSnapshots, [snapshot.sessionId]: snapshot } };
+  }),
 
   consumeBufferedSessionStatusSnapshots: (sessionId) => {
     if (!isNonEmptyString(sessionId)) {

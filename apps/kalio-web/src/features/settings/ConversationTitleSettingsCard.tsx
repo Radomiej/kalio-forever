@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ConversationTitleSettings } from '@kalio/types';
 import { SettingsRangeField } from './SettingsRangeField';
 
@@ -12,16 +13,19 @@ export function ConversationTitleSettingsCard({
   settings,
   onPatchSettings,
 }: ConversationTitleSettingsCardProps) {
+  const toggleId = useId();
   return (
     <div className="rounded-xl border border-base-300 bg-base-100/60 p-5 sm:p-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-sm font-medium">Active Change Conversation Title</div>
-          <div className="text-xs text-base-content/55">
-            Let the agent keep refining the chat title after more replies arrive.
+          <label htmlFor={toggleId} className="cursor-pointer text-sm font-medium">Automatic chat titles</label>
+          <div id={`${toggleId}-description`} className="text-xs text-base-content/55">
+            Refresh the title after more assistant replies.
           </div>
         </div>
         <input
+          id={toggleId}
+          aria-describedby={`${toggleId}-description`}
           type="checkbox"
           className="toggle toggle-info"
           checked={settings.autoRenameEnabled}
@@ -33,9 +37,9 @@ export function ConversationTitleSettingsCard({
 
       <div className="mt-5 border-t border-base-300 pt-5">
         <SettingsRangeField
-          ariaLabel="Rename every completed assistant replies"
+          ariaLabel="Update every"
           disabled={loading || !settings.autoRenameEnabled}
-          label="Rename every completed assistant replies"
+          label="Update every"
           marks={[
             { value: 1, label: '1' },
             { value: 3, label: '3' },
@@ -46,7 +50,7 @@ export function ConversationTitleSettingsCard({
           max={10}
           step={1}
           value={settings.renameEveryReplies}
-          valueLabel={settings.renameEveryReplies}
+          valueLabel={`${settings.renameEveryReplies} ${settings.renameEveryReplies === 1 ? 'reply' : 'replies'}`}
           valueTestId="conversation-title-rename-every-value"
           onChange={(event) => void onPatchSettings({ renameEveryReplies: parseInt(event.target.value, 10) })}
           testId="conversation-title-rename-every-slider"

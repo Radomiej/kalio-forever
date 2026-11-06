@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { nanoid } from 'nanoid';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
@@ -6,6 +6,7 @@ import { useSettingsStore } from '../settings/settingsStore';
 import { eventBus } from '../../services/eventBus';
 import { identifyWatchedSession } from '../../services/sessionWatchRegistry';
 import { ConversationTimeline } from './ConversationTimeline';
+import { imageInputBlockReason } from './composerImages';
 import { ChatInput } from './ChatInput';
 import { useContextUsage } from './hooks/useContextUsage';
 import { useContextPreview } from './hooks/useContextPreview';
@@ -13,7 +14,7 @@ import { useChatSessionActivation } from './hooks/useChatSessionActivation';
 import { useChatSocketEvents } from './hooks/useChatSocketEvents';
 import { useChatComposerActions } from './hooks/useChatComposerActions';
 import { useAwaitingFirstChunk } from './hooks/useAwaitingFirstChunk';
-import { buildTurnsFromHistory, computeAnsweredCallIds, buildConversationTimeline, mergeFetchedMessages } from './chatUtils';
+import { computeAnsweredCallIds, buildConversationTimeline } from './chatUtils';
 import { apiClient } from '../../services/apiClient';
 import type { ChatMessage, ConversationTitleSettings } from '@kalio/types';
 import type { TalkView } from '../../App.types';
@@ -34,7 +35,7 @@ import { resolveConversationShellState } from './conversationShellState';
 import { resolveLiveTurnState } from './liveTurnState';
 import { resolveRenderableConversationProjection } from './conversationTranscriptProjection';
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
-import { DEFAULT_SESSION_HISTORY_LIMIT, fetchSessionHistoryWindow } from './sessionHistoryApi';
+import { useOlderChatHistory } from './hooks/useOlderChatHistory';
 import { useChatAutoScroll } from './useChatAutoScroll';
 import { SessionBudgetApprovalBanner } from './SessionBudgetApprovalBanner';
 import { useChatProjectSelection } from './useChatProjectSelection';
@@ -84,16 +85,16 @@ function shouldRequestGeneratedTitle(
 
 export interface ChatInterfaceProps {
   talkView?: TalkView;
+  sidebarExpand?: ReactNode;
   onTalkViewChange?: (view: TalkView) => void;
 }
 
-export function ChatInterface({ talkView = 'conversation', onTalkViewChange = () => undefined }: ChatInterfaceProps = {}) {
+export function ChatInterface({ talkView = 'conversation', onTalkViewChange = () => undefined, sidebarExpand }: ChatInterfaceProps = {}) {
   const {
     messages, activeSessionId, sessions, addMessage, setMessages,
     agentTurns, setAgentTurns, updateAgentTurn, updateSession,
     getSessionActiveTurnId,
     getSessionHistoryMeta,
-    setSessionHistoryMeta,
     streamingChunks,
     thinkingChunks,
     chunkSessionIds,
@@ -143,7 +144,6 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
   const [selectedArchitectureId, setSelectedArchitectureId] = useState('single-chat');
   const [draftUserMessage, setDraftUserMessage] = useState('');
   const [contextPreviewRefreshKey, setContextPreviewRefreshKey] = useState(0);
-  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const toolArgProgressSeenRef = useRef<Record<string, Set<string>>>({});
 
   const { projectPath, setProjectPath, projectId, handleProjectChange } = useChatProjectSelection({
@@ -362,13 +362,13 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
 
   const {
     handleComposerSend,
+    handleArchitectureRun,
     handleSendRef,
   } = useChatComposerActions({
     architectures,
     lastSentContentRef,
     projectPath,
     requestGeneratedTitleIfNeeded,
-    selectedArchitectureId,
     setAwaitingFirstChunk,
     setDraftUserMessage,
     setError,
@@ -424,39 +424,13 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
   };
 
   const handleLaunchSend = useChatLaunchSend({
-    activeSession, projectId, projectPath, send: handleComposerSend, onError: setError,
+    activeSession, projectId, projectPath, selectedArchitectureId, onError: setError,
+    send: (content, personaId, options) => selectedArchitectureId === 'single-chat'
+      ? handleComposerSend(content, personaId, options)
+      : handleArchitectureRun(content, selectedArchitectureId),
   });
 
-  const handleLoadOlderMessages = useCallback(async () => {
-    if (!activeSessionId || !activeSessionHistoryMeta?.hasMoreBefore || loadingOlderMessages) {
-      return;
-    }
-
-    setLoadingOlderMessages(true);
-    try {
-      const response = await fetchSessionHistoryWindow(activeSessionId, {
-        limit: DEFAULT_SESSION_HISTORY_LIMIT,
-        beforeMessageId: activeSessionHistoryMeta.oldestLoadedMessageId,
-      });
-      const currentMessages = useSessionStore.getState().getSessionMessages(activeSessionId);
-      const mergedMessages = mergeFetchedMessages(currentMessages, response.messages);
-      setSessionHistoryMeta(activeSessionId, response.meta);
-      setMessages(mergedMessages, activeSessionId);
-      setAgentTurns(buildTurnsFromHistory(mergedMessages, activeSessionId), activeSessionId);
-    } catch (err: unknown) {
-      console.error('[ChatInterface] older history load failed', err instanceof Error ? err : new Error(String(err)));
-      setError('Failed to load older messages.');
-    } finally {
-      setLoadingOlderMessages(false);
-    }
-  }, [
-    activeSessionHistoryMeta,
-    activeSessionId,
-    loadingOlderMessages,
-    setAgentTurns,
-    setMessages,
-    setSessionHistoryMeta,
-  ]);
+  const { handleLoadOlderMessages, loadingOlderMessages } = useOlderChatHistory(activeSessionId, activeSessionHistoryMeta, setError);
 
   return (
     <div data-testid="chat-interface" className="flex h-full flex-col bg-base-200 overflow-hidden">
@@ -478,7 +452,7 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
         retryError={retryError}
       />
 
-      {activeSession && activeSessionId && (
+      {activeSession && activeSessionId ? (
         <ChatSessionHeader
           activeContext={activeContext}
           activeModel={activeModel}
@@ -503,10 +477,16 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
           vfsRefreshSignal={vfsRefreshSignal}
           talkView={talkView}
           onTalkViewChange={onTalkViewChange}
+          sidebarExpand={sidebarExpand}
           projectId={projectId}
           onProjectChange={handleProjectChange}
           projectPickerDisabled={isStreamingForActiveSession}
         />
+      ) : sidebarExpand && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-base-300 px-2">
+          {sidebarExpand}
+          <span className="text-sm font-medium">New Chat</span>
+        </div>
       )}
 
       <div
@@ -544,9 +524,8 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
               onPersonaChange={selectPersona}
               onProjectPathChange={setProjectPath}
               onProjectChange={handleProjectChange}
-              onSend={(content, personaId, profileId) => {
-                void handleLaunchSend(content, personaId, profileId);
-              }}
+              onSend={handleLaunchSend}
+              onSendImages={handleLaunchSend}
               personas={personas}
               executionProfiles={executionProfiles}
               selectedExecutionProfileId={selectedExecutionProfileId}
@@ -577,7 +556,7 @@ export function ChatInterface({ talkView = 'conversation', onTalkViewChange = ()
       </div>
 
       {hasRenderableConversation && (
-        <ChatInput
+        <ChatInput key={activeSessionId} imageInputBlockReason={imageInputBlockReason(executionProfiles.find((profile) => profile.id === activeSession?.executionProfileId), effectiveArchitectureId === 'single-chat')}
           architectures={architectures}
           disabled={!activeSessionId}
           isStreaming={composerBusy}

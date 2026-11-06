@@ -62,7 +62,7 @@ describe('Architecture controllers', () => {
       { persistMessage: async () => undefined } as never,
       createRoleExecutor(),
     );
-    const controller = new ArchitectureRunsController(runtime);
+    const controller = new ArchitectureRunsController(runtime, () => undefined);
 
     const run = await controller.create({
       schemaId: 'strategic-decision-council',
@@ -90,7 +90,7 @@ describe('Architecture controllers', () => {
         execute: () => new Promise(() => undefined),
       },
     );
-    const controller = new ArchitectureRunsController(runtime);
+    const controller = new ArchitectureRunsController(runtime, () => undefined);
 
     const run = await controller.createAsync({
       schemaId: 'strategic-decision-council',
@@ -163,7 +163,7 @@ describe('Architecture controllers', () => {
       { persistMessage: async () => undefined } as never,
       createRoleExecutor(),
     );
-    const controller = new ArchitectureRunsController(runtime);
+    const controller = new ArchitectureRunsController(runtime, () => undefined);
 
     const run = await controller.create({
       schemaId: 'goal-master-delivery-loop',
@@ -272,7 +272,7 @@ describe('Architecture controllers', () => {
       { persistMessage: async () => undefined } as never,
       createRoleExecutor(),
     );
-    const controller = new ArchitectureRunsController(runtime);
+    const controller = new ArchitectureRunsController(runtime, () => undefined);
 
     await expect(controller.graph(runId)).resolves.toMatchObject({
       runId,

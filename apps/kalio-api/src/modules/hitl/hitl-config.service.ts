@@ -50,6 +50,10 @@ function normalizePersonaId(value: string | null | undefined): string | null {
 
 @Injectable()
 export class HitlConfigService {
+  private configRevision = 0;
+  private updates = 0;
+  get revision(): number { return this.configRevision; }
+  get changing(): boolean { return this.updates > 0; }
   constructor(
     private readonly appSettings: AppSettingsService,
     private readonly personaService: PersonaService,
@@ -153,7 +157,12 @@ export class HitlConfigService {
       await this.ensurePersonaExists(nextAutoPersonaId);
     }
 
-    if (nextMode === 'jev') await this.decisions.resolve();
+    if (nextMode === 'jev' || nextMode === 'ollama') {
+      const connection = await this.decisions.resolve('tools');
+      if (connection.protocol !== (nextMode === 'ollama' ? 'ollama-chat' : 'jev-decisions')) {
+        throw new BadRequestException('HITL mode requires a compatible tool decision provider.');
+      }
+    }
 
     if (nextUnattendedFallback === 'representative' && nextRepresentativePersonaId === null) {
       throw new BadRequestException('Representative HITL fallback requires a configured persona.');
@@ -171,6 +180,9 @@ export class HitlConfigService {
       await this.ensurePersonaExists(nextExternalPolicyPersonaId);
     }
 
+    ++this.configRevision;
+    ++this.updates;
+    try {
     await this.appSettings.set(HITL_SETTING_KEYS.mode, nextMode);
 
     if (nextAutoPersonaId === null) {
@@ -201,6 +213,7 @@ export class HitlConfigService {
     await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
     await this.appSettings.set(HITL_SETTING_KEYS.jevFallbackToPersona, String(nextJevFallbackToPersona));
     await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
+    } finally { --this.updates; ++this.configRevision; }
 
     return {
       mode: nextMode,

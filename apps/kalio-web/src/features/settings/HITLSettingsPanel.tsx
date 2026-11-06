@@ -101,7 +101,7 @@ export function HITLSettingsPanel() {
     : null;
   const timeoutMinutes = Math.round(config.raAppApprovalTimeoutMs / 60_000);
   const jevThreshold = config.jevApprovalThreshold ?? 0.95;
-  const jevValidationMessage = !Number.isFinite(jevThreshold) || jevThreshold <= 0.5 || jevThreshold > 1
+  const jevValidationMessage = config.mode === 'ollama' ? null : !Number.isFinite(jevThreshold) || jevThreshold <= 0.5 || jevThreshold > 1
     ? 'Jev approval threshold must be greater than 0.5 and at most 1.'
     : (config.jevInstructions?.length ?? 0) > 2000
       ? 'Jev instructions must be at most 2000 characters.'
@@ -136,9 +136,8 @@ export function HITLSettingsPanel() {
         externalPolicyEnabled: config.externalPolicyEnabled,
         externalPolicyPersonaId: config.externalPolicyPersonaId,
         raAppApprovalTimeoutMs: config.raAppApprovalTimeoutMs,
-        jevApprovalThreshold: jevThreshold,
-        jevInstructions: config.jevInstructions,
-        jevFallbackToPersona: config.jevFallbackToPersona,
+        ...(config.mode !== 'ollama' ? { jevApprovalThreshold: jevThreshold, jevInstructions: config.jevInstructions } : {}),
+        jevFallbackToPersona: config.mode === 'ollama' ? false : config.jevFallbackToPersona,
         rules: config.rules ?? [],
       };
       if (config.mode === 'auto') {
@@ -208,6 +207,15 @@ export function HITLSettingsPanel() {
       <fieldset disabled={saving || !loaded} className="space-y-5">
       <div className="space-y-3 rounded-lg border border-base-300/50 bg-base-200/30 p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-base-content/60">Approval mode</h3>
+        <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
+          <input aria-label="Ollama local verdicts" type="radio" name="hitl-mode" className="radio radio-sm mt-0.5"
+            checked={config.mode === 'ollama'} onChange={() => {
+              setConfig((current) => ({ ...current, mode: 'ollama', jevFallbackToPersona: false })); setError(null); setSaved(false);
+            }} />
+          <span><span className="block text-sm font-medium">Ollama local verdicts</span>
+            <span className="block text-xs text-base-content/60">Only eligible read-only operations use local verdicts. Protected operations and errors require manual approval. No persona fallback or probability threshold. Configure the native model in Decision Settings / Tool approvals. Save to apply this mode.</span></span>
+        </label>
+
         <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
           <input aria-label="Jev typed decisions" type="radio" name="hitl-mode" className="radio radio-sm mt-0.5"
             checked={config.mode === 'jev'} onChange={() => {

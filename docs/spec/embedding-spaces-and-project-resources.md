@@ -86,6 +86,11 @@ The tools `refresh_project_context` and `search_project_context` resolve their
 project from the persisted calling session through `PROJECT_CONTEXT_PORT`; the
 agent cannot supply an arbitrary project ID. Both require confirmation. These
 tools are not automatically added to an existing persona's allowlist.
+For a scoped QA run, both Devin and Codex readiness checks accept the explicit
+`--include-project-context` flag: the persona must expose exactly the six base
+file/terminal tools plus `search_project_context`. Search must still require
+confirmation; unrelated tools, missing search registration and duplicate flags
+fail readiness. Without the flag, the six-tool boundary remains unchanged.
 There is no startup crawler, background refresh scheduler or automatic insertion
 of search results into every agent prompt. Explicit tools provide retrieved context.
 

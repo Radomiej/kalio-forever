@@ -31,6 +31,11 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('MessageBubble layout', () => {
+  it('renders a saved user image through the scoped VFS serve route', () => {
+    render(<MessageBubble message={makeMessage({ role: 'user', attachments: [{ path: 'uploads/fixture.png', mimeType: 'image/png' }] })} />);
+    expect(screen.getByRole('img', { name: 'Attached image' }).getAttribute('src'))
+      .toContain('/api/sessions/session-1/vfs/serve?path=uploads%2Ffixture.png');
+  });
   it('leaves empty streaming activity to the conversation pending indicator', () => {
     render(<MessageBubble message={makeMessage({ streaming: true, content: '' })} />);
     expect(screen.queryByTestId('message-bubble')).toBeNull();

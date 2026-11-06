@@ -31,6 +31,8 @@ export const envSchema = Joi.object({
   EMBEDDING_BASE_URL:  Joi.string().optional(),
   EMBEDDING_API_KEY:   Joi.string().optional(),
   KALIO_ENABLE_TEST_SUPPORT: Joi.boolean().default(false),
+  KALIO_DEV_LOCAL_DECISIONS: Joi.boolean().default(false),
+  KALIO_LOCAL_DECISION_TIMEOUT_MS: Joi.number().integer().min(100).max(120000).default(8000),
   // Web search (Perplexity) — optional, can be configured via Settings UI
   PERPLEXITY_API_KEY:  Joi.string().optional(),
   PERPLEXITY_PROVIDER: Joi.string().valid('perplexity', 'perplexity-openrouter').optional(),

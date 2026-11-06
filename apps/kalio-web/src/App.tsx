@@ -208,6 +208,20 @@ export function App() {
     if (window.innerWidth < 1024) setTalkSidebarCollapsed(true);
     setActiveSection('talk');
   };
+  const sidebarExpand = talkSidebarCollapsed ? (
+    <button
+      type="button"
+      className="btn btn-ghost btn-xs h-11 min-h-0 w-11 shrink-0 rounded-md p-0 text-base-content/60 hover:text-base-content"
+      onClick={() => setTalkSidebarCollapsed(false)}
+      aria-label="Show conversations"
+      title="Show conversations"
+      aria-expanded={false}
+      data-testid="talk-sidebar-expand"
+    >
+      <PanelLeftOpen size={15} />
+    </button>
+  ) : null;
+
   return (
     <div data-testid="app-root" className="flex h-screen w-screen overflow-hidden bg-base-100">
       <div
@@ -234,25 +248,7 @@ export function App() {
             or in-flight streaming state when the user navigates to the landing page */}
         <div className={`flex h-full flex-col lg:flex-row ${activeSection !== 'talk' ? 'hidden' : ''}`}>
             {/* Left sidebar: session list */}
-            {talkSidebarCollapsed ? (
-              <div
-                className="h-12 w-full shrink-0 border-b border-base-300 bg-base-100 lg:h-full lg:w-12 lg:border-b-0 lg:border-r"
-                data-testid="talk-sidebar-collapsed"
-              >
-                <div className="flex h-full items-center justify-between gap-2 px-2 lg:flex-col lg:justify-start lg:py-2">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs h-8 min-h-0 w-8 rounded-md p-0 text-base-content/60 hover:text-base-content"
-                    onClick={() => setTalkSidebarCollapsed(false)}
-                    aria-label="Show conversations"
-                    title="Show conversations"
-                    data-testid="talk-sidebar-expand"
-                  >
-                    <PanelLeftOpen size={15} />
-                  </button>
-                </div>
-              </div>
-            ) : (
+            {!talkSidebarCollapsed && (
             <div className="h-full w-full shrink-0 flex flex-col border-b border-base-300 overflow-hidden lg:w-80 lg:border-b-0 lg:border-r">
               <div className="flex h-9 items-center gap-1 border-b border-base-300 px-2 shrink-0" data-testid="talk-sidebar-mode-switcher">
                 {[
@@ -319,9 +315,9 @@ export function App() {
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-hidden min-h-0">
                   <div className={talkView === 'conversation' ? 'h-full' : 'hidden'}>
-                    <ChatInterface talkView={talkView} onTalkViewChange={setTalkView} />
+                    <ChatInterface talkView={talkView} onTalkViewChange={setTalkView} sidebarExpand={talkView === 'conversation' ? sidebarExpand : null} />
                   </div>
-                  {talkView === 'graph' && <ExecutionGraphView onOpenSessionInConversation={(sessionId) => openSessionInConversation(sessionId, true)} talkView={talkView} onTalkViewChange={setTalkView} />}
+                  {talkView === 'graph' && <ExecutionGraphView onOpenSessionInConversation={(sessionId) => openSessionInConversation(sessionId, true)} talkView={talkView} onTalkViewChange={setTalkView} sidebarExpand={sidebarExpand} />}
                 </div>
               </div>
 

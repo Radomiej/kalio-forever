@@ -175,6 +175,10 @@ compiled `kalio-mcp-bridge-stdio.js` process forwards `tools/list` and
 turn context therefore remain enforced by Kalio. A real Devin tool call still
 needs a provider/runtime canary because ACP capability discovery does not
 prove that a particular CLI build actually invokes a supplied stdio server.
+Before ACP starts, Kalio verifies that the private overlay suppresses inherited
+MCP entries. The parser supports the legacy catalog from Devin CLI
+`3000.11.1` and the catalog with a per-entry `Source` field from
+`3000.11.234`. Unknown versions and malformed entries block startup.
 Devin's own filesystem, web, and terminal tools are separate category
 switches at `/api/runtime/devin-cli/settings`, defaulting to blocked and still
 requiring Kalio strict approval when enabled.

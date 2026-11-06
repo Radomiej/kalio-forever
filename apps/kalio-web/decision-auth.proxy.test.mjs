@@ -5,6 +5,28 @@ import { loadConfigFromFile } from 'vite';
 import preview from './vite.preview.config.mjs';
 import { decisionProtectedProxy, decisionProtectedRoute } from './decision-auth.proxy.mjs';
 
+test('model manager exact paths use the Host-preserving protected proxy', () => {
+  const route = new RegExp(decisionProtectedRoute);
+  const job = '12345678-1234-1234-1234-123456789abc';
+  for (const path of ['/api/decision/ollama/models', '/api/decision/ollama/install',
+    `/api/decision/ollama/install/${job}`, `/api/decision/ollama/install/${job}/cancel`]) assert.ok(route.test(path), path);
+  for (const path of ['/api/decision/ollama/models?extra=1', '/api/decision/ollama/models/',
+    '/api/decision/ollama/install/not-a-job', `/api/decision/ollama/install/${job}/cancel/extra`,
+    '/api/decision/ollama/other']) assert.ok(!route.test(path), path);
+});
+
+test('speech routes preserve browser Host for protected local authentication', () => {
+  const route = new RegExp(decisionProtectedRoute);
+  for (const path of ['/api/speech/status', '/api/speech/install', '/api/speech/install/cancel',
+    '/api/speech/transcriptions/request-1', '/api/speech/transcriptions/request-1/cancel']) {
+    assert.ok(route.test(path), path);
+  }
+  for (const path of ['/api/speech', '/api/speech/status/extra', '/api/speech/install-other',
+    '/api/speech/transcriptions/', '/api/speech/transcriptions/a/extra', '/api/speech/transcriptions/a/b/cancel']) {
+    assert.ok(!route.test(path), path);
+  }
+});
+
 test('actual preview and DEV configs put exact protected rules before generic proxy', async () => {
   assert.equal(Object.keys(preview.preview.proxy)[0], decisionProtectedRoute);
   assert.equal(preview.preview.proxy[decisionProtectedRoute].changeOrigin, false);

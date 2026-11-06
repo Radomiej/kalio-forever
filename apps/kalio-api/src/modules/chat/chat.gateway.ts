@@ -6,7 +6,7 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Inject, Logger, Optional, UseFilters } from '@nestjs/common';
+import { Inject, Logger, Optional, UseFilters, type OnModuleDestroy } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Socket } from 'socket.io';
 import type { SocketEvents } from '@kalio/types';
@@ -30,6 +30,7 @@ import { ChatGatewayRuntime, nextApprovedBudgetLimit } from './chat.gateway.runt
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
 import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
+import { emitRuntimeEventToSubscribers, enqueueSessionEvent } from './chat.gateway.runtime-events';
 import {
   buildRuntimeActivitySnapshot,
   buildRuntimeActivitySnapshotBatch,
@@ -44,7 +45,7 @@ import {
 
 @UseFilters(WsExceptionFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   private readonly logger = new Logger(ChatGateway.name);
 
   // Track per-socket sessions for disconnect cleanup
@@ -53,6 +54,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly sessionSubscribers = new Map<string, Set<string>>();
   private sessionLifecycleBroadcastQueue: Promise<void> = Promise.resolve();
   private readonly runtime: ChatGatewayRuntime;
+  private readonly unsubscribeSessionEvents: (() => void)[];
+  private readonly disposal = new AbortController();
 
   constructor(
     private readonly toolDispatch: ToolDispatchService,
@@ -75,12 +78,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       subagentRuntime: this.subagentRuntime,
       emit: (initiator, sessionId, event, data) => this.emitToInitiatorAndSessionSubscribers(initiator, sessionId, event, data),
     });
-    this.sessionEvents.onSessionCreated(({ session }) => {
+    this.unsubscribeSessionEvents = [this.sessionEvents.onSessionCreated(({ session }) => {
       this.emitSessionLifecycleEvent('session:created', session);
-    });
+    }),
     this.sessionEvents.onSessionUpdated(({ session }) => {
       this.emitSessionLifecycleEvent('session:updated', session);
-    });
+    }), this.sessionEvents.onRuntimeEvent((event, payload) => {
+      this.sessionLifecycleBroadcastQueue = enqueueSessionEvent(this.sessionLifecycleBroadcastQueue, () =>
+        emitRuntimeEventToSubscribers({ event, payload, clients: this.clients,
+          sessionSubscribers: this.sessionSubscribers, sessionsService: this.sessionsService,
+          logger: this.logger, signal: this.disposal.signal }), this.logger);
+    })];
+  }
+
+  onModuleDestroy(): void {
+    this.disposal.abort();
+    this.unsubscribeSessionEvents.forEach((unsubscribe) => unsubscribe());
   }
 
   handleConnection(client: Socket): void {
@@ -430,23 +443,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     event: K,
     payload: SocketEvents[K],
   ): void {
-    this.sessionLifecycleBroadcastQueue = this.sessionLifecycleBroadcastQueue
-      .catch((error: unknown) => this.logger.warn(`Session lifecycle queue recovered after previous failure: ${error instanceof Error ? error.message : String(error)}`))
-      .then(() => emitSessionLifecycleEventToSubscribers({
+    this.sessionLifecycleBroadcastQueue = enqueueSessionEvent(this.sessionLifecycleBroadcastQueue,
+      () => emitSessionLifecycleEventToSubscribers({
         event,
         payload,
         clients: this.clients,
         sessionSubscribers: this.sessionSubscribers,
         sessionsService: this.sessionsService,
         logger: this.logger,
-      }))
-      .catch((error: unknown) => {
-        this.logger.warn(
-          `Failed to emit lifecycle event ${event} for session ${payload.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
+      }), this.logger);
   }
 
   @SubscribeMessage('agent:budget_approve')

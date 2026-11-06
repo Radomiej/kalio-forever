@@ -4,6 +4,22 @@ Last updated: 2026-11-02
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
 
+## Local voice input (implementation in progress)
+
+- Speech input uses explicitly installed local CPU inference and a recoverable browser recording draft. Failed transcription must retain audio for Retry/Delete; explicit X discards the current recording and successful composer insertion deletes it. A new-chat draft must not create history before its first prompt is sent. The compact purple recorder sits beside Send; settings show model readiness and an explicit install action. No automatic send or silent cloud fallback. See `docs/spec/local-voice-input.md` for the contract and required proof; this section does not claim release readiness.
+
+## Runtime Feedback
+
+- New-chat setup selects the conversation mode. Subsequent prompts resolve the architecture from that session's persisted context (or legacy persisted workflow messages), never a different welcome draft. Single-chat sessions must remain single-chat after switching from a workflow. See `docs/spec/architecture-runtime-stack.md`.
+- Devin typed role responses use a prompted JSON contract with strict host validation of the final post-tool answer. This does not claim native ACP constrained decoding or real workflow acceptance; prose cannot authorize a graph route. See `docs/spec/architecture-runtime-stack.md`.
+- A completed Devin reply with malformed or schema-invalid JSON does not signal host loss when no ACP tool activity occurred. The turn may use its existing single format repair only when its execution lane also has no tool executions.
+
+- Registry publication and initial/current goal snapshots use acyclic leaf modules, without granting launch authority. The protected launch producer and full worker/reviewer composition are not yet activated. See `docs/spec/jev-devin-goal-loop.md`.
+- IDE compatibility admits the verified protocol-3 bridge release 0.5.3; runtime workspace/capability checks remain required. See `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+- Local tool supervision preserves the validated model explanation and verified model attribution for allow, deny and manual-review resolutions, after existing current-policy and one-use checks. Host fallback reasons remain distinct from model explanations; these annotations never authorize execution or replace structured provenance. Jev does not acquire an invented explanation field. See `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+
+- Terminal chat snapshots reconcile only their owned live chunks and preserve final reasoning/text as history even without `agent:done`; stale events cannot clear a newer turn. Runtime Recheck results take precedence over older polling responses. See `docs/spec/chat-turn-feedback.md` and `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+
 ## Goal Reviewer Admission
 
 - Goal reviewer admission has a local, additive storage boundary: a committed one-use start capability, immutable metadata/hash tombstone and start/cancel CAS; it does not yet dispatch a reviewer or authorize goal completion. Normal session deletion remains allowed, but reserved reviewer IDs cannot be resurrected. Runtime wiring and deployment remain separate gates; see `docs/spec/jev-devin-goal-loop.md`.
@@ -240,6 +256,7 @@ classDiagram
 - Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server when the provider advertises HTTP MCP support. When the handshake does not advertise HTTP (the installed Devin CLI `3000.2.17` reports `mcpCapabilities.http=false`), Kalio passes a stdio MCP proxy compiled from `kalio-mcp-bridge-stdio.ts`; the proxy forwards only to the same authenticated bridge, so persona allow-lists, session/VFS scope, turn context, and HITL policy remain server-side. The stable session config carries the persona-filtered tool names and the serialized per-turn context registry supplies turn/message IDs without changing ACP session policy. The bridge token is resolved from the desktop Settings override first and `KALIO_MCP_BRIDGE_TOKEN` second, so local dev remains fail-closed when neither source is configured.
 - Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
 - Devin model discovery reads ACP model-selector metadata directly without a seed model or CLI `models list` prerequisite. Its isolated metadata configuration has no `agent.model`, no admitted MCP tools and default-denied native tools; conversation configuration still requires an explicit nonblank model. Cache/error/stale admission rules remain unchanged.
+- Devin's private MCP overlay accepts the verified CLI catalog formats for `3000.11.1` and `3000.11.234`. Unrecognized versions or ambiguous catalog rows block ACP startup before a prompt is sent.
 - Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
 - The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
@@ -338,9 +355,30 @@ classDiagram
 
 ## Local Model Evaluation And Context Budgets
 
+- REST-started architecture runs publish typed runtime events through the existing session event bus. Delivery follows persisted child ancestry to subscribed sockets, never grants socket ownership, and stops on gateway disposal. Home approval actions identify the actual child session before confirming or cancelling.
+- Invalid structured router/judge output fails at that decision stage, even after successful reads. Partial tool evidence cannot manufacture a route to implementation. Strict JSON validation and existing tool-replay guards remain enabled; no format-only retry after tools is implied.
+- Cold conversation hydration discovers all architecture runs from persisted summaries and typed raw tool-call metadata, with per-run call/result and prompt identities. A previously loaded summary must not hide later runs; missing projections remain scoped fallback evidence rather than an invented terminal outcome.
+- Cold hydration also recognizes a durable parent-projection prompt with a matching workflow turn ID, so failures before the first tool call can recover their authoritative graph and status.
+- Older history pages use the same graph projection restoration as the initial window and preserve concurrent live messages.
+- Chat architecture labels prefer the step's bound session or named node. Generic router heuristics are limited to legacy steps without that identity.
+- A graph node revisited during a correction uses the current visit for status and evidence, while retaining historical event IDs and visit count.
+- Frontend session status and its replay buffer update atomically for each socket status event.
+- Project group expansion is preserved across equivalent session updates and does not schedule redundant state updates during socket replay.
+- Architecture child execution excludes the union of verified durable manual-tool approval waits from its execution timeout, then resumes the remaining budget. Ordinary subagents retain their existing timeout behavior. Stop, expired owners and settled approval tokens cannot restart the clock; this accounting is in-process, not a persisted restart budget.
+
 - The Windows DEV launcher uses explicit IPv4 loopback for API readiness before starting the frontend; `localhost` resolution is not a readiness dependency. See `docs/spec/local-dev-guide.md`.
 
 - The versioned [Ollama benchmark](benchmarks/ollama-2026-10-19/README.md) and its [evaluation specification](benchmarks/ollama-2026-10-19/SPEC.md) record measured model behavior, hardware, grading and limits. Model rankings must retain their workload and inference conditions.
 - Kalio's history budget and the provider's actual context capacity are separate limits. A larger history setting must not be presented as enlarging the provider window.
 - The benchmark's proposed tool discovery separates the authorized catalog from schemas currently advertised to a model. Discovery must not broaden persona/MCP permissions or bypass execution validation and HITL.
 - Static profiles, dynamic discovery and semantic compaction remain distinct implementation choices; benchmark proposals must not be described as shipped behavior. Preserve durable source material and measure correctness plus retrieval/recovery cost before adopting lossy compression.
+
+Architecture audit recovery retains known typed lifecycle/status fields and scans neutral suffix events before deriving terminal status. Neutral output cannot resurrect a failed or cancelled run; later final artifacts and cancellation retain event-order precedence. Legacy rows require no rewrite. This projection repair does not implement a durable active-resume epoch (see docs/spec/architecture-runtime-stack.md).
+
+Stored RA-Apps validate catalog input schemas before effects and expose malformed inputs or runtime failures as tool errors. The graph opens the same RA-App result as chat and fits its camera on entry or explicit reset. Compact New Chat keeps the prompt on screen, with conversation settings in a disclosure and the conversation sidebar control in the active header.
+
+Single Chat sends pasted or selected images via multipart upload to the session VFS and references them from its durable user message. Native adapter routes preserve the image as typed input or report unsupported input. Devin ACP checks the initialized host's image-input capability. Provider-native generated output import and project-local publication are separate contracts.
+
+Background child turn activity resets preserve the visible conversation's tool argument progress. Visible-session lifecycle and connection resets still clear it.
+
+The empty-chat form dispatches the selected workflow for the first prompt, including when the empty session already exists. The conversation composer hides the runtime selector after the chat starts.

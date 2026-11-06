@@ -5,6 +5,8 @@ import { sanitizeJevState } from '../../common/jev-state-sanitizer';
 
 import type { HitlApprovalRequest } from './hitl.types';
 
+export class HitlDecisionProtocolError extends Error {}
+
 @Injectable()
 export class HitlJevService {
   constructor(
@@ -14,8 +16,11 @@ export class HitlJevService {
 
   async evaluateApproval(config: HitlConfig, request: HitlApprovalRequest): Promise<JevNoulResult> {
     request.abortSignal?.throwIfAborted();
-    const connection = await this.decisions.resolve();
+    const settings = await this.decisions.getConfig('tools');
+    if (settings.provider === 'ollama') throw new HitlDecisionProtocolError('Jev requires the Jev Decisions protocol.');
+    const connection = await this.decisions.resolve('tools');
     request.abortSignal?.throwIfAborted();
+    if (connection.protocol !== 'jev-decisions') throw new HitlDecisionProtocolError('Jev requires the Jev Decisions protocol.');
 
     const result = await this.jev.decideNoul({
       ...connection,

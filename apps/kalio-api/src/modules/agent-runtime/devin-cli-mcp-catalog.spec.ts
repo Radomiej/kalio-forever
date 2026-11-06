@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { parseDevinMcpCatalog } from './devin-cli-mcp-catalog';
 
-describe('Devin 3000.11.1 MCP catalog boundary', () => {
+describe('Devin MCP catalog boundary', () => {
+  it('reads the 3000.11.234 format with a source line per entry', () => {
+    const output = 'Configured MCP servers\r\n\r\n  • kalio-runtime\r\n    Command: node bridge\r\n    Source: local\r\n  ✗ inherited  (disabled)\r\n    URL: https://example.invalid\r\n    Source: user';
+    expect(parseDevinMcpCatalog(output, 'with-source')).toEqual([
+      { name: 'kalio-runtime', disabled: false }, { name: 'inherited', disabled: true },
+    ]);
+    expect(() => parseDevinMcpCatalog(output.replace('    Source: user', ''), 'with-source')).toThrow('unsupported or incomplete');
+    expect(() => parseDevinMcpCatalog(output, 'legacy')).toThrow('unsupported or incomplete');
+  });
   it('reads enabled and disabled entries without treating command details as names', () => {
     expect(parseDevinMcpCatalog('Configured MCP servers:\n  • kalio-runtime\n    Command: node bridge.js\n  ✗ serena  (disabled)\n    Command: secret-command\n  • remote\n    URL: https://example.invalid/secret\n')).toEqual([
       { name: 'kalio-runtime', disabled: false }, { name: 'serena', disabled: true },

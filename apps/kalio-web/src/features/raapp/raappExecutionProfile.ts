@@ -32,7 +32,8 @@ export function prepareRAAppLaunchInputs(id: string, inputs?: Record<string, unk
 }
 
 export function buildRAAppRunPrompt(id: string, name: string, description?: string, inputs?: Record<string, unknown>): string {
-  const instruction = inputs ? ` Use these JSON inputs: ${JSON.stringify(inputs)}.` : '';
+  const launchInputs = inputs ?? (id === 'visual-calculator' ? { a: 12, b: 4, operation: 'add' } : undefined);
+  const instruction = launchInputs ? ` Use these JSON inputs: ${JSON.stringify(launchInputs)}.` : '';
   const qaInstruction = id === 'qa-interactive'
     ? ' Before calling run_raapp, prepare a non-empty question and 1–5 non-empty string options. Generate missing values using this conversation runtime. Pass them in inputs; never launch an empty Q&A or report it completed.'
     : '';

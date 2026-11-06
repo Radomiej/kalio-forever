@@ -6,6 +6,8 @@ import { nanoid } from 'nanoid';
 import { createDevinCliConfig } from './devin-cli-config';
 import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import { createNdjsonFrameGuard, DevinCliAcpLifecycle } from './devin-cli-acp.lifecycle';
+import { captureExecutionCurrent, guardedAcpRequest, runGuardedDevinPrompt,
+  type ActiveDevinTurn, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 import { assertDevinSessionModel, bindDevinSessionModel, devinAcpChildEnv } from './devin-cli-acp.model-selection';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
 import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, DEVIN_NATIVE_TOOL_CATEGORIES, type DevinNativeToolsPolicy } from './devin-native-tools';
@@ -46,7 +48,9 @@ export interface DevinAcpSession {
 }
 
 export interface DevinAcpPromptInput {
+  images?: { type: 'image'; data: string; mimeType: string }[];
   signal?: AbortSignal;
+  assertExecutionCurrent?: ExecutionCurrentCheck;
   onTurnStart?: () => (() => void) | void;
   onText: (text: string) => void;
   onThought: (text: string) => void;
@@ -71,16 +75,12 @@ interface SessionState {
   processEpoch: string;
   mcpServers: McpServer[];
   tail: Promise<void>;
-  active?: ActiveTurn;
+  active?: ActiveDevinTurn;
 }
 
 interface DevinSessionWorkspace {
   cwd: string;
   additionalDirectories?: string[];
-}
-
-interface ActiveTurn extends DevinAcpPromptInput {
-  rejectConnection: (error: Error) => void;
 }
 
 export function buildDevinCliLaunchSpec(model: string, executable = resolveDevinCliPath()): DevinCliLaunchSpec {
@@ -113,10 +113,12 @@ export class DevinAcpHost {
     };
   }
 
-  async ensureSession(cwd: string, externalThreadId?: string, mcpServers: McpServer[] = []): Promise<DevinAcpSession> {
+  async ensureSession(cwd: string, externalThreadId?: string, mcpServers: McpServer[] = [], assertExecutionCurrent?: ExecutionCurrentCheck): Promise<DevinAcpSession> {
+    const check = captureExecutionCurrent(assertExecutionCurrent); check?.();
+    if (check && externalThreadId !== undefined) throw new Error('EXECUTION_CURRENT_UNAVAILABLE');
     const normalizedCwd = normalizeCwd(cwd);
     const normalizedMcpServers = [...mcpServers];
-    const connection = await this.ensureConnection(normalizedMcpServers);
+    const connection = await this.ensureConnection(normalizedMcpServers, check); check?.();
     const sessionWorkspace = this.buildSessionWorkspace(normalizedCwd);
     if (externalThreadId) {
       const existing = this.sessions.get(externalThreadId);
@@ -141,13 +143,13 @@ export class DevinAcpHost {
       return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: restoredEpoch, resumed: true };
     }
 
-    const response = await connection.agent.request(methods.agent.session.new, {
+    const response = await guardedAcpRequest(check, () => connection.agent.request(methods.agent.session.new, {
       ...sessionWorkspace,
       mcpServers: normalizedMcpServers,
-    });
+    }));
     const sessionId = response.sessionId?.trim();
     if (!sessionId) throw new Error('Devin ACP did not return a session id.');
-    const configOptions = await bindDevinSessionModel(connection, sessionId, this.model, response.configOptions, () => { this.earlyModelUpdates.delete(sessionId); });
+    const configOptions = await bindDevinSessionModel(connection, sessionId, this.model, response.configOptions, () => { this.earlyModelUpdates.delete(sessionId); }, check); check?.();
     const latestOptions = this.earlyModelUpdates.get(sessionId) ?? configOptions;
     assertDevinSessionModel(this.model, latestOptions);
     this.earlyModelUpdates.delete(sessionId);
@@ -162,9 +164,11 @@ export class DevinAcpHost {
   }
 
   async prompt(sessionId: string, prompt: string, input: DevinAcpPromptInput): Promise<StopReason> {
+    const check = captureExecutionCurrent(input.assertExecutionCurrent, input.signal); check?.();
+    const captured = check ? { ...input, assertExecutionCurrent: check } : input;
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Devin ACP session is not registered: ${sessionId}`);
-    const run = session.tail.then(() => this.promptNow(sessionId, prompt, input), () => this.promptNow(sessionId, prompt, input));
+    const run = session.tail.then(() => this.promptNow(sessionId, prompt, captured), () => this.promptNow(sessionId, prompt, captured));
     session.tail = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -198,36 +202,44 @@ export class DevinAcpHost {
     this.earlyModelUpdates.clear();
   }
 
-  private async ensureConnection(mcpServers: readonly McpServer[] = []): Promise<ClientConnection> {
+  private async ensureConnection(mcpServers: readonly McpServer[] = [], assertExecutionCurrent?: ExecutionCurrentCheck): Promise<ClientConnection> {
+    const check = captureExecutionCurrent(assertExecutionCurrent); check?.();
     if (this.closing) throw new Error('Devin ACP host is closing; acquire a new host after reset.');
     if (this.starting) {
       await this.starting;
+      check?.();
       return this.requireConnection();
     }
     if (this.lifecycle.disposal) {
       await this.lifecycle.disposal;
-      return this.ensureConnection(mcpServers);
+      check?.();
+      return this.ensureConnection(mcpServers, check);
     }
     if (this.lifecycle.usable) return this.requireConnection();
     if (this.lifecycle.hasResources) throw new Error('Devin ACP cleanup is incomplete; reset the host before continuing.');
     this.closing = false;
     this.status = 'starting';
-    this.starting = this.startConnection(mcpServers);
+    this.starting = this.startConnection(mcpServers, check);
     try {
       await this.starting;
+      check?.();
       return this.requireConnection();
     } finally {
       this.starting = undefined;
     }
   }
 
-  private async startConnection(mcpServers: readonly McpServer[]): Promise<void> {
+  private async startConnection(mcpServers: readonly McpServer[], assertExecutionCurrent?: ExecutionCurrentCheck): Promise<void> {
+    const check = captureExecutionCurrent(assertExecutionCurrent);
     const lifecycle = this.lifecycle = new DevinCliAcpLifecycle();
     try {
+      check?.();
       const spec = buildDevinCliLaunchSpec(this.model, resolveDevinCliPath());
-      const config = await createDevinCliConfig(this.model, mcpServers, this.nativePolicy, handle => { lifecycle.config = handle; });
+      const config = await createDevinCliConfig(this.model, mcpServers, this.nativePolicy, handle => { lifecycle.config = handle; }, check);
       lifecycle.config = config;
-      const suppressedCount = await suppressInheritedDevinMcp(spec.command, config, mcpServers.map(server => server.name));
+      check?.();
+      const suppressedCount = await suppressInheritedDevinMcp(spec.command, config, mcpServers.map(server => server.name), check);
+      check?.();
       this.logger.debug(`Devin ACP private MCP overlay verified (${suppressedCount} inherited entries suppressed).`);
       if (this.closing) {
         throw new Error('Devin ACP host was closed during startup.');
@@ -238,6 +250,7 @@ export class DevinAcpHost {
       // from the child cwd and select only the model on the command line.
       const processEpoch = this.processEpoch = nanoid();
       const onFailure = (reason: 'exit' | 'error' | 'closed', error: Error): void => this.handleConnectionClosed(lifecycle, processEpoch, reason, error);
+      check?.();
       const child = spawn(spec.command, spec.args, {
         env: devinAcpChildEnv(process.env),
         ...(config ? { cwd: config.cwd } : {}),
@@ -258,11 +271,12 @@ export class DevinAcpHost {
       this.connection = connection;
       this.status = 'starting';
       void connection.closed.then(() => onFailure('closed', new Error('Devin ACP connection closed.')), () => onFailure('error', new Error('Devin ACP connection failed.')));
-      const response = await lifecycle.initialize(connection.agent.request(methods.agent.initialize, {
+      const response = await lifecycle.initialize(guardedAcpRequest(check, () => connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {},
         clientInfo: { name: 'kalio', title: 'Kalio', version: '0.1.0' },
-      }));
+      })));
+      check?.();
       if (this.closing || !lifecycle.usable) throw new Error('Devin ACP host was closed during startup.');
       this.capabilities = response.agentCapabilities ?? {};
       this.status = 'online';
@@ -303,35 +317,15 @@ export class DevinAcpHost {
   }
 
   private async promptNow(sessionId: string, prompt: string, input: DevinAcpPromptInput): Promise<StopReason> {
-    const connection = await this.ensureConnection();
+    const check = captureExecutionCurrent(input.assertExecutionCurrent, input.signal); check?.();
+    const connection = await this.ensureConnection([], check); check?.();
+    if (input.images?.length && !this.capabilities.promptCapabilities?.image) {
+      throw new Error('This Devin runtime does not accept image attachments. Choose another runtime or remove the image.');
+    }
     const session = this.sessions.get(sessionId);
     if (!session || session.processEpoch !== this.processEpoch) throw new Error(`Devin ACP session ${sessionId} is not active on this host.`);
     assertDevinSessionModel(this.model, session.configOptions);
-    if (input.signal?.aborted) return 'cancelled';
-    let rejectConnection!: (error: Error) => void;
-    const connectionFailure = new Promise<never>((_, reject) => { rejectConnection = reject; });
-    const active: ActiveTurn = { ...input, rejectConnection };
-    session.active = active;
-    const releaseTurn = input.onTurnStart?.() ?? (() => undefined);
-    const abortHandler = (): void => {
-      void connection.agent.notify(methods.agent.session.cancel, { sessionId }).catch(() => undefined);
-    };
-    input.signal?.addEventListener('abort', abortHandler, { once: true });
-    try {
-      const promptRequest = connection.agent.request(methods.agent.session.prompt, {
-        sessionId,
-        prompt: [{ type: 'text', text: prompt }],
-      }, input.signal ? { cancellationSignal: input.signal } : undefined);
-      const response = await Promise.race([promptRequest, connectionFailure]);
-      return response.stopReason;
-    } catch (error) {
-      if (input.signal?.aborted) return 'cancelled';
-      throw asError(error, 'Devin ACP prompt failed.');
-    } finally {
-      releaseTurn();
-      input.signal?.removeEventListener('abort', abortHandler);
-      if (session.active === active) session.active = undefined;
-    }
+    return runGuardedDevinPrompt(connection, session, sessionId, prompt, input, check);
   }
 
   private async handlePermission(params: RequestPermissionRequest): Promise<{ outcome: { outcome: 'cancelled' } | { outcome: 'selected'; optionId: string } }> {
@@ -417,8 +411,10 @@ export class DevinAcpHostRegistry implements OnModuleDestroy {
 
   constructor(private readonly probes: DevinCliProbeService) {}
 
-  async get(model: string, scopeKey?: string, nativePolicy: DevinNativeToolsPolicy = DEFAULT_DEVIN_NATIVE_TOOLS_POLICY): Promise<DevinAcpHost> {
+  async get(model: string, scopeKey?: string, nativePolicy: DevinNativeToolsPolicy = DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, assertExecutionCurrent?: ExecutionCurrentCheck): Promise<DevinAcpHost> {
+    const check = captureExecutionCurrent(assertExecutionCurrent); check?.();
     if (this.resetPromise) await this.resetPromise;
+    check?.();
     const normalizedModel = model.trim();
     if (!normalizedModel) throw new Error('Devin CLI model is required.');
     const key = scopeKey?.trim() ? `${normalizedModel}\u0000${scopeKey.trim()}` : normalizedModel;

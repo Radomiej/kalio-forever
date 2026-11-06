@@ -6,6 +6,22 @@ Source: user walkthrough of the local stable QA UI, followed by read-only inspec
 
 ## Goal
 
+### Decision engines and explanations — 2026-11-03
+
+Tool supervision presents three explicit outcomes: automatic approval, manual review and rejection. Persist the actual engine/provider/model and distinguish a model-supplied explanation from a deterministic policy reason. Never infer the approver from the worker model or invent a post-hoc model explanation. Hard deny rules take precedence; unavailable, invalid or stale model output falls back to manual review.
+
+Native local Ollama verdicts and Jev typed probability/choice decisions are separate protocols. Ollama's JSON reason must be bounded and treated as untrusted display text; it is not execution authority. Existing Jev responses do not automatically supply the same explanation field. Adding reason-bearing Jev choices requires its own validated contract; a generated confidence number or an unrelated second model must not stand in for it. The manager's model installation/readiness is not proof of a safe auto-approval policy. Goal routing remains separate from tool supervision.
+
+Local tool decisions retain the validated model explanation only after the current-policy and one-use decision checks succeed. The existing resolution reason labels the verified model and verdict before the model explanation. Invalid, unavailable or stale responses retain a host fallback explanation instead; they never inherit an earlier model explanation. These text annotations do not constitute structured provider/model provenance or authorize tool execution. Jev retains its existing probability/threshold explanation rather than a fabricated natural-language reason.
+
+When a policy requests manual review, its bounded explanation accompanies the one genuine confirmation request in runtime audit `data.message` and HITL notification audit `data.policyReason`. It is request context, never a later human response or approval. Pending confirmation socket fields and rich chat/F5 provenance are unchanged; their absence must not be presented as complete supervisor provenance UI.
+
+On small screens, Settings uses one compact section selector so navigation does not consume half the viewport. Desktop retains the sidebar. Both control the same active panel and focus trap; no duplicate settings state or mobile-only API exists.
+
+### IDE bridge compatibility — 2026-11-03
+
+The installed GA VS Code LSP MCP Bridge 0.5.3 retains descriptor/health protocol 3 and the required read-only tools. Kalio now admits this exact release in addition to the existing 0.4.7–0.4.x range. Other unverified releases and malformed versions remain blocked. An installed newer release must not be described as outdated merely because Kalio's compatibility list is stale. Runtime health, workspace identity and MCP capability checks remain mandatory after the version gate; version admission alone is not an end-to-end IDE test.
+
 Make it obvious which connected service will execute a chat/run, which model is selected, what access it has, and whether it is ready. The user chooses an agent persona for role/instructions and chooses an execution provider/runtime for the conversation or run. Kalio must not silently substitute a provider or model.
 
 ## Product decisions
@@ -35,6 +51,7 @@ Make it obvious which connected service will execute a chat/run, which model is 
 
 - Devin model discovery reads the ACP session model selector directly in an isolated metadata-only configuration. It omits `agent.model` and never sends a prompt; CLI `models list` is not a prerequisite. Metadata retains empty MCP and default-denied native tools. Conversation configuration still requires an explicit nonblank model, and failed or stale discovery never admits a different model. Existing cache TTL, request deduplication and stale/error reporting remain in force.
 - Backend remains the source of truth for persisted selection and runtime state; UI is a projection.
+- Background status GETs must not overwrite a newer explicit Recheck result. Order reads and actions per integration, discard stale publishers, and abort pending reads when the panel unmounts. Polling remains a cached read; it must not introduce extra CLI discovery.
 - Treat provider + model as one validated execution pair and persist a run/session snapshot. A later settings change must not rewrite the identity of an already-started run.
 - A persona recommendation seeds a new conversation only. Persist the user's explicit conversation choice; if there is no valid recommended or saved choice, require selection. An invalid chosen pair blocks execution and does not fall through to another target.
 - At run acceptance, persist an immutable resolved execution snapshot before dispatch. Retry/resume/reconnect use that snapshot, not current persona recommendations or provider defaults. A one-run override, if later introduced, must not mutate the conversation choice.

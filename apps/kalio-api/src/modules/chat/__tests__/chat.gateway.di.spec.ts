@@ -27,7 +27,7 @@ describe('ChatGateway dependency injection', () => {
           provide: SessionEventsService,
           useValue: {
             onSessionCreated: vi.fn(),
-            onSessionUpdated: vi.fn(),
+            onRuntimeEvent: vi.fn().mockReturnValue(() => undefined), onSessionUpdated: vi.fn(),
           },
         },
         { provide: AgentBudgetApprovalService, useValue: {} },

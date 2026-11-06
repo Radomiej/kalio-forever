@@ -11,6 +11,9 @@ import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-toke
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 import { buildDevinStdioMcpBridgeConfig, DEVIN_KALIO_MCP_SERVER_NAME } from './devin-cli-mcp-bridge';
 import { summarizeDevinToolOutput } from './devin-tool-output-summary';
+import { captureExecutionCurrent, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
+import { DevinStructuredOutput, DevinStructuredOutputError } from './devin-structured-output';
+import { latestPromptImages, toAcpPromptImages } from './latest-prompt-images';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
@@ -25,9 +28,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
     const toolsDisabled = params.toolsDisabled === true;
+    const check = captureExecutionCurrent(params.assertExecutionCurrent, params.abortSignal);
+    if (check && !toolsDisabled) throw new Error('EXECUTION_CURRENT_UNAVAILABLE');
+    check?.();
+    const guardArgs: [] | [ExecutionCurrentCheck] = check ? [check] : [];
     if (toolsDisabled && params.externalThreadId !== undefined) throw new Error('LLM_TOOLS_DISABLED_THREAD_REUSE');
     if (toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
-    if (toolsDisabled) params = { ...params, tools: [], providerToolNames: [], dispatchNativeTool: undefined, toolResultChannel: undefined };
+    if (toolsDisabled) params = { ...params, tools: [], providerToolNames: [], dispatchNativeTool: undefined, toolResultChannel: undefined, assertExecutionCurrent: check };
     const profile = params.executionProfile;
     if (!profile || profile.kind !== 'devin-cli-acp') {
       throw new Error('Devin ACP source requires a devin-cli-acp execution profile.');
@@ -62,7 +69,8 @@ export class DevinCliAcpLLMSource implements ILLMSource {
     let host: DevinAcpHost | undefined;
     let session: DevinAcpSession | undefined;
     try {
-      host = await this.registry.get(model, toolsDisabled ? `reviewer-deny-all:${params.sessionId}` : bridgeConfig ? params.sessionId : undefined, nativeToolsPolicy);
+      host = await this.registry.get(model, toolsDisabled ? `reviewer-deny-all:${params.sessionId}` : bridgeConfig ? params.sessionId : undefined, nativeToolsPolicy, ...guardArgs);
+      check?.();
       if (toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
       // Devin CLI 3000.x advertises ACP but ignores session/new MCP entries in
       // practice. The host therefore loads the same scoped bridge through its
@@ -85,10 +93,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         },
       });
       const mcpBridgeEnabled = mcpServers.length > 0;
-      session = await host.ensureSession(cwd, params.externalThreadId, mcpServers);
+      check?.();
+      session = await host.ensureSession(cwd, params.externalThreadId, mcpServers, ...guardArgs);
+      check?.();
       if (toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
       if (!params.externalThreadId) {
         await params.onExternalThreadBound?.(session.sessionId, { processEpoch: session.processEpoch });
+        check?.();
       }
       await this.audit(params, {
         eventName: session.resumed ? 'devin-cli-acp.session.resumed' : 'devin-cli-acp.session.started',
@@ -113,6 +124,8 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         waiters.splice(0).forEach((wake) => wake());
       };
       const promptInput: DevinAcpPromptInput = {
+        images: toAcpPromptImages(latestPromptImages(params.messages)),
+        ...(check ? { assertExecutionCurrent: check } : {}),
         signal: params.abortSignal,
         onTurnStart: toolsDisabled ? undefined : () => this.mcpBridgeContext.activate({
           sessionId: params.sessionId,
@@ -170,6 +183,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         status: 'started',
         data: { model, sessionId: session.sessionId, processEpoch: session.processEpoch, messageId: params.messageId },
       });
+      check?.();
       void this.runPrompt(host, session, params, nativeToolsPolicy, mcpBridgeEnabled, promptInput, enqueue, finish);
 
       while (!finished || queue.length > 0) {
@@ -191,11 +205,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           reason: normalized.message.slice(0, 240),
         },
       });
-      params.onExternalRuntimeLost?.({
-        authProfileId: profile.authProfileId?.trim() || profile.id,
-        processEpoch: session?.processEpoch ?? 'devin-cli:unbound',
-        reason: params.abortSignal?.aborted ? 'closed' : 'error',
-      });
+      if (!(normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || params.abortSignal?.aborted) {
+        params.onExternalRuntimeLost?.({
+          authProfileId: profile.authProfileId?.trim() || profile.id,
+          processEpoch: session?.processEpoch ?? 'devin-cli:unbound',
+          reason: params.abortSignal?.aborted ? 'closed' : 'error',
+        });
+      }
       throw normalized;
     }
   }
@@ -212,6 +228,8 @@ export class DevinCliAcpLLMSource implements ILLMSource {
   ): Promise<void> {
     try {
       let hasAnswer = false;
+      const structured = params.structuredOutput ? new DevinStructuredOutput(params.structuredOutput) : undefined;
+      const check = captureExecutionCurrent(promptInput.assertExecutionCurrent, params.abortSignal); check?.();
       if (params.toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
       const stopReason = await host.prompt(session.sessionId, buildPrompt(
         params.messages,
@@ -219,25 +237,38 @@ export class DevinCliAcpLLMSource implements ILLMSource {
         nativeToolsPolicy,
         DEVIN_KALIO_MCP_SERVER_NAME,
         mcpBridgeEnabled,
-      ), {
+      ) + (structured ? `\n\n${structured.instruction}` : ''), {
         ...promptInput,
         onText: (text) => {
           hasAnswer ||= Boolean(text.trim());
+          structured?.onText(text);
           promptInput.onText(text);
+        },
+        onToolActivity: (activity) => {
+          structured?.onTool(activity);
+          promptInput.onToolActivity?.(activity);
         },
       });
       if (stopReason !== 'cancelled' && stopReason !== 'end_turn') {
         throw new Error('Devin did not complete the turn (limit reached or request refused).');
       }
-      if (stopReason === 'end_turn' && !hasAnswer) {
+      if (stopReason === 'end_turn' && !hasAnswer && !structured) {
         throw new Error('Devin ended the turn without a user-visible answer. The task is not confirmed complete; please continue or retry.');
       }
+      if (structured && stopReason === 'end_turn') structured.result();
       await this.audit(params, {
         eventName: 'devin-cli-acp.turn.completed',
         status: stopReason === 'cancelled' ? 'cancelled' : 'completed',
         data: { sessionId: session.sessionId, processEpoch: session.processEpoch, stopReason },
       });
-      if (stopReason !== 'cancelled') _enqueue({ type: 'done' });
+      if (stopReason !== 'cancelled') {
+        if (structured) {
+          check?.();
+          if (params.abortSignal?.aborted) throw new Error('Devin structured output cancelled.');
+          _enqueue({ type: 'structured_output', value: structured.result() });
+        }
+        _enqueue({ type: 'done' });
+      }
       finish();
     } catch (error) {
       const normalized = params.toolsDisabled ? new Error('DEVIN_TOOLS_DISABLED_FAILED') : error instanceof Error ? error : new Error(String(error));

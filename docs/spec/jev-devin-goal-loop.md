@@ -4,6 +4,10 @@ Source: USER-20261004-03/05 in ../meetings/2026-10-04-user-notes.md. Status: par
 
 ## User outcome
 
+### Publication ownership — 2026-11-03
+
+`ArchitectureRegistryModule` owns the sole registry independently of chat/execution. `ArchitectureModule` imports and re-exports that leaf. `AgentFlowGoalLaunchSnapshotModule` composes the registry publication port, existing alias publisher and freshly read user policy; it imports no execution runtime. Initial `readForLaunch` and decision-time `readCurrent` share exact allowlist/publication validation. Neither snapshot grants approval, child allocation or launch authority. Production protected disclosure/decision/claim/reservation/pair wiring and the full worker/reviewer loop remain incomplete; these modules alone do not activate a goal workflow.
+
 ### Coding-goal default — user decision, 2026-11-02
 
 Coding goals require a successful build and an independent reviewer. The host policy requires BUILD_RESULT and QUALITY_GATE for each active criterion; a kind label alone is never evidence. QUALITY_GATE must resolve to the actual independently completed reviewer and its durable result. Commit and publication are required only when explicitly requested. The coding policy factory implements these requirements, but production composition and evidence binding remain separate activation gates; it does not infer build commands or authorize tools.

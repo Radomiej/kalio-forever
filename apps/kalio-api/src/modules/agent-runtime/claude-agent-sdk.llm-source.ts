@@ -7,6 +7,7 @@ import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { resolveClaudeAgentSdkExecutable } from './claude-agent-sdk-executable';
+import { latestPromptImages } from './latest-prompt-images';
 
 type ZodSchema = z.ZodType<unknown>;
 type ZodShape = Record<string, ZodSchema>;
@@ -39,6 +40,9 @@ export class ClaudeAgentSdkLLMSource implements ILLMSource {
     const profile = params.executionProfile;
     if (!profile || profile.kind !== 'claude-agent-sdk') {
       throw new Error('Claude Agent SDK source requires a claude-agent-sdk execution profile.');
+    }
+    if (latestPromptImages(params.messages).length > 0) {
+      throw new Error('The current Claude runtime integration accepts text only. Choose another runtime or remove the image.');
     }
 
     const queue: InternalLLMChunk[] = [];

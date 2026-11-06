@@ -15,6 +15,7 @@ import { deriveSlug, RAAppVersioningService } from '../../raapp/raapp-versioning
 import { archiveDirectoryToZip } from '../../raapp/zip-archive.util';
 import { EntityStore } from '../../raapp/entity-store';
 import { applyRaAppOutputPatches } from '../../raapp/raapp-output-patches.util';
+import { validateRaAppInputs } from './raapp-input-validation';
 
 function createGeneratedAppId(sessionId: string): string {
   const sessionPart = deriveSlug(sessionId.trim().slice(0, 8)) || 'session';
@@ -167,7 +168,7 @@ export class RaAppCreateTool {
   description:
     'Run a stored RA-App by its ID. The app is rendered in the chat UI as an interactive or display block. ' +
     'Call list_raapps first to discover available app IDs and their descriptions. ' +
-    'For apps with input_schema, pass inputs via the "inputs" parameter (e.g. for qa-interactive: { question, options, allow_custom }). ' +
+    'Read input_schema and supply all required fields in "inputs". For visual-calculator use numeric a and b and operation add, subtract, multiply, or divide. ' +
     'GUI DSL apps use [output.key] bindings — inputs are passed as { output: { ...your inputs } } automatically.',
   parameters: {
     type: 'object',
@@ -201,7 +202,7 @@ export class RunRaAppTool {
         message: 'run_raapp requires a non-empty string id. Call list_raapps and retry with an exact app ID.',
       };
     }
-    const inputs = (request.args['inputs'] ?? {}) as Record<string, unknown>;
+    const rawInputs = request.args['inputs'] === undefined ? {} : request.args['inputs'];
     const sessionId = request.sessionId;
     const app = this.raapp.getById(id);
 
@@ -233,6 +234,10 @@ export class RunRaAppTool {
       }
     }
 
+    const inputError = validateRaAppInputs(appToRun.meta.input_schema, rawInputs);
+    if (inputError) return { status: 'error', code: 'RAAPP_INVALID_INPUT', message: inputError };
+    const inputs = rawInputs as Record<string, unknown>;
+
     // GUI DSL app (ui.gui)
     if (appToRun.guiContent) {
       // Flatten array inputs into indexed keys: options[0..N] → output.option_0..N
@@ -253,7 +258,12 @@ export class RunRaAppTool {
           inputs,
           { sessionId },
           entityStore,
+          true,
         );
+        const executionError = effectsResult.output['error'];
+        if (typeof executionError === 'string' && executionError.trim()) {
+          return { status: 'error', code: 'RAAPP_EXECUTION_FAILED', message: executionError };
+        }
         Object.assign(outputData, effectsResult.output);
 
         // Include ECS entity snapshot in data bindings (available as [entities[0].components...] in GUI DSL)
@@ -283,7 +293,7 @@ export class RunRaAppTool {
       const result = await this.raapp.execute({ type: 'gui', mode: appToRun.appMode, content: appToRun.guiContent }, data);
       if (result.status === 'error') {
         this.logger.warn(`[run_raapp] GUI DSL error: ${result.error?.message}`);
-        return { status: 'error', message: result.error?.message };
+        return { status: 'error', code: result.error?.code, message: result.error?.message };
       }
       return {
         status: 'ready',
@@ -307,7 +317,7 @@ export class RunRaAppTool {
     const result = await this.raapp.execute({ type: 'html', mode: appToRun.appMode, content: appToRun.htmlContent });
     if (result.status === 'error') {
       this.logger.warn(`[run_raapp] Execution error: ${result.error?.message}`);
-      return { status: 'error', message: result.error?.message };
+      return { status: 'error', code: result.error?.code, message: result.error?.message };
     }
 
     return {

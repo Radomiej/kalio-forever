@@ -2,8 +2,47 @@ import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 import type { ArchitectureRouterOutput, ArchitectureRun, ArchitectureSchema } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
+import { CODING_REVIEW } from './architecture-seed-schemas.lab';
 
 describe('createArchitectureGraphEvents max visit guards', () => {
+  it('runs a second Coding Review cycle before publishing the corrected artifact', async () => {
+    const visits: string[] = [];
+    const finding = 'The mobile navigation cannot close via Escape.';
+    const run: ArchitectureRun = {
+      id: 'coding-review-correction', schemaId: CODING_REVIEW.id, prompt: 'Verify Home Site navigation.',
+      executionMode: 'subagent_execution', context: { maxArchitectureSteps: 20, maxVisitsPerNode: 3 },
+      rootSessionId: 'coding-review-root',
+      branchSessionIds: Object.fromEntries(CODING_REVIEW.roleSlots.map(slot => [slot.id, `child-${slot.id}`])),
+      status: 'running', createdAt: 100, updatedAt: 100,
+    };
+    const roleExecutor: ArchitectureRoleExecutor = {
+      execute: async ({ slot, incomingEvents }) => {
+        visits.push(slot.id);
+        const secondPass = visits.filter(id => id === slot.id).length > 1;
+        if (slot.id === 'orchestrator') return { message: 'Start implementation.', data: routerData('implementer') };
+        if (slot.id === 'release_guard') {
+          const message = secondPass ? 'Verified.' : finding;
+          const decision = routerData(secondPass ? 'final-artifact' : 'implementer', message);
+          if (!secondPass) decision.routerOutput.nextAction = 'run_more_research';
+          return { message, data: decision };
+        }
+        if (slot.id === 'reviewer') return { message: secondPass ? 'The Escape regression is resolved.' : finding, data: {} };
+        if (slot.id === 'implementer' && secondPass) {
+          expect(incomingEvents?.some(event => event.message.includes(finding))).toBe(true);
+        }
+        const successfulToolNames = slot.id === 'implementer' ? ['vfs_write'] : ['vfs_read'];
+        return {
+          message: slot.id === 'finalizer' ? 'Corrected and independently verified.' : 'Fixture tool result recorded.',
+          data: { toolEvidence: { toolResultCount: 1, successfulToolNames, targetPaths: ['src/App.jsx'] } },
+        };
+      },
+    };
+    const events = await createArchitectureGraphEvents({ schema: CODING_REVIEW, run, now: 100, roleExecutor, personaForSlot: slot => slot.id });
+    expect(visits).toEqual(['orchestrator', 'implementer', 'reviewer', 'qa', 'release_guard',
+      'implementer', 'reviewer', 'qa', 'release_guard', 'finalizer']);
+    expect(events.filter(event => event.type === 'final_artifact')).toHaveLength(1);
+  });
+
   it('emits typed contract failure when a tool executor finishes without required tool evidence', async () => {
     const schema: ArchitectureSchema = {
       id: 'tool-evidence-contract-runtime',

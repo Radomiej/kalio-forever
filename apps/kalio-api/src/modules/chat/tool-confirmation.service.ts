@@ -151,6 +151,7 @@ export class ToolConfirmationService {
       humanOnly = true;
       if (!this.hitlRequests || !ctx.onResolvedToolDispatch || !ctx.registerToolResultReceiptCommit) throw new Error('HOST_CONFIRMATION_DURABILITY_REQUIRED');
     }
+    let policyReason: string | undefined;
     if (this.hitlPolicy && !humanOnly) {
       try {
         const resolution = await this.hitlPolicy.resolveApproval({
@@ -175,6 +176,7 @@ export class ToolConfirmationService {
           this.logPolicyLifecycle('hitl_approval_cancelled', resolution.source, callId, toolName, args, ctx, resolution.reason);
           return { approved: false };
         }
+        if (resolution.status === 'manual') policyReason = resolution.reason;
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         this.logger.error(
@@ -184,7 +186,7 @@ export class ToolConfirmationService {
       }
     }
 
-    const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx);
+    const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx, policyReason);
     if (waitResult.status === 'approved') {
       if (this.hitlRequests) {
         const approved = await this.hitlRequests.getById(waitResult.requestId);
@@ -249,9 +251,11 @@ export class ToolConfirmationService {
     toolName: string,
     args: Record<string, unknown>,
     ctx: StreamContext,
+    policyReason?: string,
   ): Promise<ConfirmationWaitResult> {
     return awaitToolConfirmation({
       callId, toolName, args, ctx, pending: this.pending,
+      ...(policyReason !== undefined ? { policyReason } : {}),
       hitlRequests: this.hitlRequests, hitlNotifications: this.hitlNotifications,
       runtimeAudit: this.runtimeAudit, logger: this.logger,
       emitConfirmationInvalidated: (pending, reason, message) => this.emitConfirmationInvalidated(pending, reason, message),

@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { ChatMessage, ChatSession, VFSFile } from '@kalio/types';
+import type { ChatAttachment, ChatMessage, ChatSession, VFSFile } from '@kalio/types';
 import { apiClient, getSessionVfsFiles } from '../../../services/apiClient';
 import { eventBus } from '../../../services/eventBus';
 import type { AgentTurn } from '../../../store/sessionStore';
@@ -39,6 +39,7 @@ interface LaunchSingleChatPromptParams {
   isStreaming: boolean;
   hasActiveLoop: boolean;
   interrupt?: boolean;
+  attachments?: ChatAttachment[];
   clearToolActivities: (sessionId?: string) => void;
   setStreaming: (streaming: boolean, messageId?: string, sessionId?: string | null) => void;
   setAwaitingFirstChunk?: (value: boolean) => void;
@@ -207,6 +208,7 @@ export async function launchSingleChatPrompt({
   isStreaming,
   hasActiveLoop,
   interrupt = false,
+  attachments,
   clearToolActivities,
   setStreaming,
   setAwaitingFirstChunk,
@@ -246,6 +248,7 @@ export async function launchSingleChatPrompt({
     sessionId: session.id,
     role: 'user',
     content,
+    ...(attachments?.length ? { attachments } : {}),
     createdAt: Date.now(),
   });
 
@@ -259,6 +262,7 @@ export async function launchSingleChatPrompt({
     content,
     personaId,
     interrupt,
+    ...(attachments?.length ? { attachments } : {}),
     clientMessageId: userMessageId,
   });
 

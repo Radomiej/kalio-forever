@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LLMContextPreview } from '@kalio/types';
+import type { ChatSession, LLMContextPreview } from '@kalio/types';
+import { mergeSessionsPreservingLocal } from '../../sessions/mergeSessionsPreservingLocal';
 
 const apiGetMock = vi.hoisted(() => vi.fn());
 const apiPostMock = vi.hoisted(() => vi.fn());
@@ -50,6 +51,41 @@ describe('useContextPreview', () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     apiPostMock.mockResolvedValue({ data: makePreview() });
+  });
+
+  it('does not refresh for equal session responses but refreshes changed profiles and nested scope', async () => {
+    vi.useFakeTimers();
+    const session: ChatSession = {
+      id: 'session-1', personaId: 'persona-1', title: 'Project chat', createdAt: 1, updatedAt: 20,
+      executionProfileId: 'profile-1', runtimeContext: { runtimeKind: 'chat', architectureContext: { executionCwd: '/synthetic' } },
+    };
+    const { result, rerender, unmount } = renderHook(({ selected }) => useContextPreview({
+      sessionId: selected.id, session: selected, personaId: selected.personaId, refreshKey: 0,
+    }), { initialProps: { selected: session } });
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(apiPostMock).toHaveBeenCalledTimes(1);
+      let selected = session;
+      for (let period = 0; period < 5; period++) {
+        [selected] = mergeSessionsPreservingLocal([selected], [structuredClone(selected)]);
+        rerender({ selected });
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+      }
+      expect(apiPostMock).toHaveBeenCalledTimes(1);
+      expect(result.current.stale).toBe(false);
+
+      [selected] = mergeSessionsPreservingLocal([selected], [{ ...selected, executionProfileId: 'profile-2' }]);
+      rerender({ selected });
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(apiPostMock).toHaveBeenCalledTimes(2);
+
+      [selected] = mergeSessionsPreservingLocal([selected], [{ ...selected,
+        runtimeContext: { ...selected.runtimeContext!, architectureContext: { executionCwd: '/other-synthetic' } },
+      }]);
+      rerender({ selected });
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(apiPostMock).toHaveBeenCalledTimes(3);
+    } finally { unmount(); vi.useRealTimers(); }
   });
 
   it('fetches backend context preview with the unsent draft message', async () => {

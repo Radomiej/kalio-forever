@@ -9,26 +9,22 @@ export interface ProjectSessionGroupsProps {
 }
 
 export function ProjectSessionGroups({ groups, children }: ProjectSessionGroupsProps) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string> | null>(null);
+  const activeGroupId = groups.find((group) => group.isExpanded)?.project.id;
 
   useEffect(() => {
-    const activeGroup = groups.find((group) => group.isExpanded);
-    setExpandedIds((current) => {
-      if (activeGroup) {
-        return current.has(activeGroup.project.id)
-          ? current
-          : new Set([...current, activeGroup.project.id]);
-      }
-
-      if (current.size > 0) return current;
-      return new Set(groups.filter((group) => group.entries.length > 0).map((group) => group.project.id));
-    });
-  }, [groups]);
+    if (activeGroupId && !expandedIds?.has(activeGroupId)) {
+      setExpandedIds(new Set([...(expandedIds ?? []), activeGroupId]));
+    } else if (expandedIds === null && !activeGroupId) {
+      const populated = groups.filter((group) => group.entries.length > 0).map((group) => group.project.id);
+      if (populated.length > 0) setExpandedIds(new Set(populated));
+    }
+  }, [activeGroupId, expandedIds, groups]);
 
   return (
     <div className="space-y-1 p-1" data-testid="project-session-groups">
       {groups.map((group) => {
-        const expanded = expandedIds.has(group.project.id) || group.isExpanded;
+        const expanded = expandedIds?.has(group.project.id) || group.isExpanded;
         return (
           <section key={group.project.id} className="overflow-hidden rounded-lg border border-base-300/70">
             <button

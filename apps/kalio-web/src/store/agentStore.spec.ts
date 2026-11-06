@@ -259,7 +259,17 @@ describe('sessionStatusSnapshots — dedupe noisy heartbeat updates', () => {
       },
     });
 
-    store.recordSessionStatusSnapshot(first);
+    const publications: unknown[] = [];
+    const unsubscribe = useAgentStore.subscribe((state) => publications.push({
+      status: state.sessionStatusSnapshots['session-A'],
+      buffered: state.bufferedSessionStatusSnapshots['session-A'],
+    }));
+    try {
+      store.recordSessionStatusSnapshot(first);
+      expect(publications).toEqual([{ status: first, buffered: [first] }]);
+    } finally {
+      unsubscribe();
+    }
     store.recordSessionStatusSnapshot(noisyHeartbeat);
     store.recordSessionStatusSnapshot(completed);
 
@@ -702,12 +712,17 @@ describe('per-session tool activities (REGRESSION)', () => {
       sessionId: 'sess-child',
     });
 
+    const visibleProgress = { toolName: 'run_subagent', totalChars: 24, charsPerSec: 12 };
+    store.setToolArgProgress(visibleProgress);
     store.clearToolActivities('sess-parent');
 
     expect(store.getToolActivitiesForSession('sess-parent')).toEqual([]);
     expect(store.getToolActivitiesForSession('sess-child')).toEqual([
       expect.objectContaining({ callId: 'call-child' }),
     ]);
+    expect(useAgentStore.getState().toolArgProgress).toEqual(visibleProgress);
+    store.clearToolActivities();
+    expect(useAgentStore.getState().toolArgProgress).toBeNull();
   });
 });
 

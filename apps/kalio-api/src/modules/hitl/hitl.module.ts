@@ -10,6 +10,7 @@ import { HitlConfigController } from './hitl-config.controller';
 import { HitlConfigService } from './hitl-config.service';
 import { HitlDecisionService } from './hitl-decision.service';
 import { HitlJevService } from './hitl-jev.service';
+import { HitlLocalDecisionService } from './hitl-local-decision.service';
 import { HitlNotificationService } from './hitl-notification.service';
 import { HitlPolicyService } from './hitl-policy.service';
 import { SecurityPolicyController } from './security-policy.controller';
@@ -20,7 +21,7 @@ import { AgentRuntimeModule } from '../agent-runtime/agent-runtime.module';
 @Module({
   imports: [DatabaseModule, DecisionSettingsModule, AgentRuntimeModule, PersonaModule, SkillsModule, LLMModule, RelayModule],
   controllers: [HitlConfigController, SecurityPolicyController],
-  providers: [HitlConfigService, HitlDecisionService, HitlJevService, JevDecisionsClient, HitlNotificationService, HitlPolicyService, SecurityPolicyService, HitlRequestService],
+  providers: [HitlConfigService, HitlDecisionService, HitlJevService, HitlLocalDecisionService, JevDecisionsClient, HitlNotificationService, HitlPolicyService, SecurityPolicyService, HitlRequestService],
   exports: [HitlConfigService, HitlDecisionService, HitlNotificationService, HitlPolicyService, SecurityPolicyService, HitlRequestService],
 })
 export class HitlModule {}

@@ -5,6 +5,100 @@ import { buildArchitectureSlotToolPolicy } from '../chat/architecture-slot-tool-
 import { ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 import { createGoalPacket, appendGoalSource } from './architecture-goal-source';
+import { DevinStructuredOutput } from '../agent-runtime/devin-structured-output';
+import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
+
+describe('TASK56 invalid structured routing containment', () => {
+  function fixture(slotId: 'orchestrator' | 'release_guard') {
+    const schema = new ArchitectureRegistryService().findOne('coding_review');
+    const slot = schema?.roleSlots.find((candidate) => candidate.id === slotId);
+    const node = schema?.nodes?.find((candidate) => candidate.roleSlotId === slotId);
+    if (!schema || !slot || !node) throw new Error('Expected Coding Review routing role');
+    const input = { schema, slot, node, run: { ...createRun('subagent_execution'), schemaId: schema.id },
+      branchSessionId: 'guard-branch', personaId: slot.defaultPersonaId,
+      outgoingNodeIds: ['implementer', 'finalizer'] };
+    return { input };
+  }
+
+  function emitReads(request: RunSubagentRequest): void {
+    for (let index = 0; index < 4; index++) {
+      const callId = `read-${index}`;
+      request.emit?.('tool:start', { callId, toolName: 'fs_read', args: { path: `file-${index}.ts` },
+        sessionId: 'guard-branch', agentRun: undefined as never });
+      request.emit?.('tool:result', { callId, toolName: 'fs_read', data: 'source evidence',
+        status: 'success', sessionId: 'guard-branch' });
+    }
+  }
+
+  it.each([
+    ['orchestrator', 'not JSON'], ['release_guard', 'not JSON'],
+    ['orchestrator', '{}'], ['release_guard', '{}'],
+  ] as const)('rejects actual invalid final output from %s after reads (%s) without synthesizing a route', async (slotId, text) => {
+    const { input } = fixture(slotId);
+    let original: unknown;
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async request => {
+      emitReads(request);
+      if (!request.structuredOutput) throw new Error('Expected structured routing contract');
+      const validator = new DevinStructuredOutput(request.structuredOutput);
+      validator.onText(text);
+      try { validator.result(); } catch (error) { original = error; throw error; }
+      throw new Error('Expected invalid output');
+    });
+    const result = new ArchitectureRoleExecutorService({ runSubagent }).execute(input);
+    await expect(result).rejects.toMatchObject({ code: 'LLM_BAD_STRUCTURED_OUTPUT' });
+    await expect(result).rejects.toBe(original);
+    expect(workflowFailureFromError(original)).toMatchObject({ code: 'CONTRACT_VIOLATION', retryable: false });
+    expect(runSubagent).toHaveBeenCalledOnce();
+  });
+
+  it.each(['orchestrator', 'release_guard'] as const)('classifies invalid schema locally for %s while retaining original cause', async slotId => {
+    const { input } = fixture(slotId);
+    let original: unknown;
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async request => {
+      emitReads(request);
+      try { new DevinStructuredOutput({ name: 'invalid', schema: { type: 'invalid-type' }, strict: true }); }
+      catch (error) { original = error; throw error; }
+      throw new Error('Expected invalid schema');
+    });
+    const result = new ArchitectureRoleExecutorService({ runSubagent }).execute(input);
+    await expect(result).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION', retryable: false,
+      message: 'Devin structured output schema is invalid or unsupported.' });
+    await expect(result).rejects.toHaveProperty('cause', original);
+    expect(original).toHaveProperty('code', 'LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID');
+    expect(runSubagent).toHaveBeenCalledOnce();
+  });
+
+  it.each(['finalize', 'route_to', 'run_more_research'] as const)('preserves valid guard decision %s after reads', async nextAction => {
+    const { input } = fixture('release_guard');
+    const decision = { ...routeOutput('implementer', 'Return actual evidence'), nextAction,
+      targetNodeId: nextAction === 'route_to' ? 'implementer' : null, response: 'Return actual evidence' };
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async request => {
+      emitReads(request);
+      if (!request.structuredOutput) throw new Error('Expected structured routing contract');
+      const validator = new DevinStructuredOutput(request.structuredOutput);
+      validator.onText(JSON.stringify(decision));
+      return { result: 'Display-only prose', structuredOutput: validator.result(), taskId: 'task',
+        childSessionId: 'guard-branch', parentSessionId: 'root-1', vfsMode: 'shared',
+        vfsSessionId: 'root-1', copiedFiles: [], durationMs: 1 };
+    });
+    const result = await new ArchitectureRoleExecutorService({ runSubagent }).execute(input);
+    expect(result.data.routerOutput).toMatchObject({ nextAction });
+    if (nextAction === 'route_to') expect(result.data.route_to).toMatchObject({ targetNodeId: 'implementer' });
+    else expect(result.data.route_to).toBeUndefined();
+    expect(result.data.boundedToolLoopExhausted).toBe(false);
+    expect(runSubagent).toHaveBeenCalledOnce();
+  });
+
+  it('keeps unrelated typed failure recovery and does not classify error prose as a routing contract', async () => {
+    const { input } = fixture('orchestrator');
+    const runSubagent = vi.fn<SubagentRuntimePort['runSubagent']>(async request => {
+      emitReads(request);
+      throw Object.assign(new Error('Devin final answer must be one complete JSON value.'), { code: 'LLM_TIMEOUT' });
+    });
+    const result = await new ArchitectureRoleExecutorService({ runSubagent }).execute(input);
+    expect(result.data).toMatchObject({ errorCode: 'TIMEOUT', route_to: { targetNodeId: 'implementer' } });
+  });
+});
 
 describe('RoleExecutor host goal proposal purpose', () => {
   const packet = () => createGoalPacket({ messageId: 'prompt', sessionId: 'host', turnId: 'turn', content: 'Build feature', createdAt: 1 });

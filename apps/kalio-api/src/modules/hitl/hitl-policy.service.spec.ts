@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HitlDecisionService } from './hitl-decision.service';
 import { HitlPolicyService } from './hitl-policy.service';
 import type { HitlJevService } from './hitl-jev.service';
+import { HitlDecisionProtocolError } from './hitl-jev.service';
+import type { HitlLocalDecisionService } from './hitl-local-decision.service';
 import type { HitlConfigService } from './hitl-config.service';
 import type { HitlConfig } from './hitl.types';
 import { ToolConfirmationService } from '../chat/tool-confirmation.service';
@@ -29,6 +31,7 @@ describe('HitlPolicyService', () => {
   let configService: { getConfig: ReturnType<typeof vi.fn> };
   let decisionService: { evaluateApproval: ReturnType<typeof vi.fn> };
   let jevService: { evaluateApproval: ReturnType<typeof vi.fn> };
+  let localService: { evaluateApproval: ReturnType<typeof vi.fn>; consume: ReturnType<typeof vi.fn>; discard: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     configService = {
@@ -40,12 +43,87 @@ describe('HitlPolicyService', () => {
     jevService = {
       evaluateApproval: vi.fn(),
     };
+    localService = { evaluateApproval: vi.fn().mockResolvedValue({ status: 'evaluated', verdict: 'allow', model: 'fixture:1', reason: 'fixture reason' }), consume: vi.fn().mockResolvedValue(true), discard: vi.fn() };
 
     service = new HitlPolicyService(
       configService as unknown as HitlConfigService,
       decisionService as unknown as HitlDecisionService,
       jevService as unknown as HitlJevService,
+      localService as unknown as HitlLocalDecisionService,
     );
+  });
+
+  it.each([['allow', 'approved'], ['deny', 'rejected'], ['ask_user', 'manual']])('resolves native %s as %s without persona', async (verdict, status) => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama', jevFallbackToPersona: true, autoPersonaId: 'old-persona' }));
+    const reason = `Actual model explanation for ${verdict}.`;
+    localService.evaluateApproval.mockResolvedValue({ status: 'evaluated', verdict, model: 'fixture:1', reason });
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toEqual({
+      status, source: verdict === 'ask_user' ? 'manual' : 'ollama',
+      reason: `Local decision (fixture:1): ${verdict}. ${reason}`,
+    });
+    expect(localService.consume).toHaveBeenCalledTimes(1); expect(localService.discard).toHaveBeenCalledTimes(1);
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
+    expect(jevService.evaluateApproval).not.toHaveBeenCalled();
+  });
+  it('never routes a native protocol mismatch through the Jev persona fallback', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevFallbackToPersona: true, autoPersonaId: 'p' }));
+    jevService.evaluateApproval.mockRejectedValue(new HitlDecisionProtocolError('unsupported'));
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', 'manual');
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
+  });
+  it.each(['terminal_exec', 'fs_write', 'unknown'])('keeps native protected %s manual without inference', async name => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama' }));
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name, args: {} })).toHaveProperty('status', 'manual');
+    expect(localService.evaluateApproval).not.toHaveBeenCalled();
+  });
+  it.each(['deny', 'ask_user', 'allow'] as const)('keeps hard %s authoritative in native mode', async decision => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama', rules: [{ id: 'r', kind: 'tool', name: 'fs_read', decision }] }));
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', decision === 'deny' ? 'rejected' : decision === 'allow' ? 'approved' : 'manual');
+    expect(localService.evaluateApproval).not.toHaveBeenCalled();
+  });
+  it('keeps native unattended manual despite an old representative config', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama', unattendedFallback: 'representative', representativePersonaId: 'old' }));
+    expect(await service.resolveUnattendedApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', 'manual');
+    expect(localService.evaluateApproval).not.toHaveBeenCalled();
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
+  });
+  it('discards native allow when the policy changes during evaluation', async () => {
+    configService.getConfig.mockResolvedValueOnce(makeConfig({ mode: 'ollama' })).mockResolvedValueOnce(makeConfig({ mode: 'manual' }));
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', 'manual');
+  });
+  it('does not infer while HITL configuration is partially being saved', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama' }));
+    Object.assign(configService, { changing: true });
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', 'manual');
+    expect(localService.evaluateApproval).not.toHaveBeenCalled();
+  });
+  it('does not approve a result invalidated during the final awaited policy refresh', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama' }));
+    localService.consume.mockResolvedValue(false);
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', 'manual');
+  });
+  it.each(['allow', 'deny', 'ask_user'])('does not propagate stale %s reason or model attribution', async verdict => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama' }));
+    localService.evaluateApproval.mockResolvedValue({ status: 'evaluated', verdict, model: 'stale-model', reason: 'STALE_MODEL_REASON' });
+    localService.consume.mockResolvedValue(false);
+    const resolution = await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} });
+    expect(resolution).toEqual({ status: 'manual', source: 'manual', reason: 'Local decision is no longer current.' });
+    expect(JSON.stringify(resolution)).not.toContain('STALE_MODEL_REASON'); expect(JSON.stringify(resolution)).not.toContain('stale-model');
+    expect(localService.discard).toHaveBeenCalledTimes(1);
+  });
+  it.each(['invalid_output', 'unavailable', 'stale'] as const)('keeps %s fallback manual without attributed model reason', async reason => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama' }));
+    localService.evaluateApproval.mockResolvedValue({ status: 'fallback', verdict: 'ask_user', reason });
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toEqual({
+      status: 'manual', source: 'manual', reason: 'Local decision requires manual review.',
+    });
+    expect(localService.consume).not.toHaveBeenCalled(); expect(localService.discard).toHaveBeenCalledTimes(1);
+  });
+  it('keeps a native fallback manual even with a saved persona', async () => {
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama', jevFallbackToPersona: true, autoPersonaId: 'old' }));
+    localService.evaluateApproval.mockResolvedValue({ status: 'fallback', verdict: 'ask_user', reason: 'unavailable' });
+    expect(await service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).toHaveProperty('status', 'manual');
+    expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
   });
 
   it('returns manual when the config mode is manual', async () => {
@@ -237,9 +315,9 @@ describe('HitlPolicyService', () => {
     await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'approved', reason: expect.stringContaining('threshold=0.95') });
   });
 
-  it.each(['rule', 'jev'] as const)('keeps destructive execution pending for an actual confirmation consumer (%s)', async (source) => {
+  it.each(['rule', 'jev', 'ollama'] as const)('keeps destructive execution pending for an actual confirmation consumer (%s)', async (source) => {
     configService.getConfig.mockResolvedValue(makeConfig({
-      mode: 'jev',
+      mode: source === 'ollama' ? 'ollama' : 'jev',
       rules: source === 'rule' ? [{ id: 'allow', kind: '*' as const, name: '*', decision: 'allow' as const }] : [],
     }));
     jevService.evaluateApproval.mockResolvedValue({ probability: 1 });

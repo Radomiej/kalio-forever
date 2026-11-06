@@ -45,12 +45,29 @@ describe('ArchitectureAutoRoutingService', () => {
   };
 
   beforeEach(() => {
-    decisions = { resolve: vi.fn().mockResolvedValue({ endpoint: 'http://127.0.0.1:9090/decide', model: 'local-decision', apiKey: '' }) };
+    decisions = { resolve: vi.fn().mockResolvedValue({ protocol: 'jev-decisions' as const, endpoint: 'http://127.0.0.1:9090/decide', model: 'local-decision', apiKey: '' }) };
     jev = { decideChoice: vi.fn().mockResolvedValue({ choice: 'edge-agent', confidence: 0.91 }) };
     service = new ArchitectureAutoRoutingService(
       decisions as unknown as DecisionSettingsPort,
       jev as unknown as JevDecisionsClient,
     );
+  });
+
+  it.each(['ollama-chat', 'unknown', undefined])('falls back without Jev for protocol %s', async protocol => {
+    decisions.resolve.mockResolvedValue({ protocol, endpoint: 'http://localhost:11434/api/chat', model: 'test' });
+    expect(await service.choose(input)).toEqual({ edgeId: 'edge-default', source: 'runtime_fallback', reason: 'provider_error' });
+    expect(jev.decideChoice).not.toHaveBeenCalled();
+    expect(decisions.resolve).toHaveBeenCalledWith();
+  });
+
+  it.each(['ollama-chat', 'unknown', undefined])('propagates cancellation before protocol %s fallback', async protocol => {
+    const controller = new AbortController();
+    decisions.resolve.mockImplementation(async () => {
+      controller.abort();
+      return { protocol, endpoint: 'http://localhost:11434/api/chat', model: 'test' };
+    });
+    await expect(service.choose({ ...input, signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(jev.decideChoice).not.toHaveBeenCalled();
   });
 
   it('offers only choice edge IDs and accepts a confident valid route', async () => {

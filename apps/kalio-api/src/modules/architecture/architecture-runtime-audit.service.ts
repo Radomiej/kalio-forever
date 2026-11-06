@@ -95,6 +95,8 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
           eventId: event.id,
           eventType: event.type,
           sequence: event.sequence,
+          lifecycle: event.lifecycle,
+          status: event.status,
           nodeId: event.nodeId,
           roleSlotId: event.roleSlotId,
           prompt: event.type === 'run_created' ? run.prompt : undefined,

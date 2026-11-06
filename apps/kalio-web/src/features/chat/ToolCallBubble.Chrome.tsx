@@ -77,7 +77,7 @@ export function Chip({
         {targetLabel && (
           <span
             data-testid="tool-call-target"
-            className="min-w-0 max-w-[16rem] truncate font-mono text-[10px] text-base-content/45"
+            className="min-w-0 max-w-[16rem] truncate font-mono text-[10px] text-base-content/60"
             title={targetLabel}
           >
             {targetLabel}
@@ -153,7 +153,7 @@ export function ConfirmationInlineBubble({ activity }: { activity: ToolActivity 
         {targetLabel && (
           <span
             data-testid="tool-call-target"
-            className="min-w-0 max-w-[16rem] truncate font-mono text-[10px] text-base-content/45"
+            className="min-w-0 max-w-[16rem] truncate font-mono text-[10px] text-base-content/60"
             title={targetLabel}
           >
             {targetLabel}

@@ -5042,7 +5042,7 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
-  it('REGRESSION: reconstructs a resumed run as running when newer audit activity exists after run_stopped', async () => {
+  it('REGRESSION: late neutral activity cannot override run_stopped without resume authority', async () => {
     const { service, audit } = createService();
     const runId = 'durable-resumed-run';
     const createdAt = 1_780_004_000_000;
@@ -5120,7 +5120,7 @@ describe('ArchitectureRuntimeService', () => {
 
     await expect(service.findRunDurable(runId)).resolves.toMatchObject({
       id: runId,
-      status: 'running',
+      status: 'cancelled',
       rootSessionId: `arch-${runId}-root`,
     });
   });

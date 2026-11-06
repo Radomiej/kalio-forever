@@ -123,9 +123,21 @@ export function SettingsModal({ onClose, initialTab }: SettingsModalProps) {
         {/* Content */}
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
 
+          <div className="shrink-0 border-b border-base-300 bg-base-200/30 p-3 lg:hidden">
+            <select
+              aria-label="Settings section"
+              data-testid="settings-section-select"
+              className="select select-bordered min-h-11 w-full"
+              value={activeBlock?.id ?? ''}
+              onChange={(event) => setTabId(event.target.value)}
+            >
+              {SETTINGS_BLOCKS.map((block) => <option key={block.id} value={block.id}>{block.label}</option>)}
+            </select>
+          </div>
+
           {/* Sidebar Tabs */}
           <div
-            className="grid shrink-0 grid-cols-2 gap-1.5 overflow-y-auto border-b border-base-300 bg-base-200/30 p-3 sm:grid-cols-3 lg:w-64 lg:grid-cols-1 lg:content-start lg:overflow-visible lg:border-b-0 lg:border-r"
+            className="hidden shrink-0 gap-1.5 overflow-y-auto border-r border-base-300 bg-base-200/30 p-3 lg:grid lg:w-64 lg:grid-cols-1 lg:content-start lg:overflow-visible"
             data-testid="settings-navigation"
           >
             {SETTINGS_BLOCKS.map((block) => (

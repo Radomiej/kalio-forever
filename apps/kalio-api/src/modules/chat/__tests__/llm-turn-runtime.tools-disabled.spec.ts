@@ -75,4 +75,32 @@ describe('one-way toolsDisabled runtime', () => {
     for (const fn of [getExecution, execute, transform, f.sessions.persistAssistantMessage, f.dispatch.dispatch])
       expect(fn).not.toHaveBeenCalled();
   });
+  it('captures guard before history await and rejects stale callback despite request mutation', async () => {
+    const f = fixture([[{ type: 'done' }]]); let current = true;
+    let release!: (value: { history: never[]; unboundedHistoryCount: number }) => void;
+    f.sessions.loadHistoryForLLM.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const request = { ...f.request, assertExecutionCurrent: () => { if (!current) throw new Error('private'); } };
+    const running = f.runtime.runAgentLoop(request);
+    await vi.waitFor(() => expect(f.sessions.loadHistoryForLLM).toHaveBeenCalled());
+    request.assertExecutionCurrent = () => undefined; current = false;
+    release({ history: [], unboundedHistoryCount: 0 });
+    await expect(running).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/); expect(f.seen).toHaveLength(0);
+  });
+  it('keeps the same captured check across empty retries', async () => {
+    const f = fixture([[{ type: 'done' }], [{ type: 'text_delta', delta: 'review' }, { type: 'done' }]]);
+    const check = vi.fn(() => undefined);
+    await f.runtime.runAgentLoop({ ...f.request, assertExecutionCurrent: check, maxEmptyNoToolRetries: 1 });
+    expect(f.seen).toHaveLength(2);
+    expect(f.seen[0]?.assertExecutionCurrent).toBeTypeOf('function');
+    expect(f.seen[0]?.assertExecutionCurrent).toBe(f.seen[1]?.assertExecutionCurrent);
+    expect(check).toHaveBeenCalled();
+  });
+  it('rechecks staleness before structured repair, not only first provider attempt', async () => {
+    const error = Object.assign(new Error('Bad JSON'), { code: 'LLM_BAD_STRUCTURED_OUTPUT' });
+    const f = fixture([error, [{ type: 'done' }]]);
+    await expect(f.runtime.runAgentLoop({ ...f.request, assertExecutionCurrent: () => {
+      if (f.seen.length) throw new Error('private');
+    }, structuredOutput: { name: 'review', schema: { type: 'object' } } })).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
+    expect(f.seen).toHaveLength(1);
+  });
 });

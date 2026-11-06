@@ -118,6 +118,20 @@ describe('CodexAppServerLLMSource', () => {
     expect(chunks).toEqual([{ type: 'text_delta', delta: 'hello' }, { type: 'done' }]);
   });
 
+  it('sends the latest attachment with the text as an App Server image input', async () => {
+    const connection = new FakeConnection();
+    const source = new CodexAppServerLLMSource({ getConnection: vi.fn().mockResolvedValue(connection) } as never);
+    const url = 'data:image/png;base64,aGVsbG8=';
+    const messages: LLMSourceParams['messages'] = [
+      { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,b2xk' } }] },
+      { role: 'user', content: [{ type: 'text', text: 'Describe this' }, { type: 'image_url', image_url: { url } }] },
+    ];
+    for await (const _chunk of source.stream(params(connection, { messages }))) { /* collect until completed */ }
+    expect(connection.requests.find((request) => request.method === 'turn/start')?.params).toMatchObject({
+      input: [{ type: 'text', text: 'Describe this', text_elements: [] }, { type: 'image', url }],
+    });
+  });
+
   it('keeps max for GPT-5.6 and downgrades it for older Codex models', async () => {
     const olderConnection = new FakeConnection();
     const olderSource = new CodexAppServerLLMSource({ getConnection: vi.fn().mockResolvedValue(olderConnection) } as never);

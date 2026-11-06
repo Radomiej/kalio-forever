@@ -142,7 +142,7 @@ describe('restored HITL shared admission (isolated SQLite)', () => {
     f.journal.getTurn.mockImplementation((sessionId: string, turnId: string) => f.durableJournal.getTurn(sessionId, turnId));
     f.journal.interrupt.mockImplementation((id: string, message: string) => f.durableJournal.interrupt(id, message));
     const gateway = new ChatGateway(f.dispatch as never, f.pipeline, {} as never, f.sessions as never,
-      { onSessionCreated: vi.fn(), onSessionUpdated: vi.fn() } as never,
+      { onSessionCreated: vi.fn(), onSessionUpdated: vi.fn(), onRuntimeEvent: vi.fn() } as never,
       { getPendingApprovals: vi.fn().mockReturnValue([]) } as never,
       undefined, undefined, undefined, undefined, f.requests, f.chat,
       new SessionRuntimeStopService(f.sessions as never, f.pipeline));

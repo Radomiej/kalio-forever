@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolMeta, ToolResult } from '@kalio/types';
 import { ToolDispatchService } from '../chat/tool-dispatch.service';
 import { ChatGateway } from '../chat/chat.gateway';
@@ -12,6 +12,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isKalioMcpBridgeEnabled } from '../../common/kalio-mcp-bridge-config';
 import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-token.service';
 import { KalioMcpBridgeContextRegistry, type KalioMcpBridgeTurnContext } from '../../common/kalio-mcp-bridge-context';
+import { readToolImage } from '../../common/utils/tool-image-content';
 
 const BLOCKED_CHILD_TOOL_NAMES = new Set([
   'run_cli_agent',
@@ -227,7 +228,7 @@ export class KalioMcpBridgeService {
         try {
           const result = await dynamicContext.dispatchNativeTool({ id: callId, name: toolName, args }, { abortSignal, onApprovalProgress });
           await notifications;
-          return toMcpResult(result);
+          return toMcpResult(result, toolName);
         } finally {
           stopHeartbeat();
           abortSignal.removeEventListener('abort', stopHeartbeat);
@@ -262,7 +263,7 @@ export class KalioMcpBridgeService {
         const result = await this.toolDispatch.dispatch(callId, toolName, args, streamContext, visible);
         emit('tool:result', { ...result, sessionId: context.sessionId, toolName });
         await notifications;
-        return toMcpResult(result);
+        return toMcpResult(result, toolName);
       } finally {
         stopHeartbeat();
         abortSignal.removeEventListener('abort', stopHeartbeat);
@@ -309,9 +310,13 @@ function toMcpTool(meta: ToolMeta): McpTool {
   };
 }
 
-function toMcpResult(result: ToolResult): { content: [{ type: 'text'; text: string }]; isError?: boolean } {
+function toMcpResult(result: ToolResult, toolName: string): CallToolResult {
   if (result.status === 'success') {
-    return { content: [{ type: 'text', text: JSON.stringify(result.data ?? null) }] };
+    const image = readToolImage(toolName, result.data);
+    return { content: [
+      { type: 'text', text: image?.text ?? JSON.stringify(result.data ?? null) },
+      ...(image?.image ? [{ type: 'image' as const, ...image.image }] : []),
+    ] };
   }
   if (result.status === 'cancelled') {
     return { content: [{ type: 'text', text: JSON.stringify(result) }] };

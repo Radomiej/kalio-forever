@@ -13,6 +13,13 @@ const makeTokenCount = (overrides: Partial<TokenCount> = {}): TokenCount => ({
   ...overrides,
 });
 
+const makePreview = (): LLMContextPreview => ({
+  sessionId: 'sid', personaId: 'persona-1', model: 'model', contextLimit: 32000,
+  estimatedTokens: { total: 20, systemPrompt: 20, tools: 0, history: 0, images: 0, reasoning: 0 },
+  compaction: { applied: false, unboundedMessageCount: 0, finalMessageCount: 0, safeTargetTokens: 25600 },
+  effectiveSystemPrompt: 'Last backend preview', messages: [], tools: [],
+});
+
 describe('ContextStats', () => {
   it('renders context stats panel with data-testid', () => {
     render(<ContextStats tokenCount={makeTokenCount()} onClose={vi.fn()} />);
@@ -158,7 +165,61 @@ describe('ContextStats', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /llm payload preview/i }));
 
-    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('stale');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent(/stale/i);
     expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('Preview failed');
+    expect(screen.queryByText(/refreshing/i)).not.toBeInTheDocument();
+  });
+
+  it('shows quiet activity only while pending and retains the backend preview through success', () => {
+    const preview = makePreview();
+    const props = { tokenCount: makeTokenCount(), onClose: vi.fn(), contextPreview: preview };
+    const { rerender } = render(
+      <ContextStats {...props} contextPreviewStatus={{ loading: true, stale: true, error: null }} />,
+    );
+    const activity = screen.getByRole('status');
+    expect(activity).toHaveTextContent('Refreshing context preview');
+    expect(activity).toHaveAttribute('aria-live', 'off');
+    expect(activity).toHaveClass('h-3', 'w-3', 'shrink-0');
+    expect(activity.querySelector('svg')).toHaveClass('motion-safe:animate-spin');
+    expect(activity.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /llm payload preview/i }));
+    const panel = screen.getByTestId('context-preview-panel');
+    expect(panel).toHaveAttribute('aria-busy', 'true');
+    expect(panel).toHaveTextContent('Last backend preview');
+    expect(panel).toHaveTextContent('Stale preview');
+    expect(panel.querySelector('.text-warning')).toBeNull();
+    const statusLine = screen.getByTestId('context-preview-status');
+    expect(statusLine).toHaveClass('min-h-4');
+
+    rerender(<ContextStats {...props} contextPreviewStatus={{ loading: false, stale: false, error: null }} />);
+    expect(screen.getByRole('status')).toBe(activity);
+    expect(activity).toBeEmptyDOMElement();
+    expect(panel).toHaveAttribute('aria-busy', 'false');
+    expect(panel).toHaveTextContent('Last backend preview');
+    expect(screen.getByTestId('context-preview-status')).toBe(statusLine);
+    expect(statusLine).toBeEmptyDOMElement();
+  });
+
+  it('shows initial loading accessibly without claiming progress', () => {
+    render(<ContextStats tokenCount={makeTokenCount()} onClose={vi.fn()}
+      contextPreviewStatus={{ loading: true, stale: false, error: null }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading context preview');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('stops activity on error while preserving stale data and the error', () => {
+    const props = { tokenCount: makeTokenCount(), onClose: vi.fn(), contextPreview: makePreview() };
+    const { rerender } = render(
+      <ContextStats {...props} contextPreviewStatus={{ loading: true, stale: true, error: null }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /llm payload preview/i }));
+    rerender(<ContextStats {...props}
+      contextPreviewStatus={{ loading: false, stale: true, error: 'Preview failed' }} />);
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('context-preview-panel')).toHaveAttribute('aria-busy', 'false');
+    expect(screen.getByTestId('context-preview-panel')).toHaveTextContent('Last backend preview');
+    expect(screen.getByTestId('context-preview-status')).toHaveTextContent('Stale preview');
+    expect(screen.getByText('Preview failed')).toHaveClass('text-error');
+    expect(screen.queryByText(/refreshing/i)).not.toBeInTheDocument();
   });
 });

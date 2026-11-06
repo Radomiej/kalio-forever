@@ -26,6 +26,8 @@ import {
   architectureAuditWorkflowRuntimeDecisionField,
   isArchitectureExecutionEventType,
   statusFromArchitectureAuditEventSummary,
+  architectureAuditLifecycleField,
+  architectureAuditStatusField,
 } from './architecture-runtime-audit-recovery.utils';
 
 export interface ArchitectureRuntimeAuditRecovery {
@@ -81,7 +83,7 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
       }
       const type = architectureAuditStringField(record, 'eventType');
       if (!type || !isArchitectureExecutionEventType(type)) continue;
-      const status = architectureAuditStringField(record, 'status');
+      const status = architectureAuditStatusField(record);
       events.push({
         type,
         reasonCode: architectureAuditWorkflowReasonCodeField(record, 'reasonCode')
@@ -161,6 +163,8 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
         id: eventId,
         runId,
         sequence: architectureAuditNumberField(data, 'sequence') ?? index + 1,
+        lifecycle: architectureAuditLifecycleField(data),
+        status: architectureAuditStatusField(data),
         type: eventType,
         message: architectureAuditStringField(data, 'messagePreview') ?? row.label,
         actionSummary: actionFields.actionSummary,

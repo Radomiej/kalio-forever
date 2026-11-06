@@ -17,7 +17,7 @@ import { SubagentResultReplayService } from './subagent-result-replay.service';
 import { LLM_SOURCE } from './chat.tokens';
 import type { ILLMSource } from './interfaces/llm-source.interface';
 import { TurnState } from './turn-state';
-import { createWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
+import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import { RAW_XML_TOOL_CALL_COMPAT_TOOL_NAME } from './raw-tool-call.parser';
 import { ExecutionProfileService } from '../agent-runtime/execution-profile.service';
 import { NativeApprovalService } from '../agent-runtime/native-approval.service';
@@ -29,6 +29,7 @@ import { ProjectsService } from './projects.service';
 import { failedRunResultText } from './subagent-result-text';
 import { completeSubagentRuntime } from './subagent-runtime-completion';
 import { bindObservedSubagentCancellation } from './subagent-cancellation-binding';
+import { createSubagentExecutionBudget } from './subagent-execution-budget';
 import { hostReceiptIdentity } from './llm-turn-tool-execution';
 import {
   ActiveSubagentRunRegistry,
@@ -212,34 +213,18 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       controller,
     });
     const executionLease = this.runtimeScheduler ? createRuntimeExecutionLeaseController(this.runtimeScheduler, { projectId: childSession.projectId ?? 'system:none', priority: 'child', label: `subagent:${childSessionId}:${turnId}` }) : undefined;
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const executionBudget = createSubagentExecutionBudget({ timeoutMs: request.timeoutMs,
+      signal: controller.signal, isCurrent: () => this.activeRuns.getStatus(childSessionId)?.turnId === turnId,
+      onExpired: error => controller.abort(error) });
     let journalRunId: string | undefined;
     let journalCommitted = false;
     let loopExecution: Promise<LLMAgentLoopResult> | undefined;
-    let rejectExecutionTimeout: ((error: Error) => void) | undefined;
-    const clearExecutionTimeout = () => {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
-      }
-    };
-    const armExecutionTimeout = () => {
-      clearExecutionTimeout();
-      timeoutHandle = setTimeout(() => {
-        const error = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${request.timeoutMs}ms`, {
-          source: 'subagent-runtime',
-        });
-        controller.abort(error);
-        rejectExecutionTimeout?.(error);
-      }, request.timeoutMs);
-    };
 
     try {
       await executionLease?.acquire();
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        rejectExecutionTimeout = reject;
-        armExecutionTimeout();
-      });
+      controller.signal.throwIfAborted();
+      if (this.activeRuns.getStatus(childSessionId)?.turnId !== turnId) throw new Error('Sub-agent execution owner is stale.');
+      executionBudget.start();
 
       const toolPolicyRequest = {
         runtimeKind,
@@ -266,6 +251,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
             toolPolicyRequest,
           });
 
+      controller.signal.throwIfAborted();
       const runtimeConfig = await this.llmSource.getConfig?.();
       const llmAuditData = buildSubagentLLMAuditData(runtimeConfig, assembledContext.model, observedScope ? undefined : request.model);
       const requestModel = observedScope ? undefined : request.model?.trim();
@@ -284,6 +270,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       const hostCancellationRecording = request.hostRuntimeReceiptObserver
         ? bindObservedSubagentCancellation(this.activeRuns, childSessionId, controller, hostReceiptIdentity({ runId: journalRunId, sessionId: childSessionId, turnId, promptMessageId })) : undefined;
 
+      controller.signal.throwIfAborted();
       const loopResult = await Promise.race([
         loopExecution = this.llmTurnRuntime.runAgentLoop({
           runtimeKind,
@@ -328,6 +315,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
           firstMessageId: `subagent-${agentRun.agentRunId}`,
           messageIdPrefix: `subagent-${agentRun.agentRunId}`,
           callbacks: {
+            ...(runtimeKind === 'agent-flow-branch' ? { beginManualToolWait: executionBudget.beginManualToolWait } : {}),
             onBeforeIteration: async (iteration, messageId, currentLimit) => {
               trackingEmit?.('agent:budget_progress', {
                 sessionId: childSessionId,
@@ -359,7 +347,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                 roleSlotId: typeof request.auditContext?.roleSlotId === 'string' ? request.auditContext.roleSlotId : undefined,
                 updatedAt: Date.now(),
               });
-              clearExecutionTimeout();
+              executionBudget.pauseForIterationApproval();
               const approvedLimit = await this.agentBudgetApprovals.requestAdditionalBudget(
                 {
                   sessionId: childSessionId,
@@ -383,13 +371,13 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
                 },
               );
               if (approvedLimit && !controller.signal.aborted) {
-                armExecutionTimeout();
+                executionBudget.resetAfterIterationGrant();
               }
               return approvedLimit;
             },
           },
         }),
-        timeoutPromise,
+        executionBudget.expiration.then(error => { throw error; }),
       ]);
 
       const { copiedFiles, baseResultText, completionMessageId } = await completeSubagentRuntime({
@@ -471,7 +459,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
       throw error;
     } finally {
-      clearExecutionTimeout();
+      executionBudget.dispose();
       executionLease?.release();
       completeActiveRun();
     }

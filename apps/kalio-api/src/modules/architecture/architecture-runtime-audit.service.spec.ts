@@ -13,6 +13,16 @@ import {
 import type { ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 
 describe('ArchitectureRuntimeAuditWriterService', () => {
+  it('TASK59 preserves typed lifecycle and status in ordinary audit events', () => {
+    const log = vi.fn().mockResolvedValue('row');
+    const writer = new ArchitectureRuntimeAuditWriterService({ log } as unknown as AuditService);
+    writer.logEvent({ id: 'schema' } as ArchitectureSchema, { id: 'run', rootSessionId: 'root' } as ArchitectureRun,
+      { id: 'failed-event', runId: 'run', sequence: 2, type: 'router_decision', message: 'Display only', createdAt: 2,
+        status: 'failed', lifecycle: 'failed', errorCode: 'CONTRACT_VIOLATION' });
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      eventType: 'router_decision', status: 'failed', lifecycle: 'failed', errorCode: 'CONTRACT_VIOLATION',
+    }) }));
+  });
   it('persists pause lifecycle and reason in required route checkpoints', async () => {
     const logRequired = vi.fn(async () => undefined);
     const writer = new ArchitectureRuntimeAuditWriterService({ logRequired } as unknown as AuditService);

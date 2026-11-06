@@ -357,3 +357,22 @@ describe('HITLSettingsPanel', () => {
     expect(getPutBody()).toMatchObject({ mode: 'jev', jevApprovalThreshold: 0.98, rules });
   });
 });
+
+it('saves explicit Ollama mode with no persona fallback or probability controls', async () => {
+  installFetchMock();
+  render(<HITLSettingsPanel />);
+  const option = await screen.findByRole('radio', { name: 'Ollama local verdicts' });
+  fireEvent.click(option);
+  expect(option).toBeChecked();
+  expect(screen.getByText(/Only eligible read-only operations/)).toHaveTextContent('Protected operations and errors require manual approval');
+  expect(screen.queryByLabelText('Jev approval threshold')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Jev approval instructions')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Approval persona')).toBeDisabled();
+  expect(getPutBody()).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await screen.findByText('HITL settings saved.');
+  expect(getPutBody()).toMatchObject({ mode: 'ollama', jevFallbackToPersona: false });
+  expect(getPutBody()).not.toHaveProperty('autoPersonaId');
+  expect(getPutBody()).not.toHaveProperty('jevApprovalThreshold');
+  expect(getPutBody()).not.toHaveProperty('jevInstructions');
+});

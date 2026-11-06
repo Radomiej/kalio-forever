@@ -10,13 +10,15 @@ describe('ProjectSessionGroups accessibility', () => {
       entries: [{ type: 'session', depth: 0, session: { id: 's', title: 'Chat', personaId: 'default', createdAt: 1, updatedAt: 1 } }],
       latestActivityAt: 1, isExpanded: false,
     };
-    render(<ProjectSessionGroups groups={[group]}>{() => <p>Conversation child</p>}</ProjectSessionGroups>);
+    const { rerender } = render(<ProjectSessionGroups groups={[group]}>{() => <p>Conversation child</p>}</ProjectSessionGroups>);
     const toggle = screen.getByRole('button', { name: 'Bez projektu 1' });
     expect(within(toggle).getByText('1')).toHaveClass('text-base-content/60');
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Conversation child')).not.toBeInTheDocument();
+    rerender(<ProjectSessionGroups groups={[{ ...group }]}>{() => <p>Conversation child</p>}</ProjectSessionGroups>);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(toggle);
     expect(screen.getByText('Conversation child')).toBeInTheDocument();
   });

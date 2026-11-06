@@ -6,6 +6,8 @@ import type { NativeToolDispatch } from '../../../common/kalio-mcp-bridge-contex
 export interface LLMSourceParams {
   /** Backend-only, one-way narrowing; never grants host admission authority. */
   toolsDisabled?: true;
+  /** Backend-only synchronous narrowing check; must return exactly undefined. */
+  assertExecutionCurrent?: () => void;
   messages: ContextManagedLLMMessage[];
   tools: ToolMeta[];
   sessionId: string;

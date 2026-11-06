@@ -44,7 +44,7 @@ function fixture() {
       childRefsById: {}, supersededEvidenceIds: {},
       buildExpectation: { approvedSource: { messageId: 'human', sessionId: 'HOST', turnId: 'turn' }, executable: 'npm', args: ['run', 'build'], canonicalCwd: 'E:\\project' } } }, 2);
   const http = vi.fn<typeof fetch>().mockImplementation(async () => answer()); vi.stubGlobal('fetch', http);
-  const settings: DecisionSettingsPort = { resolve: vi.fn(async () => ({ endpoint: 'https://decisions.invalid', model: 'jev', apiKey: 'PRIVATE' })), getConfig: vi.fn(), updateConfig: vi.fn() };
+  const settings: DecisionSettingsPort = { resolve: vi.fn(async () => ({ protocol: 'jev-decisions' as const, endpoint: 'https://decisions.invalid', model: 'jev', apiKey: 'PRIVATE' })), getConfig: vi.fn(), updateConfig: vi.fn() };
   const review = new ArchitectureGoalCompletionReviewService(settings, new JevDecisionsClient(), {
     readCurrent: async () => {
       const state = repo.load('run', 'root'); if (!state?.evidenceInventory) throw new Error('No inventory');

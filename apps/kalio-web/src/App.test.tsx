@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -64,8 +65,9 @@ const {
 }));
 
 vi.mock('./features/chat/ChatInterface', () => ({
-  ChatInterface: ({ onTalkViewChange }: { onTalkViewChange?: (view: 'conversation' | 'graph') => void }) => (
+  ChatInterface: ({ onTalkViewChange, sidebarExpand }: { onTalkViewChange?: (view: 'conversation' | 'graph') => void; sidebarExpand?: ReactNode }) => (
     <div data-testid="chat-interface">
+      {sidebarExpand}
       Chat
       <textarea aria-label="Unsent draft" defaultValue="" />
       <button type="button" data-testid="mock-switch-graph" onClick={() => onTalkViewChange?.('graph')}>
@@ -80,8 +82,9 @@ vi.mock('./features/chat/CanvasPanel', () => ({
 }));
 
 vi.mock('./features/chat/graph/ExecutionGraphView', () => ({
-  ExecutionGraphView: ({ onOpenSessionInConversation }: { onOpenSessionInConversation?: (sessionId: string) => void }) => (
+  ExecutionGraphView: ({ onOpenSessionInConversation, sidebarExpand }: { onOpenSessionInConversation?: (sessionId: string) => void; sidebarExpand?: ReactNode }) => (
     <div data-testid="execution-graph-view">
+      {sidebarExpand}
       Graph
       <button
         type="button"
@@ -626,7 +629,7 @@ describe('App view state persistence', () => {
     vi.stubGlobal('innerWidth', 1023);
     fireEvent(window, new Event('resize'));
 
-    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.getByTestId('talk-sidebar-expand')).toBeInTheDocument();
     expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
     expect(draft.closest('[class~="hidden"][class~="lg:flex"]')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Unsent draft' })).toBe(draft);
@@ -638,7 +641,7 @@ describe('App view state persistence', () => {
     fireEvent(window, new Event('resize'));
     expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Hide conversations' }));
-    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.getByTestId('talk-sidebar-expand')).toBeInTheDocument();
 
     vi.stubGlobal('innerWidth', 1440);
     fireEvent(window, new Event('resize'));
@@ -654,9 +657,9 @@ describe('App view state persistence', () => {
     vi.stubGlobal('innerWidth', 800);
     fireEvent(window, new Event('resize'));
     expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-expand')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('mock-select-conversation'));
-    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.getByTestId('talk-sidebar-expand')).toBeInTheDocument();
   });
 
   it('does not switch to a conversation when crossing the breakpoint outside Talk', () => {
@@ -666,7 +669,7 @@ describe('App view state persistence', () => {
     fireEvent(window, new Event('resize'));
     fireEvent.click(screen.getByTestId('nav-talk'));
     expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-expand')).not.toBeInTheDocument();
   });
 
   it('opens a Home approval directly in the conversation on compact screens even after using graph', async () => {
@@ -677,7 +680,7 @@ describe('App view state persistence', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('landing-open-approval')); });
 
     expect(setActiveSession).toHaveBeenCalledWith('session-1');
-    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.getByTestId('talk-sidebar-expand')).toBeInTheDocument();
     expect(screen.queryByTestId('execution-graph-view')).not.toBeInTheDocument();
     expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
   });
@@ -758,25 +761,21 @@ describe('App view state persistence', () => {
 
     fireEvent.click(screen.getByTestId('talk-sidebar-collapse'));
 
-    expect(screen.getByTestId('talk-sidebar-collapsed')).toBeInTheDocument();
+    expect(screen.getByTestId('execution-graph-view')).toContainElement(screen.getByTestId('talk-sidebar-expand'));
     expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
-    expect(screen.getByTestId('execution-graph-view')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('talk-sidebar-expand'));
 
     expect(screen.getByTestId('conversation-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('talk-sidebar-collapsed')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('talk-sidebar-expand')).not.toBeInTheDocument();
   });
 
-  it('does not expose the graph switcher in the collapsed Talk sidebar rail', () => {
-
+  it('puts the sidebar restore control inside the conversation pane', () => {
     render(<App />);
 
     fireEvent.click(screen.getByTestId('talk-sidebar-collapse'));
-    const collapsedRail = screen.getByTestId('talk-sidebar-collapsed');
-
-    expect(collapsedRail.querySelector('[data-testid="talk-sidebar-graph-entry"]')).not.toBeInTheDocument();
-    expect(screen.getByTestId('chat-interface')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-interface')).toContainElement(screen.getByTestId('talk-sidebar-expand'));
+    expect(screen.queryByTestId('conversation-panel')).not.toBeInTheDocument();
   });
 
   it('shows the conversation view when landing starts a chat from a stored graph view', () => {

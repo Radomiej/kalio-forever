@@ -3,6 +3,7 @@ import { ChevronDown, BrainCircuit } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
 import type { ChatMessage } from '@kalio/types';
+import { getApiBaseUrl } from '../../services/apiClient';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -72,10 +73,19 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
   }, [thinkingActive]);
 
   if (isUser) {
+    const images = (message.attachments ?? []).filter(({ mimeType }) => /^image\/(png|jpeg|webp|gif)$/.test(mimeType));
     return (
       <div data-testid="message-bubble" data-role="user" className="flex justify-end">
         <div className="flex max-w-[min(100%,72rem)] flex-col items-end">
           <div className="max-w-full overflow-hidden rounded-2xl bg-sky-700 px-3.5 py-2 text-sm text-white">
+            {images.length > 0 && <div className="mb-2 flex flex-wrap gap-2">
+              {images.map(({ path }, index) => {
+                const url = `${getApiBaseUrl()}/api/sessions/${encodeURIComponent(message.sessionId)}/vfs/serve?path=${encodeURIComponent(path)}`;
+                return <a key={`${path}:${index}`} href={url} target="_blank" rel="noreferrer">
+                  <img src={url} alt="Attached image" className="max-h-40 max-w-full rounded-lg object-contain" loading="lazy" />
+                </a>;
+              })}
+            </div>}
             <UserMessageContent content={displayContent} />
           </div>
         </div>

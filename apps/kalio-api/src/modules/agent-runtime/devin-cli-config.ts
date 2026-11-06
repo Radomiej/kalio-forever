@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import type { McpServer } from '@agentclientprotocol/sdk';
 import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, type DevinNativeToolsPolicy } from './devin-native-tools';
+import { captureExecutionCurrent, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,9 +27,11 @@ export async function createDevinCliConfig(
   mcpServers: readonly McpServer[],
   nativePolicy: DevinNativeToolsPolicy = DEFAULT_DEVIN_NATIVE_TOOLS_POLICY,
   onAllocated?: (handle: DevinCliConfigHandle) => void,
+  assertExecutionCurrent?: ExecutionCurrentCheck,
 ): Promise<DevinCliConfigHandle> {
   if (typeof model !== 'string' || !model.trim()) throw new Error('Devin runtime config requires an explicit model.');
-  return prepareDevinCliConfig({ kind: 'runtime', model }, mcpServers, nativePolicy, onAllocated);
+  const check = captureExecutionCurrent(assertExecutionCurrent); check?.();
+  return prepareDevinCliConfig({ kind: 'runtime', model }, mcpServers, nativePolicy, onAllocated, check);
 }
 
 /** Metadata discovery never selects a runtime model or enables native tools. */
@@ -42,7 +45,9 @@ async function prepareDevinCliConfig(
   intent: { kind: 'runtime'; model: string } | { kind: 'metadata' },
   mcpServers: readonly McpServer[], nativePolicy: DevinNativeToolsPolicy,
   onAllocated?: (handle: DevinCliConfigHandle) => void,
+  assertExecutionCurrent?: ExecutionCurrentCheck,
 ): Promise<DevinCliConfigHandle> {
+  const check = captureExecutionCurrent(assertExecutionCurrent); check?.();
   const directory = await mkdtemp(join(tmpdir(), 'kalio-devin-acp-'));
   const cwd = join(directory, 'workspace');
   const configDirectory = join(cwd, '.devin');
@@ -55,11 +60,14 @@ async function prepareDevinCliConfig(
   };
   try {
     onAllocated?.(handle);
+    check?.();
     await mkdir(configDirectory, { recursive: true });
     // Devin discovers project-scoped config by walking up to a valid .git/.jj
     // root. Keep that discovery inside the ephemeral host directory rather than
     // the user's project or global Devin configuration.
+    check?.();
     await execFileAsync('git', ['init', '--quiet', cwd], { windowsHide: true });
+    check?.();
     const mcpConfig = Object.fromEntries(mcpServers.map((server) => [server.name, serializeMcpServer(server)]));
     const dedicatedMcpPath = join(configDirectory, 'mcp_config.local.json');
     // The Kalio host must not import another client's MCP/rules/skills by default.
@@ -80,6 +88,7 @@ async function prepareDevinCliConfig(
       ask: groups.filter(group => group.enabled).flatMap(group => group.tools),
     };
     writeConfig = async (names: readonly string[]): Promise<void> => {
+      check?.();
       const disabled = Object.fromEntries(names.filter(name => !Object.hasOwn(mcpConfig, name)).map(name => [name, {
         command: process.execPath, args: ['-e', 'process.exit(0)'], disabled: true,
       }]));
@@ -90,10 +99,12 @@ async function prepareDevinCliConfig(
           read_config_from, permissions, mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
         writeFile(dedicatedMcpPath, JSON.stringify({ mcpServers: servers }, null, 2), { encoding: 'utf8', mode: 0o600 }),
       ]);
+      check?.();
       const failed = writes.find((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failed) throw failed.reason;
     };
     await writeConfig([]);
+    check?.();
     return handle;
   } catch (error) {
     // An adopting host owns rollback; standalone callers retain it if cleanup fails.

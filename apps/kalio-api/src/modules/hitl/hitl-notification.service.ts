@@ -10,6 +10,8 @@ export interface HitlApprovalNotification {
   requestId: string;
   timeoutMs: number;
   request: HitlApprovalRequest;
+  /** Supervisor context on the existing request, distinct from a later human reason. */
+  policyReason?: string;
 }
 
 export type HitlApprovalLifecycleEvent =
@@ -137,6 +139,7 @@ export class HitlNotificationService {
         delivered,
         timeoutMs: notification.timeoutMs,
         request: this.serializeRequest(notification.request),
+        ...(notification.policyReason ? { policyReason: notification.policyReason } : {}),
         ...(error ? { error } : {}),
       },
     });

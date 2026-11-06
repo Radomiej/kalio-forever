@@ -38,7 +38,7 @@ function DevinAuditContent({ sessionId, turnId }: { sessionId: string; turnId: s
       }}>Devin tool permissions</button>
       {open && (
         <div className="mt-2 space-y-2 rounded border border-base-content/15 p-2">
-          <p>Native Devin permission and activity evidence only; opening this panel does not mean a native tool ran. Kalio tool calls are shown separately in the chat. This panel does not report native tools from other providers. Approval does not prove execution.</p>
+          <p>Devin reports skills, tool discovery and permission decisions here. Approval records permission only. Kalio tool executions appear separately in chat.</p>
           <button className="btn btn-xs" disabled={loading} onClick={() => void load()}>Refresh native audit</button>
           {loading && <p role="status">Loading native audit…</p>}
           {error && <p role="alert">{error}</p>}

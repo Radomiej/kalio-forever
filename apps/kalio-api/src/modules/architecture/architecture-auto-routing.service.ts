@@ -44,6 +44,8 @@ export class ArchitectureAutoRoutingService {
       let connection: DecisionConnection;
       try { connection = await this.decisions.resolve(); }
       catch (error) { if (input.signal?.aborted) throw error; return fallback('credential_missing'); }
+      input.signal?.throwIfAborted();
+      if (connection.protocol !== 'jev-decisions') return fallback('provider_error');
 
       const nodesById = new Map(input.schema.nodes.map((node) => [node.id, node]));
       const criteria = Object.fromEntries(choiceEdges.map((edge) => {

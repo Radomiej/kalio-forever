@@ -31,6 +31,7 @@ import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
 import { AgentRuntimeModule } from './modules/agent-runtime/agent-runtime.module';
 import { CodeIntelligenceModule } from './modules/code-intelligence/code-intelligence.module';
 import { KalioMcpBridgeModule } from './modules/mcp-bridge/kalio-mcp-bridge.module';
+import { SpeechModule } from './modules/speech/speech.module';
 
 const shouldServeUi = process.env['KALIO_SERVE_UI'] === 'true';
 const webRoot = resolve(
@@ -97,6 +98,7 @@ const renderEmbeddedUiIndex = (_req: Request, res: Response) => {
     AgentRuntimeModule,
     CodeIntelligenceModule,
     KalioMcpBridgeModule,
+    SpeechModule,
     HitlModule,
     RelayModule,
   ],

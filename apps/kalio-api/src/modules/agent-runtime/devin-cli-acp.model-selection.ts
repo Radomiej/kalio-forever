@@ -1,4 +1,5 @@
 import { methods, type ClientConnection, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { captureExecutionCurrent, guardedAcpRequest, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 
 type ConfigOptions = SessionConfigOption[] | null | undefined;
 
@@ -51,14 +52,15 @@ export function assertDevinSessionModel(model: string, options: ConfigOptions, s
 
 export async function bindDevinSessionModel(
   connection: ClientConnection, sessionId: string, model: string, options: ConfigOptions,
-  beforeSet?: () => void,
+  beforeSet?: () => void, assertExecutionCurrent?: ExecutionCurrentCheck,
 ): Promise<SessionConfigOption[]> {
+  const check = captureExecutionCurrent(assertExecutionCurrent); check?.();
   const selector = modelSelector(model, options);
   if (selector.currentValue === model) return structuredClone(options!);
   beforeSet?.();
-  const response = await connection.agent.request(methods.agent.session.setConfigOption, {
+  const response = await guardedAcpRequest(check, () => connection.agent.request(methods.agent.session.setConfigOption, {
     sessionId, configId: selector.id, value: model,
-  });
+  }));
   assertDevinSessionModel(model, response.configOptions, 'setter_response');
   if (modelSelector(model, response.configOptions).id !== selector.id) {
     throw new Error('Devin ACP model selector changed during confirmation; prompt blocked.');

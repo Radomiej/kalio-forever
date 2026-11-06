@@ -28,6 +28,47 @@ describe('landing chat launch', () => {
     expect(mocks.persist).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
+  it('persists explicit draft workflow in the create request before activation and first send', async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useChatLaunchSend({
+      activeSession: null, projectId: 'home', projectPath: '',
+      selectedArchitectureId: 'strategic-decision-council', send, onError: vi.fn(),
+    }));
+    await act(() => result.current('First workflow prompt', 'default', 'devin-swe-2'));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeContext: { runtimeKind: 'chat', architectureContext: { schemaId: 'strategic-decision-council' } },
+    }));
+    expect(mocks.create.mock.invocationCallOrder[0]).toBeLessThan(mocks.activate.mock.invocationCallOrder[0]);
+    expect(mocks.activate.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
+  });
+
+  it('does not seed draft workflow into an existing single chat', async () => {
+    const send = vi.fn();
+    const { result } = renderHook(() => useChatLaunchSend({
+      activeSession: session, projectId: 'home', projectPath: '',
+      selectedArchitectureId: 'strategic-decision-council', send, onError: vi.fn(),
+    }));
+    await act(() => result.current('Single follow up', 'default', 'devin-swe-2'));
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.persist).toHaveBeenCalledWith(session, 'default', 'devin-swe-2', mocks.store.updateSession);
+    expect(send).toHaveBeenCalledWith('Single follow up', 'default');
+  });
+
+  it('does not reuse a failed draft after changing its workflow mode', async () => {
+    mocks.persist.mockRejectedValueOnce(new Error('selection failed'));
+    const send = vi.fn();
+    const { result, rerender } = renderHook(({ selectedArchitectureId }) => useChatLaunchSend({
+      activeSession: null, projectId: 'home', projectPath: '', selectedArchitectureId,
+      send, onError: vi.fn(),
+    }), { initialProps: { selectedArchitectureId: 'strategic-decision-council' } });
+    await act(() => result.current('First prompt', 'default', 'devin-swe-2'));
+    expect(send).not.toHaveBeenCalled();
+    rerender({ selectedArchitectureId: 'single-chat' });
+    await act(() => result.current('Single prompt', 'default', 'devin-swe-2'));
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+    expect(mocks.create.mock.calls[1][0]).not.toHaveProperty('runtimeContext');
+    expect(send).toHaveBeenCalledExactlyOnceWith('Single prompt', 'default');
+  });
   it('guards double submit during first session creation and sends one first message', async () => {
     let resolveCreate!: () => void;
     mocks.create.mockImplementationOnce(() => new Promise((resolve) => {

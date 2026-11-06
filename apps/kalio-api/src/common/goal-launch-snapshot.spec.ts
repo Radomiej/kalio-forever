@@ -27,6 +27,29 @@ function fixture() {
   const owners: GoalLaunchSnapshotOwners = { readSchemaPublication: id => { const schema = registry.findOne(id); return schema ? publishArchitectureGoalSchema(schema).publication : null; }, publishAlias: (flow, schema, hash) => publishSchemaAliasFlow(flow, schema, hash).publication, readUserPolicy: async () => policy };
   return { owners, requirement, policy, flowDefinition, schemaDefinition };
 }
+it('reads an initial launch snapshot through the same owners without granting authorization', async () => {
+  const f = fixture();
+  const adapter = new GoalLaunchSnapshotAdapter(f.owners);
+  const initial = await adapter.readForLaunch({ flowDefinitionId: f.requirement.goalLaunch.flowDefinitionId,
+    schemaId: f.requirement.goalLaunch.schemaId });
+  expect(initial).toEqual(await adapter.readCurrent(f.requirement));
+  expect(initial).not.toHaveProperty('authorizationRef');
+  expect(initial).not.toHaveProperty('admissionRef');
+});
+it('requires the exact current allowlist for an initial read', async () => {
+  const f = fixture(); f.policy.eligibleDefinitions[0]!.schemaDefinitionSha256 = '0'.repeat(64);
+  expect(await new GoalLaunchSnapshotAdapter(f.owners).readForLaunch({
+    flowDefinitionId: f.requirement.goalLaunch.flowDefinitionId, schemaId: f.requirement.goalLaunch.schemaId,
+  })).toEqual({ status: 'ineligible' });
+});
+it('rejects initial selection accessors without invoking them or reading owners', async () => {
+  const f = fixture(); let calls = 0;
+  const selection = { get schemaId() { calls++; return 'schema'; }, flowDefinitionId: 'flow' };
+  await expect(new GoalLaunchSnapshotAdapter({ ...f.owners,
+    readUserPolicy: async () => { calls++; return f.policy; },
+  }).readForLaunch(selection)).rejects.toThrow('GOAL_LAUNCH_SNAPSHOT_INVALID');
+  expect(calls).toBe(0);
+});
 it('returns detached full real-owner publications and computed bindings', async () => {
   const f = fixture(); const result = await new GoalLaunchSnapshotAdapter(f.owners).readCurrent(f.requirement);
   expect(result).toEqual({ status: 'eligible', flowDefinitionId: f.requirement.goalLaunch.flowDefinitionId, schemaId: f.requirement.goalLaunch.schemaId, policyId: 'host-policy', flowDefinition: f.flowDefinition, schemaDefinition: f.schemaDefinition, policy: f.policy });

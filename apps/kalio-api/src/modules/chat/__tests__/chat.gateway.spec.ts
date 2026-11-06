@@ -8,7 +8,8 @@ import type { AgentBudgetApprovalRequest, AgentFlowRunSnapshot, ChatSession, Too
 import type { AgentFlowRuntimePort } from '../../agent-flow/agent-flow-runtime.port';
 import { CLI_AGENT_SESSION_RUNTIME } from '../../cli-agent/cli-agent-session-runtime.port';
 import type { CLIAgentSessionRuntimePort } from '../../cli-agent/cli-agent-session-runtime.port';
-import type { SessionEventsService } from '../session-events.service';
+import { SessionEventsService } from '../session-events.service';
+import type { EventEmitter } from 'node:events';
 import type { AgentBudgetApprovalService } from '../agent-budget-approval.service';
 import type { ModuleRef } from '@nestjs/core';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from '../architecture-runtime-stop.port';
@@ -108,9 +109,10 @@ describe('ChatGateway', () => {
 
     sessionEvents = {
       onSessionCreated: vi.fn().mockReturnValue(() => undefined),
-      onSessionUpdated: vi.fn().mockReturnValue(() => undefined),
+      onRuntimeEvent: vi.fn().mockReturnValue(vi.fn()), onSessionUpdated: vi.fn().mockReturnValue(() => undefined),
       emitSessionCreated: vi.fn(),
       emitSessionUpdated: vi.fn(),
+      emitRuntimeEvent: vi.fn(),
     } as unknown as SessionEventsService;
     agentBudgetApprovals = {
       getPendingApprovals: vi.fn().mockReturnValue([]),
@@ -182,6 +184,82 @@ describe('ChatGateway', () => {
     await Promise.resolve();
   }
 
+  it.each(['destroy', 'disconnect'] as const)('does not deliver an in-flight runtime event after %s', async (boundary) => {
+    gateway.onModuleDestroy();
+    const bus = new SessionEventsService();
+    gateway = makeGateway(toolDispatch, pipeline, raappHITL, sessions, bus, agentBudgetApprovals);
+    gateway.handleConnection(observer as never);
+    const host = sessionFixture({ id: 'session-1' });
+    const child = sessionFixture({ id: 'held-child', parentSessionId: host.id });
+    await gateway.handleSessionIdentify(observer as never, { sessionId: host.id });
+    observer.emit.mockClear();
+    let release!: () => void;
+    let entered!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(sessions.get).mockImplementation(async (id) => {
+      if (id === child.id) { entered(); await held; return child; }
+      if (id === host.id) return host;
+      throw new Error('unknown session');
+    });
+    const request: ToolConfirmationRequest = { sessionId: child.id, requestId: 'held-request',
+      toolCallId: 'held-call', toolName: 'fs_write', args: { path: 'index.html' }, timeoutMs: 0 };
+    bus.emitRuntimeEvent('tool:confirmation_required', request);
+    await lookupStarted;
+    if (boundary === 'destroy') gateway.onModuleDestroy();
+    else gateway.handleDisconnect(observer as never);
+    const replacement = makeGateway(toolDispatch, pipeline, raappHITL, sessions, bus, agentBudgetApprovals);
+    const nextClient = { id: 'replacement-socket', emit: vi.fn() };
+    replacement.handleConnection(nextClient as never);
+    await replacement.handleSessionIdentify(nextClient as never, { sessionId: host.id });
+    nextClient.emit.mockClear();
+    release();
+    await flushLifecycleBroadcast();
+    expect(observer.emit).not.toHaveBeenCalledWith('tool:confirmation_required', request);
+    expect(nextClient.emit).not.toHaveBeenCalledWith('tool:confirmation_required', request);
+    if (boundary === 'disconnect') gateway.onModuleDestroy();
+    expect((bus as unknown as { emitter: EventEmitter }).emitter.listenerCount('runtime')).toBe(1);
+    bus.emitRuntimeEvent('tool:confirmation_required', request);
+    await (replacement as unknown as { sessionLifecycleBroadcastQueue: Promise<void> }).sessionLifecycleBroadcastQueue;
+    expect(nextClient.emit).toHaveBeenCalledExactlyOnceWith('tool:confirmation_required', request);
+    replacement.onModuleDestroy();
+  });
+
+  it('shares lifecycle/runtime FIFO for a newly created child without granting child ownership', async () => {
+    const host = sessionFixture({ id: 'session-1' });
+    const child = sessionFixture({ id: 'new-child', parentSessionId: host.id });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await gateway.handleSessionIdentify(observer as never, { sessionId: host.id });
+    observer.emit.mockClear();
+    vi.mocked(sessions.get).mockImplementation(async (id) => {
+      if (id === host.id) { await gate; return host; }
+      if (id === child.id) return child;
+      throw new Error('unknown session');
+    });
+    createdHandler()({ session: child });
+    const publish = vi.mocked(sessionEvents.onRuntimeEvent).mock.calls[0][0];
+    const request: ToolConfirmationRequest = { sessionId: child.id, requestId: 'req-new', toolCallId: 'call-new',
+      toolName: 'fs_write', args: { path: 'index.html' }, timeoutMs: 0 };
+    publish('tool:confirmation_required', request);
+    publish('tool:confirmation_invalidated', { sessionId: child.id, requestId: request.requestId, reason: 'cancelled' });
+    await Promise.resolve();
+    expect(observer.emit).not.toHaveBeenCalled();
+    release();
+    await flushLifecycleBroadcast();
+    expect(observer.emit.mock.calls.map(([event]) => event)).toEqual([
+      'session:created', 'tool:confirmation_required', 'tool:confirmation_invalidated',
+    ]);
+    expect(client.emit).not.toHaveBeenCalledWith('tool:confirmation_required', request);
+    const owned = (gateway as unknown as { socketSessions: Map<string, Set<string>> }).socketSessions;
+    expect(owned.get(observer.id)?.has(child.id)).toBe(false);
+    expect(vi.mocked(sessionEvents.onRuntimeEvent)).toHaveBeenCalledOnce();
+    gateway.onModuleDestroy();
+    const off = vi.mocked(sessionEvents.onRuntimeEvent).mock.results[0].value;
+    // The real bus unsubscribe is separately exercised; this seam proves teardown invokes it.
+    expect(off).toHaveBeenCalledOnce();
+  });
+
   it('broadcasts child-session stream events to sockets that identified that child session', async () => {
     await gateway.handleSessionIdentify(observer as never, { sessionId: 'child-session' });
     (pipeline.submit as ReturnType<typeof vi.fn>).mockImplementation(async (_payload, emit) => {
@@ -218,6 +296,7 @@ describe('ChatGateway', () => {
 
     expect(observer.emit).toHaveBeenCalledWith('tool:confirmation_required', request);
     expect(client.emit).not.toHaveBeenCalledWith('tool:confirmation_required', request);
+    expect(sessionEvents.emitRuntimeEvent).not.toHaveBeenCalled();
   });
 
   it('REGRESSION: allows the initiator to stop a child session after child events were streamed to that socket', async () => {
