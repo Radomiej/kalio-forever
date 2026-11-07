@@ -9,6 +9,7 @@ import type {
   ArchitectureSchemaEdge,
 } from '@kalio/types';
 import { layoutMissingNodePositions } from './ArchitectGraphLayout';
+import { readStatusRoutingConfig, validateArchitectStatusRouting } from './architect.status-routing';
 import { readAutoRoutingConfig, validateArchitectAutoRouting } from './architect.auto-routing';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,7 +72,7 @@ function readBoolean(record: Record<string, unknown>, key: string, fallback: boo
 }
 
 function readNodeKind(value: string | undefined): ArchitectureNodeKind {
-  if (value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router') {
+  if (value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router' || value === 'status_router') {
     return value;
   }
   return 'role';
@@ -227,6 +228,7 @@ function normalizeNode(raw: unknown, index: number): ArchitectNode {
     maxToolAttempts: hasFiniteNumber(raw, 'maxToolAttempts') ? readNumber(raw, 'maxToolAttempts', 0) : undefined,
     toolOverride: readNodeToolOverride(raw),
     behavior: readNodeBehavior(raw),
+    statusRouting: readStatusRoutingConfig(raw['statusRouting']),
     autoRouting: readAutoRoutingConfig(raw['autoRouting']),
     personaId: readString(raw, ['personaId', 'persona', 'defaultPersonaId'], undefined),
     description: readString(raw, ['description', 'summary'], undefined),
@@ -344,6 +346,7 @@ export function normalizeArchitectureSchema(raw: unknown, index = 0): ArchitectS
 
   const schemaWithEdges = applyTopLevelEdges(schema, raw);
   validateArchitectAutoRouting(schemaWithEdges);
+  validateArchitectStatusRouting(schemaWithEdges);
   return {
     ...schemaWithEdges,
     nodes: layoutMissingNodePositions(schemaWithEdges.nodes, schemaWithEdges.edges, missingPositionIds),

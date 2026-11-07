@@ -25,6 +25,7 @@ export function useArchitectGraphDraft(
       || Object.keys(graphDraft.nodeBehaviors).length > 0
       || Object.keys(graphDraft.nodeMaxToolAttempts).length > 0
       || Object.keys(graphDraft.nodeToolOverrides).length > 0
+      || Object.keys(graphDraft.nodeStatusRouting ?? {}).length > 0
       || Object.keys(graphDraft.nodeAutoRouting ?? {}).length > 0
       || graphDraft.addedNodes.length > 0
       || graphDraft.edges !== null,
@@ -37,6 +38,7 @@ export function useArchitectGraphDraft(
       || Object.keys(graphDraft.nodeBehaviors).length > 0
       || Object.keys(graphDraft.nodeMaxToolAttempts).length > 0
       || Object.keys(graphDraft.nodeToolOverrides).length > 0
+      || Object.keys(graphDraft.nodeStatusRouting ?? {}).length > 0
       || Object.keys(graphDraft.nodeAutoRouting ?? {}).length > 0
       || graphDraft.addedNodes.length > 0
       || graphDraft.edges !== null,
@@ -211,13 +213,28 @@ export function useArchitectGraphDraft(
       return { ...current, nodeAutoRouting: next };
     });
   };
+  const setStatusRoutingOverride = (nodeId: string, statusRouting: NonNullable<ArchitectureSchemaNode['statusRouting']>) => {
+    setGraphDraft((current) => {
+      const originalNode = selectedSchema?.nodes.find((node) => node.id === nodeId)
+        ?? current.addedNodes.find((node) => node.id === nodeId);
+      if (!originalNode) return current;
+      const original = originalNode.statusRouting ?? { sourceNodeId: '', expectedStatus: 'completed' };
+      const next = { ...current.nodeStatusRouting };
+      if (original.sourceNodeId === statusRouting.sourceNodeId && original.expectedStatus === statusRouting.expectedStatus) {
+        delete next[nodeId];
+      } else {
+        next[nodeId] = { ...statusRouting };
+      }
+      return { ...current, nodeStatusRouting: next };
+    });
+  };
 
   return {
     editableSchema, hasVariantChanges, hasDraftSchemaChanges,
     personaOverrides, nodeKindOverrides, contextPolicyOverrides,
     setPersonaOverrides, setPersonaOverride, selectNode,
     setNodeKindOverrides, setContextPolicyOverrides, setGraphDraft,
-    setNodeKindOverride, setNodeBehaviorOverride, setAutoRoutingOverride,
+    setNodeKindOverride, setNodeBehaviorOverride, setAutoRoutingOverride, setStatusRoutingOverride,
     setNodeMaxToolAttemptsOverride, setNodeToolOverride, setContextPolicyOverride,
     moveGraphNode, addGraphNode, toggleGraphEdge, setGraphEdgeSelection, autoLayoutGraph,
   };

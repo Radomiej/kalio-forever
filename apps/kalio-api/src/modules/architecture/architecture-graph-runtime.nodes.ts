@@ -1,3 +1,4 @@
+import { executeStatusRoutingNode } from './architecture-graph-status-routing';
 import type { ArchitectureSchemaNode } from '@kalio/types';
 import { types } from 'node:util';
 import { architectureActionSummaryForEvent } from './architecture-action-summary';
@@ -26,6 +27,7 @@ export async function executeNode(ctx: ArchitectureGraphContext,
 ): Promise<string[]> {
   const goalResult = await executeGoalNode(ctx, node, outgoingNodeIds);
   if (goalResult !== null) return goalResult;
+  if (node.kind === 'status_router') return executeStatusRoutingNode(ctx, node);
   if (node.kind === 'auto_router') {
     if (!ctx.options.persistAutoRouteDecision) {
       throw new Error('Durable route decision storage is unavailable.');
@@ -186,13 +188,16 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
     }
   }
   const timedOut = !goalWork && slot.slotType === 'tool_executor' && result.data.errorCode === 'SUBAGENT_TIMEOUT';
+  const statusTarget = !goalWork && outgoingNodeIds.length === 1
+    && ctx.options.schema.nodes.some(target => target.id === outgoingNodeIds[0] && target.kind === 'status_router'
+      && target.statusRouting?.sourceNodeId === node.id) ? outgoingNodeIds[0] : undefined;
   const normalTarget = defaultOutgoingNodeId(ctx.options.schema, node.id, outgoingNodeIds);
   const recoveryTargets = !goalWork && slot.slotType === 'tool_executor' && normalTarget
     ? ctx.options.schema.edges.filter(edge => edge.fromNodeId === node.id && edge.selection === 'continuation'
       && outgoingNodeIds.includes(edge.toNodeId) && edge.toNodeId !== normalTarget
-      && ctx.options.schema.nodes.some(target => target.id === edge.toNodeId && target.kind === 'router'))
+      && ctx.options.schema.nodes.some(target => target.id === edge.toNodeId && (target.kind === 'router' || target.kind === 'status_router')))
     : [];
-  const recoveryTarget = recoveryTargets.length === 1 ? recoveryTargets[0]?.toNodeId : undefined;
+  const recoveryTarget = statusTarget ?? (recoveryTargets.length === 1 ? recoveryTargets[0]?.toNodeId : undefined);
   const toolContract = architectureToolExecutorContract({
     slot,
     data: result.data,
@@ -210,7 +215,7 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
     ?? incompleteToolExecutorReason({ slot, data: result.data, incomingEvents: ctx.events });
   const selectedNodeIds = timedOut ? recoveryTarget ? [recoveryTarget] : [] : goalWork ? outgoingNodeIds.filter(id => id === ctx.options.goalProtocol?.judgeNodeId) : incompleteReason
     ? ctx.incompleteContinuationNodeIds(outgoingNodeIds, node.id, defaultOutgoingNodeId(ctx.options.schema, node.id, outgoingNodeIds))
-    : selectedRoleOutgoingNodeIds({ data: result.data, outgoingNodeIds: outgoingNodeIds.filter(id => id !== recoveryTarget) });
+    : selectedRoleOutgoingNodeIds({ data: result.data, outgoingNodeIds: outgoingNodeIds.filter(id => statusTarget !== undefined || id !== recoveryTarget) });
   const requestedRoute = routeRequest(result.data);
   const hasAgentRoute = !incompleteReason && requestedRoute !== undefined && outgoingNodeIds.includes(requestedRoute.targetNodeId);
   if (attempt) {

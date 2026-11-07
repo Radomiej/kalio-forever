@@ -270,3 +270,11 @@ Router detail cards present confidence, input counts and available action/strate
 In Game Development 2 and its variants, Release Review receives the latest completed participant output from Core, UX, Senior and both QA nodes in the current run. A newer unfinished or failed visit suppresses that node’s older output. These summaries inform routing. Artifact publication still depends on runtime evidence guards.
 
 Game Development 2 finalization keeps a bounded head and conclusion of each browser QA report so the result and reload evidence near the end survives prompt compression. Reports remain supplemental to runtime evidence.
+
+## Deterministic status conditions
+
+A status_router node compares the execution outcome of its single source role with completed or failed. Its statusRouting field stores sourceNodeId and expectedStatus. Exactly one choice edge (Yes) and one default edge (Else) must have distinct targets. The node has no persona, tools or model call.
+
+The predicate reads the latest source node_started visit in the same run. A recovered runtime failure or exhausted subagent timeout counts as failed. A nested tool failure does not determine the whole role outcome. A new source visit without a terminal outcome blocks evaluation. Fatal contract errors and explicit Stop remain terminal.
+
+Decisions use the existing required route checkpoint, with source-start and terminal event IDs and the exact condition. Recovery validates that binding and the selected edge against the saved schema before resuming. Checkpoint persistence errors fail the node. Route selection does not supply implementation, build or semantic acceptance evidence.

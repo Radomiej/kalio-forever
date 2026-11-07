@@ -1935,7 +1935,7 @@ export interface SecurityPolicyResponse {
 }
 
 // Architecture Orchestration
-export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
+export type ArchitectureNodeKind = 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router' | 'status_router';
 export type ArchitectureNodeBehaviorMode =
   | 'fan_out_all'
   | 'choose_one'
@@ -1946,7 +1946,7 @@ export type ArchitectureNodeFanOutMode = 'parallel' | 'sequential';
 export type ArchitectureNodeScoringPolicy = 'confidence' | 'risk' | 'cost' | 'custom';
 export type ArchitectureRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ArchitectureExecutionMode = 'session_branches' | 'subagent_execution';
-export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
+export type ArchitectureRouteSource = 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice' | 'status_condition';
 export type ArchitectureEventAction =
   | 'run_created'
   | 'run_stopped'
@@ -2002,6 +2002,10 @@ export interface ArchitectureSchemaNode {
   autoRouting?: {
     confidenceThreshold: number;
     instructions: string;
+  };
+  statusRouting?: {
+    sourceNodeId: string;
+    expectedStatus: 'completed' | 'failed';
   };
   x?: number;
   y?: number;

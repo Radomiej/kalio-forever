@@ -108,7 +108,7 @@ export async function createArchitectureGraphEvents(options: GraphRuntimeOptions
         const caughtError = goalProtocolRequired(ctx)
           ? createWorkflowError('CONTRACT_VIOLATION', 'Goal graph protocol failed.', { source: 'architecture-graph-runtime', retryable: false })
           : error;
-        if (node.kind === 'auto_router' || !ctx.isRecoverableNodeError(caughtError)) {
+        if (node.kind === 'auto_router' || node.kind === 'status_router' || !ctx.isRecoverableNodeError(caughtError)) {
           const failure = workflowFailureFromError(caughtError);
           ctx.push('node_failed', `${node.label} failed.`, {
             actionSummary: architectureActionSummaryForEvent('node_failed', node.kind),

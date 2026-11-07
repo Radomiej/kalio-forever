@@ -552,7 +552,7 @@ describe('@kalio/types contract shape', () => {
       nodes: Array<{
         id: string;
         label: string;
-        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
+        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router' | 'status_router';
         roleSlotId?: string;
         maxToolAttempts?: number;
         toolOverride?: {
@@ -566,6 +566,7 @@ describe('@kalio/types contract shape', () => {
           description?: string;
         };
         autoRouting?: { confidenceThreshold: number; instructions: string };
+        statusRouting?: { sourceNodeId: string; expectedStatus: 'completed' | 'failed' };
         x?: number;
         y?: number;
       }>;
@@ -624,7 +625,7 @@ describe('@kalio/types contract shape', () => {
       nodes?: Array<{
         id: string;
         label: string;
-        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
+        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router' | 'status_router';
         roleSlotId?: string;
         maxToolAttempts?: number;
         toolOverride?: {
@@ -638,6 +639,7 @@ describe('@kalio/types contract shape', () => {
           description?: string;
         };
         autoRouting?: { confidenceThreshold: number; instructions: string };
+        statusRouting?: { sourceNodeId: string; expectedStatus: 'completed' | 'failed' };
         x?: number;
         y?: number;
       }>;
@@ -692,7 +694,7 @@ describe('@kalio/types contract shape', () => {
     >();
     expectTypeOf<ArchitectureExecutionEvent['detail']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<ArchitectureRouteDecision>().toEqualTypeOf<{
-      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
+      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice' | 'status_condition';
       fromNodeId: string;
       selectedNodeIds: string[];
       rejectedNodeIds?: string[];
@@ -706,7 +708,7 @@ describe('@kalio/types contract shape', () => {
     }>();
     expectTypeOf<ArchitectureRouteHop>().toEqualTypeOf<{
       eventId: ID;
-      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice';
+      source: 'agent' | 'router' | 'parallel' | 'runtime_fallback' | 'jev_choice' | 'status_condition';
       fromNodeId: string;
       toNodeId: string;
     }>();
@@ -757,7 +759,7 @@ describe('@kalio/types contract shape', () => {
         sessionId?: ID;
         roleSlotId?: string;
         label: string;
-        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router';
+        kind: 'parallel' | 'role' | 'router' | 'artifact' | 'auto_router' | 'status_router';
         behavior?: ArchitectureSchema['nodes'][number]['behavior'];
         status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
         actionSummary?: string;

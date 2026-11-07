@@ -9,6 +9,33 @@ import { LAB_PRESET_IDS } from './architecture-seed-schemas.lab-presets';
 import { ArchitectureRegistryService } from './architecture-registry.service';
 
 describe('ArchitectureRegistryService', () => {
+  it('persists a status condition and rejects an ambiguous source or missing branch', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'kalio-status-schema-'));
+    tempDirs.add(directory);
+    const config = { get: () => directory } as unknown as ConfigService;
+    const service = new ArchitectureRegistryService(config);
+    const base = service.findOne('strategic-decision-council')!;
+    const role = base.roleSlots.find(slot => slot.slotType === 'participant')!;
+    const nodes: ArchitectureSchema['nodes'] = [
+      { id: 'worker', label: 'Worker', kind: 'role', roleSlotId: role.id },
+      { id: 'if', label: 'If completed', kind: 'status_router', statusRouting: { sourceNodeId: 'worker', expectedStatus: 'completed' } },
+      { id: 'yes', label: 'Yes', kind: 'parallel' }, { id: 'no', label: 'Else', kind: 'parallel' },
+    ];
+    const edges: ArchitectureSchema['edges'] = [
+      { id: 'in', fromNodeId: 'worker', toNodeId: 'if' },
+      { id: 'yes', fromNodeId: 'if', toNodeId: 'yes', selection: 'choice' },
+      { id: 'no', fromNodeId: 'if', toNodeId: 'no', selection: 'default' },
+    ];
+    const variant = await service.createVariant(base.id, { nodes, edges });
+    const reloaded = new ArchitectureRegistryService(config);
+    await reloaded.onModuleInit();
+    const copy = reloaded.findOne(variant!.id)!;
+    expect(copy.nodes[1]?.statusRouting).toEqual(nodes[1]?.statusRouting);
+    copy.nodes[1]!.statusRouting!.expectedStatus = 'failed';
+    expect(reloaded.findOne(variant!.id)?.nodes[1]?.statusRouting?.expectedStatus).toBe('completed');
+    await expect(service.createVariant(base.id, { nodes, edges: edges.slice(0, 2) })).rejects.toThrow(BadRequestException);
+    await expect(service.createVariant(base.id, { nodes, edges: [...edges, { ...edges[0]!, id: 'duplicate-in' }] })).rejects.toThrow(BadRequestException);
+  });
   it('saves and reloads auto-routing variants with independently cloned metadata', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'kalio-auto-schema-'));
     tempDirs.add(directory);

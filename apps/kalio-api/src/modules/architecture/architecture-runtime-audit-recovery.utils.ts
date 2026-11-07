@@ -252,7 +252,7 @@ export function architectureAuditAutoRoutingData(record: Record<string, unknown>
   if (record.eventType !== 'router_decision' || !isNonEmptyString(record.eventId)
     || !Number.isSafeInteger(record.sequence) || (record.sequence as number) < 1
     || !isNonEmptyString(nodeId) || !Number.isSafeInteger(visit) || (visit as number) < 1
-    || !route || (route.source !== 'jev_choice' && route.source !== 'runtime_fallback')
+    || !route || (route.source !== 'jev_choice' && route.source !== 'runtime_fallback' && route.source !== 'status_condition')
     || route.fromNodeId !== nodeId || !isNonEmptyString(record.selectedEdgeId)
     || route.selectedEdgeId !== record.selectedEdgeId || !isNonEmptyString(route.nextNodeId)
     || !validIds(selected) || selected.length !== 1 || selected[0] !== route.nextNodeId
@@ -366,7 +366,7 @@ function isWorkflowEvidenceStatus(value: unknown): value is WorkflowEvidenceStat
 
 function isArchitectureRouteDecision(value: unknown): value is ArchitectureRouteDecision {
   return isPlainRecord(value)
-    && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback' || value.source === 'jev_choice')
+    && (value.source === 'agent' || value.source === 'router' || value.source === 'parallel' || value.source === 'runtime_fallback' || value.source === 'jev_choice' || value.source === 'status_condition')
     && isNonEmptyString(value.fromNodeId)
     && Array.isArray(value.selectedNodeIds)
     && value.selectedNodeIds.every((nodeId) => typeof nodeId === 'string')

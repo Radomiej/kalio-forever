@@ -37,28 +37,28 @@ function behaviorLabel(node: ArchitectNode): string | null {
 }
 
 function nodeAccentClass(node: ArchitectNode): string {
-  if (node.kind === 'router') return 'border-amber-300/45 bg-amber-400/15 text-amber-100';
+  if (node.kind === 'router' || node.kind === 'status_router') return 'border-amber-300/45 bg-amber-400/15 text-amber-100';
   if (node.kind === 'parallel') return 'border-violet-300/45 bg-violet-400/15 text-violet-100';
   if (node.kind === 'artifact') return 'border-emerald-300/45 bg-emerald-400/15 text-emerald-100';
   return 'border-sky-300/35 bg-sky-400/12 text-sky-100';
 }
 
 function kindBadgeClass(node: ArchitectNode): string {
-  if (node.kind === 'router') return 'border-amber-400/30 bg-amber-500/10 text-amber-200';
+  if (node.kind === 'router' || node.kind === 'status_router') return 'border-amber-400/30 bg-amber-500/10 text-amber-200';
   if (node.kind === 'parallel') return 'border-violet-400/30 bg-violet-500/10 text-violet-200';
   if (node.kind === 'artifact') return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200';
   return 'border-base-300/80 bg-base-200/70 text-base-content/55';
 }
 
 function nodeSurfaceClass(node: ArchitectNode): string {
-  if (node.kind === 'router') return 'border-amber-300/35 bg-[linear-gradient(135deg,rgba(251,191,36,0.16),rgba(15,23,42,0.95)_48%,rgba(6,10,18,0.98))] shadow-[0_16px_40px_-28px_rgba(251,191,36,0.9)]';
+  if (node.kind === 'router' || node.kind === 'status_router') return 'border-amber-300/35 bg-[linear-gradient(135deg,rgba(251,191,36,0.16),rgba(15,23,42,0.95)_48%,rgba(6,10,18,0.98))] shadow-[0_16px_40px_-28px_rgba(251,191,36,0.9)]';
   if (node.kind === 'parallel') return 'border-violet-300/30 bg-[linear-gradient(135deg,rgba(139,92,246,0.14),rgba(15,23,42,0.94)_46%,rgba(6,10,18,0.98))] shadow-[0_16px_40px_-28px_rgba(139,92,246,0.8)]';
   if (node.kind === 'artifact') return 'border-emerald-300/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.13),rgba(15,23,42,0.94)_46%,rgba(6,10,18,0.98))] shadow-[0_16px_40px_-28px_rgba(16,185,129,0.75)]';
   return 'border-sky-300/25 bg-[linear-gradient(135deg,rgba(14,165,233,0.10),rgba(15,23,42,0.94)_48%,rgba(6,10,18,0.98))] shadow-[0_16px_40px_-28px_rgba(14,165,233,0.65)]';
 }
 
 function nodeIcon(node: ArchitectNode) {
-  if (node.kind === 'router') return <Route size={13} />;
+  if (node.kind === 'router' || node.kind === 'status_router') return <Route size={13} />;
   if (node.kind === 'parallel') return <GitBranch size={13} />;
   if (node.kind === 'artifact') return <Box size={13} />;
   return <Bot size={13} />;
@@ -184,7 +184,7 @@ export function ArchitectGraphNodeCard({
               className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${kindBadgeClass(node)}`}
               data-testid={`architect-node-kind-${node.id}`}
             >
-              {node.kind}
+              {node.kind === 'status_router' ? 'Status condition' : node.kind}
             </span>
             {behaviorLabel(node) && (
               <span

@@ -17,6 +17,7 @@ export interface GraphDraft {
   nodeBehaviors: NodeBehaviorOverrideMap;
   nodeToolOverrides: NodeToolOverrideMap;
   nodeMaxToolAttempts: Record<string, number | undefined>;
+  nodeStatusRouting?: Record<string, NonNullable<ArchitectureSchemaNode['statusRouting']>>;
   nodeAutoRouting?: Record<string, NonNullable<ArchitectureSchemaNode['autoRouting']>>;
   addedNodes: ArchitectNode[];
   edges: ArchitectSchema['edges'] | null;
@@ -82,7 +83,13 @@ export function applyGraphDraft(
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
-      autoRouting: cloneAutoRouting(graphDraft.nodeAutoRouting?.[node.id] ?? node.autoRouting),
+      statusRouting: (kindOverrides[node.id] ?? node.kind) === 'status_router'
+        ? { ...(graphDraft.nodeStatusRouting?.[node.id] ?? node.statusRouting ?? { sourceNodeId: '', expectedStatus: 'completed' }) }
+        : undefined,
+      autoRouting: (kindOverrides[node.id] ?? node.kind) === 'status_router' ? undefined : cloneAutoRouting(graphDraft.nodeAutoRouting?.[node.id] ?? node.autoRouting),
+      ...((kindOverrides[node.id] ?? node.kind) === 'status_router'
+        ? { roleSlotId: undefined, personaId: undefined, slots: [], behavior: undefined, toolOverride: undefined, maxToolAttempts: undefined }
+        : {}),
     })).concat(graphDraft.addedNodes.map((node) => ({
       ...node,
       ...(graphDraft.nodePositions[node.id] ?? {}),
@@ -90,7 +97,13 @@ export function applyGraphDraft(
       maxToolAttempts: graphDraft.nodeMaxToolAttempts[node.id] ?? node.maxToolAttempts,
       toolOverride: graphDraft.nodeToolOverrides[node.id] ?? node.toolOverride,
       behavior: graphDraft.nodeBehaviors[node.id] ?? node.behavior,
-      autoRouting: cloneAutoRouting(graphDraft.nodeAutoRouting?.[node.id] ?? node.autoRouting),
+      statusRouting: (kindOverrides[node.id] ?? node.kind) === 'status_router'
+        ? { ...(graphDraft.nodeStatusRouting?.[node.id] ?? node.statusRouting ?? { sourceNodeId: '', expectedStatus: 'completed' }) }
+        : undefined,
+      autoRouting: (kindOverrides[node.id] ?? node.kind) === 'status_router' ? undefined : cloneAutoRouting(graphDraft.nodeAutoRouting?.[node.id] ?? node.autoRouting),
+      ...((kindOverrides[node.id] ?? node.kind) === 'status_router'
+        ? { roleSlotId: undefined, personaId: undefined, slots: [], behavior: undefined, toolOverride: undefined, maxToolAttempts: undefined }
+        : {}),
     }))),
     edges: graphDraft.edges ?? schema.edges,
     contextPolicy: {
@@ -116,6 +129,7 @@ export function toSchemaNodes(schema: ArchitectSchema): ArchitectureSchemaNode[]
     maxToolAttempts: node.maxToolAttempts,
     toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
     behavior: node.behavior ? { ...node.behavior } : undefined,
+    statusRouting: node.statusRouting ? { ...node.statusRouting } : undefined,
     autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
     x: node.x,
     y: node.y,
@@ -138,6 +152,13 @@ export function createDraftNode(
     x: Math.round(position.x),
     y: Math.round(position.y),
   };
+  if (kind === 'status_router') {
+    return {
+      id, label: `Status condition ${index}`, kind,
+      statusRouting: { sourceNodeId: '', expectedStatus: 'completed' },
+      ...roundedPosition, slots: [], connections: [],
+    };
+  }
   if (kind === 'auto_router') {
     return {
       id, label: `Auto-routing ${index}`, kind,

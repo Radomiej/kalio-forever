@@ -1,3 +1,4 @@
+import { hasValidStatusRoutingTopology } from './architecture-status-routing.schema';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { BadRequestException, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
@@ -80,6 +81,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
         ...node,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
         autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
+        statusRouting: node.statusRouting ? { ...node.statusRouting } : undefined,
         kind: nodeKindOverrides[node.id] ?? node.kind,
       }));
       const variant: ArchitectureSchema = {
@@ -250,6 +252,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
         ...node,
         toolOverride: node.toolOverride ? { ...node.toolOverride } : undefined,
         autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined,
+        statusRouting: node.statusRouting ? { ...node.statusRouting } : undefined,
       })),
       edges: schema.edges.map((edge) => ({ ...edge })),
       routerPolicy: { ...schema.routerPolicy },
@@ -318,6 +321,9 @@ export class ArchitectureRegistryService implements OnModuleInit {
         || (node.kind === 'auto_router' ? node.roleSlotId !== undefined : node.autoRouting !== undefined)) {
         throw new BadRequestException(`Invalid auto-routing configuration for ${node.id}`);
       }
+    }
+    if (!hasValidStatusRoutingTopology(effectiveNodes, dto.edges ?? baseSchema.edges)) {
+      throw new BadRequestException('Status conditions require one source role and exactly one Yes and one Else route');
     }
     if (!hasValidAutoRoutingTopology(effectiveNodes, dto.edges ?? baseSchema.edges)) {
       throw new BadRequestException('Auto-routing nodes require choices and exactly one default route');
@@ -402,6 +408,7 @@ export class ArchitectureRegistryService implements OnModuleInit {
       || value === 'role'
       || value === 'router'
       || value === 'auto_router'
+      || value === 'status_router'
       || value === 'artifact';
   }
 

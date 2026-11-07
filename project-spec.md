@@ -399,3 +399,5 @@ Game Development 2 is a built-in workflow preset for game design, core and UX im
 Game Development 2 Release Review consumes the latest completed outputs of its implementation, independent review, and both QA nodes. A newer failed or unfinished visit suppresses the prior output for that node. Runtime evidence guards remain authoritative for finalization.
 
 Game Development 2 finalization retains the conclusion of both browser QA reports within a bounded prompt budget, so end-of-match and restored-career observations reach the finalizer.
+
+Architecture graphs support a deterministic status_router node with one source role and Yes/Else branches. The predicate checks completed/failed for the current source execution. It does not call a model or establish task acceptance. Current source evidence and a required durable decision checkpoint are mandatory. Editor, registry snapshots and recovery preserve the condition and its source-visit binding.

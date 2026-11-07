@@ -1,3 +1,4 @@
+import { assertSavedStatusRoutingDecision } from './architecture-status-routing';
 import type { AgentFlowContinuationCursor, ArchitectureExecutionEvent, ArchitectureSchema } from '@kalio/types';
 
 export type ArchitectureRuntimeResumeCursor = AgentFlowContinuationCursor | {
@@ -40,6 +41,10 @@ export function recoverAutoRoutingCursor(
   for (const checkpointIndex of checkpointIndexes) {
     const checkpoint = events[checkpointIndex];
     if (!checkpoint?.nodeId) continue;
+    const checkpointNode = schema.nodes.find(node => node.id === checkpoint.nodeId);
+    if (checkpointNode?.kind === 'status_router') {
+      assertSavedStatusRoutingDecision(schema, checkpoint, events.slice(0, checkpointIndex));
+    }
     const selectedEdgeId = typeof checkpoint.data?.['selectedEdgeId'] === 'string'
       ? checkpoint.data['selectedEdgeId']
       : checkpoint.route?.selectedEdgeId;
@@ -69,7 +74,7 @@ export function recoverAutoRoutingCursor(
   }
 
   const resumeStartedNodeIds: string[] = [];
-  for (const node of schema.nodes.filter((candidate) => candidate.kind === 'auto_router')) {
+  for (const node of schema.nodes.filter((candidate) => candidate.kind === 'auto_router' || candidate.kind === 'status_router')) {
     const startedIndex = lastEventIndex(events, node.id, 'node_started');
     if (startedIndex < 0) continue;
     const completedIndex = lastEventIndex(events, node.id, 'node_completed');

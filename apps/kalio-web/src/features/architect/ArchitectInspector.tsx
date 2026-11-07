@@ -9,6 +9,7 @@ import type {
 } from '@kalio/types';
 import type { ArchitectSchema } from './architect.types';
 import { ArchitectBehaviorControls } from './ArchitectBehaviorControls';
+import { ArchitectStatusRoutingControls } from './ArchitectStatusRoutingControls';
 import { ArchitectAutoRoutingControls } from './ArchitectAutoRoutingControls';
 
 interface ArchitectInspectorProps {
@@ -21,6 +22,7 @@ interface ArchitectInspectorProps {
   onPersonaOverride: (nodeId: string, personaId: string) => void;
   onNodeKindOverride: (nodeId: string, kind: ArchitectureNodeKind) => void;
   onNodeBehaviorOverride: (nodeId: string, behavior: NonNullable<ArchitectureSchemaNode['behavior']>) => void;
+  onStatusRoutingOverride?: (nodeId: string, value: NonNullable<ArchitectureSchemaNode['statusRouting']>) => void;
   onAutoRoutingOverride?: (nodeId: string, autoRouting: NonNullable<ArchitectureSchemaNode['autoRouting']>) => void;
   onNodeMaxToolAttemptsOverride: (nodeId: string, maxToolAttempts?: number) => void;
   onNodeToolOverride: (nodeId: string, toolOverride?: NonNullable<ArchitectureSchemaNode['toolOverride']>) => void;
@@ -34,6 +36,7 @@ const NODE_KIND_OPTIONS: ReadonlyArray<{ value: ArchitectureNodeKind; label: str
   { value: 'parallel', label: 'Parallel' },
   { value: 'role', label: 'Role' },
   { value: 'router', label: 'Router' },
+  { value: 'status_router', label: 'Status condition' },
   { value: 'auto_router', label: 'Auto-routing' },
   { value: 'artifact', label: 'Artifact' },
 ];
@@ -70,6 +73,7 @@ export function ArchitectInspector({
   onNodeKindOverride,
   onNodeBehaviorOverride,
   onAutoRoutingOverride,
+  onStatusRoutingOverride,
   onNodeMaxToolAttemptsOverride,
   onNodeToolOverride,
   onEdgeSelectionOverride,
@@ -104,7 +108,7 @@ export function ArchitectInspector({
       allowedToolNames.length > 0 ? { allowedToolNames } : undefined,
     );
   };
-  const routingSummary = node?.behavior?.mode
+  const routingSummary = selectedNodeKind === 'status_router' ? 'Yes / Else' : node?.behavior?.mode
     ? NODE_ROUTING_LABELS[node.behavior.mode] ?? node.behavior.mode
     : selectedNodeKind === 'router'
       ? 'Rank then merge'
@@ -172,23 +176,25 @@ export function ArchitectInspector({
             {node.personaId && <span className="badge badge-ghost badge-sm">{node.personaId}</span>}
           </div>
 
-          <div className="mt-4 form-control gap-1">
-            <label className="label-text text-xs font-semibold text-base-content/70">Persona override</label>
-            <select
-              aria-label="Persona override"
-              className="select select-bordered select-sm h-9 min-h-9 w-full"
-              value={selectedPersonaId}
-              onChange={(event) => onPersonaOverride(overrideKey, event.target.value)}
-              data-testid="architect-persona-select"
-            >
-              <option value="">Use schema default</option>
-              {personas.map((persona) => (
-                <option key={persona.id} value={persona.id}>
-                  {persona.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {selectedNodeKind !== 'status_router' && (
+            <div className="mt-4 form-control gap-1">
+              <label className="label-text text-xs font-semibold text-base-content/70">Persona override</label>
+              <select
+                aria-label="Persona override"
+                className="select select-bordered select-sm h-9 min-h-9 w-full"
+                value={selectedPersonaId}
+                onChange={(event) => onPersonaOverride(overrideKey, event.target.value)}
+                data-testid="architect-persona-select"
+              >
+                <option value="">Use schema default</option>
+                {personas.map((persona) => (
+                  <option key={persona.id} value={persona.id}>
+                    {persona.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <section className="mt-3 rounded-md border border-base-300/80 bg-base-200/45 p-2.5">
             <div className="flex items-start justify-between gap-3">
@@ -210,7 +216,7 @@ export function ArchitectInspector({
             </div>
           </section>
 
-          {selectedPersona && (
+          {selectedNodeKind !== 'status_router' && selectedPersona && (
             <div className="mt-3 rounded-md border border-base-300/80 bg-base-200/60 p-2.5">
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
@@ -278,6 +284,10 @@ export function ArchitectInspector({
                 />
               )}
 
+              {selectedNodeKind === 'status_router' && (
+                <ArchitectStatusRoutingControls nodeId={node.id} nodes={schema?.nodes ?? []} value={node.statusRouting} onChange={onStatusRoutingOverride} />
+              )}
+
               {selectedNodeKind === 'auto_router' && (
                 <ArchitectAutoRoutingControls nodeId={node.id} value={node.autoRouting} onChange={onAutoRoutingOverride} />
               )}
@@ -304,11 +314,11 @@ export function ArchitectInspector({
                             )}
                             data-testid={`architect-edge-selection-${edge.fromNodeId}-${edge.toNodeId}`}
                           >
-                            <option value="">Normal transition</option>
-                            <option value="default">Default route</option>
-                            <option value="choice">Choice route</option>
-                            <option value="converge">Converge route</option>
-                            <option value="continuation">Continuation route</option>
+                            <option value="">{selectedNodeKind === 'status_router' ? 'Select Yes or Else' : 'Normal transition'}</option>
+                            <option value="default">{selectedNodeKind === 'status_router' ? 'Else' : 'Default route'}</option>
+                            <option value="choice">{selectedNodeKind === 'status_router' ? 'Yes' : 'Choice route'}</option>
+                            {selectedNodeKind !== 'status_router' && <option value="converge">Converge route</option>}
+                            {selectedNodeKind !== 'status_router' && <option value="continuation">Continuation route</option>}
                           </select>
                         </label>
                       );
@@ -317,41 +327,45 @@ export function ArchitectInspector({
                 </section>
               )}
 
-              <div className="mt-4 form-control gap-1">
-                <label className="label-text text-xs font-semibold text-base-content/70">Node tool loop override</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  className="input input-bordered input-sm h-9 min-h-9 w-full font-mono"
-                  placeholder="Use persona/system default"
-                  value={node.maxToolAttempts ?? ''}
-                  onChange={(event) => {
-                    const value = event.target.value.trim();
-                    onNodeMaxToolAttemptsOverride(
-                      node.id,
-                      value.length === 0 ? undefined : Math.max(1, Math.min(100, parseInt(value, 10) || 1)),
-                    );
-                  }}
-                  data-testid="architect-node-max-tool-attempts"
-                />
-              </div>
+              {selectedNodeKind !== 'status_router' && (
+                <>
+                  <div className="mt-4 form-control gap-1">
+                    <label className="label-text text-xs font-semibold text-base-content/70">Node tool loop override</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      className="input input-bordered input-sm h-9 min-h-9 w-full font-mono"
+                      placeholder="Use persona/system default"
+                      value={node.maxToolAttempts ?? ''}
+                      onChange={(event) => {
+                        const value = event.target.value.trim();
+                        onNodeMaxToolAttemptsOverride(
+                          node.id,
+                          value.length === 0 ? undefined : Math.max(1, Math.min(100, parseInt(value, 10) || 1)),
+                        );
+                      }}
+                      data-testid="architect-node-max-tool-attempts"
+                    />
+                  </div>
 
-              <div className="mt-4 form-control gap-1">
-                <label className="label-text text-xs font-semibold text-base-content/70">Node tool permission override</label>
-                <textarea
-                  className="textarea textarea-bordered min-h-20 w-full font-mono text-xs"
-                  placeholder="Inherit default policy"
-                  value={toolOverrideValue}
-                  onChange={(event) => updateToolOverride(event.target.value)}
-                  data-testid="architect-node-tool-override"
-                />
-                <p className="text-[11px] leading-4 text-base-content/55">
-                  Blank inherits the runtime, persona, and slot policy. Set this only to deliberately replace allowed tools for this node.
-                </p>
-              </div>
+                  <div className="mt-4 form-control gap-1">
+                    <label className="label-text text-xs font-semibold text-base-content/70">Node tool permission override</label>
+                    <textarea
+                      className="textarea textarea-bordered min-h-20 w-full font-mono text-xs"
+                      placeholder="Inherit default policy"
+                      value={toolOverrideValue}
+                      onChange={(event) => updateToolOverride(event.target.value)}
+                      data-testid="architect-node-tool-override"
+                    />
+                    <p className="text-[11px] leading-4 text-base-content/55">
+                      Blank inherits the runtime, persona, and slot policy. Set this only to deliberately replace allowed tools for this node.
+                    </p>
+                  </div>
+                </>
+              )}
 
-              {roleSlotId && (
+              {selectedNodeKind !== 'status_router' && roleSlotId && (
                 <section className="mt-4 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-base-content/55">Context policy</div>
                   <label className="mt-2 flex items-center justify-between gap-3 text-xs text-base-content/70">
@@ -411,6 +425,7 @@ export function ArchitectInspector({
 }
 
 const NODE_KIND_LABELS: Record<ArchitectureNodeKind, string> = {
+  status_router: 'Status condition',
   auto_router: 'Auto-routing',
   artifact: 'Artifact',
   parallel: 'Parallel',

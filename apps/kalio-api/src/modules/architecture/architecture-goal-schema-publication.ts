@@ -67,7 +67,7 @@ const overrides: Rule = { read: value => {
 type Node = ArchitectureSchema['nodes'][number];
 type Behavior = NonNullable<Node['behavior']>;
 const node = object<Node>({
-  id: nonempty, label: nonempty, kind: enumeration('parallel', 'role', 'router', 'artifact', 'auto_router'),
+  id: nonempty, label: nonempty, kind: enumeration('parallel', 'role', 'router', 'artifact', 'auto_router', 'status_router'),
   roleSlotId: optional(text), maxToolAttempts: optional(numeric(v => Number.isInteger(v) && v >= 1 && v <= 100)),
   toolOverride: optional(object<NonNullable<Node['toolOverride']>>({ allowedToolNames: optional(array(nonempty)) })),
   behavior: optional(object<Behavior>({
@@ -78,7 +78,9 @@ const node = object<Node>({
   autoRouting: optional(object<NonNullable<Node['autoRouting']>>({
     confidenceThreshold: numeric(v => Number.isFinite(v) && v >= 0 && v <= 1),
     instructions: { read: value => typeof value === 'string' && value.length <= 2000 ? value : invalid() },
-  })), x: optional(number), y: optional(number),
+  })),
+  statusRouting: optional(object<NonNullable<Node['statusRouting']>>({ sourceNodeId: nonempty, expectedStatus: enumeration('completed', 'failed') })),
+  x: optional(number), y: optional(number),
 } satisfies Fields<Node>);
 type Slot = ArchitectureSchema['roleSlots'][number];
 type Edge = ArchitectureSchema['edges'][number];

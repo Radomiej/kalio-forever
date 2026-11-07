@@ -159,6 +159,7 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
         nodeId: event.nodeId, roleSlotId: event.roleSlotId,
         route: event.route, routerOutput: event.routerOutput,
         autoRoutingVisit: event.data?.['autoRoutingVisit'],
+        statusRoutingDecision: event.data?.['statusRoutingDecision'],
         selectedEdgeId: event.data?.['selectedEdgeId'],
         pendingNodeIds: event.data?.['pendingNodeIds'],
         visitCounts: event.data?.['visitCounts'],
