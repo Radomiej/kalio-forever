@@ -55,6 +55,31 @@ export class ProjectResourceIndexStore {
     } catch (error) { this.db.close(); throw error; }
   }
 
+  reusableEmbeddings(candidates: readonly Omit<IndexedResourceChunk, 'embedding'>[]): Map<string, number[]> {
+    const reusable = new Map<string, number[]>();
+    if (!this.hasCurrentChunking()) return reusable;
+    const byId = new Map(candidates.map(chunk => [chunk.id, chunk]));
+    for (const type of RESOURCE_TYPES) {
+      const rows = this.db.prepare<ResourceRow & { embedding: Uint8Array }>(
+        `SELECT r.*,v.embedding FROM resource_vec_${type} v JOIN resources r ON r.id=v.id WHERE r.resource_type=?`,
+      ).all(type);
+      for (const row of rows) {
+        const candidate = byId.get(row.id);
+        if (!candidate || candidate.path !== row.path || candidate.resourceType !== row.resource_type
+          || candidate.representation !== row.representation || candidate.content !== row.content
+          || candidate.contentHash !== row.content_hash) continue;
+        if (!(row.embedding instanceof Uint8Array) || row.embedding.byteLength !== this.space.dimensions * 4) {
+          throw new Error('INVALID_EMBEDDING_VECTOR');
+        }
+        const bytes = new DataView(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength);
+        const vector = Array.from({ length: this.space.dimensions }, (_, index) => bytes.getFloat32(index * 4, true));
+        validateVector(vector, this.space.dimensions);
+        reusable.set(row.id, vector);
+      }
+    }
+    return reusable;
+  }
+
   /** Full bounded snapshot only. Failure leaves the previous published snapshot intact. */
   replace(chunks: readonly IndexedResourceChunk[], indexedAt: number): void {
     if (!Number.isSafeInteger(indexedAt) || indexedAt < 1 || chunks.length > 10000) throw new Error('INVALID_RESOURCE_SNAPSHOT');

@@ -104,7 +104,12 @@ each SQLite database at 64 MiB through `max_page_count`. Journal/WAL transient
 overhead is not a promised hard total-disk quota. Reaching a cap rejects work and
 does not automatically delete prior indexes.
 
-Publication embeds all batches before a single SQLite transaction. A second VFS
+Refresh reuses vectors only for exact unchanged chunks in the same embedding
+space and current chunking version. The chunk ID, path, resource type,
+representation, content and source hash must match. Changed or missing chunks
+require document inference; removed chunks do not survive replacement. A changed
+model or chunking version cannot reuse vectors from the older index.
+Publication completes all required inference before a single SQLite transaction. A second VFS
 read must match source hashes before publication. Search revalidates indexed file
 hashes before and after retrieval. Added/changed/deleted/excluded supported sources
 trigger automatic refresh; unchanged sources do not reembed documents. At most

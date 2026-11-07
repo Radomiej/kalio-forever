@@ -350,6 +350,9 @@ classDiagram
   No automatic crawler or implicit prompt-context injection is enabled.
 - Added, modified, removed or newly excluded sources cause refresh before search;
   unchanged sources reuse the published index without document inference.
+  During refresh, exact unchanged chunks reuse their vectors only within the
+  same embedding space and current chunking version. Changed chunks require
+  inference; removed chunks are omitted from the atomic replacement.
   Concurrent refresh requests coalesce, but consent remains per caller.
   TS/JS chunking prefers declarations/class members; other languages use bounded
   line windows. Full path/line labels and optional syntax context count toward

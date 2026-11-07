@@ -36,6 +36,56 @@ function fixture() {
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 describe('project indexing workflow', () => {
+  it.each(['sizer', 'reuse'] as const)('retains the published snapshot after source mutation during %s', async stage => {
+    const f = fixture(); await f.service.index('project', {});
+    const before = await f.service.status('project'); const original = await f.reader.readProject();
+    const mutate = () => f.setSnapshot({ ...original, files: [] });
+    const reuse = ProjectResourceIndexStore.prototype.reusableEmbeddings;
+    const spy = stage === 'reuse' ? vi.spyOn(ProjectResourceIndexStore.prototype, 'reusableEmbeddings')
+      .mockImplementationOnce(function (this: ProjectResourceIndexStore, candidates) { mutate(); return reuse.call(this, candidates); }) : undefined;
+    if (stage === 'sizer') f.embeddings.getDocumentSizer.mockImplementationOnce(async () => { mutate(); return undefined; });
+    try {
+      await expect(f.service.index('project', {})).rejects.toThrow('PROJECT_RESOURCE_SOURCE_CHANGED');
+      expect(await f.service.status('project')).toEqual(before);
+      f.setSnapshot(original);
+      expect(await f.service.search('project', { query: 'approveBuild', mode: 'fts' })).toHaveLength(1);
+    } finally { spy?.mockRestore(); }
+  });
+  it('embeds only changed/new documents and atomically removes deleted resources', async () => {
+    const f = fixture(); await f.service.index('project', {});
+    const original = await f.reader.readProject();
+    const file = (path: string, content: string) => ({ path, content: Buffer.from(content), sizeBytes: Buffer.byteLength(content) });
+    f.embeddings.embedPinned.mockClear();
+    f.setSnapshot({ ...original, files: [file('src/api.ts', 'export const changedToken = 2;'), original.files[1]!] });
+    expect(await f.service.search('project', { query: 'changedToken', mode: 'fts' })).toHaveLength(1);
+    const documents = f.embeddings.embedPinned.mock.calls.filter(call => call[2] === 'document').flatMap(call => call[1]);
+    expect(documents).toHaveLength(1);
+    expect(documents[0]).toContain('changedToken');
+    f.embeddings.embedPinned.mockClear();
+    f.setSnapshot({ ...original, files: [original.files[1]!] });
+    expect(await f.service.search('project', { query: 'changedToken', mode: 'fts' })).toEqual([]);
+    expect(f.embeddings.embedPinned).not.toHaveBeenCalled();
+    expect((await f.service.status('project')).indexedChunks).toBe(1);
+    expect(await f.service.search('project', { query: 'logo', mode: 'fts' })).toHaveLength(1);
+  });
+  it.each(['abort', 'failure'] as const)('keeps the old snapshot when incremental inference ends in %s', async outcome => {
+    const f = fixture(); await f.service.index('project', {});
+    const before = await f.service.status('project');
+    const original = await f.reader.readProject();
+    f.setSnapshot({ ...original, files: [...original.files, { path: 'new.ts', content: Buffer.from('newToken'), sizeBytes: 8 }] });
+    const controller = new AbortController();
+    f.embeddings.embedPinned.mockImplementation(async (_space, texts) => {
+      if (outcome === 'failure') throw new Error('INFERENCE_FAILED');
+      controller.abort(new Error('INDEX_ABORTED')); return texts.map(() => [1, 0]);
+    });
+    await expect(f.service.index('project', {}, controller.signal)).rejects.toThrow(outcome === 'failure' ? 'INFERENCE_FAILED' : 'INDEX_ABORTED');
+    expect(await f.service.status('project')).toEqual(before);
+    const store = new ProjectResourceIndexStore(new ProjectResourceIndexStorage(f.root), 'project', space);
+    try {
+      expect(store.search('approveBuild', undefined, ['code'], 5, 'fts')).toHaveLength(1);
+      expect(store.search('newToken', undefined, ['code'], 5, 'fts')).toEqual([]);
+    } finally { store.close(); }
+  });
   it('rejects oversized asset metadata before inference and leaves its representation unchanged', async () => {
     const f = fixture();
     const path = `${'asset'.repeat(100)}.png`;
@@ -433,11 +483,14 @@ describe('project indexing workflow', () => {
   });
   it('does not publish if model identity changes between embedding and publication', async () => {
     const f = fixture(); await f.service.index('project', {});
+    const original = await f.reader.readProject();
+    f.setSnapshot({ ...original, files: [...original.files, { path: 'new.ts', content: Buffer.from('newToken'), sizeBytes: 8 }] });
     f.embeddings.embedPinned.mockImplementation(async (_space, texts) => {
       f.embeddings.captureSpace = () => ({ ...space, id: 'changed' }); return texts.map(() => [1, 0]);
     });
     await expect(f.service.index('project', {})).rejects.toThrow('EMBEDDING_SPACE_CHANGED');
     f.embeddings.captureSpace = () => space;
+    f.setSnapshot(original);
     expect(await f.service.search('project', { query: 'approveBuild', mode: 'fts' })).toHaveLength(1);
   });
   it('reindex removes deleted files and abort does not publish a partial snapshot', async () => {

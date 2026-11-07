@@ -119,15 +119,21 @@ export class ProjectResourceIndexService {
         if (resource) prepared.push(...prepareFile(file, resource, fits));
       }
       if (prepared.length > 10000) throw new Error('PROJECT_RESOURCE_CHUNK_LIMIT');
-      const chunks: IndexedResourceChunk[] = [];
-      for (let start = 0; start < prepared.length; start += 32) {
+      let vectorsById = new Map<string, number[]>();
+      if (this.storage.exists(project, space.id)) {
+        const previous = new ProjectResourceIndexStore(this.storage, project, space);
+        try { vectorsById = previous.reusableEmbeddings(prepared); } finally { previous.close(); }
+      }
+      const missing = prepared.filter(chunk => !vectorsById.has(chunk.id));
+      for (let start = 0; start < missing.length; start += 32) {
         await this.settings.assertEnabled(); this.assertCurrent(space);
         signal?.throwIfAborted();
-        const batch = prepared.slice(start, start + 32);
+        const batch = missing.slice(start, start + 32);
         const vectors = await this.embeddings.embedPinned(space, batch.map(c => c.content), 'document');
         if (vectors.length !== batch.length) throw new Error('INVALID_EMBEDDING_BATCH');
-        batch.forEach((chunk, index) => chunks.push({ ...chunk, embedding: vectors[index]! }));
+        batch.forEach((chunk, index) => vectorsById.set(chunk.id, vectors[index]!));
       }
+      const chunks: IndexedResourceChunk[] = prepared.map(chunk => ({ ...chunk, embedding: vectorsById.get(chunk.id)! }));
       signal?.throwIfAborted(); this.assertCurrent(space);
       await this.settings.assertEnabled();
       const fresh = await this.reader.readProject(project, signal);
@@ -141,6 +147,7 @@ export class ProjectResourceIndexService {
       await this.embeddings.ensureCurrentIdentity();
       await this.settings.assertEnabled();
       this.assertCurrent(space);
+      signal?.throwIfAborted();
       const store = new ProjectResourceIndexStore(this.storage, project, space);
       try { store.replace(chunks, indexedAt); } finally { store.close(); }
       return { projectId: project, space, indexedFiles, indexedChunks: chunks.length, skipped, indexedAt };
