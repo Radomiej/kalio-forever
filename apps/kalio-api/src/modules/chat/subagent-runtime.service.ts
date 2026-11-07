@@ -30,6 +30,7 @@ import { failedRunResultText } from './subagent-result-text';
 import { completeSubagentRuntime } from './subagent-runtime-completion';
 import { bindObservedSubagentCancellation } from './subagent-cancellation-binding';
 import { createSubagentExecutionBudget } from './subagent-execution-budget';
+import { createSubagentActivityObserver } from './subagent-execution-activity';
 import { hostReceiptIdentity } from './llm-turn-tool-execution';
 import {
   ActiveSubagentRunRegistry,
@@ -189,6 +190,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     if (request.hostRuntimeReceiptObserver && !promptMessageId) throw new Error('Host receipts require a persisted prompt message.');
     let hadContent = false;
     let streamedText = '';
+    let onExecutionActivity: ReturnType<typeof createSubagentActivityObserver> = () => undefined;
     const trackingEmit = createSubagentTrackingEmit({
       emit,
       runtimeKind,
@@ -196,6 +198,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       turnId,
       promptMessageId: () => promptMessageId,
       onChunk: (delta) => { hadContent = true; streamedText += delta; },
+      ...(runtimeKind === 'agent-flow-branch' ? { onActivity: (event: string, data: unknown) => onExecutionActivity(event, data) } : {}),
     });
     trackingEmit?.('agent:start', { sessionId: childSessionId, turnId, promptMessageId, agentRun });
     if (!requestedChildSessionId) {
@@ -217,8 +220,10 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     });
     const executionLease = this.runtimeScheduler ? createRuntimeExecutionLeaseController(this.runtimeScheduler, { projectId: childSession.projectId ?? 'system:none', priority: 'child', label: `subagent:${childSessionId}:${turnId}` }) : undefined;
     const executionBudget = createSubagentExecutionBudget({ timeoutMs: request.timeoutMs,
+      mode: runtimeKind === 'agent-flow-branch' ? 'idle' : 'active',
       signal: controller.signal, isCurrent: () => this.activeRuns.getStatus(childSessionId)?.turnId === turnId,
       onExpired: error => controller.abort(error) });
+    onExecutionActivity = createSubagentActivityObserver({ sessionId: childSessionId, turnId, noteActivity: executionBudget.noteActivity });
     let journalRunId: string | undefined;
     let journalCommitted = false;
     let loopExecution: Promise<LLMAgentLoopResult> | undefined;
@@ -300,6 +305,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
              abortSignal: controller.signal,
              onExternalRuntimeLost: () => controller.abort(),
              trackingEmit,
+             onActivity: runtimeKind === 'agent-flow-branch' ? onExecutionActivity : undefined,
             sessions: this.sessions,
             runJournal: this.runJournal,
             nativeApprovals: this.nativeApprovals,

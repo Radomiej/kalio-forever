@@ -376,7 +376,7 @@ classDiagram
 - A graph node revisited during a correction uses the current visit for status and evidence, while retaining historical event IDs and visit count.
 - Frontend session status and its replay buffer update atomically for each socket status event.
 - Project group expansion is preserved across equivalent session updates and does not schedule redundant state updates during socket replay.
-- Architecture child execution excludes the union of verified durable manual-tool approval waits from its execution timeout, then resumes the remaining budget. Ordinary subagents retain their existing timeout behavior. Stop, expired owners and settled approval tokens cannot restart the clock; this accounting is in-process, not a persisted restart budget.
+- Architecture child execution expires after communication inactivity, rather than total productive work. Nonempty model text/thinking, CLI progress, growing tool arguments and distinct tool start/result events refresh the deadline; status heartbeats do not. Verified durable manual-tool approval waits exclude their union, and approval alone resumes the remaining allowance. Ordinary subagents retain their existing active-time budget. Stop, expired owners and settled approval tokens cannot restart the clock; this accounting is in-process, not a persisted restart budget.
 
 - The Windows DEV launcher uses explicit IPv4 loopback for API readiness before starting the frontend; `localhost` resolution is not a readiness dependency. See `docs/spec/local-dev-guide.md`.
 
@@ -406,4 +406,4 @@ Game Development 2 Release Review consumes the latest completed outputs of its i
 
 Game Development 2 finalization retains the conclusion of both browser QA reports within a bounded prompt budget, so end-of-match and restored-career observations reach the finalizer.
 
-Architecture graphs support a deterministic status_router node with one source role and Yes/Else branches. The predicate checks completed/failed for the current source execution. It does not call a model or establish task acceptance. Current source evidence and a required durable decision checkpoint are mandatory. Editor, registry snapshots and recovery preserve the condition and its source-visit binding.
+Architecture graphs support a deterministic status_router node with one source role and Yes/Else branches. The predicate checks completed/failed for the current source execution. It does not call a model or establish task acceptance. Current source evidence and a required durable decision checkpoint are mandatory. Editor, registry snapshots and recovery preserve the condition and its source-visit binding. Selected downstream roles also receive the original source contribution bound to that checkpoint visit, preserving failure and partial tool evidence across the control hop and durable recovery; stale, invalid or cross-run bindings cannot supply context.

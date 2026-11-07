@@ -267,9 +267,11 @@ export function createSubagentTrackingEmit(input: {
   turnId: string;
   promptMessageId?: () => string | undefined;
   onChunk: (delta: string) => void;
+  onActivity?: (event: string, data: unknown) => void;
 }): EmitFn | undefined {
-  if (!input.emit) return undefined;
+  if (!input.emit && !input.onActivity) return undefined;
   return (event, data) => {
+    input.onActivity?.(event, data);
     if (event === 'chat:chunk') {
       const payload = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
       if (typeof payload['delta'] === 'string') input.onChunk(payload['delta']);
@@ -277,7 +279,7 @@ export function createSubagentTrackingEmit(input: {
     const forwarded = input.runtimeKind === 'agent-flow-branch' && typeof data === 'object' && data !== null
       ? { ...data as Record<string, unknown>, architectureParentExecution: { childSessionId: input.childSessionId, childTurnId: input.turnId, promptMessageId: input.promptMessageId?.() } }
       : data;
-    input.emit!(event, forwarded as never);
+    input.emit?.(event, forwarded as never);
   };
 }
 

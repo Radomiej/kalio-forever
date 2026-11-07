@@ -171,7 +171,7 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
     branchSessionId,
     personaId: ctx.options.personaForSlot(slot),
     node,
-    incomingEvents: ctx.incomingEventsForSlot(slot, ctx.incomingNodeIdsFor(node.id)),
+    incomingEvents: ctx.incomingEventsForSlot(slot, ctx.incomingNodeIdsFor(node.id), node.id),
     outgoingNodeIds,
     resumeChildTurnId: ctx.options.resumeFrom?.waitingNodeId === node.id
       ? ctx.options.resumeFrom.waitIdentity?.childTurnId

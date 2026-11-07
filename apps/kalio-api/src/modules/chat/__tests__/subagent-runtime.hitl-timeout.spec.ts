@@ -194,7 +194,7 @@ describe('Architecture remaining execution time with real durable tool waiter', 
     }
   });
 
-  it.each(['approve', 'deny'] as const)('charges only remaining time after %s, not a fresh timeout', async decision => {
+  it.each(['approve', 'deny'] as const)('refreshes the idle deadline on the actual tool result after %s', async decision => {
     vi.useFakeTimers(); const f = fixture();
     try {
       await f.entered.promise; await vi.advanceTimersByTimeAsync(20);
@@ -205,7 +205,7 @@ describe('Architecture remaining execution time with real durable tool waiter', 
       if (decision === 'approve') await f.confirmations.resolveConfirmation(pending.id, f.params.sessionId);
       else await f.confirmations.cancelConfirmation(pending.id, f.params.sessionId);
       await f.toolsFinished.promise;
-      await vi.advanceTimersByTimeAsync(29); expect(f.outcome).toBe('pending');
+      await vi.advanceTimersByTimeAsync(49); expect(f.outcome).toBe('pending');
       await vi.advanceTimersByTimeAsync(1);
       expect((await f.settled).error).toMatchObject({ code: 'SUBAGENT_TIMEOUT' });
       expect(f.write).toHaveBeenCalledTimes(decision === 'approve' ? 1 : 0);
@@ -254,7 +254,7 @@ describe('Architecture remaining execution time with real durable tool waiter', 
       expect(f.write).toHaveBeenCalledTimes(1); expect(f.outcome).toBe('pending');
       await f.confirmations.cancelConfirmation(pending[1]!.id, f.params.sessionId);
       await f.toolsFinished.promise;
-      await vi.advanceTimersByTimeAsync(29); expect(f.outcome).toBe('pending');
+      await vi.advanceTimersByTimeAsync(49); expect(f.outcome).toBe('pending');
       await vi.advanceTimersByTimeAsync(1);
       expect((await f.settled).error).toMatchObject({ code: 'SUBAGENT_TIMEOUT' });
       expect(f.write).toHaveBeenCalledTimes(1);
@@ -275,7 +275,9 @@ describe('Architecture remaining execution time with real durable tool waiter', 
       await vi.advanceTimersByTimeAsync(500);
       await f.confirmations.resolveConfirmation(pending.id, f.params.sessionId);
       await claimEntered.promise;
-      await vi.advanceTimersByTimeAsync(30);
+      // tool:start is real progress; approval itself does not refresh this allowance.
+      await vi.advanceTimersByTimeAsync(49); expect(f.outcome).toBe('pending');
+      await vi.advanceTimersByTimeAsync(1);
       expect((await f.settled).error).toMatchObject({ code: 'SUBAGENT_TIMEOUT' });
       expect(f.write).not.toHaveBeenCalled();
     } finally { claimGate.open(); await f.runtime.stopAndDrainSessions(['parent']); await f.settled; f.sqlite.close(); }

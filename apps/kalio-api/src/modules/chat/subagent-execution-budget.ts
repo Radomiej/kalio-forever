@@ -1,9 +1,10 @@
 import { createWorkflowError } from '../../common/utils/workflow-error.util';
 import type { BeginManualToolWait } from './interfaces/stream-context.interface';
 
-/** Per-execution monotonic clock. Manual scopes exclude their union, not CPU work. */
+/** Per-execution monotonic clock; manual scopes exclude their union in both modes. */
 export function createSubagentExecutionBudget(input: {
   timeoutMs: number;
+  mode?: 'active' | 'idle';
   signal: AbortSignal;
   isCurrent: () => boolean;
   onExpired: (error: Error) => void;
@@ -46,7 +47,7 @@ export function createSubagentExecutionBudget(input: {
   };
   const expire = () => {
     if (!current()) return;
-    failure = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${input.timeoutMs}ms`, {
+    failure = createWorkflowError('SUBAGENT_TIMEOUT', `Sub-agent timed out after ${input.timeoutMs}ms${input.mode === 'idle' ? ' without progress' : ''}`, {
       source: 'subagent-runtime',
     });
     dispose();
@@ -90,6 +91,13 @@ export function createSubagentExecutionBudget(input: {
   return {
     expiration,
     start() { if (!started) { started = true; arm(); } },
+    noteActivity() {
+      if (input.mode !== 'idle' || !started || !current()) return;
+      account();
+      if (remaining <= 0) { expire(); return; }
+      remaining = input.timeoutMs;
+      arm();
+    },
     beginManualToolWait,
     pauseForIterationApproval() {
       if (!current()) return;

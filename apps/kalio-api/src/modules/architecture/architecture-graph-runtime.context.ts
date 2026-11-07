@@ -1,3 +1,4 @@
+import { statusRoutingInputEvents } from './architecture-status-routing-inputs';
 import type {
   ArchitectureExecutionEvent,
   ArchitectureRoleSlot,
@@ -188,9 +189,9 @@ export class ArchitectureGraphContext {
     };
   }
 
-  incomingEventsForSlot(slot: ArchitectureRoleSlot, incomingNodeIds: string[]): ArchitectureExecutionEvent[] {
+  incomingEventsForSlot(slot: ArchitectureRoleSlot, incomingNodeIds: string[], receiverNodeId?: string): ArchitectureExecutionEvent[] {
     if (slot.slotType !== 'judge' && slot.slotType !== 'finalizer') {
-      return this.eventsForNodeIds(incomingNodeIds);
+      return statusRoutingInputEvents(this.options.schema, this.events, this.options.run.id, incomingNodeIds, receiverNodeId);
     }
     return this.events.filter((event) => (
       event.type === 'participant_output'

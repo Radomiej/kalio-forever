@@ -55,7 +55,7 @@ export async function executeRouterRoleNode(ctx: ArchitectureGraphContext,
     personaId: ctx.options.personaForSlot(slot),
     node,
     incomingEvents: gameReleaseReviewEvents(ctx.options.schema, node.id, ctx.events)
-      ?? ctx.incomingEventsForSlot(slot, incomingNodeIds),
+      ?? ctx.incomingEventsForSlot(slot, incomingNodeIds, node.id),
     outgoingNodeIds,
     emit: ctx.branchEventEmit(node, slot),
   });
