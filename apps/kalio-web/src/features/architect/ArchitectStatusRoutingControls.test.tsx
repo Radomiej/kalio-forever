@@ -17,18 +17,20 @@ describe('status routing controls', () => {
     for (const name of ['Router', 'Role without slot', 'Condition']) {
       expect(screen.queryByRole('option', { name })).not.toBeInTheDocument();
     }
-    fireEvent.change(screen.getByLabelText('Source node'), { target: { value: 'role' } });
+    expect(screen.getByRole('option', { name: 'Select a source step' })).toBeInTheDocument();
+    expect(screen.getByText('Connect a Yes route and an Else route.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Source step'), { target: { value: 'role' } });
     expect(onChange).toHaveBeenLastCalledWith('condition', { sourceNodeId: 'role', expectedStatus: 'completed' });
-    fireEvent.change(screen.getByLabelText('Expected status'), { target: { value: 'failed' } });
+    fireEvent.change(screen.getByLabelText('When status is'), { target: { value: 'failed' } });
     expect(onChange).toHaveBeenLastCalledWith('condition', { sourceNodeId: '', expectedStatus: 'failed' });
   });
 
   it('preserves a missing source visibly and disables read-only controls', () => {
     render(<ArchitectStatusRoutingControls nodeId="condition" nodes={nodes}
       value={{ sourceNodeId: 'missing', expectedStatus: 'failed' }} />);
-    expect(screen.getByLabelText('Source node')).toHaveValue('missing');
+    expect(screen.getByLabelText('Source step')).toHaveValue('missing');
     expect(screen.getByRole('option', { name: 'Missing source: missing' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Source node')).toBeDisabled();
-    expect(screen.getByLabelText('Expected status')).toBeDisabled();
+    expect(screen.getByLabelText('Source step')).toBeDisabled();
+    expect(screen.getByLabelText('When status is')).toBeDisabled();
   });
 });

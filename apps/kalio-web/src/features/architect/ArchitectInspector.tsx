@@ -160,7 +160,7 @@ export function ArchitectInspector({
 
       {!node && (
         <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-base-content/60">
-          Select a graph node or slot to inspect its runtime configuration.
+          Select a node or slot to view its settings.
         </div>
       )}
 
@@ -294,7 +294,7 @@ export function ArchitectInspector({
 
               {outgoingEdges.length > 0 && (
                 <section className="mt-4 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-base-content/55">Outgoing edge roles</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-base-content/55">{selectedNodeKind === 'status_router' ? 'Routes' : 'Outgoing edge roles'}</div>
                   <div className="mt-2 space-y-2">
                     {outgoingEdges.map((edge) => {
                       const target = nodeById.get(edge.toNodeId);
@@ -314,7 +314,7 @@ export function ArchitectInspector({
                             )}
                             data-testid={`architect-edge-selection-${edge.fromNodeId}-${edge.toNodeId}`}
                           >
-                            <option value="">{selectedNodeKind === 'status_router' ? 'Select Yes or Else' : 'Normal transition'}</option>
+                            <option value="">{selectedNodeKind === 'status_router' ? 'Select a route' : 'Normal transition'}</option>
                             <option value="default">{selectedNodeKind === 'status_router' ? 'Else' : 'Default route'}</option>
                             <option value="choice">{selectedNodeKind === 'status_router' ? 'Yes' : 'Choice route'}</option>
                             {selectedNodeKind !== 'status_router' && <option value="converge">Converge route</option>}
@@ -350,16 +350,16 @@ export function ArchitectInspector({
                   </div>
 
                   <div className="mt-4 form-control gap-1">
-                    <label className="label-text text-xs font-semibold text-base-content/70">Node tool permission override</label>
-                    <textarea
+                    <label htmlFor="architect-node-tool-override" className="label-text text-xs font-semibold text-base-content/70">Allowed tools</label>
+                    <textarea id="architect-node-tool-override" aria-describedby="architect-node-tool-override-help"
                       className="textarea textarea-bordered min-h-20 w-full font-mono text-xs"
                       placeholder="Inherit default policy"
                       value={toolOverrideValue}
                       onChange={(event) => updateToolOverride(event.target.value)}
                       data-testid="architect-node-tool-override"
                     />
-                    <p className="text-[11px] leading-4 text-base-content/55">
-                      Blank inherits the runtime, persona, and slot policy. Set this only to deliberately replace allowed tools for this node.
+                    <p id="architect-node-tool-override-help" className="text-[11px] leading-4 text-base-content/55">
+                      Leave blank to inherit the runtime, persona, and slot policy. Enter tool names to replace the allowed tools for this node.
                     </p>
                   </div>
                 </>

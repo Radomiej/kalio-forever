@@ -13,11 +13,11 @@ export function ArchitectStatusRoutingControls({ nodeId, nodes, value, onChange 
   return (
     <section className="mt-4 space-y-3 rounded-md border border-base-300/80 bg-base-200/50 p-2.5">
       <label className="form-control gap-1">
-        <span className="label-text text-xs">Source node</span>
-        <select aria-label="Source node" className="select select-bordered select-sm w-full"
+        <span className="label-text text-xs">Source step</span>
+        <select aria-label="Source step" className="select select-bordered select-sm w-full"
           value={config.sourceNodeId} disabled={!onChange}
           onChange={(event) => onChange?.(nodeId, { ...config, sourceNodeId: event.target.value })}>
-          <option value="">Select source node</option>
+          <option value="">Select a source step</option>
           {config.sourceNodeId && !sources.some((node) => node.id === config.sourceNodeId) && (
             <option value={config.sourceNodeId}>Missing source: {config.sourceNodeId}</option>
           )}
@@ -25,8 +25,8 @@ export function ArchitectStatusRoutingControls({ nodeId, nodes, value, onChange 
         </select>
       </label>
       <label className="form-control gap-1">
-        <span className="label-text text-xs">Expected status</span>
-        <select aria-label="Expected status" className="select select-bordered select-sm w-full"
+        <span className="label-text text-xs">When status is</span>
+        <select aria-label="When status is" className="select select-bordered select-sm w-full"
           value={config.expectedStatus} disabled={!onChange}
           onChange={(event) => {
             const expectedStatus = event.target.value;
@@ -38,7 +38,7 @@ export function ArchitectStatusRoutingControls({ nodeId, nodes, value, onChange 
           <option value="failed">Failed</option>
         </select>
       </label>
-      <p className="text-xs text-base-content/65">Check whether the source step completed or failed. Connect one Yes route and one Else route.</p>
+      <p className="text-xs text-base-content/65">Connect a Yes route and an Else route.</p>
     </section>
   );
 }

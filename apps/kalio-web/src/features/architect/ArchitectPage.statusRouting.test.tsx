@@ -32,8 +32,8 @@ async function openSettings() {
   await screen.findByTestId('architect-node-properties-open');
   expect(screen.getByTestId('architect-save-variant')).toBeDisabled();
   fireEvent.click(screen.getByTestId('architect-node-properties-open'));
-  expect(screen.getByLabelText('Source node')).toBeEnabled();
-  expect(screen.getByLabelText('Expected status')).toBeEnabled();
+  expect(screen.getByLabelText('Source step')).toBeEnabled();
+  expect(screen.getByLabelText('When status is')).toBeEnabled();
 }
 
 describe('ArchitectPage enabled status condition flow', () => {
@@ -63,7 +63,7 @@ describe('ArchitectPage enabled status condition flow', () => {
     expect(screen.queryByTestId('architect-node-tool-override')).not.toBeInTheDocument();
     expect(within(screen.getByLabelText('Edge role for Choice')).getByRole('option', { name: 'Yes' })).toHaveValue('choice');
     expect(within(screen.getByLabelText('Edge role for Fallback')).getByRole('option', { name: 'Else' })).toHaveValue('default');
-    fireEvent.change(screen.getByLabelText('Expected status'), { target: { value: 'failed' } });
+    fireEvent.change(screen.getByLabelText('When status is'), { target: { value: 'failed' } });
     expect(screen.getByTestId('architect-save-variant')).toBeEnabled();
     fireEvent.click(screen.getByTestId('architect-node-properties-close'));
     fireEvent.click(screen.getByTestId('architect-save-variant'));
@@ -73,14 +73,14 @@ describe('ArchitectPage enabled status condition flow', () => {
     })));
     await waitFor(() => expect(screen.getByTestId('architect-save-variant')).toBeDisabled());
     fireEvent.click(screen.getByTestId('architect-node-properties-open'));
-    expect(screen.getByLabelText('Source node')).toHaveValue('source');
-    expect(screen.getByLabelText('Expected status')).toHaveValue('failed');
+    expect(screen.getByLabelText('Source step')).toHaveValue('source');
+    expect(screen.getByLabelText('When status is')).toHaveValue('failed');
     expect(schema.nodes[0]?.statusRouting?.expectedStatus).toBe('completed');
   });
 
   it('sends a status-only edit through the inline run schema', async () => {
     await openSettings();
-    fireEvent.change(screen.getByLabelText('Expected status'), { target: { value: 'failed' } });
+    fireEvent.change(screen.getByLabelText('When status is'), { target: { value: 'failed' } });
     fireEvent.click(screen.getByTestId('architect-node-properties-close'));
     fireEvent.click(screen.getByTestId('architect-start-run'));
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/architecture-runs/async', expect.objectContaining({
@@ -92,17 +92,17 @@ describe('ArchitectPage enabled status condition flow', () => {
 
   it('tracks source/status changes and clears dirty state on baseline restoration and refresh', async () => {
     await openSettings();
-    fireEvent.change(screen.getByLabelText('Source node'), { target: { value: 'source-2' } });
-    expect(screen.getByLabelText('Source node')).toHaveValue('source-2');
+    fireEvent.change(screen.getByLabelText('Source step'), { target: { value: 'source-2' } });
+    expect(screen.getByLabelText('Source step')).toHaveValue('source-2');
     expect(screen.getByTestId('architect-save-variant')).toBeEnabled();
-    fireEvent.change(screen.getByLabelText('Source node'), { target: { value: 'source' } });
+    fireEvent.change(screen.getByLabelText('Source step'), { target: { value: 'source' } });
     expect(screen.getByTestId('architect-save-variant')).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Expected status'), { target: { value: 'failed' } });
+    fireEvent.change(screen.getByLabelText('When status is'), { target: { value: 'failed' } });
     fireEvent.click(screen.getByTestId('architect-node-properties-close'));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(screen.getByTestId('architect-save-variant')).toBeDisabled());
     fireEvent.click(screen.getByTestId('architect-node-properties-open'));
-    expect(screen.getByLabelText('Expected status')).toHaveValue('completed');
+    expect(screen.getByLabelText('When status is')).toHaveValue('completed');
   });
 
   it('creates and edits a slot-free status condition from the palette', async () => {
@@ -113,11 +113,11 @@ describe('ArchitectPage enabled status condition flow', () => {
     fireEvent.click(screen.getByTestId('architect-graph-canvas'), { clientX: 660, clientY: 260 });
     await screen.findByTestId('architect-node-custom-node-6');
     fireEvent.click(screen.getByTestId('architect-node-properties-open'));
-    expect(screen.getByLabelText('Source node')).toHaveValue('');
-    fireEvent.change(screen.getByLabelText('Source node'), { target: { value: 'source' } });
-    fireEvent.change(screen.getByLabelText('Expected status'), { target: { value: 'failed' } });
-    expect(screen.getByLabelText('Source node')).toHaveValue('source');
-    expect(screen.getByLabelText('Expected status')).toHaveValue('failed');
+    expect(screen.getByLabelText('Source step')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Source step'), { target: { value: 'source' } });
+    fireEvent.change(screen.getByLabelText('When status is'), { target: { value: 'failed' } });
+    expect(screen.getByLabelText('Source step')).toHaveValue('source');
+    expect(screen.getByLabelText('When status is')).toHaveValue('failed');
     expect(screen.queryByLabelText('Persona override')).not.toBeInTheDocument();
   });
 });

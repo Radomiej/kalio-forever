@@ -58,7 +58,8 @@ function nodeSurfaceClass(node: ArchitectNode): string {
 }
 
 function nodeIcon(node: ArchitectNode) {
-  if (node.kind === 'router' || node.kind === 'status_router') return <Route size={13} />;
+  if (node.kind === 'status_router') return <GitBranch size={13} />;
+  if (node.kind === 'router' || node.kind === 'auto_router') return <Route size={13} />;
   if (node.kind === 'parallel') return <GitBranch size={13} />;
   if (node.kind === 'artifact') return <Box size={13} />;
   return <Bot size={13} />;

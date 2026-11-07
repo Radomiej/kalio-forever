@@ -23,7 +23,7 @@ const PALETTE: ReadonlyArray<{
 }> = [
   { kind: 'role', label: 'Agent', title: 'Add agent node', icon: Bot },
   { kind: 'router', label: 'Router', title: 'Add router node', icon: Route },
-  { kind: 'status_router', label: 'Status condition', title: 'Add status condition node', icon: Route },
+  { kind: 'status_router', label: 'Status condition', title: 'Add status condition node', icon: GitBranch },
   { kind: 'auto_router', label: 'Auto-routing', title: 'Add auto-routing node', icon: Route },
   { kind: 'parallel', label: 'Parallel', title: 'Add parallel router node', icon: GitBranch },
   { kind: 'artifact', label: 'Artifact', title: 'Add final artifact node', icon: Box },
@@ -62,7 +62,7 @@ export function ArchitectGraphToolbar({
         data-testid="architect-mode-select"
         title="Select and move nodes"
       >
-        <MousePointer2 size={12} />
+        <MousePointer2 size={16} />
       </button>
       <button
         type="button"
@@ -72,17 +72,17 @@ export function ArchitectGraphToolbar({
         data-testid="architect-mode-connect"
         title="Connect or disconnect nodes"
       >
-        <Merge size={12} />
+        <Merge size={16} />
       </button>
       <div className="mx-1 h-6 w-px bg-base-300" />
       <button type="button" className="btn btn-ghost btn-xs btn-square h-11 min-h-11 w-11" onClick={onZoomOut} aria-label="Zoom out" title="Zoom out">
-        <Minus size={12} />
+        <Minus size={16} />
       </button>
-      <div className="min-w-10 text-center font-mono text-[10px] text-base-content/55" data-testid="architect-zoom-label">
+      <div className="min-w-10 text-center text-xs text-base-content/55" data-testid="architect-zoom-label">
         {Math.round(zoom * 100)}%
       </div>
       <button type="button" className="btn btn-ghost btn-xs btn-square h-11 min-h-11 w-11" onClick={onZoomIn} aria-label="Zoom in" title="Zoom in">
-        <Plus size={12} />
+        <Plus size={16} />
       </button>
       <div className="relative">
         <button
@@ -93,7 +93,7 @@ export function ArchitectGraphToolbar({
           title="More graph controls"
           onClick={() => setControlsOpen((value) => !value)}
         >
-          <MoreHorizontal size={12} />
+          <MoreHorizontal size={16} />
         </button>
         {controlsOpen && (
           <div
