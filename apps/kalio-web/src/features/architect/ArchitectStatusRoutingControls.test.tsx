@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ArchitectStatusRoutingControls } from './ArchitectStatusRoutingControls';
 
@@ -10,6 +11,25 @@ const nodes = [
 ];
 
 describe('status routing controls', () => {
+  it('reveals the execution-status distinction by keyboard without changing the selection', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ArchitectStatusRoutingControls nodeId="condition" nodes={nodes} onChange={onChange} />);
+    const info = screen.getByRole('button', { name: 'About status routing' });
+    expect(info).toHaveAttribute('aria-expanded', 'false');
+    await user.tab();
+    await user.tab();
+    expect(info).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(info).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Branches on step execution status. QA verdicts are evaluated separately. Stop ends the run.')).toBeVisible();
+    expect(screen.getByLabelText('When status is')).toHaveValue('completed');
+    expect(screen.getByLabelText('When status is')).toHaveAccessibleDescription('Branches on step execution status. QA verdicts are evaluated separately. Stop ends the run.');
+    expect(onChange).not.toHaveBeenCalled();
+    await user.keyboard(' ');
+    expect(info).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('offers only source roles with slots and emits both settings', () => {
     const onChange = vi.fn();
     render(<ArchitectStatusRoutingControls nodeId="condition" nodes={nodes} onChange={onChange} />);

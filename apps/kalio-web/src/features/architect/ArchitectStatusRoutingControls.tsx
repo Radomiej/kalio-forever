@@ -1,4 +1,6 @@
 import type { ArchitectureSchemaNode } from '@kalio/types';
+import { Info } from 'lucide-react';
+import { useId, useState } from 'react';
 
 interface Props {
   nodeId: string;
@@ -8,6 +10,9 @@ interface Props {
 }
 
 export function ArchitectStatusRoutingControls({ nodeId, nodes, value, onChange }: Props) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const infoId = useId();
+  const statusId = useId();
   const config = value ?? { sourceNodeId: '', expectedStatus: 'completed' };
   const sources = nodes.filter((node) => node.id !== nodeId && node.kind === 'role' && node.roleSlotId !== undefined);
   return (
@@ -24,9 +29,15 @@ export function ArchitectStatusRoutingControls({ nodeId, nodes, value, onChange 
           {sources.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
         </select>
       </label>
-      <label className="form-control gap-1">
-        <span className="label-text text-xs">When status is</span>
-        <select aria-label="When status is" className="select select-bordered select-sm w-full"
+      <div className="form-control gap-1">
+        <div className="flex items-center gap-1">
+          <label htmlFor={statusId} className="label-text text-xs">When status is</label>
+          <button type="button" className="btn btn-ghost btn-xs btn-square" aria-label="About status routing"
+            aria-expanded={infoOpen} aria-controls={infoId} onClick={() => setInfoOpen((open) => !open)}>
+            <Info size={14} aria-hidden="true" />
+          </button>
+        </div>
+        <select id={statusId} aria-describedby={infoId} className="select select-bordered select-sm w-full"
           value={config.expectedStatus} disabled={!onChange}
           onChange={(event) => {
             const expectedStatus = event.target.value;
@@ -37,7 +48,8 @@ export function ArchitectStatusRoutingControls({ nodeId, nodes, value, onChange 
           <option value="completed">Completed</option>
           <option value="failed">Failed</option>
         </select>
-      </label>
+        <p id={infoId} hidden={!infoOpen} className="text-xs text-base-content/65">Branches on step execution status. QA verdicts are evaluated separately. Stop ends the run.</p>
+      </div>
       <p className="text-xs text-base-content/65">Connect a Yes route and an Else route.</p>
     </section>
   );
