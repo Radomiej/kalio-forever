@@ -9,7 +9,7 @@ import { commitOrdinaryContinuationCancellationBatch, type OrdinaryCancellationB
   type OrdinaryCancellationResult } from '../../database/ordinary-continuation-cancellation';
 
 export type HitlRequestKind = 'tool_confirmation' | 'raapp_native' | 'tool_budget';
-export type HitlRequestResolution = 'approved' | 'denied' | 'cancelled';
+export type HitlRequestResolution = 'approved' | 'denied' | 'cancelled' | 'expired';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -99,6 +99,10 @@ export class HitlRequestService {
   }
 
   async resolve(id: string, revision: number, status: HitlRequestResolution, outcome?: Record<string, unknown>): Promise<boolean> {
+    if (status === 'expired') {
+      const row = await this.getById(id);
+      if (!row || row.kind !== 'tool_confirmation' || hasHostRequirement(row) || isProtectedGoalRequest(row)) return false;
+    }
     if (status === 'approved') {
       const row = await this.getById(id);
       if (row && hasHostRequirement(row)) return false;

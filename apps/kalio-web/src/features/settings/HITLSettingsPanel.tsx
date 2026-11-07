@@ -9,6 +9,8 @@ import type { HitlConfig } from './hitl-settings.types';
 
 const DEFAULT_CONFIG: HitlConfig = {
   mode: 'manual',
+  confirmationAuthority: 'human',
+  humanReviewTimeoutMs: 60_000,
   autoPersonaId: null,
   unattendedFallback: 'pause',
   representativePersonaId: null,
@@ -64,6 +66,9 @@ export function HITLSettingsPanel() {
       ]);
       setConfig({
         mode: loadedConfig.mode,
+        // TODO: legacy fallback — older HITL configs require manual terminal approval.
+        confirmationAuthority: loadedConfig.confirmationAuthority ?? 'human',
+        humanReviewTimeoutMs: loadedConfig.humanReviewTimeoutMs ?? 60_000,
         autoPersonaId: loadedConfig.autoPersonaId ?? null,
         unattendedFallback: loadedConfig.unattendedFallback ?? 'pause',
         representativePersonaId: loadedConfig.representativePersonaId ?? null,
@@ -130,6 +135,8 @@ export function HITLSettingsPanel() {
     try {
       const payload: UpdateHitlConfigDto = {
         mode: config.mode,
+        confirmationAuthority: config.confirmationAuthority ?? 'human',
+        humanReviewTimeoutMs: config.humanReviewTimeoutMs ?? 60_000,
         unattendedFallback: config.unattendedFallback,
         representativePersonaId: config.representativePersonaId,
         notificationChannel: config.notificationChannel,
@@ -149,6 +156,9 @@ export function HITLSettingsPanel() {
       });
       setConfig({
         mode: updated.mode,
+        // TODO: legacy fallback — older HITL responses omit terminal approval settings.
+        confirmationAuthority: updated.confirmationAuthority ?? 'human',
+        humanReviewTimeoutMs: updated.humanReviewTimeoutMs ?? 60_000,
         autoPersonaId: updated.autoPersonaId ?? null,
         unattendedFallback: updated.unattendedFallback ?? 'pause',
         representativePersonaId: updated.representativePersonaId ?? null,

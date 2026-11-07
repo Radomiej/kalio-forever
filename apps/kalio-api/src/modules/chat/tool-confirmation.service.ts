@@ -18,6 +18,7 @@ export interface ToolApprovalOutcome {
   rejectionMessage?: string;
   execution?: { requestId: string; revision: number };
   nonDurableReason?: 'policy' | 'representative' | 'legacy_confirmation';
+  validateBeforeExecution?: () => Promise<boolean>;
 }
 export type PendingMutationStatus = 'removed' | 'not_found' | 'session_mismatch';
 
@@ -168,7 +169,8 @@ export class ToolConfirmationService {
 
         if (resolution.status === 'approved') {
           this.logPolicyLifecycle('hitl_approval_confirmed', resolution.source, callId, toolName, args, ctx, resolution.reason);
-          return ctx.onResolvedToolDispatch ? { approved: true, nonDurableReason: 'policy' } : { approved: true };
+          return { approved: true, ...(ctx.onResolvedToolDispatch ? { nonDurableReason: 'policy' as const } : {}),
+            ...(resolution.validateBeforeExecution ? { validateBeforeExecution: resolution.validateBeforeExecution } : {}) };
         }
 
         if (resolution.status === 'rejected') {
@@ -188,7 +190,13 @@ export class ToolConfirmationService {
       }
     }
 
-    const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx, policyReason);
+    let manualReviewTimeoutMs: number | undefined = humanOnly ? 0 : undefined;
+    if (!humanOnly && this.hitlPolicy?.getManualReviewTimeoutMs) {
+      manualReviewTimeoutMs = await this.hitlPolicy.getManualReviewTimeoutMs({
+        kind: 'tool', sessionId: ctx.sessionId, name: toolName, args, toolCallId: callId, abortSignal: ctx.abortSignal,
+      });
+    }
+    const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx, policyReason, manualReviewTimeoutMs);
     const rejectionMessage = waitResult.message ?? (waitResult.status === 'timeout'
       ? 'Tool confirmation expired before a decision. The operation did not run. Request a new confirmation if it is still needed.'
       : undefined);
@@ -225,8 +233,10 @@ export class ToolConfirmationService {
       });
 
       if (resolution.status === 'approved') {
-        this.logUnattendedLifecycle('hitl_approval_representative_approved', waitResult.requestId, callId, toolName, args, ctx, resolution.reason);
-        return ctx.onResolvedToolDispatch ? { approved: true, nonDurableReason: 'representative' } : { approved: true };
+        if (resolution.source === 'jev') this.logPolicyLifecycle('hitl_approval_confirmed', 'jev', callId, toolName, args, ctx, resolution.reason);
+        else this.logUnattendedLifecycle('hitl_approval_representative_approved', waitResult.requestId, callId, toolName, args, ctx, resolution.reason);
+        return { approved: true, ...(ctx.onResolvedToolDispatch ? { nonDurableReason: resolution.source === 'jev' ? 'policy' as const : 'representative' as const } : {}),
+          ...(resolution.validateBeforeExecution ? { validateBeforeExecution: resolution.validateBeforeExecution } : {}) };
       }
 
       if (resolution.status === 'rejected') {
@@ -252,6 +262,12 @@ export class ToolConfirmationService {
     };
   }
 
+  async reviewsSubagentAutoApprovals(): Promise<boolean> {
+    if (!this.hitlPolicy?.reviewsSubagentAutoApprovals) return false;
+    try { return await this.hitlPolicy.reviewsSubagentAutoApprovals(); }
+    catch (error) { this.logger.error('Unable to resolve subagent approval policy', error); return true; }
+  }
+
   private policyRejection(source: string, reason?: string): ToolApprovalOutcome {
     const label = source === 'jev' ? 'Jev' : source;
     const explanation = reason?.trim() || 'No reason was provided.';
@@ -267,10 +283,12 @@ export class ToolConfirmationService {
     args: Record<string, unknown>,
     ctx: StreamContext,
     policyReason?: string,
+    manualReviewTimeoutMs?: number,
   ): Promise<ConfirmationWaitResult> {
     return awaitToolConfirmation({
       callId, toolName, args, ctx, pending: this.pending,
       ...(policyReason !== undefined ? { policyReason } : {}),
+      ...(manualReviewTimeoutMs !== undefined ? { manualReviewTimeoutMs } : {}),
       hitlRequests: this.hitlRequests, hitlNotifications: this.hitlNotifications,
       runtimeAudit: this.runtimeAudit, logger: this.logger,
       emitConfirmationInvalidated: (pending, reason, message) => this.emitConfirmationInvalidated(pending, reason, message),

@@ -23,6 +23,29 @@ function makeFixture() {
 }
 function makeService(): HitlRequestService { return makeFixture().service; }
 
+describe('durable human timeout ownership', () => {
+  it('expires an ordinary request once and refuses a late human approval', async () => {
+    const { service } = makeFixture();
+    await service.create({ id: 'timeout', kind: 'tool_confirmation', sessionId: 's', payload: {}, continuation: {} });
+    expect(await service.resolve('timeout', 1, 'expired', { reason: 'human_review_timeout' })).toBe(true);
+    expect(await service.resolve('timeout', 1, 'approved')).toBe(false);
+    expect(await service.resolve('timeout', 2, 'approved')).toBe(false);
+    expect(await service.getById('timeout')).toMatchObject({ status: 'expired', revision: 2 });
+  });
+  it('does not steal an approval already won by the human', async () => {
+    const { service } = makeFixture();
+    await service.create({ id: 'human', kind: 'tool_confirmation', sessionId: 's', payload: {}, continuation: {} });
+    expect(await service.resolve('human', 1, 'approved')).toBe(true);
+    expect(await service.resolve('human', 1, 'expired')).toBe(false);
+    expect(await service.getById('human')).toMatchObject({ status: 'approved', revision: 2 });
+  });
+  it('does not expire a mandatory host-human request', async () => {
+    const { service } = makeFixture();
+    await service.create({ id: 'host', kind: 'tool_confirmation', sessionId: 's', payload: {}, continuation: { hostConfirmationRequirement: { required: true } } });
+    expect(await service.resolve('host', 1, 'expired')).toBe(false);
+  });
+});
+
 async function claimedFixture() {
   const fixture = makeFixture();
   await fixture.service.create({ id: 'receipt', kind: 'tool_confirmation', sessionId: 's', payload: {}, continuation: { executionState: 'pending' } });

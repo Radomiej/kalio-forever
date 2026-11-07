@@ -58,6 +58,19 @@ describe('HitlJevService', () => {
     }));
   });
 
+  it('does not delegate approval when sanitization removes operation evidence', async () => {
+    await expect(service.evaluateApproval({ ...config, confirmationAuthority: 'decision_model' }, request)).rejects.toThrow('Incomplete approval evidence');
+    expect(client.decideNoul).not.toHaveBeenCalled();
+  });
+
+  it('keeps complete file-change evidence instead of silently truncating it for delegated approval', async () => {
+    const content = 'code'.repeat(750);
+    await service.evaluateApproval({ ...config, confirmationAuthority: 'decision_model' }, { ...request, args: { path: '/project/file.ts', content } });
+    expect(client.decideNoul).toHaveBeenCalledWith(expect.objectContaining({ state: expect.objectContaining({
+      operation: expect.objectContaining({ args: { path: '/project/file.ts', content } }),
+    }) }));
+  });
+
   it('redacts decisions embedded in command text before sending state', async () => {
     await service.evaluateApproval(config, {
       ...request,

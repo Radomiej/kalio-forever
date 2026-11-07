@@ -31,6 +31,7 @@ export class HitlPolicyService {
           return { status: 'rejected', source: 'rule', reason: `Denied by HITL rule ${hardRule.id}.` };
         }
         if (hardRule.decision === 'allow') {
+          if (this.delegatesToJev(config, request)) return this.resolveWithJev(config, request);
           if (this.requiresHumanToolApproval(request)) return { status: 'manual', source: 'manual' };
           return { status: 'approved', source: 'rule', reason: `Allowed by HITL rule ${hardRule.id}.` };
         }
@@ -65,6 +66,8 @@ export class HitlPolicyService {
         return this.resolveWithPersona(config.autoPersonaId, request, 'auto');
       }
 
+      if (config.confirmationAuthority === 'human_then_decision') return { status: 'manual', source: 'manual', reason: 'Human-first review; Jev may assess only after the configured wait expires.' };
+
       return this.resolveWithJev(config, request);
     } catch (err) {
       request.abortSignal?.throwIfAborted();
@@ -83,6 +86,10 @@ export class HitlPolicyService {
       const hardRule = matchingHitlHardRule(request, config.rules ?? []);
       if (hardRule?.decision === 'deny') {
         return { status: 'rejected', source: 'rule', reason: `Denied by HITL rule ${hardRule.id}.` };
+      }
+      if (hardRule?.decision === 'ask_user') return { status: 'manual', source: 'manual', reason: 'An always-ask rule requires a human.' };
+      if (config.mode === 'jev' && config.confirmationAuthority === 'human_then_decision') {
+        return this.resolveWithJev(config, request, true);
       }
       if (hardRule?.decision === 'allow') {
         if (this.requiresHumanToolApproval(request)) return { status: 'manual', source: 'manual' };
@@ -127,8 +134,14 @@ export class HitlPolicyService {
   private async resolveWithJev(
     config: HitlConfig,
     request: HitlApprovalRequest,
+    afterHumanTimeout = false,
   ): Promise<HitlApprovalResolution> {
     try {
+      const delegated = this.delegatesToJev(config, request, afterHumanTimeout);
+      const revision = this.hitlConfig.revision;
+      const binding = JSON.stringify({ sessionId: request.sessionId, toolCallId: request.toolCallId, name: request.name, args: request.args });
+      const policy = JSON.stringify(config);
+      if (delegated && (!request.toolCallId || this.hitlConfig.changing)) return { status: 'manual', source: 'manual', reason: 'Decision authority is not current.' };
       const threshold = config.jevApprovalThreshold ?? 0.95;
       if (!Number.isFinite(threshold) || threshold <= 0.5 || threshold > 1) {
         throw new Error('Invalid Jev approval threshold.');
@@ -141,6 +154,23 @@ export class HitlPolicyService {
       }
       const reason = `Jev p(allow)=${result.probability.toFixed(2)}; threshold=${threshold.toFixed(2)}.`;
       if (result.probability >= threshold) {
+        if (delegated) {
+          if (this.hitlConfig.changing || this.hitlConfig.revision !== revision || JSON.stringify(await this.hitlConfig.getConfig()) !== policy
+            || JSON.stringify({ sessionId: request.sessionId, toolCallId: request.toolCallId, name: request.name, args: request.args }) !== binding) {
+            return { status: 'manual', source: 'manual', reason: 'Approval request or policy changed during Jev evaluation.' };
+          }
+          let unused = true;
+          return { status: 'approved', source: 'jev', reason: `${reason} Delegated tool confirmation (${result.model ?? 'configured Jev'}).`,
+            validateBeforeExecution: async () => {
+              if (!unused) return false;
+              unused = false;
+              request.abortSignal?.throwIfAborted();
+              const fresh = await this.hitlConfig.getConfig();
+              request.abortSignal?.throwIfAborted();
+              return !this.hitlConfig.changing && this.hitlConfig.revision === revision && JSON.stringify(fresh) === policy
+                && JSON.stringify({ sessionId: request.sessionId, toolCallId: request.toolCallId, name: request.name, args: request.args }) === binding;
+            } };
+        }
         if (this.requiresHumanToolApproval(request)) return { status: 'manual', source: 'manual', reason };
         return { status: 'approved', source: 'jev', reason };
       }
@@ -195,5 +225,21 @@ export class HitlPolicyService {
     return request.kind === 'tool' && ![
       'fs_read', 'fs_list', 'vfs_read', 'vfs_list', 'web_search', 'web_fetch',
     ].includes(request.name);
+  }
+
+  private delegatesToJev(config: HitlConfig, request: HitlApprovalRequest, afterHumanTimeout = false): boolean {
+    return config.mode === 'jev' && request.kind === 'tool' && (config.confirmationAuthority === 'decision_model'
+      || (afterHumanTimeout && config.confirmationAuthority === 'human_then_decision'));
+  }
+
+  async getManualReviewTimeoutMs(request: HitlApprovalRequest): Promise<number | undefined> {
+    const config = await this.hitlConfig.getConfig();
+    if (config.mode !== 'jev') return undefined;
+    if (matchingHitlHardRule(request, config.rules ?? [])?.decision === 'ask_user') return 0;
+    return config.confirmationAuthority === 'human_then_decision' ? config.humanReviewTimeoutMs ?? 60_000 : 0;
+  }
+
+  async reviewsSubagentAutoApprovals(): Promise<boolean> {
+    return (await this.hitlConfig.getConfig()).mode === 'jev';
   }
 }

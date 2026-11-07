@@ -9,6 +9,7 @@ import { persistToolConfirmation } from './tool-confirmation.persistence';
 import type { ConfirmationWaitResult, ConfirmationWaitSource, PendingConfirmation } from './tool-confirmation-pending';
 import { canonicalGoalLaunchJson } from '../../common/goal-launch-canonical';
 import { detachHostReceiptArgs } from '../../common/host-receipt-json';
+import { isProtectedGoalRequest } from '../../common/goal-launch-request-family';
 
 const HITL_TIMEOUT_MS = 0;
 
@@ -69,6 +70,8 @@ export interface ToolConfirmationWaitInput {
   args: Record<string, unknown>;
   /** Request context only; never a human response or execution authority. */
   policyReason?: string;
+  /** Host-configured review window; zero keeps the human wait indefinite. */
+  manualReviewTimeoutMs?: number;
   ctx: StreamContext;
   pending: Map<string, PendingConfirmation>;
   hitlRequests: Parameters<typeof persistToolConfirmation>[0];
@@ -88,7 +91,12 @@ export async function awaitToolConfirmation(input: ToolConfirmationWaitInput): P
     && input.policyReason.trim() ? input.policyReason : undefined;
     const originalSource = captureOriginalSource(callId, toolName, args, ctx);
     const requestId = nanoid();
-    const timeoutMs = ctx.agentRun?.agentType === 'subagent' ? 0 : HITL_TIMEOUT_MS;
+    const protectedHostWait = Object.hasOwn(ctx, 'hostConfirmationRequirement');
+    const requestedTimeout = input.manualReviewTimeoutMs;
+    let timeoutMs = protectedHostWait ? 0 : requestedTimeout === undefined
+      ? ctx.agentRun?.agentType === 'subagent' ? 0 : HITL_TIMEOUT_MS
+      : Number.isSafeInteger(requestedTimeout) && requestedTimeout >= 0 && requestedTimeout <= 2_147_483_647
+        ? requestedTimeout : 0;
 
     const payload: ToolConfirmationRequest = {
       requestId,
@@ -110,6 +118,9 @@ export async function awaitToolConfirmation(input: ToolConfirmationWaitInput): P
       && persisted.status === 'pending' && Number.isSafeInteger(persisted.revision) && persisted.revision > 0
       && persisted.sessionId === ctx.sessionId && persisted.turnId === (ctx.turnId ?? null)
       && persisted.toolCallId === callId;
+    if (timeoutMs > 0 && (!input.hitlRequests || !durableManualWait || isProtectedGoalRequest(persisted!)
+      || (persisted?.continuation && Object.hasOwn(persisted.continuation, 'hostConfirmationRequirement')))) timeoutMs = 0;
+    payload.timeoutMs = timeoutMs;
     let releaseManualWait: (() => void) | undefined;
     try {
     releaseManualWait = durableManualWait ? ctx.beginManualToolWait?.(requestId) : undefined;
@@ -152,18 +163,26 @@ export async function awaitToolConfirmation(input: ToolConfirmationWaitInput): P
 
     return await new Promise<ConfirmationWaitResult>(resolve => {
       const timeout = timeoutMs > 0
-        ? setTimeout(() => {
-            const pending = input.pending.get(requestId);
-          if (pending) {
-            input.pending.delete(requestId);
-            input.emitConfirmationInvalidated(pending, 'timeout', `Approval timed out for tool ${toolName}.`);
-            input.logConfirmationLifecycle(pending, 'hitl_approval_timeout', 'manual');
-            void input.logRuntimeConfirmation(pending, 'tool.confirmation.timeout', 'failed');
-          }
-            input.logger.warn(`HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`);
-            resolve({ status: 'timeout', requestId });
-          }, timeoutMs)
+        ? setTimeout(() => { void expireManualWait(); }, timeoutMs)
         : null;
+
+      const expireManualWait = async (): Promise<void> => {
+        if (input.pending.get(requestId) !== pending || pending.hostConfirmationRequired || ctx.abortSignal.aborted
+          || !input.hitlRequests || pending.revision === undefined || pending.revision !== persisted?.revision) return;
+        try {
+          const expired = await input.hitlRequests.resolve(requestId, pending.revision, 'expired', { reason: 'human_review_timeout' });
+          if (!expired || input.pending.get(requestId) !== pending || ctx.abortSignal.aborted) return;
+          input.pending.delete(requestId);
+          cleanupAbortListener();
+          input.emitConfirmationInvalidated(pending, 'timeout', `Approval timed out for tool ${toolName}.`);
+          input.logConfirmationLifecycle(pending, 'hitl_approval_timeout', 'manual');
+          void input.logRuntimeConfirmation(pending, 'tool.confirmation.timeout', 'failed');
+          input.logger.warn(`HITL confirmation timed out for tool [${toolName}] session=${ctx.sessionId}`);
+          resolve({ status: 'timeout', requestId });
+        } catch (error) {
+          input.logger.error(`Unable to persist HITL review timeout ${requestId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
 
       const cleanupAbortListener = () => {
         ctx.abortSignal?.removeEventListener('abort', handleAbort);

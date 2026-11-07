@@ -118,6 +118,7 @@ export class ToolDispatchService {
       if (invalid) return invalid;
     }
     let approvalProof: HostDispatchApproval = Object.freeze({ kind: 'non_durable', reason: requestConfirmation ? 'not_required' : 'explicit_bypass' });
+    let validateBeforeExecution: (() => Promise<boolean>) | undefined;
     if (!entry) {
       // Route MCP tools by their canonical mcp_{serverKey}_{toolName} names.
       if (this.mcpService) {
@@ -162,10 +163,12 @@ export class ToolDispatchService {
       }, toolName, ctx);
     }
 
+    const subagentAuto = isAutoApprovedSubagentTool(toolName, ctx)
+      && !await this.confirmations.reviewsSubagentAutoApprovals();
     if (
       requestConfirmation
       && (hostRequirement || (observed ? requiresConfirmation : entry.meta.requiresConfirmation))
-      && (hostRequirement || !isAutoApprovedSubagentTool(toolName, ctx))
+      && (hostRequirement || !subagentAuto)
     ) {
       const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx, Boolean(hostRequirement));
       if (!approval.approved) {
@@ -173,9 +176,10 @@ export class ToolDispatchService {
       }
       if (hostRequirement && !approval.execution) throw new Error('HOST_CONFIRMATION_DURABLE_CLAIM_REQUIRED');
       approvalProof = this.approvalProof(approval);
+      validateBeforeExecution = approval.validateBeforeExecution;
       this.registerLiveExecution(ctx, approval);
     }
-    else if (requestConfirmation && requiresConfirmation && isAutoApprovedSubagentTool(toolName, ctx)) {
+    else if (requestConfirmation && requiresConfirmation && subagentAuto) {
       approvalProof = Object.freeze({ kind: 'non_durable', reason: 'subagent_auto' });
     }
 
@@ -199,6 +203,17 @@ export class ToolDispatchService {
         _emit: ctx.emit as ToolCallRequest['_emit'],
         abortSignal: ctx.abortSignal,
     };
+    if (validateBeforeExecution) {
+      try {
+        if (!await validateBeforeExecution()) return this.cancelledResult(callId, toolName, ctx, 'Jev approval is stale; request a fresh decision.');
+      } catch (error) {
+        if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+        this.logger.error('Jev execution approval validation failed', error);
+        return this.withMeta({ callId, status: 'error', errorCode: 'APPROVAL_VALIDATION_FAILED',
+          errorMessage: 'Execution approval could not be verified. Request a fresh decision.' }, toolName, ctx);
+      }
+    }
+    if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
     if (observed) acknowledgeExecutorEntry(ctx);
     try {
       const data = observed ? await execute!.call(entry, req) : await entry.execute(req);

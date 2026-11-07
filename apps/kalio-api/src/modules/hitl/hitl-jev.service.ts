@@ -22,6 +22,13 @@ export class HitlJevService {
     request.abortSignal?.throwIfAborted();
     if (connection.protocol !== 'jev-decisions') throw new HitlDecisionProtocolError('Jev requires the Jev Decisions protocol.');
 
+    const operation = { host: { platform: process.platform }, operation: { kind: request.kind, name: request.name, displayLabel: request.displayLabel, args: request.args } };
+    const delegated = config.confirmationAuthority === 'decision_model' || config.confirmationAuthority === 'human_then_decision';
+    const state = delegated
+      ? sanitizeJevState(operation, 65_536, { maxStringCharacters: 65_536 }) : sanitizeJevState(operation);
+    if (delegated && JSON.stringify(state) !== JSON.stringify(operation)) {
+      throw new HitlDecisionProtocolError('Incomplete approval evidence requires manual review.');
+    }
     const result = await this.jev.decideNoul({
       ...connection,
       questionId: 'approval',
@@ -29,14 +36,7 @@ export class HitlJevService {
         'Should the requested operation be allowed? Return the probability that the answer is yes.',
         config.jevInstructions ?? '',
       ].filter(Boolean).join('\n\n').slice(0, 2_500),
-      state: sanitizeJevState({
-        operation: {
-          kind: request.kind,
-          name: request.name,
-          displayLabel: request.displayLabel,
-          args: request.args,
-        },
-      }),
+      state,
       signal: request.abortSignal,
     });
     request.abortSignal?.throwIfAborted();

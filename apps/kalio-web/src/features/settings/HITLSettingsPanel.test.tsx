@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Persona } from '@kalio/types';
+import type { HitlConfig, Persona } from '@kalio/types';
 import { HITLSettingsPanel } from './HITLSettingsPanel';
 import { DEFAULT_TEST_PERSONA_AVATAR } from '../../test/personaFixtures';
 
@@ -37,7 +37,7 @@ const PERSONAS: Persona[] = [
   },
 ];
 
-function installFetchMock(initialConfig = {
+function installFetchMock(initialConfig: HitlConfig = {
   mode: 'manual',
   autoPersonaId: null as string | null,
   unattendedFallback: 'pause' as 'pause' | 'representative',
@@ -88,9 +88,99 @@ function getPutBody(): Record<string, unknown> | null {
 }
 
 describe('HITLSettingsPanel', () => {
+  const terminalConfig: HitlConfig = {
+    mode: 'jev', autoPersonaId: null, unattendedFallback: 'pause', representativePersonaId: null,
+    notificationChannel: 'none', externalPolicyEnabled: false, externalPolicyPersonaId: null,
+    raAppApprovalTimeoutMs: 600_000,
+    rules: [{ id: 'saved-deny', kind: 'tool', name: 'terminal_exec', decision: 'deny', argumentsContains: '--production' }],
+  };
+
   beforeEach(() => {
     vi.restoreAllMocks();
     installFetchMock();
+  });
+
+  it('defaults legacy terminal approvals to manual without saving the draft', async () => {
+    installFetchMock(terminalConfig);
+    render(<HITLSettingsPanel />);
+    const select = await screen.findByRole('combobox', { name: 'Approval authority' });
+    expect(select).toHaveValue('human');
+    expect(select).toHaveAccessibleDescription('Deny and ask-user rules take precedence. Uncertainty or provider failure requires manual approval.');
+    expect(screen.getByRole('option', { name: 'Always ask me' })).toHaveValue('human');
+    expect(screen.getByRole('option', { name: 'Decision model' })).toHaveValue('decision_model');
+    expect(getPutBody()).toBeNull();
+  });
+
+  it('saves human-first Jev handoff with an explicit two-minute timeout', async () => {
+    installFetchMock(terminalConfig);
+    const user = userEvent.setup(); render(<HITLSettingsPanel />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Approval authority' }), 'human_then_decision');
+    const timeout = screen.getByRole('combobox', { name: 'Time before Jev takes over' });
+    expect(screen.getByRole('option', { name: 'No timeout' })).toHaveValue('0');
+    await user.selectOptions(timeout, '120000');
+    expect(getPutBody()).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('HITL settings saved.');
+    expect(getPutBody()).toMatchObject({ confirmationAuthority: 'human_then_decision', humanReviewTimeoutMs: 120000 });
+    expect(timeout).toHaveValue('120000');
+  });
+
+  it('hydrates saved project-read terminal approvals', async () => {
+    installFetchMock({ ...terminalConfig, confirmationAuthority: 'decision_model' });
+    render(<HITLSettingsPanel />);
+    expect(await screen.findByRole('combobox', { name: 'Approval authority' })).toHaveValue('decision_model');
+    expect(getPutBody()).toBeNull();
+  });
+
+  it.each(['human', 'decision_model'] as const)('saves terminal approval draft %s while preserving rules', async (confirmationAuthority) => {
+    installFetchMock({ ...terminalConfig, confirmationAuthority: confirmationAuthority === 'human' ? 'decision_model' : 'human' });
+    const user = userEvent.setup();
+    render(<HITLSettingsPanel />);
+    const select = await screen.findByRole('combobox', { name: 'Approval authority' });
+    await user.selectOptions(select, confirmationAuthority);
+    expect(getPutBody()).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('HITL settings saved.');
+    expect(getPutBody()).toMatchObject({ mode: 'jev', confirmationAuthority, rules: terminalConfig.rules });
+    expect(select).toHaveValue(confirmationAuthority);
+  });
+
+  it('does not expose terminal approvals while config is loading', () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(() => undefined));
+    render(<HITLSettingsPanel />);
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Approval authority' })).not.toBeInTheDocument();
+    expect(getPutBody()).toBeNull();
+  });
+
+  it('hydrates the terminal approval value returned by PUT instead of retaining the draft', async () => {
+    installFetchMock(terminalConfig);
+    const user = userEvent.setup();
+    render(<HITLSettingsPanel />);
+    const select = await screen.findByRole('combobox', { name: 'Approval authority' });
+    await user.selectOptions(select, 'decision_model');
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ ...terminalConfig, confirmationAuthority: 'human' }), { status: 200 }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('HITL settings saved.');
+    expect(getPutBody()).toMatchObject({ confirmationAuthority: 'decision_model' });
+    expect(select).toHaveValue('human');
+  });
+
+  it('disables terminal approvals while saving and retains the draft after failure', async () => {
+    installFetchMock(terminalConfig);
+    const user = userEvent.setup();
+    render(<HITLSettingsPanel />);
+    const select = await screen.findByRole('combobox', { name: 'Approval authority' });
+    await user.selectOptions(select, 'decision_model');
+    let rejectSave!: (reason: Error) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => { rejectSave = reject; }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(select).toBeDisabled();
+    rejectSave(new Error('Save failed'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Save failed');
+    expect(select).toBeEnabled();
+    expect(select).toHaveValue('decision_model');
+    expect(screen.queryByText('HITL settings saved.')).not.toBeInTheDocument();
   });
 
   it('loads the saved config and persists auto mode with a selected persona', async () => {
@@ -106,6 +196,8 @@ describe('HITLSettingsPanel', () => {
     await waitFor(() => {
       expect(getPutBody()).toEqual({
         mode: 'auto',
+        confirmationAuthority: 'human',
+        humanReviewTimeoutMs: 60_000,
         autoPersonaId: 'ops-persona',
         jevApprovalThreshold: 0.95,
         jevInstructions: '',
@@ -157,6 +249,8 @@ describe('HITLSettingsPanel', () => {
     await waitFor(() => {
       expect(getPutBody()).toEqual({
         mode: 'manual',
+        confirmationAuthority: 'human',
+        humanReviewTimeoutMs: 60_000,
         jevApprovalThreshold: 0.95,
         jevInstructions: '',
         jevFallbackToPersona: false,

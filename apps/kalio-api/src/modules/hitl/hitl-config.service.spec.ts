@@ -22,6 +22,8 @@ const DEFAULT_CONFIG: HitlConfig = {
   jevApprovalThreshold: 0.95,
   jevFallbackToPersona: false,
   rules: [],
+  confirmationAuthority: 'human',
+  humanReviewTimeoutMs: 60_000,
 };
 
 function makeTestDrizzle(): DrizzleService {
@@ -67,6 +69,27 @@ describe('HitlConfigService', () => {
 
   it('returns manual defaults when no HITL config is stored', async () => {
     await expect(service.getConfig()).resolves.toEqual(DEFAULT_CONFIG);
+  });
+
+  it('persists opt-in Jev terminal reads and preserves them on unrelated saves', async () => {
+    await service.updateConfig({ mode: 'jev', confirmationAuthority: 'decision_model' });
+    expect(await service.getConfig()).toHaveProperty('confirmationAuthority', 'decision_model');
+    await service.updateConfig({ mode: 'jev', notificationChannel: 'none' });
+    expect(await service.getConfig()).toHaveProperty('confirmationAuthority', 'decision_model');
+  });
+
+  it.each([0, 60_000, 120_000, 300_000])('persists explicit human-first review timeout %s', async humanReviewTimeoutMs => {
+    await service.updateConfig({ mode: 'jev', confirmationAuthority: 'human_then_decision', humanReviewTimeoutMs });
+    expect(await service.getConfig()).toMatchObject({ confirmationAuthority: 'human_then_decision', humanReviewTimeoutMs });
+  });
+  it.each([-1, 1, 90_000, NaN])('rejects unsupported human review timeout %s', async humanReviewTimeoutMs => {
+    await expect(service.updateConfig({ mode: 'jev', humanReviewTimeoutMs })).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects unsupported terminal approval values instead of enabling a bypass', async () => {
+    await expect(service.updateConfig({ mode: 'jev', confirmationAuthority: 'allow_all' } as never)).rejects.toThrow(BadRequestException);
+    await appSettings.set('hitl.confirmationAuthority', 'allow_all');
+    await expect(service.getConfig()).rejects.toThrow(BadRequestException);
   });
 
   it.each([

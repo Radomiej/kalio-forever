@@ -26,6 +26,9 @@ export interface HitlConfig {
   jevInstructions?: string;
   jevFallbackToPersona?: boolean;
   rules?: HitlHardRule[];
+  /** Jev only: delegate ordinary tool confirmation; never host-enforced human gates. */
+  confirmationAuthority?: 'human' | 'decision_model' | 'human_then_decision';
+  humanReviewTimeoutMs?: number;
 }
 
 export interface UpdateHitlConfigDto extends Omit<Partial<HitlConfig>, 'mode' | 'rules'> {

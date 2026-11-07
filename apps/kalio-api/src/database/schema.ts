@@ -303,7 +303,7 @@ export const raappPendingApprovals = sqliteTable('raapp_pending_approvals', {
 export const hitlRequests = sqliteTable('hitl_requests', {
   id: text('id').primaryKey(),
   kind: text('kind', { enum: ['tool_confirmation', 'raapp_native', 'tool_budget'] }).notNull(),
-  status: text('status', { enum: ['pending', 'approved', 'denied', 'cancelled'] }).notNull().default('pending'),
+  status: text('status', { enum: ['pending', 'approved', 'denied', 'cancelled', 'expired'] }).notNull().default('pending'),
   sessionId: text('session_id').notNull(),
   turnId: text('turn_id'),
   runId: text('run_id'),

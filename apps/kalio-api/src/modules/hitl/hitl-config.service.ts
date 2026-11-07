@@ -26,6 +26,8 @@ const DEFAULT_HITL_CONFIG: ResolvedHitlConfig = {
   jevApprovalThreshold: 0.95,
   jevFallbackToPersona: false,
   rules: [],
+  confirmationAuthority: 'human',
+  humanReviewTimeoutMs: 60_000,
 };
 
 const HITL_SETTING_KEYS = {
@@ -106,11 +108,15 @@ export class HitlConfigService {
       jevApprovalThreshold: this.parseStoredJevApprovalThreshold(storedJevApprovalThreshold),
       jevFallbackToPersona: this.parseStoredJevFallback(storedJevFallbackToPersona),
       rules: this.parseStoredRules(storedRules),
+      confirmationAuthority: this.confirmationAuthority(await this.appSettings.get('hitl.confirmationAuthority')),
+      humanReviewTimeoutMs: this.humanReviewTimeout(await this.appSettings.get('hitl.humanReviewTimeoutMs')),
     };
   }
 
   async updateConfig(dto: UpdateHitlConfigDto): Promise<ResolvedHitlConfig> {
     const current = await this.getConfig();
+    const confirmationAuthority = this.confirmationAuthority(dto.confirmationAuthority ?? current.confirmationAuthority ?? null);
+    const humanReviewTimeoutMs = this.humanReviewTimeout(dto.humanReviewTimeoutMs ?? current.humanReviewTimeoutMs ?? null);
     const nextMode = this.normalizeMode(dto.mode);
     const nextAutoPersonaId = dto.autoPersonaId !== undefined
       ? normalizePersonaId(dto.autoPersonaId)
@@ -213,6 +219,8 @@ export class HitlConfigService {
     await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
     await this.appSettings.set(HITL_SETTING_KEYS.jevFallbackToPersona, String(nextJevFallbackToPersona));
     await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
+    await this.appSettings.set('hitl.confirmationAuthority', confirmationAuthority);
+    await this.appSettings.set('hitl.humanReviewTimeoutMs', String(humanReviewTimeoutMs));
     } finally { --this.updates; ++this.configRevision; }
 
     return {
@@ -228,6 +236,8 @@ export class HitlConfigService {
       jevApprovalThreshold: nextJevApprovalThreshold,
       jevFallbackToPersona: nextJevFallbackToPersona,
       rules: nextRules,
+      confirmationAuthority,
+      humanReviewTimeoutMs,
     };
   }
 
@@ -237,6 +247,21 @@ export class HitlConfigService {
     }
 
     throw new BadRequestException(`Unsupported HITL mode: ${mode}`);
+  }
+
+  private confirmationAuthority(value: unknown): 'human' | 'decision_model' | 'human_then_decision' {
+    if (value === null || value === 'human') return 'human';
+    if (value === 'decision_model' || value === 'human_then_decision') return value;
+    throw new BadRequestException('Approval authority must be human or decision model.');
+  }
+
+  private humanReviewTimeout(value: unknown): number {
+    if (value === null) return 60_000;
+    const milliseconds = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    if (typeof milliseconds !== 'number' || ![0, 60_000, 120_000, 300_000].includes(milliseconds)) {
+      throw new BadRequestException('Human review timeout must be off, 1, 2 or 5 minutes.');
+    }
+    return milliseconds;
   }
 
   private normalizeUnattendedFallback(value: string): HitlUnattendedFallback {

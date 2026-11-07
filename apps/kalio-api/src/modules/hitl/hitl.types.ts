@@ -39,6 +39,8 @@ export interface HitlApprovalResolution {
   status: HitlApprovalStatus;
   source: HitlApprovalSource;
   reason?: string;
+  /** In-process, one-use recheck; never serialized as approval authority. */
+  validateBeforeExecution?: () => Promise<boolean>;
 }
 
 export interface HitlDecisionInput {
