@@ -225,6 +225,8 @@ Architecture branch execution uses one monotonic remaining-time budget. Only a v
 
 The graph passes its host-owned abort signal through the role executor to the active subagent. When the graph stops, the child controller aborts and its tool-confirmation waiter cancels the pending durable request.
 
+Before tool policy or confirmation, dispatch validates arguments against the canonical registered Kalio or MCP schema, without coercion, defaults or property removal. Invalid input settles as an `INVALID_ARGUMENT` tool error and does not create a confirmation request or executor-entry authority. Missing or invalid canonical schemas fail closed. Existing execution-time guards remain defense in depth; valid destructive operations still require confirmation.
+
 When a tool-execution role returns a subagent timeout, the graph retains its partial tool evidence. A role with a default successor and a single distinct continuation to a router sends the timeout only to that router. The failed attempt counts against the node visit limit and appears as failed in the graph. A successful attempt excludes that recovery edge. Without a configured recovery route, the timeout fails the run.
 
 Before extracting the stream into a standalone library, keep these checks true:

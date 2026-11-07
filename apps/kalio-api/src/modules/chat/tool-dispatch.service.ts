@@ -12,6 +12,7 @@ import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { detachHostReceiptArgs } from './llm-turn-runtime-dispatch';
 import { readHostConfirmationRequirement } from './tool-confirmation.persistence';
+import { toolArgumentValidationError } from './tool-argument-validation';
 
 const SUBAGENT_AUTO_APPROVE_TOOL_NAMES = new Set([
   'vfs_write',
@@ -112,12 +113,19 @@ export class ToolDispatchService {
       || !ctx.onResolvedToolDispatch || !ctx.registerToolResultReceiptCommit)) throw new Error('HOST_CONFIRMATION_DURABILITY_REQUIRED');
     if (observed && entry && canonicalName !== toolName) throw new Error('HOST_DISPATCH_REGISTRY_MISMATCH');
     if (observed) args = detachHostReceiptArgs(args);
+    if (entry) {
+      const invalid = this.invalidArguments(callId, toolName, entry.meta.parameters, args, ctx);
+      if (invalid) return invalid;
+    }
     let approvalProof: HostDispatchApproval = Object.freeze({ kind: 'non_durable', reason: requestConfirmation ? 'not_required' : 'explicit_bypass' });
     if (!entry) {
       // Route MCP tools by their canonical mcp_{serverKey}_{toolName} names.
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {
+          const canonical = this.mcpService.getToolByName(toolName);
+          const invalid = this.invalidArguments(callId, toolName, canonical?.parameters, args, ctx);
+          if (invalid) return invalid;
           const resolvedMcpTarget = observed
             ? Object.freeze({ serverKey: mcpRef.serverKey, originalName: mcpRef.originalName }) : mcpRef;
           // External MCP calls always require a human, regardless of global policy or tool metadata.
@@ -270,6 +278,12 @@ export class ToolDispatchService {
     if (!runId || !sessionId || !turnId || !promptMessageId) throw new Error('HOST_DISPATCH_IDENTITY_REQUIRED');
     await ctx.onResolvedToolDispatch(Object.freeze({ identity: Object.freeze({ runId, sessionId, turnId, promptMessageId }),
       callId, requestedName, canonicalName, args, target: Object.freeze(target), approval }));
+  }
+
+  private invalidArguments(callId: string, toolName: string, schema: unknown, args: unknown, ctx: StreamContext): ToolResult | undefined {
+    const reason = toolArgumentValidationError(schema, args);
+    if (reason) return this.withMeta({ callId, status: 'error', errorCode: 'INVALID_ARGUMENT',
+      errorMessage: `Invalid arguments for ${toolName}: ${reason} Correct the arguments and submit a new call.` }, toolName, ctx);
   }
 
   private withMeta(result: ToolResult, toolName: string, ctx: StreamContext): ToolResult {

@@ -205,6 +205,8 @@ classDiagram
 
 ## HITL And Budgets
 
+- Tool arguments are checked against canonical host registry schemas before policy evaluation or HITL. Invalid input returns `INVALID_ARGUMENT`, never a user-denial result, and does not enter the executor. Validation does not coerce input, add defaults or remove fields; executor guards remain in place. Caller-provided metadata cannot weaken the canonical schema.
+
 - A tool denied by the user or an approval policy returns a cancelled result to the calling agent with the decision source and any supplied reason. A denial without a reason says so explicitly. An expired approval is reported separately and does not imply a user decision.
 - Stopping an architecture run propagates cancellation to its active role executions. A child waiting for tool approval cancels that wait through the durable HITL path.
 - A tool-executor timeout carries partial evidence to its configured continuation router, or fails the run when that route is unavailable. Only a later successful attempt can take the normal success edge.
