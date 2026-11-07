@@ -21,6 +21,7 @@ async function run(routes = fixture(), args = argv) {
   const requests = [];
   const output = [];
   const exit = await runPaidReadinessCheck({ argv: args, now: 1000, stdout: text => output.push(text), stderr: text => output.push(text),
+    env: { KALIO_CONTROL_PLANE_TOKEN: 'a'.repeat(64) },
     fetchJson: async (url, init) => {
       requests.push({ url, init });
       const key = new URL(url).pathname.replace('/api', '');
@@ -34,6 +35,29 @@ test('Codex prelaunch gate is GET-only and does not test unrelated global creden
   assert.equal(result.requests.length, 8);
   assert.ok(result.requests.every(({ init }) => init.method === 'GET'));
   assert.ok(result.requests.every(({ url }) => !url.includes('/credentials') && !url.includes('/check')));
+});
+
+test('explicit decision persona requires no tools and one Kalio iteration, not a worker roster', async () => {
+  const routes = fixture();
+  Object.assign(routes['/personas/persona'], { allowedTools: [], maxToolAttempts: 1, executionProfileId: 'profile' });
+  const result = await run(routes, [...argv, '--decision-persona']);
+  assert.equal(result.exit, 0, result.output.join('\n'));
+  const hitl = result.requests.find(r => r.url.endsWith('/hitl/config'));
+  assert.equal(hitl.init.headers.Authorization, 'Bearer ' + 'a'.repeat(64));
+  assert.ok(result.requests.every(r => r.init.method === 'GET'));
+});
+for (const [label, patch] of [
+  ['tools', { allowedTools: ['fs_read'] }], ['multiple iterations', { maxToolAttempts: 2 }],
+  ['wrong profile', { executionProfileId: 'other' }], ['native tools', { providerToolNames: ['exec'] }],
+]) test(`decision snapshot rejects ${label}`, async () => {
+  const routes = fixture();
+  Object.assign(routes['/personas/persona'], { allowedTools: [], maxToolAttempts: 1, executionProfileId: 'profile' }, patch);
+  assert.equal((await run(routes, [...argv, '--decision-persona'])).exit, 1);
+});
+test('duplicate decision selection or decision plus project-context tools is rejected before fetch', async () => {
+  for (const flags of [['--decision-persona', '--decision-persona'], ['--decision-persona', '--include-project-context']]) {
+    const r = await run(fixture(), [...argv, ...flags]); assert.equal(r.exit, 1); assert.equal(r.requests.length, 0);
+  }
 });
 
 function contextFixture() {

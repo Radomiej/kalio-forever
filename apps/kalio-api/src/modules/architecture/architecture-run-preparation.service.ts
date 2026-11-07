@@ -228,7 +228,10 @@ export class ArchitectureRunPreparationService {
             hostSessionId,
             historySessionId,
           }),
-        }, { registerRuntimeProjectPath: true });
+        }, { registerRuntimeProjectPath: true, architectureBranch: {
+          runId, rootSessionId, schema, slotId: slot.id, personaId,
+          goalProtocol: dto.context?.['goalProtocol'] !== undefined,
+        } });
         return [slot.id, sessionId] as const;
       }),
     );

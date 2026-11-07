@@ -229,5 +229,6 @@ export function executionProfileLabel(profile: ExecutionProfile): string {
         : profile.kind === 'claude-agent-sdk'
           ? 'Claude Code'
           : profile.provider ?? 'Direct LLM';
-  return `${runtime} · ${profile.model}`;
+  const effort = profile.kind === 'codex-app-server' && profile.reasoningEffort ? ` · ${profile.reasoningEffort}` : '';
+  return `${runtime} · ${profile.model}${effort}`;
 }

@@ -25,6 +25,16 @@ function createService(): { service: ContextAssemblyService; decide: ReturnType<
 }
 
 describe('ContextAssemblyService AgentFlow model contract', () => {
+  it.each(['chat', 'subagent', 'agent-flow-branch'] as const)('adds one concise default without dropping persona/contract for %s', async runtimeKind => {
+    const { service } = createService();
+    const assembled = await service.assembleForRuntime({ runtimeKind, personaId: 'agent-orchestrator',
+      toolPolicyRequest: { runtimeKind, personaId: 'agent-orchestrator' } });
+    expect(assembled.effectiveSystemPrompt.match(/Concise output by default/g)).toHaveLength(1);
+    expect(assembled.effectiveSystemPrompt).toContain('Workflow persona');
+    expect(assembled.effectiveSystemPrompt).toContain('User-requested detail and required output schemas take precedence');
+    expect(assembled.effectiveSystemPrompt).not.toContain('Return a plain-language final answer only');
+    expect(assembled.systemPrompt).toBe('Workflow persona');
+  });
   it('inherits the active provider model instead of applying a persona-only model', async () => {
     const { service } = createService();
     const assembled = await service.assembleForRuntime({

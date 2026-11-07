@@ -1,4 +1,5 @@
 import { win32 } from 'node:path';
+import { fetchProtectedHitlConfig, HitlAuthorizationConfigurationError } from './devin-session-readiness.auth.mjs';
 
 const names = ['fs_list', 'fs_read', 'fs_write', 'terminal_spawn', 'terminal_list', 'terminal_output'];
 export async function collectCodexProfileReadinessChecks(options = {}) {
@@ -7,7 +8,11 @@ export async function collectCodexProfileReadinessChecks(options = {}) {
   const check = (ok, message) => checks.push({ ok: Boolean(ok), message });
   const contextFlags = argv.filter(arg => arg === '--include-project-context').length;
   check(contextFlags <= 1, 'Project context scope is explicit and unique');
-  const allowedTools = contextFlags === 1 ? [...names, 'search_project_context'] : names;
+  const decisionFlags = argv.filter(arg => arg === '--decision-persona').length;
+  const decision = decisionFlags === 1;
+  check(decisionFlags <= 1 && !argv.some(arg => arg.startsWith('--decision-persona=')) && !(decision && contextFlags),
+    'Decision scope is explicit and cannot add project-context tools');
+  const allowedTools = decision ? [] : contextFlags === 1 ? [...names, 'search_project_context'] : names;
   const value = flag => {
     if (argv.filter(arg => arg === flag).length !== 1) return null;
     const candidate = argv[argv.indexOf(flag) + 1];
@@ -32,13 +37,18 @@ export async function collectCodexProfileReadinessChecks(options = {}) {
   if (checks.some(item => !item.ok)) return checks;
   const read = async endpoint => {
     try {
-      const response = await (options.fetchJson ?? fetch)(`${api.origin}/api${endpoint}`, {
+      const response = endpoint === '/hitl/config'
+        ? await fetchProtectedHitlConfig({ apiBase: api.href, fetchJson: options.fetchJson ?? fetch, env: options.env ?? process.env })
+        : await (options.fetchJson ?? fetch)(`${api.origin}/api${endpoint}`, {
         method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000),
       });
       if (!response.ok || response.redirected) { check(false, `Endpoint rejected: ${endpoint}`); return undefined; }
       const body = await response.text();
       return body === '' && endpoint.endsWith('/runs/current') ? null : JSON.parse(body);
-    } catch { check(false, `Endpoint unavailable: ${endpoint}`); return undefined; }
+    } catch (error) {
+      check(false, error instanceof HitlAuthorizationConfigurationError ? new HitlAuthorizationConfigurationError().message : `Endpoint unavailable: ${endpoint}`);
+      return undefined;
+    }
   };
   const profile = await read(`/runtime/profiles/${profileId}`);
   check(profile?.id === profileId && profile.enabled === true && profile.kind === 'codex-app-server'
@@ -83,10 +93,12 @@ export async function collectCodexProfileReadinessChecks(options = {}) {
     && typeof project.path === 'string' && win32.normalize(project.path).toLowerCase() === win32.normalize(path).toLowerCase()).length === 1,
   'Unique approved workspace exists');
   const persona = await read(`/personas/${personaId}`);
-  check(persona?.id === personaId && persona.mcpPolicy === 'allow_list' && Array.isArray(persona.allowedTools)
+  check(persona?.id === personaId && (persona.mcpPolicy === 'allow_list' || (decision && persona.mcpPolicy === 'deny_all')) && Array.isArray(persona.allowedTools)
     && persona.allowedTools.length === allowedTools.length && new Set(persona.allowedTools).size === allowedTools.length
     && allowedTools.every(name => persona.allowedTools.includes(name)) && Array.isArray(persona.providerToolNames)
-    && persona.providerToolNames.length === 0, `Persona exposes only the ${allowedTools.length} approved Kalio tools`);
+    && persona.providerToolNames.length === 0
+    && (!decision || (persona.executionProfileId === profileId && persona.maxToolAttempts === 1)),
+  decision ? 'Decision persona has no tools and exactly one Kalio iteration' : `Persona exposes only the ${allowedTools.length} approved Kalio tools`);
   const hitl = await read('/hitl/config');
   check(hitl?.mode === 'manual' && hitl.unattendedFallback === 'pause' && hitl.externalPolicyEnabled === false, 'Manual HITL pauses unattended requests');
   const tools = await read('/tools');
@@ -95,5 +107,6 @@ export async function collectCodexProfileReadinessChecks(options = {}) {
     return matches.length === 1 && (!['fs_write', 'terminal_spawn', 'search_project_context'].includes(name) || matches[0].requiresConfirmation === true);
   }), 'Approved tools unique; writes/spawns/context search require confirmation');
   check(true, 'Snapshot only; UI session binding, authorization and live execution still require proof');
+  if (decision) check(true, 'One Kalio iteration does not prove one internal provider generation or native-tool suppression');
   return checks;
 }

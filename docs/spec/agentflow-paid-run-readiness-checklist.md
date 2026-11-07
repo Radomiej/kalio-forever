@@ -29,6 +29,10 @@ For an authorized single-chat launch, check the exact profile rather than unrela
 node scripts/agentflow-paid-readiness.mjs --api http://127.0.0.1:3316/api --static-only --codex-profile <profile-id> --persona <persona-id> --expected-model <model-id> --expected-project-path E:/Projekty/home-site
 ```
 
+For a tool-free decision persona, add `--decision-persona`. This requires the exact saved profile, zero Kalio/provider tool names, and `maxToolAttempts: 1`; it cannot be combined with project-context tools. It proves one configured Kalio iteration, not one internal provider generation or native-tool suppression. The worker profile keeps its existing exact six-tool roster requirement.
+
+Both Codex and Devin static checks read protected HITL settings through the existing bearer transport. Configure the same valid `KALIO_CONTROL_PLANE_TOKEN` in the API process and readiness process; never print or commit it. These checks remain GET-only and do not bootstrap browser cookies or weaken API authentication. A missing token is a preflight blocker, not proof that the provider is offline.
+
 This GET-only snapshot requires an enabled strict Codex profile, one online idle account host, disabled inherited MCP, a model catalog refreshed within five minutes with a known matching process epoch, a unique workspace, the six approved Kalio tools and manual HITL. Refresh the catalog explicitly through Recheck when stale; the gate does not refresh or generate automatically.
 
 PASS proves configuration only, not account authentication during generation, session binding, filesystem enforcement or successful execution. Launch through the UI and verify the persisted exact profile, response, tools and reload separately. This branch does not waive paid AgentFlow release gates.

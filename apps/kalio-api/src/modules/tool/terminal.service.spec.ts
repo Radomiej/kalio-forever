@@ -67,6 +67,17 @@ describe('TerminalService', () => {
 
   // ── spawn() ──────────────────────────────────────────────────────────────
 
+  it('does not expose unreadable interactive stdin to background commands', async () => {
+    await service.spawn('rg', ['-l', 'tradeConstruction'], '/project');
+    expect(mockSpawnFn.mock.calls[0]?.[2].stdio).toEqual(['ignore', 'pipe', 'pipe']);
+  });
+
+  it('preserves explicit EOF input for CLI callers that request closeStdin', async () => {
+    await service.spawn('node', ['worker.js'], '/project', true);
+    expect(mockSpawnFn.mock.calls[0]?.[2].stdio).toEqual(['pipe', 'pipe', 'pipe']);
+    expect(proc.stdin.end).toHaveBeenCalledOnce();
+  });
+
   it('keeps the backend NODE_ENV out of project commands without changing the backend environment', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     try {
@@ -179,7 +190,7 @@ describe('TerminalService', () => {
       await service.spawn('npm', ['run', 'build'], '/project');
       expect(mockSpawnFn).toHaveBeenCalledExactlyOnceWith('npm', ['run', 'build'], expect.objectContaining({
         cwd: '/project', shell: process.platform === 'win32', windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe'],
       }));
     });
     it('audits the shell-backed terminal invocation with the originating tool IDs', async () => {

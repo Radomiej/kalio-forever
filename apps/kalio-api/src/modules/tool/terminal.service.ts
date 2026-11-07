@@ -80,7 +80,9 @@ export class TerminalService implements OnModuleDestroy {
       env,
       shell: useShell,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      // Background terminals have no input writer. An open pipe makes tools
+      // such as rg wait for stdin instead of searching the working directory.
+      stdio: [closeStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
 
     if (closeStdin && proc.stdin) {

@@ -32,6 +32,19 @@ function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
 }
 
 describe('ExecutionProfileCombobox', () => {
+  it('distinguishes two saved Codex profiles with the same model by explicit reasoning effort', async () => {
+    vi.mocked(getCodexModels).mockResolvedValue(['gpt-6.1-sol']);
+    const onChange = vi.fn();
+    render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'default', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-6.1-sol' }),
+      profile({ id: 'low', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-6.1-sol', reasoningEffort: 'low' }),
+    ]} value="default" onChange={onChange} />);
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Provider and model' }));
+    const low = await screen.findByRole('option', { name: 'Codex · gpt-6.1-sol · low' });
+    expect(screen.getByRole('option', { selected: true })).toHaveTextContent('Codex · gpt-6.1-sol');
+    fireEvent.click(low);
+    expect(onChange).toHaveBeenCalledWith('low');
+  });
   it('refreshes quietly when opened without catalog marketing or a recheck button', async () => {
     await act(async () => { render(<ExecutionProfileCombobox profiles={[
       profile({ id: 'devin', kind: 'devin-cli-acp', model: 'swe-2' }),

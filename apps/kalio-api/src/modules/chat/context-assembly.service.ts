@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { PersonaSessionConfig, SessionRuntimeContext, SessionRuntimeKind, Skill, ToolMeta, ToolPolicyDecision } from '@kalio/types';
 import { PersonaService } from '../persona/persona.service';
 import { SkillsService } from '../skills/skills.service';
-import { buildSkillsSection, buildToolsSection } from './context-prompt-sections';
+import { buildSkillsSection, buildToolsSection, DEFAULT_RESPONSE_STYLE } from './context-prompt-sections';
 import { SUBAGENT_SYSTEM_PROMPT } from './subagent-system-prompt';
 import { ToolPolicyService, type ToolPolicyRequest } from './tool-policy.service';
 
@@ -117,6 +117,7 @@ export class ContextAssemblyService {
 
     if (profile.runtimeKind === 'chat') {
       const effectiveSystemPrompt = joinPromptSections([
+        DEFAULT_RESPONSE_STYLE,
         systemPrompt,
         launchScopePrompt,
         raAppLaunchPrompt,
@@ -143,7 +144,7 @@ export class ContextAssemblyService {
     const branchAdditions = profile.runtimeKind === 'agent-flow-branch'
       ? (profile.systemPromptAdditions?.trim() ? `\n\n${profile.systemPromptAdditions.trim()}` : '')
       : '';
-    const effectiveSystemPrompt = `${basePrompt}${branchAdditions}`
+    const effectiveSystemPrompt = `${DEFAULT_RESPONSE_STYLE}\n\n${basePrompt}${branchAdditions}`
       + buildSkillsSection(activeSkills)
       + buildToolsSection(toolPolicy.tools, { compact: true, includeCount: false });
     // Persona config stores only a model name, not a provider/model pair. AgentFlow
