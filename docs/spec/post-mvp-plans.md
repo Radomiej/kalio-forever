@@ -24,3 +24,12 @@ Ten dokument zbiera kierunki rozwoju celowo wyjęte z dokumentacji MVP/as-built.
 
 - MVP zakłada lokalne Observability UI i lokalny audyt runtime.
 - Eksport logów do zewnętrznych systemów obserwowalności, append-only storage albo centralnego logowania pozostaje osobnym torem post-MVP.
+
+## 5. Przeglądarka agenta i dowody wizualne — propozycja 2026-11-07
+
+- Zachować domyślny tryb izolowanych sesji Playwright, rozdzielonych między agentami. Snapshot DOM, zapis PNG oraz odczyt pikseli przez model to trzy osobne możliwości; raport QA ma jasno wskazywać, które faktycznie wykonał.
+- Obecne `take_snapshot` zwraca metadane i ścieżkę PNG. Samo dopisanie narzędzia do allowlisty nie przekazuje obrazu do modelu. Przed uznaniem audytu wizualnego za gotowy potrzebne są kontrolowane przekazanie obrazu do modelu oraz dowód jego odczytu, wraz z trwałym artefaktem widocznym w Kalio.
+- Dodać jawnie wybierany tryb połączenia z przeglądarką użytkownika: dla Chrome/Edge przez istniejące Chrome DevTools MCP lub CDP, z widoczną zgodą, zakresem sesji i przyciskiem rozłączenia. Nie przejmować domyślnie profilu użytkownika.
+- Firefox wymaga osobnego adaptera WebDriver BiDi albo rozszerzenia; nie oferować dla niego opcji CDP jako działającej integracji.
+- Weryfikacja: agent sam otwiera testową aplikację, wykonuje akcje, zapisuje PNG, otrzymuje rzeczywiste dane obrazu, rozpoznaje kontrolowany szczegół wizualny i zamyka swoją sesję. Oddzielnie sprawdzić odrzucenie zgody, utratę połączenia, anulowanie i izolację równoległych agentów.
+- Źródła do projektu adaptera: [Chrome DevTools MCP](https://developer.chrome.com/docs/devtools/agents/get-started/configuration), [Playwright CDP](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp), [Firefox Remote Protocols](https://firefox-source-docs.mozilla.org/remote/index.html). To plan, nie deklaracja wdrożonej obsługi.
