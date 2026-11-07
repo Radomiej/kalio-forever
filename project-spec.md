@@ -394,6 +394,7 @@ Background child turn activity resets preserve the visible conversation's tool a
 The empty-chat form dispatches the selected workflow for the first prompt, including when the empty session already exists. The conversation composer hides the runtime selector after the chat starts.
 
 Workflow final answers display the structured outcome, evidence and optional blocking reason in Talk and the graph inspector. Referenced project files can be previewed as text through the persisted session project.
+After history hydration, both surfaces prefer the complete durable finalizer message over a clipped audit preview. Valid report JSON is parsed once; decoded newlines render as line breaks without globally unescaping plain text, code or file paths.
 
 Workflow routing and final responses are visually distinct from ordinary agent messages.
 

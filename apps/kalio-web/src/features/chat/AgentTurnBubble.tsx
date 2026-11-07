@@ -1,3 +1,4 @@
+import { finalAnswerForArchitectureRun } from './finalAnswerReport';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ThinkingBlock } from './ThinkingBlock';
 import { NativeToolAuditPanel } from './NativeToolAuditPanel';
@@ -147,7 +148,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
       : { ...architectureRun, status: 'running' as const }
     : null;
   const architectureFinalAnswer = turnArchitectureRun
-    ? finalAnswerForArchitectureRun(turnArchitectureRun)
+    ? finalAnswerForArchitectureRun(turnArchitectureRun, workflowTurnProjection.turnMessages)
     : null;
   const visibleItems = deriveVisibleTurnItems(turn.items, turnMessages, streamingChunks, turn.done);
   const turnBranchSessionIds = workflowTurnProjection.branchSessionIds;
@@ -367,7 +368,8 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
             if (!displayContent) return null;
             const trace = turnArchitectureRun ? readWorkflowTrace(displayContent) : null;
             if (trace) {
-              if (trace.kind === 'finalizer' && architectureFinalAnswer && trace.body.trim() === architectureFinalAnswer.trim()) return null;
+              if (trace.kind === 'finalizer' && architectureFinalAnswer
+                && (trace.body.trim() === architectureFinalAnswer.trim() || displayContent.trim() === architectureFinalAnswer.trim())) return null;
               const routerOutput = turnArchitectureRun?.trace.find(step =>
                 step.eventId && messageId === `architecture:${turnArchitectureRun.runId}:text:${step.eventId}`)?.routerOutput;
               return <WorkflowTraceCard key={messageId} trace={trace} output={routerOutput} />;
@@ -467,16 +469,4 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
 
 function isArchitectureTextOutput(_content: string, hasRunMetadata: boolean): boolean {
   return hasRunMetadata;
-}
-
-function finalAnswerForArchitectureRun(
-  run: NonNullable<ReturnType<typeof resolveWorkflowTurnProjection>['architectureRun']>,
-): string | null {
-  if (run.finalArtifact?.trim()) {
-    return run.finalArtifact;
-  }
-  const finalizer = [...run.trace]
-    .reverse()
-    .find((step) => step.speaker === 'finalizer' && (step.content ?? '').trim().length > 0);
-  return finalizer?.content?.trim() ?? null;
 }

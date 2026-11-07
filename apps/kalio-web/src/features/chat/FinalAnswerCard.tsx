@@ -5,40 +5,8 @@ import { apiClient } from '../../services/apiClient';
 import { useProjectStore } from '../../store/projectStore';
 import { useSessionStore } from '../../store/sessionStore';
 
-const labels = { accepted: 'Accepted', blocked: 'Blocked', rejected: 'Rejected', incomplete: 'Incomplete' } as const;
-type FinalAnswer = { status: keyof typeof labels; blockingReason?: string; evidence: string[]; answer?: string; partial?: boolean };
-
-export function parseFinalAnswer(content: string): FinalAnswer | null {
-  try {
-    const raw: unknown = JSON.parse(content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1'));
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const value = raw as Record<string, unknown>;
-    if (typeof value.status !== 'string' || !Object.hasOwn(labels, value.status)
-      || !Array.isArray(value.evidence) || !value.evidence.every(item => typeof item === 'string')
-      || (value.answer !== undefined && typeof value.answer !== 'string')
-      || (value.blockingReason != null && typeof value.blockingReason !== 'string')) return null;
-    return {
-      status: value.status as FinalAnswer['status'],
-      evidence: value.evidence,
-      answer: typeof value.answer === 'string' ? value.answer : undefined,
-      blockingReason: typeof value.blockingReason === 'string' ? value.blockingReason.trim() : undefined,
-    };
-  } catch {
-    // TODO: legacy fallback — historical audit previews clipped final artifacts at 800 characters.
-    if (content.length === 800) {
-      const quoted = String.raw`"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"`;
-      const prefix = new RegExp(`^\\{\\s*"status":\\s*("(?:accepted|blocked|rejected|incomplete)")\\s*,\\s*"blockingReason":\\s*(null|${quoted})\\s*,\\s*"evidence":\\s*\\[`).exec(content);
-      if (prefix) {
-        const remainder = content.slice(prefix[0].length);
-        const complete = new RegExp(`^\\s*((?:${quoted}\\s*,\\s*)+)`).exec(remainder);
-        const evidence = complete ? JSON.parse(`[${complete[1]!.trimEnd().slice(0, -1)}]`) as string[] : [];
-        return { status: JSON.parse(prefix[1]!) as FinalAnswer['status'],
-          blockingReason: JSON.parse(prefix[2]!) ?? undefined, evidence, partial: true };
-      }
-    }
-    return null;
-  }
-}
+import { finalAnswerLabels as labels, parseFinalAnswer } from './finalAnswerReport';
+export { parseFinalAnswer } from './finalAnswerReport';
 
 function evidenceFiles(evidence: string[], projectRoot: string): string[] {
   const root = projectRoot.replaceAll('\\', '/').replace(/\/$/, '');
@@ -92,9 +60,9 @@ export function FinalAnswerCard({ content, sessionId }: { content: string; sessi
       </header>
       {result ? <>
         {result.partial && <p className="text-xs text-base-content/70">Only the saved excerpt is available for this run.</p>}
-        {result.answer && <MarkdownViewer content={result.answer} />}
+        {result.answer && <MarkdownViewer content={result.answer} className="[&_p]:whitespace-pre-wrap" />}
         {result.status !== 'accepted' && result.blockingReason && <div className="rounded-md bg-warning/10 p-2 text-sm break-words">
-          <p className="font-medium">Blocking reason</p><p>{result.blockingReason}</p>
+          <p className="font-medium">Blocking reason</p><p className="whitespace-pre-wrap">{result.blockingReason}</p>
         </div>}
         {result.evidence.length > 0 && <div className="border-t border-base-300 pt-2 text-sm">
           <p className="mb-1 flex items-center gap-1.5 font-medium"><ListChecks size={14} aria-hidden="true" />Evidence</p>
@@ -106,7 +74,7 @@ export function FinalAnswerCard({ content, sessionId }: { content: string; sessi
                   <ListChecks size={13} className="shrink-0 text-primary" aria-hidden="true" />
                   {heading?.[1] ?? `Evidence ${index + 1}`}
                 </p>
-                <p className="break-words text-base-content/85">{heading ? text.slice(heading[0].length) : text}</p>
+                <p className="whitespace-pre-wrap break-words text-base-content/85">{heading ? text.slice(heading[0].length) : text}</p>
                 {files.length > 0 && <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-xs text-base-content/70">{project?.name}</span>
                   {files.map(path => <button key={path} type="button"

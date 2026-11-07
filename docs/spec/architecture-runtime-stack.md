@@ -260,6 +260,7 @@ Target delegation kinds:
 The first product-critical flow is `goal_guard_delivery_loop`: a two-agent Dev/Implementer and Goal Guard loop. Five Minds-style debate flows remain useful for analysis, but they are not valid substitutes when the user asks to validate implementation/guard ping-pong behavior.
 
 Talk and the graph inspector share the structured final-answer presentation. A file preview resolves relative paths against the persisted session project and uses the bounded project resource reader. Plain-text legacy artifacts remain readable.
+The report selector prefers the complete durable finalizer assistant message when recovered metadata contains only a clipped preview. It parses supported report JSON once, including the historical Finalizer heading wrapper. Decoded report fields preserve newline layout; arbitrary text, Windows paths and code are not globally unescaped.
 
 Legacy audit projections capped at 800 characters show a labeled excerpt when the status and complete evidence entries can be recovered. The UI never reconstructs missing evidence.
 

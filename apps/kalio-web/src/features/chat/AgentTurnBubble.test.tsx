@@ -443,6 +443,31 @@ describe('AgentTurnBubble', () => {
     expect(markdowns[1]).toHaveTextContent('Updated final answer');
   });
 
+  it('F5 selects the complete durable Finalizer report instead of the clipped trace preview', () => {
+    const runId = '_1zNgPZLWRkJnkyv_crze';
+    const eventId = `${runId}:event:399`;
+    const content = JSON.stringify({ status: 'accepted', blockingReason: null,
+      evidence: ['Build passed', 'x'.repeat(900)], answer: '## Restored report\n\nFirst line\nSecond line' });
+    const persisted: ChatMessage[] = JSON.parse(JSON.stringify([
+      makeMsg({ id: 'prompt-report', role: 'user', content: 'Verify project', createdAt: 1 }),
+      makeMsg({ id: `architecture:${runId}:text:${eventId}`, role: 'assistant',
+        content: `### Finalizer\n\n${content}`, turnId: 'architecture-turn-report', promptMessageId: 'prompt-report', createdAt: 2 }),
+      makeMsg({ id: 'architecture-rehydrate:report', role: 'assistant', content: '',
+        turnId: 'architecture-turn-report', promptMessageId: 'prompt-report', createdAt: 3,
+        architectureRun: { runId, schemaId: 'report-schema', status: 'completed', hostProjectionKind: 'workflow-envelope',
+          trace: [{ speaker: 'finalizer', eventId, content: content.slice(0, 800) }], routeHops: [] } }),
+    ]));
+    const turns = buildTurnsFromHistory(persisted, 's1');
+    render(<AgentTurnBubble turn={turns[0]!} renderedMessages={persisted} toolActivities={[]} />);
+    const card = screen.getByTestId('architecture-final-answer');
+    expect(card).toHaveTextContent('Restored report');
+    expect(card).toHaveTextContent('First line');
+    expect(card).toHaveTextContent('Second line');
+    expect(card).not.toHaveTextContent('Only the saved excerpt');
+    expect(card).not.toHaveTextContent('"status":');
+    expect(screen.queryByTestId('workflow-trace-finalizer')).not.toBeInTheDocument();
+  });
+
   it('REGRESSION: earlier workflow bubble keeps its own architecture run when a follow-up workflow starts', () => {
     mockMessages.push(
       makeMsg({

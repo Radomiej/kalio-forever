@@ -690,6 +690,20 @@ describe('ExecutionGraphInspector', () => {
     expect(apiClient.post).toHaveBeenCalledWith('/api/agent-flows/runs/flow-1/resume', { input: 'Continue.' });
   });
 
+  it('renders the persisted Finalizer wrapper as a structured report in the graph', () => {
+    const content = '### Finalizer\n\n' + JSON.stringify({ status: 'accepted', blockingReason: null,
+      evidence: ['Build passed\nTests passed'], answer: '## Graph report\n\nFirst line\nSecond line' });
+    render(<ExecutionGraphInspector activeSessionId="session-1" inspectorWidth={360} selectedConfirmation={null}
+      selectedNode={makeNode({ kind: 'final-answer',
+        message: { id: 'finalizer-message', sessionId: 'session-1', role: 'assistant', content, createdAt: 2 },
+        turn: { id: 'turn-report', sessionId: 'session-1', done: true, items: [] },
+      })} setActiveSession={vi.fn()} removePendingConfirmation={vi.fn()} setPendingMessage={vi.fn()} />);
+    expect(screen.getByTestId('architecture-final-answer')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Graph report' })).toBeVisible();
+    expect(screen.queryByText('Reply')).not.toBeInTheDocument();
+    expect(screen.getByTestId('architecture-final-answer')).not.toHaveTextContent('"status":');
+  });
+
   it('shows an awaiting reply state for a final response node without a message yet', () => {
     render(
       <ExecutionGraphInspector
