@@ -223,6 +223,10 @@ Loading older chat messages runs the same architecture projection restoration on
 
 Architecture branch execution uses one monotonic remaining-time budget. Only a verified, durably persisted manual tool request opens a host-owned wait token, before its announcement; every settlement path releases it. Overlapping waits exclude their union. Approval resumes the remaining time, not a fresh timeout; the existing explicit iteration grant retains its separate reset policy. Stop/dispose/stale ownership fence timer rearming and tool entry. Ordinary subagents keep existing behavior; no durable restart accounting or scheduler policy change is implied.
 
+The graph passes its host-owned abort signal through the role executor to the active subagent. When the graph stops, the child controller aborts and its tool-confirmation waiter cancels the pending durable request.
+
+When a tool-execution role returns a subagent timeout, the graph retains its partial tool evidence. A role with a default successor and a single distinct continuation to a router sends the timeout only to that router. The failed attempt counts against the node visit limit and appears as failed in the graph. A successful attempt excludes that recovery edge. Without a configured recovery route, the timeout fails the run.
+
 Before extracting the stream into a standalone library, keep these checks true:
 
 - Normal `chat:send` still reaches `ChatService` without importing architecture modules.
@@ -234,6 +238,10 @@ Before extracting the stream into a standalone library, keep these checks true:
 ### Durable terminal status recovery
 
 Ordinary architecture audit events persist their existing typed lifecycle and status fields; recovery accepts only known enum values. Status reconstruction scans past neutral trailing events to the newest recognized terminal event. A later final artifact can supersede an earlier failure, while later cancellation remains cancellation. Participant output, a running node, prose or elapsed time cannot resurrect a terminal run. This repairs legacy failed-event histories without rewriting their audit rows. An authoritative durable active-resume epoch is not implemented by this projection fix.
+
+Auto-routing checkpoints use the required audit writer. Recovery discards a legacy lossy duplicate only when the same session, run, schema, event identity, sequence, node and route have a complete checkpoint. A malformed checkpoint without that match still fails validation.
+
+Game Development 2 finalization requires successful browser navigation, click, snapshot and repeat navigation through Kalio in both current QA visits, after the latest recorded write. Audit records preserve tool result names and statuses for this check after recovery. Provider-native activity and participant prose do not satisfy it. A router selecting an artifact without that evidence takes its configured non-artifact continuation when available. The finalizer still blocks when there is no such edge.
 
 ## Target Direction: Sub-AgentFlow
 
@@ -258,3 +266,7 @@ Legacy audit projections capped at 800 characters show a labeled excerpt when th
 Router decisions and finalizer output are visually marked as Kalio workflow events, with explicit route transitions in Talk and the graph inspector.
 
 Router detail cards present confidence, input counts and available action/strategy as fields, preferring the typed event output. Final-answer evidence rows attach each file preview action to the evidence that references it.
+
+In Game Development 2 and its variants, Release Review receives the latest completed participant output from Core, UX, Senior and both QA nodes in the current run. A newer unfinished or failed visit suppresses that node’s older output. These summaries inform routing. Artifact publication still depends on runtime evidence guards.
+
+Game Development 2 finalization keeps a bounded head and conclusion of each browser QA report so the result and reload evidence near the end survives prompt compression. Reports remain supplemental to runtime evidence.

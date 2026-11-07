@@ -310,6 +310,17 @@ describe('durable audit checkpoint recovery', () => {
     expect(events[1]?.data?.kind).toBe('architecture_event');
   });
 
+  it('uses the full checkpoint when the legacy event writer also recorded a lossy copy', async () => {
+    const complete = checkpoint();
+    const copy = { ...checkpoint(), id: 'lossy-copy' };
+    for (const key of ['autoRoutingVisit', 'selectedEdgeId', 'pendingNodeIds', 'visitCounts', 'selectedNodeIds']) delete copy.data?.[key];
+    const events = await recovery([copy, complete]).service.reconstructEvents('run', 'host');
+    expect(events).toHaveLength(1);
+    expect(events[0]?.data).toMatchObject({ kind: 'auto_routing_decision', pendingNodeIds: ['next'] });
+    await expect(recovery([copy]).service.reconstructEvents('run', 'host')).rejects.toThrow(/checkpoint/);
+    await expect(recovery([{ ...copy, sessionId: 'other-host' }, complete]).service.reconstructEvents('run')).rejects.toThrow(/checkpoint/);
+  });
+
   it.each([
     ['autoRoutingVisit', undefined], ['autoRoutingVisit', 0], ['autoRoutingVisit', 1.5],
     ['autoRoutingVisit', NaN], ['selectedEdgeId', undefined], ['selectedEdgeId', 'wrong'],

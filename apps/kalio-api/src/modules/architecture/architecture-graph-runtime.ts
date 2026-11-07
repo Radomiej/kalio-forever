@@ -1,7 +1,7 @@
 import type { ArchitectureExecutionEvent } from '@kalio/types';
 import { architectureActionSummaryForEvent } from './architecture-action-summary';
 import { partitionReadyNodesByVisitLimit, runtimeLimitDecisionForPendingNodes } from './architecture-graph-scheduler.utils';
-import { groupArchitectureEdges, markActiveIncoming, returnToOrchestratorNodeIds, rootArchitectureNodes } from './architecture-graph-topology.utils';
+import { groupArchitectureEdges, isToolTimeoutRecovery, markActiveIncoming, returnToOrchestratorNodeIds, rootArchitectureNodes } from './architecture-graph-topology.utils';
 import { createWorkflowError, workflowFailureFromError } from '../../common/utils/workflow-error.util';
 import { ArchitectureGraphContext, type GraphRuntimeOptions } from './architecture-graph-runtime.context';
 import { executeNode, handleRecoverableNodeError } from './architecture-graph-runtime.nodes';
@@ -94,6 +94,7 @@ export async function createArchitectureGraphEvents(options: GraphRuntimeOptions
       }
       if (ctx.isStopped()) return { node, selectedNodeIds: [] };
       const outgoingNodeIds = outgoing.get(node.id) ?? [];
+      const eventOffset = ctx.events.length;
       let selectedNodeIds: string[];
       try {
         selectedNodeIds = await executeNode(ctx,
@@ -103,7 +104,7 @@ export async function createArchitectureGraphEvents(options: GraphRuntimeOptions
           nodesById,
         );
       } catch (error) {
-        if (goalProtocolRequired(ctx) && ctx.isStopped()) return { node, selectedNodeIds: [] };
+        if (ctx.isStopped()) return { node, selectedNodeIds: [] };
         const caughtError = goalProtocolRequired(ctx)
           ? createWorkflowError('CONTRACT_VIOLATION', 'Goal graph protocol failed.', { source: 'architecture-graph-runtime', retryable: false })
           : error;
@@ -127,6 +128,9 @@ export async function createArchitectureGraphEvents(options: GraphRuntimeOptions
         selectedNodeIds = handleRecoverableNodeError(ctx, node, outgoingNodeIds, caughtError);
       }
       if (ctx.isStopped() || ctx.goalPaused || ctx.goalTerminalPublished) return { node, selectedNodeIds: [] };
+      if (ctx.events.slice(eventOffset).some(event => event.nodeId === node.id && isToolTimeoutRecovery(event))) {
+        return { node, selectedNodeIds };
+      }
       const completedEvent = ctx.createEvent('node_completed', `${node.label} completed.`, {
         lifecycle: 'node_completed',
         status: 'done',

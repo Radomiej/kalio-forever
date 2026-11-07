@@ -67,6 +67,20 @@ describe('TerminalService', () => {
 
   // ── spawn() ──────────────────────────────────────────────────────────────
 
+  it('keeps the backend NODE_ENV out of project commands without changing the backend environment', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      await service.spawn('npm', ['test'], '/project');
+      const options = mockSpawnFn.mock.calls[0]?.[2];
+      expect(options?.env).toBeDefined();
+      expect(options.env).not.toHaveProperty('NODE_ENV');
+      expect(options.env.PATH ?? options.env.Path).toBe(process.env.PATH ?? process.env.Path);
+      expect(process.env.NODE_ENV).toBe('production');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   describe('observeUntilExit()', () => {
     it('cancels the real terminal_output tool and releases its observer', async () => {
       vi.useFakeTimers();

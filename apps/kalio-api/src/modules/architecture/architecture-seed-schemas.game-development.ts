@@ -19,6 +19,9 @@ const browser = [
   'mcp_toml_mcp-playwright-orchestrator_browser_page_new_5bd3a08e',
   'mcp_toml_mcp-playwright-orchestrator_browser_page_navig_181cd832',
   'mcp_toml_mcp-playwright-orchestrator_browser_snapshot_22722cdb',
+  'mcp_toml_mcp-playwright-orchestrator_browser_click_e993a421',
+  'mcp_toml_mcp-playwright-orchestrator_browser_press_key_5dbce85f',
+  'mcp_toml_mcp-playwright-orchestrator_browser_wait_for_91d3c8d3',
   'mcp_toml_mcp-playwright-orchestrator_audit_visual_layou_63cb5173',
   'mcp_toml_mcp-playwright-orchestrator_take_snapshot_3959a244',
   'mcp_toml_mcp-playwright-orchestrator_browser_session_cl_73f1e1da',
@@ -31,7 +34,7 @@ function edge(fromNodeId: string, toNodeId: string, selection?: ArchitectureSche
 export const GAME_DEVELOPMENT_2: ArchitectureSchema = {
   id: 'game-development-2',
   name: 'Game Development 2',
-  version: '1.0.0',
+  version: '1.0.2',
   description: 'Game design, implementation, independent playtest, and an evidence-led correction loop.',
   roleSlots: roles.map(([id, label, defaultPersonaId, slotType, description]) => ({
     id, label, defaultPersonaId, slotType, description, allowedPersonaTags: [],
@@ -57,7 +60,10 @@ export const GAME_DEVELOPMENT_2: ArchitectureSchema = {
   ],
   edges: [
     edge('analyst', 'orchestrator'), edge('orchestrator', 'designer', 'default'),
-    edge('designer', 'core'), edge('core', 'ux'), edge('ux', 'senior'), edge('senior', 'readiness'),
+    edge('orchestrator', 'core', 'choice', 'Retry implementation after reviewing failure'),
+    edge('designer', 'core'), edge('core', 'ux', 'default'),
+    edge('core', 'orchestrator', 'continuation', 'Recover after implementation timeout'),
+    edge('ux', 'senior'), edge('senior', 'readiness'),
     edge('readiness', 'core', 'default', 'Rework · insufficient evidence'),
     edge('readiness', 'input-qa', 'choice', 'Ready for independent QA'),
     edge('input-qa', 'loop-qa'), edge('loop-qa', 'release'),

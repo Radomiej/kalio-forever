@@ -33,7 +33,7 @@ async function untilGate(promise: Promise<void>, signal: AbortSignal) {
 }
 
 function fixture(options: { ordinary?: boolean; count?: number; finish?: boolean; scheduler?: RuntimeExecutionScheduler;
-  preparation?: ReturnType<typeof gate> } = {}) {
+  preparation?: ReturnType<typeof gate>; parentSignal?: AbortSignal } = {}) {
   const sqlite = new Database(':memory:');
   sqlite.exec(`CREATE TABLE hitl_requests (
     id text PRIMARY KEY NOT NULL, kind text NOT NULL, status text NOT NULL DEFAULT 'pending',
@@ -95,6 +95,7 @@ function fixture(options: { ordinary?: boolean; count?: number; finish?: boolean
     { requestAdditionalBudget: vi.fn(async () => null) } as unknown as AgentBudgetApprovalService,
     undefined, undefined, undefined, undefined, undefined, options.scheduler);
   const run = runtime.runSubagent({ parentSessionId: 'parent', parentToolCallId: 'role', objective: 'fixture',
+    parentSignal: options.parentSignal,
     timeoutMs: 50, vfsMode: 'shared', copyOutputs: false, availableTools: [meta],
     architectureContext: { projectPath: process.cwd(), executionCwd: process.cwd() },
     ...(options.ordinary ? {} : { auditContext: { architectureRunId: 'architecture-fixture' },
@@ -108,6 +109,25 @@ function fixture(options: { ordinary?: boolean; count?: number; finish?: boolean
 }
 
 afterEach(() => vi.useRealTimers());
+
+it('propagates a parent stop to the active child and cancels its durable tool approval', async () => {
+  const parent = new AbortController();
+  const f = fixture({ parentSignal: parent.signal });
+  try {
+    await f.entered.promise;
+    f.startTools.open();
+    const sessionId = f.params.sessionId!;
+    await vi.waitFor(() => expect(f.confirmations.getPendingConfirmations(sessionId)).toHaveLength(1));
+    const [request] = f.confirmations.getPendingConfirmations(sessionId);
+    parent.abort(new Error('Parent stopped.'));
+    await f.settled;
+    expect((await f.requests.getById(request!.requestId))?.status).toBe('cancelled');
+    expect(f.confirmations.getPendingConfirmations(sessionId)).toHaveLength(0);
+    expect(f.write).not.toHaveBeenCalled();
+  } finally {
+    f.sqlite.close();
+  }
+});
 
 describe('Architecture remaining execution time with real durable tool waiter', () => {
   it('charges preparation after admission and never starts a model after that deadline', async () => {

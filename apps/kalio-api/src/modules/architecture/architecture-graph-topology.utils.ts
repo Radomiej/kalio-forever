@@ -19,6 +19,12 @@ export function selectedNodeIdsFromEvent(event: ArchitectureExecutionEvent): str
     : [];
 }
 
+export function isToolTimeoutRecovery(event: ArchitectureExecutionEvent): boolean {
+  return event.type === 'participant_output'
+    && event.data?.runtimeGuard === 'tool_timeout_recovery'
+    && event.errorCode === 'SUBAGENT_TIMEOUT';
+}
+
 export function rootArchitectureNodes(
   schema: ArchitectureSchema,
   incoming: Map<string, string[]>,

@@ -286,7 +286,7 @@ export class ToolDispatchService {
     return this.withMeta({
       callId,
       status: 'cancelled',
-      ...(rejectionMessage ? { errorMessage: `User rejected tool confirmation: ${rejectionMessage}` } : {}),
+      ...(rejectionMessage ? { errorMessage: rejectionMessage } : {}),
     }, toolName, ctx);
   }
 

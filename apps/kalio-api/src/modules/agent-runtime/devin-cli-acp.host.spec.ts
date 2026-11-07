@@ -16,6 +16,20 @@ vi.mock('node:child_process', async original => {
 });
 
 describe('Devin CLI ACP host contract', () => {
+  it.each([false, true])('shares the project directory only when native filesystem access is enabled (%s)', filesystem => {
+    const host = new DevinAcpHost('swe-2', { filesystem, terminal: false, web: false, source: 'default' });
+    const fixture = host as unknown as {
+      lifecycle: { config: { cwd: string } };
+      capabilities: { sessionCapabilities: { additionalDirectories: object } };
+      buildSessionWorkspace(cwd: string): { cwd: string; additionalDirectories?: string[] };
+    };
+    fixture.lifecycle.config = { cwd: '/private-workspace' };
+    fixture.capabilities = { sessionCapabilities: { additionalDirectories: {} } };
+    expect(fixture.buildSessionWorkspace('/game')).toEqual({
+      cwd: '/private-workspace',
+      ...(filesystem ? { additionalDirectories: ['/game'] } : {}),
+    });
+  });
   it('suppresses all inherited MCP entries with empty allowlist and blocks failed verification', async () => {
     const enabled = 'Configured MCP servers:\n  • inherited\n    Command: private-command\n';
     const disabled = 'Configured MCP servers:\n  ✗ inherited  (disabled)\n    Command: private-command\n';

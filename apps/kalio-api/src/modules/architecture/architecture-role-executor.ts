@@ -45,6 +45,7 @@ export interface ArchitectureRoleExecutionInput {
   outgoingNodeIds?: string[];
   resumeChildTurnId?: string;
   emit?: SubagentEmit;
+  signal?: AbortSignal;
   /** Host-supplied only, never read from run.context or model tool arguments. */
   purpose?: { kind: 'goal_proposal'; packet: ArchitectureGoalPacketV1 };
   /** Host-only object capability; never derive from run context or DTOs. */
@@ -160,6 +161,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         slotPolicy: slotPolicy ?? undefined,
         architectureContext: input.run.context,
         timeoutMs: this.timeoutMsForSlot(input),
+        ...(input.signal ? { parentSignal: input.signal } : {}),
         maxIterations,
         structuredOutput: goalContract?.structuredOutput ?? structuredOutputForArchitectureSlot(input.slot),
         vfsMode: 'shared',
@@ -180,7 +182,8 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
       }
       const streamSnapshot = streamHook.snapshot();
       const toolEvidence = summarizeToolEvidence(streamSnapshot);
-      if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0) {
+      if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0
+        && !(code === 'SUBAGENT_TIMEOUT' && input.slot.slotType === 'tool_executor')) {
         throw error;
       }
       const failure = workflowFailureFromError(error);

@@ -77,6 +77,8 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
     run: ArchitectureRun,
     event: ArchitectureExecutionEvent,
   ): void {
+    // Auto-routing decisions already have a required durable audit row.
+    if (event.type === 'router_decision' && event.data?.['kind'] === 'auto_routing_decision') return;
     const sessionId = getArchitectureParentSessionId(run.context) ?? run.rootSessionId ?? run.id;
     if (this.audit) {
       const actionFields = architectureActionFieldsForEvent(event);
@@ -108,6 +110,11 @@ export class ArchitectureRuntimeAuditWriterService implements ArchitectureRuntim
           incompleteReason: typeof event.data?.['incompleteReason'] === 'string' ? event.data['incompleteReason'] : undefined,
           runtimeGuard: typeof event.data?.['runtimeGuard'] === 'string' ? event.data['runtimeGuard'] : undefined,
           toolEvidence: this.toolEvidenceForAudit(event),
+          ...(event.type === 'tool_call' && event.data?.event === 'tool:result' ? {
+            event: event.data.event,
+            toolName: event.data.toolName,
+            toolStatus: event.data.status,
+          } : {}),
           route: event.route,
           routerOutput: event.routerOutput,
           messagePreview: event.message.slice(0, 800),

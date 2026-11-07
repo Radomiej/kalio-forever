@@ -15,6 +15,7 @@ import {
   architectureRunningActionSummaryForNodeKind,
 } from './architecture-action-summary';
 import { architectureSessionIdForRunSlot } from './architecture-session-ids';
+import { isToolTimeoutRecovery } from './architecture-graph-topology.utils';
 
 export function buildArchitectureGraphProjection(
   runId: string,
@@ -342,6 +343,7 @@ function hasNodeRuntimeEvidence(events: ArchitectureExecutionEvent[]): boolean {
 
 function latestNodeTerminalStatus(events: ArchitectureExecutionEvent[]): ArchitectureGraphNodeStatus | undefined {
   for (const event of [...events].reverse()) {
+    if (isToolTimeoutRecovery(event)) return 'failed';
     if (
       event.type === 'node_completed'
       || event.type === 'participant_output'

@@ -277,7 +277,8 @@ export class KalioMcpBridgeService {
     const allowList = this.activeContext(connection).allowedToolNames;
     return this.toolDispatch
       .getToolMetas()
-      .filter((tool) => tool.domain !== 'mcp')
+      .filter((tool) => tool.domain !== 'mcp'
+        || (connection.context.dynamicContextRequired && connection.context.allowedToolNames?.has(tool.name)))
       .filter((tool) => !BLOCKED_CHILD_TOOL_NAMES.has(tool.name))
       // A caller must opt into confirmation-gated tools explicitly. Native
       // read-only tools remain convenient for first-party MCP clients.

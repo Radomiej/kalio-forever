@@ -205,6 +205,11 @@ classDiagram
 
 ## HITL And Budgets
 
+- A tool denied by the user or an approval policy returns a cancelled result to the calling agent with the decision source and any supplied reason. A denial without a reason says so explicitly. An expired approval is reported separately and does not imply a user decision.
+- Stopping an architecture run propagates cancellation to its active role executions. A child waiting for tool approval cancels that wait through the durable HITL path.
+- A tool-executor timeout carries partial evidence to its configured continuation router, or fails the run when that route is unavailable. Only a later successful attempt can take the normal success edge.
+- Project terminal commands do not inherit the backend's `NODE_ENV`.
+
 - Manual HITL waits are durable and do not expire by timeout. They end only by approve, deny, explicit user/system stop, or workflow cancellation.
 - Tool confirmation state and its typed continuation cursor must survive backend process restart. Approval uses CAS before dispatch, commits one durable tool result, and resumes the same turn and iteration budget; denial uses CAS and cannot leave an orphaned pending request.
 - Chat and subagent continuations share the typed cursor contract, but a chat journal `runId` must not be fabricated for subagent runtime. Runtime-specific journal behavior is selected from `runtimeKind`.
@@ -257,6 +262,7 @@ classDiagram
 - Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
 - Devin model discovery reads ACP model-selector metadata directly without a seed model or CLI `models list` prerequisite. Its isolated metadata configuration has no `agent.model`, no admitted MCP tools and default-denied native tools; conversation configuration still requires an explicit nonblank model. Cache/error/stale admission rules remain unchanged.
 - Devin's private MCP overlay accepts the verified CLI catalog formats for `3000.11.1` and `3000.11.234`. Unrecognized versions or ambiguous catalog rows block ACP startup before a prompt is sent.
+- Devin ACP advertises the host project as an additional directory only when native filesystem or terminal access is enabled. Bridge-only sessions reach project files through Kalio's scoped tools.
 - Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
 - The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
@@ -281,7 +287,8 @@ classDiagram
 - Without an explicit `x-kalio-tool-names` allow-list, only native tools that
   do not require confirmation are exposed. Explicitly listed confirmation-gated
   tools still pass through Kalio's normal HITL policy. Child/CLI/subagent tools
-  and connected external MCP tools are never re-exported through this bridge.
+  are excluded. Connected external MCP tools require an explicit managed Devin
+  allow-list and a live turn dispatcher. Their calls use the same Kalio HITL path.
 - An explicit empty `x-kalio-tool-names` value exposes no tools; Devin always
   sends this header so a persona with no allowed Kalio tools cannot fall back to
   the bridge's read-only defaults.
@@ -388,3 +395,7 @@ Workflow final answers display the structured outcome, evidence and optional blo
 Workflow routing and final responses are visually distinct from ordinary agent messages.
 
 Game Development 2 is a built-in workflow preset for game design, core and UX implementation, Jev readiness routing, independent input/visual and core-loop QA, and orchestrator-led rework. Its requested mixed-model deployment and acceptance checks are documented in docs/spec/game-development-2.md.
+
+Game Development 2 Release Review consumes the latest completed outputs of its implementation, independent review, and both QA nodes. A newer failed or unfinished visit suppresses the prior output for that node. Runtime evidence guards remain authoritative for finalization.
+
+Game Development 2 finalization retains the conclusion of both browser QA reports within a bounded prompt budget, so end-of-match and restored-career observations reach the finalizer.

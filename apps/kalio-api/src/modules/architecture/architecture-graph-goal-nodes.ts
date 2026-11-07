@@ -186,7 +186,7 @@ export async function executeGoalNode(ctx: ArchitectureGraphContext, node: Archi
         personaId: ctx.options.personaForSlot(slot), node, incomingEvents: ctx.incomingEventsForSlot(slot, ctx.incomingNodeIdsFor(node.id)),
         outgoingNodeIds, purpose: { kind: 'goal_proposal', packet: structuredClone(state.packet) },
         resumeChildTurnId: ctx.options.resumeFrom?.waitingNodeId === node.id ? ctx.options.resumeFrom.waitIdentity?.childTurnId : undefined,
-        emit: ctx.branchEventEmit(node, slot) });
+        emit: ctx.branchEventEmit(node, slot), signal: ctx.options.signal });
       if (ctx.isStopped()) return [];
       unchanged();
       const proposal = prepareGoalProjection(state.packet, result.structuredOutput);

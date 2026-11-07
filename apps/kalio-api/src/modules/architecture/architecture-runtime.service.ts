@@ -189,6 +189,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       events = await createArchitectureGraphEvents({
         schema,
         run,
+        signal,
         now: run.createdAt,
         roleExecutor: this.roleExecutor,
         personaForSlot: (slot) => this.personaForRunSlot(run, slot),

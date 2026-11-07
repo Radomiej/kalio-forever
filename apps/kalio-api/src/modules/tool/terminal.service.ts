@@ -70,8 +70,14 @@ export class TerminalService implements OnModuleDestroy {
 
     // On Windows most CLI tools are .cmd shims and won't resolve without a shell.
     // shell:true is acceptable here — terminal_spawn already requires user confirmation.
+    const env = { ...process.env };
+    // Project commands choose their own runtime mode.
+    for (const key of Object.keys(env)) {
+      if ((useShell ? key.toUpperCase() : key) === 'NODE_ENV') delete env[key];
+    }
     const proc = spawn(command, capturedArgs, {
       cwd: safeCwd,
+      env,
       shell: useShell,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -76,6 +76,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
   }
 
   async runSubagent(request: RunSubagentRequest): Promise<RunSubagentResult> {
+    request.parentSignal?.throwIfAborted();
     if (request.hostRuntimeReceiptObserver && (request.resumeTurnId || !this.runJournal)) {
       throw new Error('Host receipt runs require a durable journal and cannot replay a previous turn.');
     }
@@ -202,6 +203,8 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     }
 
     const controller = new AbortController();
+    const parentSignal = request.parentSignal;
+    const abortFromParent = () => controller.abort(parentSignal?.reason);
     const completeActiveRun = this.activeRuns.register({
       childSessionId,
       parentSessionId: request.parentSessionId,
@@ -221,6 +224,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     let loopExecution: Promise<LLMAgentLoopResult> | undefined;
 
     try {
+      parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+      if (parentSignal?.aborted) abortFromParent();
+      controller.signal.throwIfAborted();
       await executionLease?.acquire();
       controller.signal.throwIfAborted();
       if (this.activeRuns.getStatus(childSessionId)?.turnId !== turnId) throw new Error('Sub-agent execution owner is stale.');
@@ -459,6 +465,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
       trackingEmit?.('agent:done', { sessionId: childSessionId, turnId, agentRun });
       throw error;
     } finally {
+      parentSignal?.removeEventListener('abort', abortFromParent);
       executionBudget.dispose();
       executionLease?.release();
       completeActiveRun();

@@ -110,3 +110,14 @@ describe('summarizeArchitectureIncomingEvent', () => {
     expect(packet).toContain('risks=frontend: UI copy may drift. -> Mirror backend labels.');
   });
 });
+
+it('preserves the bounded ending of a playtest report for finalization', () => {
+  const output = event({ message: 'Playtest begins. ' + 'Navigation detail. '.repeat(300)
+    + 'Result screen captured. Reload restored the saved career.' });
+  const regular = summarizeArchitectureIncomingEvent(output, 'finalizer');
+  const playtest = summarizeArchitectureIncomingEvent(output, 'finalizer', true);
+  expect(regular).not.toContain('Reload restored');
+  expect(playtest).toContain('Playtest begins.');
+  expect(playtest).toContain('Result screen captured. Reload restored the saved career.');
+  expect(playtest.length).toBeLessThanOrEqual(3600);
+});

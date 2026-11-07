@@ -40,8 +40,11 @@ export class ArchitectureRoleObjective extends ArchitectureRoleExecutionPolicy {
     ].filter((line): line is string => typeof line === 'string');
     if (incomingEvents.length > 0) {
       lines.push('', 'Incoming graph outputs:');
+      const isGameFinalizer = input.slot.slotType === 'finalizer'
+        && /^game-development-2(?:-variant-\d+)?$/.test(input.schema.id);
       for (const event of incomingEvents) {
-        lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType)}${incomingEventEvidenceSummary(event)}`);
+        const preserveConclusion = isGameFinalizer && (event.nodeId === 'input-qa' || event.nodeId === 'loop-qa');
+        lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType, preserveConclusion)}${incomingEventEvidenceSummary(event)}`);
       }
       const handoffPackets = incomingEvents
         .map((event) => summarizeArchitectureIncomingHandoffPacket(event))

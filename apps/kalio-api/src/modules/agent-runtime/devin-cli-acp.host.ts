@@ -291,7 +291,8 @@ export class DevinAcpHost {
   private buildSessionWorkspace(cwd: string): DevinSessionWorkspace {
     const configCwd = this.lifecycle.config?.cwd;
     if (!configCwd) return { cwd };
-    return this.capabilities.sessionCapabilities?.additionalDirectories !== undefined
+    const needsProjectDirectory = this.nativePolicy.filesystem || this.nativePolicy.terminal;
+    return needsProjectDirectory && this.capabilities.sessionCapabilities?.additionalDirectories !== undefined
       ? { cwd: configCwd, additionalDirectories: [cwd] }
       : { cwd: configCwd };
   }

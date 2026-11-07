@@ -175,6 +175,7 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
       ? ctx.options.resumeFrom.waitIdentity?.childTurnId
       : undefined,
     emit: ctx.branchEventEmit(node, slot),
+    signal: ctx.options.signal,
     ...(attempt ? { hostRuntimeReceiptObserver: attempt.observer } : {}),
   });
   if (goalSnapshot !== undefined) {
@@ -184,13 +185,21 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
       throw createWorkflowError('CONTRACT_VIOLATION', 'Goal graph protocol failed.', { source: 'architecture-graph-runtime', retryable: false });
     }
   }
+  const timedOut = !goalWork && slot.slotType === 'tool_executor' && result.data.errorCode === 'SUBAGENT_TIMEOUT';
+  const normalTarget = defaultOutgoingNodeId(ctx.options.schema, node.id, outgoingNodeIds);
+  const recoveryTargets = !goalWork && slot.slotType === 'tool_executor' && normalTarget
+    ? ctx.options.schema.edges.filter(edge => edge.fromNodeId === node.id && edge.selection === 'continuation'
+      && outgoingNodeIds.includes(edge.toNodeId) && edge.toNodeId !== normalTarget
+      && ctx.options.schema.nodes.some(target => target.id === edge.toNodeId && target.kind === 'router'))
+    : [];
+  const recoveryTarget = recoveryTargets.length === 1 ? recoveryTargets[0]?.toNodeId : undefined;
   const toolContract = architectureToolExecutorContract({
     slot,
     data: result.data,
     incomingEvents: ctx.events,
     ...ctx.finalizationInput(),
   });
-  if (!toolContract.ok) {
+  if (!timedOut && !toolContract.ok) {
     throw createWorkflowError(
       'CONTRACT_VIOLATION',
       `Architecture tool executor ${slot.id} completed without required tool evidence: ${toolContract.reason}`,
@@ -199,9 +208,9 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
   }
   const incompleteReason = architectureIncompleteResultReason(result.data)
     ?? incompleteToolExecutorReason({ slot, data: result.data, incomingEvents: ctx.events });
-  const selectedNodeIds = goalWork ? outgoingNodeIds.filter(id => id === ctx.options.goalProtocol?.judgeNodeId) : incompleteReason
+  const selectedNodeIds = timedOut ? recoveryTarget ? [recoveryTarget] : [] : goalWork ? outgoingNodeIds.filter(id => id === ctx.options.goalProtocol?.judgeNodeId) : incompleteReason
     ? ctx.incompleteContinuationNodeIds(outgoingNodeIds, node.id, defaultOutgoingNodeId(ctx.options.schema, node.id, outgoingNodeIds))
-    : selectedRoleOutgoingNodeIds({ data: result.data, outgoingNodeIds });
+    : selectedRoleOutgoingNodeIds({ data: result.data, outgoingNodeIds: outgoingNodeIds.filter(id => id !== recoveryTarget) });
   const requestedRoute = routeRequest(result.data);
   const hasAgentRoute = !incompleteReason && requestedRoute !== undefined && outgoingNodeIds.includes(requestedRoute.targetNodeId);
   if (attempt) {
@@ -215,6 +224,7 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
     actionSummary: architectureActionSummaryForEvent('participant_output', 'role'),
     nodeId: node.id,
     roleSlotId: slot.id,
+    ...(timedOut ? { errorCode: 'SUBAGENT_TIMEOUT' as const } : {}),
     route: {
       source: incompleteReason ? 'runtime_fallback' : hasAgentRoute ? 'agent' : 'runtime_fallback',
       fromNodeId: node.id,
@@ -226,11 +236,19 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
     evidence: workflowEvidenceArray(result.data),
     data: {
       ...result.data,
+      ...(timedOut && recoveryTarget ? { runtimeGuard: 'tool_timeout_recovery' } : {}),
       incompleteReason,
       incomingNodeIds: ctx.incomingNodeIdsFor(node.id),
       selectedNodeIds,
     },
   });
+  if (timedOut && !recoveryTarget) {
+    const message = result.data.recoverableRuntimeError;
+    throw createWorkflowError('SUBAGENT_TIMEOUT', typeof message === 'string' ? message : `${slot.label} timed out.`, {
+      source: 'architecture-role-executor',
+      retryable: true,
+    });
+  }
   if (goalWork) {
     if (ctx.isStopped()) return [];
     assertCurrentWork();
@@ -270,6 +288,7 @@ export async function executeFinalizerNode(ctx: ArchitectureGraphContext,
     incomingEvents: ctx.incomingEventsForSlot(slot, incomingNodeIds),
     outgoingNodeIds,
     emit: ctx.options.emit,
+    signal: ctx.options.signal,
   });
   if (goalProtocolRequired(ctx) && ctx.isStopped()) return [];
   const projection = finalArtifactFromRoleResult({

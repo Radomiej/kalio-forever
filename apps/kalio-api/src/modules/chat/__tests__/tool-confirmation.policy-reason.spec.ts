@@ -22,6 +22,20 @@ function fixture() {
   return { service, policy, notifications, audit, writer, ctx };
 }
 describe('manual supervisor reason remains request context, never human authority', () => {
+  it.each(['jev', 'rule', 'ollama'] as const)('forwards a denial from %s to the calling agent', async source => {
+    const f = fixture();
+    f.policy.resolveApproval.mockResolvedValue({ status: 'rejected', source, reason: 'Read scope exceeded.' });
+    const execute = vi.fn(async () => 'tool result');
+    const dispatcher = new ToolDispatchService([{ meta: { name: 'fs_read', description: 'fixture',
+      parameters: {}, requiresConfirmation: true }, execute }], null, null, null, null, f.service);
+
+    await expect(dispatcher.dispatch('call', 'fs_read', {}, f.ctx)).resolves.toMatchObject({
+      status: 'cancelled',
+      errorMessage: expect.stringContaining(`(${source === 'jev' ? 'Jev' : source}): Read scope exceeded. Do not retry`),
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each(['approve', 'reject'] as const)('annotates only real requested event and separates later human %s reason', async action => {
     const f = fixture(); let settled = false;
     const waiting = f.service.approveOrRequestConfirmation('call', 'fs_read', {}, f.ctx);

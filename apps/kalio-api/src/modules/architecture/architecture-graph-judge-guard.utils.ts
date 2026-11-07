@@ -1,6 +1,7 @@
 import type { ArchitectureExecutionEvent, ArchitectureRoleSlot, ArchitectureSchema, ArchitectureSchemaNode } from '@kalio/types';
 import {
   blockingFinalizationReason,
+  blockingGameBrowserEvidence,
   externalQualityGateAcceptanceReason,
   hasVisibleWorkflowToolProof,
   type ArchitectureGraphFinalizationInput,
@@ -8,6 +9,7 @@ import {
 import {
   continuationOutgoingNodeId,
   defaultOutgoingNodeId,
+  outgoingNodeIdForSelection,
 } from './architecture-graph-routing.utils';
 
 type JudgeContinuationGuardInput = {
@@ -39,6 +41,17 @@ export function judgeArchitectureContinuationGuard(input: JudgeContinuationGuard
     outgoingNodeIds,
     finalizationInput,
   } = input;
+
+  const selectsArtifact = schema.nodes.some(candidate => candidate.kind === 'artifact' && selectedNodeIds.includes(candidate.id));
+  if (selectsArtifact) {
+    const reason = blockingGameBrowserEvidence(finalizationInput);
+    if (reason) {
+      const rework = outgoingNodeIdForSelection(schema, node.id, outgoingNodeIds, 'continuation');
+      if (rework && !schema.nodes.some(candidate => candidate.id === rework && candidate.kind === 'artifact')) {
+        return { selectedNodeIds: [rework], applied: true, reason };
+      }
+    }
+  }
 
   if (slot.slotType !== 'judge' || !requireGoalMasterLoopProof) {
     return { selectedNodeIds, applied: false };

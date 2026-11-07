@@ -1,4 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ArchitectureExecutionEvent,
   ArchitectureRun,
@@ -268,14 +269,28 @@ export class ArchitectureRuntimeAuditRecoveryService implements ArchitectureRunt
     });
     // AuditService has no pagination cursor; never accept a potentially truncated replay.
     if (rows.length >= 5000) throw new Error('Durable audit recovery limit reached; history may be truncated.');
-    return rows
+    const scopedRows = rows
       .filter((row) => {
         const data = this.auditData(row);
-        const matches = (data.runId === runId || data.architectureRunId === runId)
+        return (data.runId === runId || data.architectureRunId === runId)
           && (sessionId === undefined || row.sessionId === sessionId);
-        if (matches && data.kind === 'architecture_event') architectureAuditAutoRoutingData(data);
-        return matches;
-      })
+      });
+    const checkpoints = scopedRows.filter(row => this.auditData(row).autoRoutingVisit !== undefined);
+    return scopedRows.filter(row => {
+      const data = this.auditData(row);
+      if (data.kind !== 'architecture_event') return true;
+      // TODO: legacy fallback for the old lossy logEvent copy of a required decision.
+      const fields = ['autoRoutingVisit', 'selectedEdgeId', 'pendingNodeIds', 'visitCounts', 'selectedNodeIds'];
+      if (typeof data.eventId === 'string' && fields.every(key => !Object.hasOwn(data, key))
+        && checkpoints.some(checkpoint => {
+          const complete = this.auditData(checkpoint);
+          return row.sessionId === checkpoint.sessionId && complete.kind === data.kind
+            && ['runId', 'schemaId', 'eventId', 'eventType', 'sequence', 'nodeId', 'route']
+              .every(key => isDeepStrictEqual(data[key], complete[key]));
+        })) return false;
+      architectureAuditAutoRoutingData(data);
+      return true;
+    })
       .sort((left, right) => {
         if (left.createdAt !== right.createdAt) {
           return left.createdAt - right.createdAt;

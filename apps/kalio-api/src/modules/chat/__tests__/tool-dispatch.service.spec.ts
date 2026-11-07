@@ -223,7 +223,10 @@ describe('ToolDispatchService', () => {
         toolName: 'dangerous_tool',
         sessionId: 'sid',
       }));
-      expect(result.status).toBe('cancelled');
+      expect(result).toMatchObject({
+        status: 'cancelled',
+        errorMessage: expect.stringMatching(/User rejected.*Do not retry.*ask for clarification/),
+      });
     });
 
     it('returns cancelled result with the user rejection message visible to the agent', async () => {

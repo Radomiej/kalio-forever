@@ -4,6 +4,7 @@ import { architectureIncompleteResultReason, workflowEvidenceArray } from './arc
 import { judgeArchitectureContinuationGuard } from './architecture-graph-judge-guard.utils';
 import {
   defaultOutgoingNodeId,
+  gameReleaseReviewEvents,
   isRouterPauseAction,
   routeConvergeNodeId,
   routeRequest,
@@ -46,13 +47,15 @@ export async function executeRouterRoleNode(ctx: ArchitectureGraphContext,
     throw new Error(`Missing branch session for role slot ${slot.id}`);
   }
   const result = await ctx.options.roleExecutor.execute({
+    signal: ctx.options.signal,
     schema: ctx.options.schema,
     run: ctx.options.run,
     slot,
     branchSessionId,
     personaId: ctx.options.personaForSlot(slot),
     node,
-    incomingEvents: ctx.incomingEventsForSlot(slot, incomingNodeIds),
+    incomingEvents: gameReleaseReviewEvents(ctx.options.schema, node.id, ctx.events)
+      ?? ctx.incomingEventsForSlot(slot, incomingNodeIds),
     outgoingNodeIds,
     emit: ctx.branchEventEmit(node, slot),
   });

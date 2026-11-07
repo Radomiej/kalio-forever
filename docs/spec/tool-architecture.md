@@ -223,3 +223,10 @@ This means tool visibility is a session-level orchestration concern, while tool 
 - Confirmation enforcement must stay session-bound in both the gateway and dispatch layer.
 - Any tool that streams progress should use `_emit` and still end with a normal `ToolResult`.
 - New mutating tools should prefer `@ConfirmedTool(...)` unless there is a deliberate reason not to use it.
+## Tool confirmation outcomes
+
+A denied tool returns `cancelled` with an agent-facing explanation. Manual denial identifies the user and preserves any reason they supplied. Policy denial identifies the policy source and preserves its reason when available. The Kalio MCP bridge carries the cancelled result and its explanation to the calling client. An expired confirmation is separate from denial.
+
+Project commands launched by `terminal_spawn` choose their own runtime mode. The backend's `NODE_ENV` is removed from the child environment, while PATH and other inherited variables are preserved.
+
+Managed Devin ACP may discover external MCP tools explicitly listed for its bridge connection. Calling them requires the live Kalio turn dispatcher, which applies the tool policy and HITL. Standalone bridge clients cannot call external MCP tools.

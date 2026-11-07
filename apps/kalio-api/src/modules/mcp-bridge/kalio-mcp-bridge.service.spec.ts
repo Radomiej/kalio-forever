@@ -28,7 +28,7 @@ const tools: ToolMeta[] = [
   },
   {
     name: 'mcp_playwright_browser_click',
-    description: 'External MCP tools must not be exposed through the Devin native bridge.',
+    description: 'Click a browser element through the authorized Kalio turn.',
     domain: 'mcp',
     parameters: { type: 'object', properties: { selector: { type: 'string' } } },
     requiresConfirmation: true,
@@ -378,6 +378,33 @@ describe('KalioMcpBridgeService', () => {
     expect(nativeDispatch).toHaveBeenCalledTimes(1);
     expect(emitSessionEvent).not.toHaveBeenCalled();
     await client.close();
+  });
+
+  it('advertises an explicitly scoped external tool and executes it only through a live ACP turn', async () => {
+    const name = 'mcp_playwright_browser_click';
+    const sessionId = 'session-browser';
+    const client = new Client({ name: 'browser-bridge-test', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: { headers: {
+        Authorization: 'Bearer test-bridge-token', 'x-kalio-session-id': sessionId,
+        'x-kalio-tool-names': name, 'x-kalio-bridge-client': 'devin-acp',
+      } },
+    }));
+    try {
+      expect((await client.listTools()).tools.map(tool => tool.name)).toEqual([name]);
+      const call = { name, arguments: { selector: 'button' } };
+      expect(await client.callTool(call)).toMatchObject({ isError: true });
+      const dispatchNativeTool = vi.fn(async (toolCall: { id: string }) => ({
+        callId: toolCall.id, status: 'success' as const, data: { clicked: true },
+      }));
+      contextRegistry.activate({ sessionId, dispatchNativeTool });
+      const result = await client.callTool(call);
+      expect(findTextContent(result.content)?.text).toContain('"clicked":true');
+      expect(dispatchNativeTool).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ name, args: call.arguments }), expect.any(Object),
+      );
+      expect(dispatchSpy).not.toHaveBeenCalled();
+    } finally { await client.close(); }
   });
 
   it('does not bypass durable execution when a managed context has no runtime port', async () => {
