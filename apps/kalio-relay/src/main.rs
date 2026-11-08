@@ -55,7 +55,7 @@ async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
     Json(PairResponse{v:1,instance_id:pair.instance,device_id:device,token}).into_response()
 }
 fn bearer(headers:&HeaderMap)->Option<&str>{ headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ") }
-async fn agent_ws(Path(id):Path<String>, State(app):State<App>, headers:HeaderMap, ws:WebSocketUpgrade) -> Response {
+async fn agent_ws(Path(id):Path<String>, State(app):State<App>, ws:WebSocketUpgrade) -> Response {
     ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id))
 }
 async fn agent_auth(mut socket:WebSocket, app:App, id:String) {
