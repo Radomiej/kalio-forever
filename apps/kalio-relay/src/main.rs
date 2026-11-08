@@ -91,12 +91,13 @@ async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
     let _=broadcast(&app,&id,json!({"v":1,"type":"instance.online","instanceId":id})).await;
     loop {
         tokio::select! {
-            _=cancel_rx.changed()=>break,
+            _=cancel_rx.changed()=>{let _=socket.send(Message::Close(None)).await;break},
             out=rx.recv()=> match out {Some(out)=>if socket.send(Message::Text(out.into())).await.is_err(){break},None=>break},
             incoming=socket.recv()=> match incoming {
                 Some(Ok(Message::Text(text))) if text.len()<=MAX_FRAME => {
                     let Ok(e)=serde_json::from_str::<Envelope>(&text) else {continue};
                     if e.v!=1 || e.instance_id!=id {continue}
+                    if !app.0.instances.read().await.get(&id).is_some_and(|i|i.agent_generation==generation){break}
                     if !matches!(e.kind.as_str(),"snapshot"|"session.snapshot"|"approval.result"|"pair.create") {continue}
                     if e.kind=="pair.create" {
                         let mut pairs=app.0.pairs.lock().unwrap(); pairs.retain(|_,p|p.expires>Instant::now());
@@ -141,9 +142,10 @@ async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
         i.device_generation.insert(device.clone(),gen); i.device_cancel.insert(device.clone(),cancel_tx);
         i.devices.insert(device.clone(),tx); let mut h=Vec::new(); if let Some(s)=&i.snapshot{h.push(s.clone())} h.extend(i.history.iter().cloned()); (gen,h)
     };
-    for s in initial {if socket.send(Message::Text(s.into())).await.is_err(){return}}
+    for s in initial {if socket.send(Message::Text(s.into())).await.is_err(){if let Some(i)=app.0.instances.write().await.get_mut(&id){if i.device_generation.get(&device)==Some(&generation){i.devices.remove(&device);i.device_cancel.remove(&device);}}return}}
     loop {
         tokio::select! {
+            _=cancel_rx.changed()=>{let _=socket.send(Message::Close(None)).await;break},
             out=rx.recv()=> match out {Some(out)=>if socket.send(Message::Text(out.into())).await.is_err(){break},None=>break},
             incoming=socket.recv()=> match incoming {
                 Some(Ok(Message::Text(text))) if text.len()<=MAX_FRAME=>{
