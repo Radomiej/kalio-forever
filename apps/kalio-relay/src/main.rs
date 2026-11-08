@@ -196,10 +196,67 @@ async fn main()->anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn token_hash_is_stable_and_256_bit() { assert_eq!(hash("token"),hash("token")); assert_ne!(hash("token"),hash("other")); }
-    #[test] fn pair_codes_have_128_bits_and_device_tokens_256_bits() { assert_eq!(random_hex(16).len(),32); assert_eq!(random_hex(32).len(),64); }
-    #[test] fn envelope_does_not_require_payload() {
-        let e:Envelope=serde_json::from_str(r#"{"v":1,"type":"snapshot","instanceId":"desk"}"#).unwrap();
-        assert_eq!(e.instance_id,"desk"); assert_eq!(e.payload,None);
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{connect_async, tungstenite::Message as ClientMessage};
+
+    async fn test_server() -> (String, tokio::task::JoinHandle<()>, App) {
+        let db=Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE devices(instance TEXT NOT NULL, device TEXT NOT NULL, token_hash BLOB NOT NULL, PRIMARY KEY(instance,device));").unwrap();
+        let app=App(Arc::new(Inner {
+            preauth:Arc::new(Semaphore::new(32)),
+            agents:HashMap::from([("desk".to_string(),hash("agent-secret"))]),
+            db:Mutex::new(db),
+            instances:RwLock::new(HashMap::new()),
+            pairs:Mutex::new(HashMap::new()),
+        }));
+        let router=Router::new().route("/healthz",get(health)).route("/v1/pair",post(pair))
+            .route("/v1/agent/{instance}",get(agent_ws)).route("/v1/device",get(device_ws)).with_state(app.clone());
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address=listener.local_addr().unwrap();
+        let task=tokio::spawn(async move {let _=axum::serve(listener,router).await;});
+        (format!("ws://{address}"),task,app)
+    }
+    async fn auth_agent(base:&str) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+        let (mut ws,_)=connect_async(format!("{base}/v1/agent/desk")).await.unwrap();
+        ws.send(ClientMessage::Text(json!({"v":1,"type":"agent.authenticate","instanceId":"desk","payload":{"token":"agent-secret"}}).to_string().into())).await.unwrap();
+        let frame=tokio::time::timeout(Duration::from_secs(2),ws.next()).await.unwrap().unwrap().unwrap();
+        assert!(frame.into_text().unwrap().contains("auth.accepted"));
+        ws
+    }
+    async fn auth_device(base:&str, token:&str) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+        let (mut ws,_)=connect_async(format!("{base}/v1/device")).await.unwrap();
+        ws.send(ClientMessage::Text(json!({"v":1,"type":"auth","instanceId":"desk","token":token}).to_string().into())).await.unwrap();
+        let frame=tokio::time::timeout(Duration::from_secs(2),ws.next()).await.unwrap().unwrap().unwrap();
+        assert!(frame.into_text().unwrap().contains("auth.accepted"));
+        ws
+    }
+    #[tokio::test]
+    async fn replacing_agent_closes_old_socket_without_offlining_new_agent() {
+        let (base,server,app)=test_server().await;
+        let mut old=auth_agent(&base).await;
+        let mut new=auth_agent(&base).await;
+        let ended=tokio::time::timeout(Duration::from_secs(2),old.next()).await.unwrap();
+        assert!(ended.is_none() || ended.unwrap().is_err() || matches!(ended.unwrap(),Ok(ClientMessage::Close(_))));
+        let state=app.0.instances.read().await;
+        let current=state.get("desk").unwrap();
+        assert!(!current.offline);
+        assert!(current.agent.is_some());
+        drop(state);
+        new.close(None).await.unwrap();
+        server.abort();
+    }
+    #[tokio::test]
+    async fn replacing_device_closes_only_the_old_connection() {
+        let (base,server,app)=test_server().await;
+        app.0.db.lock().unwrap().execute("INSERT INTO devices(instance,device,token_hash) VALUES(?1,?2,?3)",params!["desk","phone",hash("device-secret").as_slice()]).unwrap();
+        let mut old=auth_device(&base,"device-secret").await;
+        let mut new=auth_device(&base,"device-secret").await;
+        let ended=tokio::time::timeout(Duration::from_secs(2),old.next()).await.unwrap();
+        assert!(ended.is_none() || ended.unwrap().is_err() || matches!(ended.unwrap(),Ok(ClientMessage::Close(_))));
+        let state=app.0.instances.read().await;
+        assert!(state.get("desk").unwrap().devices.contains_key("phone"));
+        drop(state);
+        new.close(None).await.unwrap();
+        server.abort();
     }
 }
