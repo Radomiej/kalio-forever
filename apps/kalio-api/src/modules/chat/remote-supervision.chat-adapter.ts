@@ -66,8 +66,11 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
   async snapshot(): Promise<{ sessions: RemoteSupervisionSessionSummary[]; approvals: RemoteSupervisionApproval[] }> {
     const sessions = await this.sessions.list({ limit: 500 });
     const projected = sessions.map((session) => summary(session, this.active));
-    const pending = await Promise.all(sessions.map((session) => this.hitl.listPending(session.id)));
-    const approvals = pending.flatMap((rows) => rows.flatMap((row) => this.approval(row)));
+    const approvals: RemoteSupervisionApproval[] = [];
+    for (const session of sessions) {
+      const pending = await this.hitl.listPending(session.id);
+      for (const row of pending) approvals.push(...this.approval(row));
+    }
     return { sessions: projected, approvals };
   }
 
