@@ -32,7 +32,7 @@ fn app(data: &str, config: &str) -> anyhow::Result<App> {
     db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS devices(instance TEXT NOT NULL, device TEXT NOT NULL, token_hash BLOB NOT NULL, PRIMARY KEY(instance,device));")?;
     Ok(App(Arc::new(Inner{allowed_origins,preauth:Arc::new(Semaphore::new(256)),agents,db:Mutex::new(db),instances:RwLock::new(HashMap::new()),pairs:Mutex::new(HashMap::new())})))
 }
-async pub(crate) fn send_socket(socket:&mut WebSocket, message:Message)->bool { matches!(tokio::time::timeout(Duration::from_secs(5),socket.send(message)).await,Ok(Ok(()))) }
+pub(crate) async fn send_socket(socket:&mut WebSocket, message:Message)->bool { matches!(tokio::time::timeout(Duration::from_secs(5),socket.send(message)).await,Ok(Ok(()))) }
 async fn health() -> Json<Value> { Json(json!({"ok":true})) }
 async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
     let pair={ let mut p=app.0.pairs.lock().unwrap(); p.retain(|_,v|v.expires>Instant::now()); p.remove(&req.code) };
@@ -43,8 +43,8 @@ async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
     Json(PairResponse{v:1,instance_id:pair.instance,device_id:device,token}).into_response()
 }
 fn bearer(headers:&HeaderMap)->Option<&str>{ headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ") }
-async pub(crate) fn broadcast(app:&App,id:&str,v:Value)->Result<(),()> {broadcast_serialized(app,id,v.to_string()).await}
-pub(crate) async pub(crate) fn broadcast_devices(app:&App,id:&str,s:String)->Result<(),()> {broadcast_serialized(app,id,s).await}
+pub(crate) async fn broadcast(app:&App,id:&str,v:Value)->Result<(),()> {broadcast_serialized(app,id,v.to_string()).await}
+pub(crate) pub(crate) async fn broadcast_devices(app:&App,id:&str,s:String)->Result<(),()> {broadcast_serialized(app,id,s).await}
 async fn broadcast_serialized(app:&App,id:&str,s:String)->Result<(),()> {
     let mut all=app.0.instances.write().await;
     let Some(i)=all.get_mut(id) else{return Ok(())};
