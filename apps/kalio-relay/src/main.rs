@@ -111,7 +111,7 @@ async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
                         }
                         drop(all);
                         let value=serde_json::from_str(&s).unwrap_or(Value::Null);
-                        if private {let _=broadcast_devices(&app,&id,s).await} else {let _=broadcast(&app,&id,value).await}
+                        if private {let _=broadcast_devices(&app,&id,s).await;} else {let _=broadcast(&app,&id,value).await;}
                     }
                 },
                 Some(Ok(Message::Close(_)))|None=>break,
