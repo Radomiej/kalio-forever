@@ -82,6 +82,14 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Mobile preview smoke and screenshot
         run: node ../../scripts/remote-supervision-ui-smoke.mjs
+      - name: Upload implementation screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kalio-remote-screenshots
+          retention-days: 3
+          if-no-files-found: ignore
+          path: apps/kalio-remote/test-results/*.png
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -93,6 +101,12 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+          node <<'NODE'
+          const fs=require('node:fs');
+          const path='android/gradle/wrapper/gradle-wrapper.properties';
+          const text=fs.readFileSync(path,'utf8');
+          fs.writeFileSync(path,/^networkTimeout=/m.test(text)?text.replace(/^networkTimeout=.*$/m,'networkTimeout=60000'):text+'\nnetworkTimeout=60000\n');
+          NODE
       - name: Build debug APK
         run: cd android && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
