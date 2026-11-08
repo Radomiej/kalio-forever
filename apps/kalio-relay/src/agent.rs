@@ -3,11 +3,11 @@ use axum::{extract::{Path, State, ws::{Message, WebSocket, WebSocketUpgrade}}, h
 use rusqlite::{params};
 use serde_json::{json, Value};
 use std::{time::{Duration, Instant}};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
 pub(crate) async fn agent_ws(Path(id):Path<String>, State(app):State<App>, ws:WebSocketUpgrade) -> Response {
     ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id))
 }
-async fn agent_auth(mut socket:WebSocket, app:App, id:String, _permit:tokio::sync::OwnedSemaphorePermit) {
+async fn agent_auth(mut socket:WebSocket, app:App, id:String, _permit:OwnedSemaphorePermit) {
     let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
     let Ok(Some(Ok(Message::Text(text))))=first else{return};
     if text.len()>MAX_FRAME{return}
