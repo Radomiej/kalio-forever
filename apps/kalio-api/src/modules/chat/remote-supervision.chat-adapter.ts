@@ -17,6 +17,13 @@ function stable(value: unknown): string {
   if (!isRecord(value)) return JSON.stringify(value) ?? 'null';
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`;
 }
+function sanitized(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitized);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key, /(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)/i.test(key) ? '[redacted]' : sanitized(entry),
+  ]));
+}
 function sha256(value: unknown): string {
   return createHash('sha256').update(stable(value), 'utf8').digest('hex');
 }
@@ -112,7 +119,7 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
     const args = row.payload['args'];
     if (typeof toolName !== 'string' || !isRecord(args)) return [];
     return [{
-      id: row.id, sessionId: row.sessionId, toolName, args, requestedAt: row.createdAt.getTime(),
+      id: row.id, sessionId: row.sessionId, toolName, args: sanitized(args) as Record<string, unknown>, requestedAt: row.createdAt.getTime(),
       revision: requestRevision(row), argsSha256: sha256(args),
     }];
   }
