@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::{HashMap, VecDeque}, env, net::SocketAddr, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, RwLock, Semaphore};
 use tower_http::limit::RequestBodyLimitLayer;
 
 const MAX_FRAME: usize = 1_048_576;
@@ -17,7 +17,7 @@ const PAIR_LIMIT: usize = 2048;
 struct Envelope { v: u8, #[serde(rename="type")] kind: String, #[serde(rename="instanceId")] instance_id: String, #[serde(default)] sequence: Option<u64>, #[serde(rename="requestId", default)] request_id: Option<String>, #[serde(default)] payload: Option<Value> }
 #[derive(Clone)]
 struct App(Arc<Inner>);
-struct Inner { agents: HashMap<String, [u8;32]>, db: Mutex<Connection>, instances: RwLock<HashMap<String, Instance>>, pairs: Mutex<HashMap<String, Pair>> }
+struct Inner { preauth: Arc<Semaphore>, agents: HashMap<String, [u8;32]>, db: Mutex<Connection>, instances: RwLock<HashMap<String, Instance>>, pairs: Mutex<HashMap<String, Pair>> }
 struct Instance { agent: Option<mpsc::Sender<String>>, devices: HashMap<String,mpsc::Sender<String>>, history: VecDeque<String>, snapshot: Option<String>, offline: bool }
 struct Pair { instance: String, expires: Instant }
 #[derive(Deserialize)]
@@ -43,7 +43,7 @@ fn app(data: &str, config: &str) -> anyhow::Result<App> {
     }
     let db=Connection::open(data)?;
     db.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS devices(instance TEXT NOT NULL, device TEXT NOT NULL, token_hash BLOB NOT NULL, PRIMARY KEY(instance,device));")?;
-    Ok(App(Arc::new(Inner{agents,db:Mutex::new(db),instances:RwLock::new(HashMap::new()),pairs:Mutex::new(HashMap::new())})))
+    Ok(App(Arc::new(Inner{preauth:Arc::new(Semaphore::new(256)),agents,db:Mutex::new(db),instances:RwLock::new(HashMap::new()),pairs:Mutex::new(HashMap::new())})))
 }
 async fn health() -> Json<Value> { Json(json!({"ok":true})) }
 async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
@@ -58,7 +58,7 @@ fn bearer(headers:&HeaderMap)->Option<&str>{ headers.get(axum::http::header::AUT
 async fn agent_ws(Path(id):Path<String>, State(app):State<App>, ws:WebSocketUpgrade) -> Response {
     ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id))
 }
-async fn agent_auth(mut socket:WebSocket, app:App, id:String) {
+async fn agent_auth(mut socket:WebSocket, app:App, id:String, _permit:tokio::sync::OwnedSemaphorePermit) {
     let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
     let Ok(Some(Ok(Message::Text(text))))=first else{return};
     if text.len()>MAX_FRAME{return}
@@ -69,8 +69,8 @@ async fn agent_auth(mut socket:WebSocket, app:App, id:String) {
     if socket.send(Message::Text(json!({"v":1,"type":"auth.accepted","instanceId":id}).to_string().into())).await.is_err(){return}
     agent_loop(socket,app,id).await
 }
-async fn device_ws(State(app):State<App>, ws:WebSocketUpgrade)->Response { ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|device_auth(socket,app)) }
-async fn device_auth(mut socket:WebSocket, app:App) {
+async fn device_ws(State(app):State<App>, ws:WebSocketUpgrade)->Response { let Ok(permit)=app.0.preauth.clone().try_acquire_owned() else{return error(StatusCode::SERVICE_UNAVAILABLE)}; ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|device_auth(socket,app,permit)) }
+async fn device_auth(mut socket:WebSocket, app:App, _permit:tokio::sync::OwnedSemaphorePermit) {
     let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
     let Ok(Some(Ok(Message::Text(text))))=first else{return};
     let Ok(auth)=serde_json::from_str::<First>(&text) else{return};
@@ -88,7 +88,7 @@ async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
     let _=broadcast(&app,&id,json!({"v":1,"type":"instance.online","instanceId":id})).await;
     loop {
         tokio::select! {
-            Some(out)=rx.recv()=> if socket.send(Message::Text(out.into())).await.is_err(){break},
+            out=rx.recv()=> match out {Some(out)=>if socket.send(Message::Text(out.into())).await.is_err(){break},None=>break},
             incoming=socket.recv()=> match incoming {
                 Some(Ok(Message::Text(text))) if text.len()<=MAX_FRAME => {
                     let Ok(e)=serde_json::from_str::<Envelope>(&text) else {continue};
