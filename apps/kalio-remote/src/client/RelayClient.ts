@@ -20,7 +20,8 @@ export class RelayClient {
   private authenticated = false;
   private closed = false;
   private generation = 0;
-  private outstanding = new Map<string, Outstanding>();\n  private watchRequestId: string | null = null;
+  private outstanding = new Map<string, Outstanding>();
+  private watchRequestId: string | null = null;
   constructor(private baseUrl: string, private pair: PairReply) {}
   get instanceId(): string { return this.pair.instanceId; }
   get deviceId(): string { return this.pair.deviceId; }
