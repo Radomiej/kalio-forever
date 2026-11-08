@@ -1,0 +1,120 @@
+name: Remote supervision MVP
+on:
+  push:
+    branches: [codex/remote-supervision-mvp]
+  pull_request:
+    paths:
+      - 'apps/kalio-relay/**'
+      - 'apps/kalio-remote/**'
+      - 'apps/kalio-api/src/modules/remote-relay/**'
+      - 'apps/kalio-api/src/modules/chat/**'
+      - 'packages/@kalio/types/**'
+      - '.github/workflows/remote-supervision.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: remote-supervision-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+jobs:
+  dependency-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
+      - name: Record generated lockfile for reviewed commit
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const b = fs.readFileSync('pnpm-lock.yaml').toString('base64');
+          console.log('KALIO_LOCK_BEGIN');
+          for (let i=0;i<b.length;i+=12000) console.log('KALIO_LOCK_CHUNK '+b.slice(i,i+12000));
+          console.log('KALIO_LOCK_END');
+          NODE
+  rust-relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format relay source
+        run: cargo fmt --manifest-path apps/kalio-relay/Cargo.toml --all
+      - name: Real relay tests
+        run: cargo test --manifest-path apps/kalio-relay/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path apps/kalio-relay/Cargo.toml --all-targets -- -D warnings
+      - name: Record formatting and dependency lock for review
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'), path=require('node:path');
+          function walk(p){for(const e of fs.readdirSync(p,{withFileTypes:true})){const f=path.join(p,e.name);if(e.isDirectory())walk(f);else if(f.endsWith('.rs'))record(f);}}
+          function record(p){const b=fs.readFileSync(p).toString('base64');console.log('KALIO_FILE_BEGIN '+p);for(let i=0;i<b.length;i+=12000)console.log('KALIO_FILE_CHUNK '+b.slice(i,i+12000));console.log('KALIO_FILE_END');}
+          walk('apps/kalio-relay/src');if(fs.existsSync('apps/kalio-relay/Cargo.lock'))record('apps/kalio-relay/Cargo.lock');
+          NODE
+  backend-connector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LLM_PROVIDER: mock
+      DATABASE_PATH: /tmp/kalio-remote-test.db
+      MEMORY_DB_PATH: /tmp/kalio-remote-memory
+      WORKSPACE_ROOT: /tmp/kalio-remote-workspace
+      CREDENTIALS_MASTER_KEY: ci-remote-test-key-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @kalio/types --filter @kalio/sdk build
+      - run: pnpm --filter kalio-api typecheck
+      - run: pnpm --filter kalio-api build
+      - run: pnpm --filter kalio-api exec vitest run src/modules/remote-relay src/modules/chat/remote-supervision.chat-adapter.spec.ts
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/kalio-remote
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --package-lock=false --workspaces=false
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Install browser QA dependency
+        run: npm install --no-save --package-lock=false playwright@1.52.0
+      - run: npx playwright install --with-deps chromium
+      - name: Mobile preview smoke and screenshot
+        run: node ../../scripts/remote-supervision-ui-smoke.mjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: Generate Android shell and sync reviewed web bundle
+        run: |
+          npx cap add android
+          npx cap sync android
+      - name: Build debug APK
+        run: cd android && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kalio-remote-android-debug
+          retention-days: 3
+          if-no-files-found: error
+          path: apps/kalio-remote/android/app/build/outputs/apk/debug/app-debug.apk
