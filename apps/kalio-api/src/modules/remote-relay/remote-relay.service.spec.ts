@@ -21,8 +21,10 @@ function internal(service: RemoteRelayService): {
   receive(data: unknown): Promise<void>;
   socket: FakeWebSocket | null;
   authenticated: boolean;
+  instanceId: string;
+  refreshProjection(force: boolean): Promise<void>;
 } {
-  return service as unknown as { receive(data: unknown): Promise<void>; socket: FakeWebSocket | null; authenticated: boolean };
+  return service as unknown as { receive(data: unknown): Promise<void>; socket: FakeWebSocket | null; authenticated: boolean; instanceId: string; refreshProjection(force: boolean): Promise<void> };
 }
 
 describe('RemoteRelayService protocol lifecycle', () => {
@@ -71,4 +73,22 @@ describe('RemoteRelayService protocol lifecycle', () => {
     expect(chat.snapshot).not.toHaveBeenCalled();
     expect(chat.session).not.toHaveBeenCalled();
   });
+  it('preserves each watched device requestId on initial and live session snapshots', async () => {
+    vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'false');
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const { service } = createService();
+    const state = internal(service);
+    state.instanceId = 'instance-1';
+    state.socket = new FakeWebSocket();
+    state.authenticated = true;
+    const watch = { v: 1, type: 'session.watch', instanceId: 'instance-1', requestId: 'watch-1',
+      payload: { sessionId: 'session-1', deviceId: 'device-1' } };
+    await state.receive(JSON.stringify(watch));
+    await state.refreshProjection(true);
+    const snapshots = state.socket.sent.map((frame) => JSON.parse(frame) as { type: string; requestId?: string });
+    expect(snapshots.filter((frame) => frame.type === 'session.snapshot').map((frame) => frame.requestId))
+      .toEqual(['watch-1', 'watch-1']);
+    service.onModuleDestroy();
+  });
+
 });
