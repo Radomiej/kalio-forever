@@ -3,7 +3,7 @@ export type SessionSummary = { id: string; title: string; updatedAt?: string; ac
 export type Message = { id: string; role: string; content: string; createdAt?: string; turnId?: string };
 export type GraphNode = { id: string; type: string; label: string; status?: string; sessionId?: string };
 export type GraphEdge = { id: string; source: string; target: string; type: string };
-export type Approval = { id: string; sessionId: string; toolName: string; args: Record<string, unknown>; requestedAt?: string; revision: string; argsSha256: string; status?: string };
+export type Approval = { id: string; sessionId: string; toolName: string; args: Record<string, unknown>; requestedAt?: string; revision: string; argsSha256: string; status?: string; decisionAvailable?: boolean; availabilityReason?: string };
 export type Snapshot = { instance: { id: string; name: string }; sessions: SessionSummary[]; approvals: Approval[] };
 export type SessionSnapshot = { sessionId: string; title: string; updatedAt?: string; active: boolean; messages: Message[]; graph: { nodes: GraphNode[]; edges: GraphEdge[]; available: boolean; reason?: string; runId?: string } };
 export type Envelope = { v: 1; type: string; instanceId: string; sequence?: number; requestId?: string; payload?: unknown };
@@ -22,7 +22,7 @@ export function parseSnapshot(value: unknown): Snapshot | null {
   for (const item of value.approvals) {
     if (!isRecord(item) || typeof item.id !== 'string' || typeof item.sessionId !== 'string' || typeof item.toolName !== 'string' ||
         !isRecord(item.args) || typeof item.requestedAt !== 'number' || typeof item.revision !== 'string' || typeof item.argsSha256 !== 'string') return null;
-    approvals.push({ id: item.id, sessionId: item.sessionId, toolName: item.toolName, args: item.args, requestedAt: new Date(item.requestedAt).toISOString(), revision: item.revision, argsSha256: item.argsSha256 });
+    approvals.push({ id: item.id, sessionId: item.sessionId, toolName: item.toolName, args: item.args, requestedAt: new Date(item.requestedAt).toISOString(), revision: item.revision, argsSha256: item.argsSha256, decisionAvailable: item.decisionAvailable === true, ...(typeof item.availabilityReason === 'string' ? {availabilityReason:item.availabilityReason}:{}) });
   }
   return { instance: { id: value.instance.id, name: value.instance.name }, sessions, approvals };
 }

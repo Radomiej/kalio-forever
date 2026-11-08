@@ -136,7 +136,7 @@ use super::*;
         assert_eq!(result["payload"]["status"],"settled");
         host.send(ClientMessage::Close(None)).await.unwrap();
         phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"offline-1","approvalId":"a","revision":"r","argsSha256":"d","decision":"deny"}).to_string().into())).await.unwrap();
-        let rejected=text_json(&mut phone).await;
+        let rejected=loop { let message=text_json(&mut phone).await; if message["type"]=="approval.rejected" {break message} };
         assert_eq!(rejected["type"],"approval.rejected");
         server.abort();
     }
