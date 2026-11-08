@@ -47,13 +47,13 @@ use super::*;
         let mut old=auth_agent(&base).await;
         let mut new=auth_agent(&base).await;
         let ended=tokio::time::timeout(Duration::from_secs(2),old.next()).await.unwrap();
-        assert!(matches!(ended, Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(ClientMessage::Close(_))))));
+        assert!(matches!(ended, None | Some(Err(_)) | Some(Ok(ClientMessage::Close(_)))));
         let state=app.0.instances.read().await;
         let current=state.get("desk").unwrap();
         assert!(!current.offline);
         assert!(current.agent.is_some());
         drop(state);
-        new.close().await.unwrap();
+        new.send(ClientMessage::Close(None)).await.unwrap();
         server.abort();
     }
     #[tokio::test]
@@ -87,5 +87,56 @@ use super::*;
             .header("access-control-request-method","POST")
             .send().await.unwrap();
         assert!(blocked.headers().get("access-control-allow-origin").is_none());
+        server.abort();
+    }
+    async fn text_json<S>(socket:&mut S) -> Value
+    where S: futures_util::Stream<Item=Result<ClientMessage,tokio_tungstenite::tungstenite::Error>> + Unpin {
+        let frame=tokio::time::timeout(Duration::from_secs(2),socket.next()).await.unwrap().unwrap().unwrap();
+        serde_json::from_str(&frame.into_text().unwrap()).unwrap()
+    }
+    #[tokio::test]
+    async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
+        let (base,server,_app)=test_server().await;
+        let http=base.replacen("ws://","http://",1);
+        let client=reqwest::Client::new();
+        let mut host=auth_agent(&base).await;
+        host.send(ClientMessage::Text(json!({"v":1,"type":"pair.create","instanceId":"desk","requestId":"pair-1"}).to_string().into())).await.unwrap();
+        let created=text_json(&mut host).await;
+        assert_eq!(created["type"],"pair.created");
+        assert_eq!(created["requestId"],"pair-1");
+        let code=created["payload"]["code"].as_str().unwrap();
+        let pair=client.post(format!("{http}/v1/pair")).json(&json!({"code":code})).send().await.unwrap();
+        assert!(pair.status().is_success());
+        let credentials:Value=pair.json().await.unwrap();
+        let replay=client.post(format!("{http}/v1/pair")).json(&json!({"code":code})).send().await.unwrap();
+        assert_eq!(replay.status(),reqwest::StatusCode::UNAUTHORIZED);
+        let mut phone=auth_device(&base,credentials["token"].as_str().unwrap()).await;
+
+        host.send(ClientMessage::Text(json!({"v":1,"type":"snapshot","instanceId":"desk","payload":{"overview":"ready"}}).to_string().into())).await.unwrap();
+        let snapshot=text_json(&mut phone).await;
+        assert_eq!(snapshot["type"],"snapshot");
+
+        phone.send(ClientMessage::Text(json!({"v":1,"type":"session.watch","instanceId":"desk","requestId":"watch-1","sessionId":"session-7","extra":"drop"}).to_string().into())).await.unwrap();
+        let watch=text_json(&mut host).await;
+        assert_eq!(watch["requestId"],"watch-1");
+        assert_eq!(watch["payload"]["sessionId"],"session-7");
+        assert!(watch.get("sessionId").is_none());
+        assert!(watch.get("extra").is_none());
+
+        phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"decision-1","approvalId":"approval-2","revision":"rev-3","argsSha256":"digest","decision":"approve","payload":{"deviceId":"spoof"}}).to_string().into())).await.unwrap();
+        let decision=text_json(&mut host).await;
+        assert_eq!(decision["requestId"],"decision-1");
+        assert_eq!(decision["payload"]["approvalId"],"approval-2");
+        assert_eq!(decision["payload"]["decision"],"approve");
+        assert_eq!(decision["payload"]["deviceId"],credentials["deviceId"]);
+        assert!(decision.get("approvalId").is_none());
+
+        host.send(ClientMessage::Text(json!({"v":1,"type":"approval.result","instanceId":"desk","requestId":"decision-1","payload":{"approvalId":"approval-2","status":"settled"}}).to_string().into())).await.unwrap();
+        let result=text_json(&mut phone).await;
+        assert_eq!(result["payload"]["status"],"settled");
+        host.close().await.unwrap();
+        phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"offline-1","approvalId":"a","revision":"r","argsSha256":"d","decision":"deny"}).to_string().into())).await.unwrap();
+        let rejected=text_json(&mut phone).await;
+        assert_eq!(rejected["type"],"approval.rejected");
         server.abort();
     }
