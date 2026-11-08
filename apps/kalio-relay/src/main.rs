@@ -1,4 +1,4 @@
-use axum::{extract::{Path, State, ws::{Message, WebSocket, WebSocketUpgrade}}, http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Json, Router};
+use axum::{extract::{Path, State, ws::{Message, WebSocket, WebSocketUpgrade}}, http::StatusCode, response::{IntoResponse, Response}, routing::{get, post}, Json, Router};
 use rand::{rngs::OsRng, RngCore};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -56,10 +56,18 @@ async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
 }
 fn bearer(headers:&HeaderMap)->Option<&str>{ headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ") }
 async fn agent_ws(Path(id):Path<String>, State(app):State<App>, headers:HeaderMap, ws:WebSocketUpgrade) -> Response {
-    let Some(expected)=app.0.agents.get(&id) else{return error(StatusCode::UNAUTHORIZED)};
-    let Some(token)=bearer(&headers) else{return error(StatusCode::UNAUTHORIZED)};
-    if !bool::from(subtle::ConstantTimeEq::ct_eq(&hash(token),expected)){return error(StatusCode::UNAUTHORIZED)}
-    ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_loop(socket,app,id))
+    ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id))
+}
+async fn agent_auth(mut socket:WebSocket, app:App, id:String) {
+    let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
+    let Ok(Some(Ok(Message::Text(text))))=first else{return};
+    if text.len()>MAX_FRAME{return}
+    let Ok(e)=serde_json::from_str::<Envelope>(&text) else{return};
+    let Some(token)=e.payload.as_ref().and_then(|p|p.get("token")).and_then(Value::as_str) else{return};
+    let Some(expected)=app.0.agents.get(&id) else{return};
+    if e.v!=1 || e.kind!="agent.authenticate" || e.instance_id!=id || !bool::from(subtle::ConstantTimeEq::ct_eq(&hash(token),expected)){return}
+    if socket.send(Message::Text(json!({"v":1,"type":"auth.accepted","instanceId":id}).to_string().into())).await.is_err(){return}
+    agent_loop(socket,app,id).await
 }
 async fn device_ws(State(app):State<App>, ws:WebSocketUpgrade)->Response { ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|device_auth(socket,app)) }
 async fn device_auth(mut socket:WebSocket, app:App) {
