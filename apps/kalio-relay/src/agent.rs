@@ -2,10 +2,11 @@ use crate::{protocol::*, state::*, relay::{broadcast,broadcast_devices,error,has
 use axum::{extract::{Path, State, ws::{Message, WebSocket, WebSocketUpgrade}}, http::StatusCode, response::{IntoResponse, Response}};
 use rusqlite::{params};
 use serde_json::{json, Value};
-use std::{time::{Duration, Instant}};
+use std::{collections::{HashMap, VecDeque}, time::{Duration, Instant}};
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
 pub(crate) async fn agent_ws(Path(id):Path<String>, State(app):State<App>, ws:WebSocketUpgrade) -> Response {
-    ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id))
+    let Ok(permit)=app.0.preauth.clone().try_acquire_owned() else{return error(StatusCode::SERVICE_UNAVAILABLE)};
+    ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id,permit))
 }
 async fn agent_auth(mut socket:WebSocket, app:App, id:String, _permit:OwnedSemaphorePermit) {
     let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
@@ -14,7 +15,7 @@ async fn agent_auth(mut socket:WebSocket, app:App, id:String, _permit:OwnedSemap
     let Ok(e)=serde_json::from_str::<Envelope>(&text) else{return};
     let Some(token)=e.payload.as_ref().and_then(|p|p.get("token")).and_then(Value::as_str) else{return};
     let Some(expected)=app.0.agents.get(&id) else{return};
-    if e.v!=1 || e.kind!="agent.authenticate" || e.instance_id!=id || !bool::from(subtle::ConstantTimeEq::ct_eq(&hash(token),expected)){return}
+    if e.v!=1 || e.kind!="agent.authenticate" || e.instance_id!=id || !bool::from(subtle::ConstantTimeEq::ct_eq(hash(token).as_slice(),expected.as_slice())){return}
     if !send_socket(&mut socket,Message::Text(json!({"v":1,"type":"auth.accepted","instanceId":id}).to_string().into())).await{return}
     agent_loop(socket,app,id).await
 }
