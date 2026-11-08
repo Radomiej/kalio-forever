@@ -40,7 +40,8 @@ export class ProjectResourceReaderService implements ProjectResourceReaderPort {
 
   async previewSessionFile(sessionId: string, path: string): Promise<string> {
     if (typeof path !== 'string' || path.length > 512
-      || path.split('/').some(part => !part || part === '.' || part === '..' || /[\\:\x00-\x1f]/.test(part))) {
+      || path.split('/').some(part => !part || part === '.' || part === '..'
+        || /[\\:]/.test(part) || [...part].some(char => char.charCodeAt(0) <= 0x1f))) {
       throw new Error('PROJECT_PREVIEW_PATH_INVALID');
     }
     const session = this.database.db.select({ projectId: sessions.projectId }).from(sessions)

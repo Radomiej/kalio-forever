@@ -424,3 +424,5 @@ Tool approval safety floor: the versioned Kalio inspector catalog applies deny/m
 
 Windows terminal transport: native executables receive literal argv without an outer shell. Batch .cmd/.bat and legacy bare package-manager shims retain shell transport; no ENOENT shell fallback is permitted. A shared pure transport policy drives spawn, audit, execution descriptors and Jev host metadata. Literal transport does not make an invoked interpreter safe. Production-target hints match whole prod/production words, not filenames beginning with producer.
 Approval evidence axis: complete parameters and assigned scope are evaluated separately from harmful effects. A proposed read must not need successful output before it can run; all remaining risk axes, configured thresholds and hard controls remain mandatory.
+
+Codex launch selection distinguishes an unchecked model catalog from a successfully checked catalog that excludes the model. Unknown catalogs show 'Models not checked yet' (or the existing probe error), while selection remains blocked until the existing model admission succeeds. This is a display correction, not an availability or authorization bypass.

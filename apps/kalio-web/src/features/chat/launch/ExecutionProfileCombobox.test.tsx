@@ -32,6 +32,66 @@ function profile(overrides: Partial<ExecutionProfile>): ExecutionProfile {
 }
 
 describe('ExecutionProfileCombobox', () => {
+  it.each([null, undefined])('does not claim a saved Codex model is unavailable with an unchecked catalog (%s)', async (catalog) => {
+    vi.mocked(getCodexModels).mockImplementation(() => catalog === undefined
+      ? new Promise(() => undefined) : Promise.resolve(catalog));
+    const onChange = vi.fn();
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'saved', kind: 'codex-app-server', authProfileId: 'account', model: 'gpt-6.1-sol' }),
+    ]} value="saved" onChange={onChange} />); });
+    await act(async () => { fireEvent.focus(screen.getByRole('combobox')); });
+    const option = screen.getByRole('option');
+    expect(option).toHaveTextContent('Models not checked yet');
+    expect(option).not.toHaveTextContent('Model unavailable');
+    expect(option).toBeDisabled();
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it.each([{ catalog: [] }, { catalog: ['other-model'] }])('retains unavailability for a successfully read catalog excluding the model ($catalog)', async ({ catalog }) => {
+    vi.mocked(getCodexModels).mockResolvedValue(catalog);
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'saved', kind: 'codex-app-server', model: 'gpt-6.1-sol' }),
+    ]} value="saved" onChange={vi.fn()} />); });
+    await act(async () => { fireEvent.focus(screen.getByRole('combobox')); });
+    const option = screen.getByRole('option', { name: /Codex · gpt-6.1-sol/ });
+    expect(option).toBeDisabled();
+    expect(option).toHaveTextContent('Model unavailable. Check the provider connection.');
+    expect(option).not.toHaveTextContent('Models not checked yet');
+  });
+
+  it.each(['account', undefined])('uses the auth account or profile ID for known models (%s)', async (authProfileId) => {
+    const account = authProfileId || 'saved';
+    vi.mocked(getCodexModels).mockImplementation(async id => id === account ? ['gpt-6.1-sol'] : []);
+    const onChange = vi.fn();
+    await act(async () => { render(<ExecutionProfileCombobox profiles={[
+      profile({ id: 'saved', kind: 'codex-app-server', authProfileId, model: 'gpt-6.1-sol' }),
+    ]} value="saved" onChange={onChange} />); });
+    expect(getCodexModels).toHaveBeenCalledWith(account);
+    await act(async () => { fireEvent.focus(screen.getByRole('combobox')); });
+    const option = screen.getByRole('option');
+    expect(option).toBeEnabled();
+    expect(option).not.toHaveTextContent(/Model unavailable|Models not checked yet/);
+    fireEvent.click(option);
+    expect(onChange).toHaveBeenCalledWith('saved');
+  });
+
+  it('shows the existing probe error instead of asserting that the saved model is missing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      vi.mocked(getCodexModels).mockRejectedValue(new Error('offline'));
+      await act(async () => { render(<ExecutionProfileCombobox profiles={[
+        profile({ id: 'saved', kind: 'codex-app-server', model: 'gpt-6.1-sol' }),
+      ]} value="saved" onChange={vi.fn()} />); });
+      await act(async () => { fireEvent.focus(screen.getByRole('combobox')); });
+      const option = screen.getByRole('option');
+      expect(option).toBeDisabled();
+      expect(option).toHaveTextContent('Codex models unavailable. Recheck the connection.');
+      expect(option).not.toHaveTextContent('Model unavailable.');
+    } finally { log.mockRestore(); }
+  });
+
   it('distinguishes two saved Codex profiles with the same model by explicit reasoning effort', async () => {
     vi.mocked(getCodexModels).mockResolvedValue(['gpt-6.1-sol']);
     const onChange = vi.fn();
