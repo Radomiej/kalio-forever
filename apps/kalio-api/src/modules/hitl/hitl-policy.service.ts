@@ -6,6 +6,8 @@ import { classifyJevAssessment } from './hitl-jev-assessment';
 import { HitlLocalDecisionService } from './hitl-local-decision.service';
 import type { HitlApprovalRequest, HitlApprovalResolution, HitlConfig } from './hitl.types';
 import { matchingHitlHardRule } from './hitl-rules.utils';
+import { approvalThreshold } from './hitl-environment-policy';
+import { inspectToolOperation } from './tool-inspector';
 
 @Injectable()
 export class HitlPolicyService {
@@ -27,10 +29,12 @@ export class HitlPolicyService {
       request.abortSignal?.throwIfAborted();
 
       const hardRule = matchingHitlHardRule(request, config.rules ?? []);
+      if (hardRule?.decision === 'deny') {
+        return { status: 'rejected', source: 'rule', reason: `Denied by HITL rule ${hardRule.id}.` };
+      }
+      const inspection = inspectToolOperation(request);
+      if (inspection) return inspection;
       if (hardRule) {
-        if (hardRule.decision === 'deny') {
-          return { status: 'rejected', source: 'rule', reason: `Denied by HITL rule ${hardRule.id}.` };
-        }
         if (hardRule.decision === 'allow') {
           if (this.delegatesToJev(config, request)) return this.resolveWithJev(config, request);
           if (this.requiresHumanToolApproval(request)) return { status: 'manual', source: 'manual' };
@@ -88,6 +92,8 @@ export class HitlPolicyService {
       if (hardRule?.decision === 'deny') {
         return { status: 'rejected', source: 'rule', reason: `Denied by HITL rule ${hardRule.id}.` };
       }
+      const inspection = inspectToolOperation(request);
+      if (inspection) return inspection;
       if (hardRule?.decision === 'ask_user') return { status: 'manual', source: 'manual', reason: 'An always-ask rule requires a human.' };
       if (config.mode === 'jev' && config.confirmationAuthority === 'human_then_decision') {
         return this.resolveWithJev(config, request, true);
@@ -143,7 +149,7 @@ export class HitlPolicyService {
       const binding = this.requestBinding(request);
       const policy = JSON.stringify(config);
       if (delegated && (!request.toolCallId || this.hitlConfig.changing)) return { status: 'manual', source: 'manual', reason: 'Decision authority is not current.' };
-      const threshold = config.jevApprovalThreshold ?? 0.95;
+      const threshold = approvalThreshold(config.jevApprovalThreshold ?? 0.95);
       if (!Number.isFinite(threshold) || threshold <= 0.5 || threshold > 1) {
         throw new Error('Invalid Jev approval threshold.');
       }
@@ -248,6 +254,7 @@ export class HitlPolicyService {
   async getManualReviewTimeoutMs(request: HitlApprovalRequest): Promise<number | undefined> {
     const config = await this.hitlConfig.getConfig();
     if (config.mode !== 'jev') return undefined;
+    if (inspectToolOperation(request)) return 0;
     if (matchingHitlHardRule(request, config.rules ?? [])?.decision === 'ask_user') return 0;
     return config.confirmationAuthority === 'human_then_decision' ? config.humanReviewTimeoutMs ?? 60_000 : 0;
   }

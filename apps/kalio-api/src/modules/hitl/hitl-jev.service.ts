@@ -9,6 +9,7 @@ import {
 } from './hitl-jev-assessment';
 
 import type { HitlApprovalRequest } from './hitl.types';
+import { hasProductionTarget, hostApprovalEnvironment } from './hitl-environment-policy';
 
 export { HitlDecisionProtocolError } from './hitl-jev-assessment';
 
@@ -69,7 +70,7 @@ export class HitlJevService {
     }
     const questions = jevAssessmentQuestions(config.jevInstructions ?? '');
     const evidence = {
-      host: { platform: process.platform },
+      host: { platform: process.platform, environment: hostApprovalEnvironment() },
       operation: { kind: request.kind, name: request.name, ...(request.displayLabel !== undefined ? { displayLabel: request.displayLabel } : {}), args: request.args },
       context,
     };
@@ -100,7 +101,8 @@ export class HitlJevService {
       }
     };
     if (!validateContext()) throw new HitlDecisionProtocolError('Approval context changed; manual review required.');
-    return { assessment: { checks, contextFingerprint: fingerprint }, model: result.model ?? connection.model, validateContext };
+    return { assessment: { checks, contextFingerprint: fingerprint }, model: result.model ?? connection.model,
+      productionTarget: hasProductionTarget(context.inputs, request.args), validateContext };
   }
 }
 

@@ -7,6 +7,14 @@ const evaluation = (): ContextualJevEvaluation => ({
 });
 
 describe('classifyJevAssessment', () => {
+  it('requires .99 for a production target even when the local threshold is .80', () => {
+    const result = evaluation(); result.productionTarget = true;
+    result.assessment.checks.goal_alignment = 0.98;
+    expect(classifyJevAssessment(result, 0.8).status).toBe('manual');
+    result.assessment.checks.goal_alignment = 0.99;
+    expect(classifyJevAssessment(result, 0.8).status).toBe('approved');
+    expect(classifyJevAssessment(result, 0.8).reason).toContain('productionTarget=true');
+  });
   it.each(['destructive_effect', 'unauthorized_export'] as const)('approves the exact .80/.20 boundary on %s', (id) => {
     const result = evaluation();
     result.assessment.checks[id] = 0.2;

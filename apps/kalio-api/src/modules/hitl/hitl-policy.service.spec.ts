@@ -144,7 +144,7 @@ describe('HitlPolicyService', () => {
       throw reason;
     });
 
-    await expect(service.resolveApproval({ kind: 'tool', sessionId: 'sess-1', name: 'terminal_exec', args: {}, abortSignal: controller.signal })).rejects.toBe(reason);
+    await expect(service.resolveApproval({ kind: 'tool', sessionId: 'sess-1', name: 'terminal_exec', args: { command: 'rg', args: ['x'], cwd: 'C:/project' }, abortSignal: controller.signal })).rejects.toBe(reason);
     expect(decisionService.evaluateApproval).not.toHaveBeenCalled();
   });
 
@@ -276,15 +276,16 @@ describe('HitlPolicyService', () => {
 
   it.each(['terminal_spawn', 'terminal_exec', 'fs_write', 'vfs_delete', 'unknown_tool'])('cannot approve protected tool %s through allow rules or Jev', async (name) => {
     const request = { kind: 'tool' as const, sessionId: 's', name, args: {} };
+    const status = name === 'vfs_delete' ? 'rejected' : 'manual';
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', rules: [{ id: 'allow', kind: '*' as const, name: '*', decision: 'allow' as const }] }));
-    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'manual' });
-    await expect(service.resolveUnattendedApproval(request)).resolves.toMatchObject({ status: 'manual' });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status });
+    await expect(service.resolveUnattendedApproval(request)).resolves.toMatchObject({ status });
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevFallbackToPersona: true, autoPersonaId: 'reviewer' }));
     jevService.evaluateApproval.mockResolvedValue({ probability: 1 });
-    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'manual' });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status });
     jevService.evaluateApproval.mockResolvedValue({ probability: 0.5 });
     decisionService.evaluateApproval.mockResolvedValue({ agree: true, decision: 'allow', reason: 'ok' });
-    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'manual' });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status });
   });
 
   it.each(['auto', 'bypass', 'jev'] as const)('propagates pre-abort in %s and unattended modes', async (mode) => {
