@@ -33,6 +33,8 @@ function summary(session: Awaited<ReturnType<SessionsService['list']>>[number], 
     id: session.id,
     title: session.title,
     updatedAt: session.updatedAt,
+    ...(session.projectId ? { projectId: session.projectId } : {}),
+    personaId: session.personaId,
     active: active.isActive(session.id),
     ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
   };

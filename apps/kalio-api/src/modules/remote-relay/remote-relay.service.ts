@@ -128,7 +128,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     if (message.type === 'session.watch' && message.requestId && message.payload
       && typeof message.payload['sessionId'] === 'string') {
       const result = await this.session(message.payload['sessionId']);
-      this.send('session.snapshot', { requestId: message.requestId, result });
+      this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }) });
       return;
     }
     if (message.type === 'approval.decide' && message.requestId && message.payload) {
@@ -137,15 +137,17 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
         && typeof argsSha256 === 'string' && (decision === 'approve' || decision === 'deny')
         ? await this.decide({ approvalId, revision, argsSha256, decision })
         : { status: 'rejected' as const };
-      this.send('approval.result', { requestId: message.requestId, ...result });
+      this.send('approval.result', { requestId: message.requestId, approvalId, ...result });
     }
   }
 
   private send(type: string, payload?: Record<string, unknown>): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
+    const requestId = payload && typeof payload['requestId'] === 'string' ? payload['requestId'] as string : undefined;
+    const cleanPayload = payload ? { ...payload } : undefined;
+    if (cleanPayload) delete cleanPayload['requestId'];
     const envelope: Envelope = { v: 1, type, instanceId: this.instanceId, sequence: ++this.sequence,
-      ...(payload && typeof payload['requestId'] === 'string' ? { requestId: payload['requestId'] as string } : {}),
-      ...(payload ? { payload } : {}) };
+      ...(requestId ? { requestId } : {}), ...(cleanPayload ? { payload: cleanPayload } : {}) };
     this.socket.send(JSON.stringify(envelope));
     return true;
   }

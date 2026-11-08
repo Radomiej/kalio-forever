@@ -9,7 +9,7 @@ export interface RemoteSupervisionApproval {
   requestedAt: number; revision: string; argsSha256: string;
 }
 export interface RemoteSupervisionSessionSummary {
-  id: string; title: string; updatedAt: number; active: boolean; parentSessionId?: string;
+  id: string; title: string; updatedAt: number; active: boolean; parentSessionId?: string; projectId?: string; personaId?: string;
 }
 export interface RemoteSupervisionSessionSnapshot {
   session: RemoteSupervisionSessionSummary;
