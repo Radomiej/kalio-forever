@@ -94,9 +94,10 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
   }
 
   async decide(input: RemoteSupervisionDecision): Promise<RemoteSupervisionDecisionResult> {
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(input.deviceId)) return { status: 'rejected' };
     const row = await this.hitl.getById(input.approvalId);
     const approval = row ? this.approval(row)[0] : undefined;
-    if (!row || !approval || row.status !== 'pending'
+    if (!row || !approval || !approval.decisionAvailable || row.status !== 'pending'
       || approval.revision !== input.revision || approval.argsSha256 !== input.argsSha256) {
       return { status: 'stale' };
     }
@@ -105,19 +106,20 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
       return { status: 'rejected' };
     }
     const status = input.decision === 'approve'
-      ? await this.dispatch.resolveConfirmation(row.id, row.sessionId)
-      : await this.dispatch.cancelConfirmation(row.id, row.sessionId);
+      ? await this.dispatch.resolveConfirmation(row.id, row.sessionId, `Remote device ${input.deviceId}`)
+      : await this.dispatch.cancelConfirmation(row.id, row.sessionId, `Remote device ${input.deviceId}`);
     return status === 'resolved' || status === 'rejected'
       ? { status: 'settled' }
       : { status: 'stale' };
   }
 
   private approval(row: Awaited<ReturnType<HitlRequestService['getById']>> extends infer R ? Exclude<R, null> : never): RemoteSupervisionApproval[] {
-    if (row.status !== 'pending' || row.kind !== 'tool_confirmation' || !isRecord(row.payload)) return [];
-    if (isRecord(row.continuation) && Object.hasOwn(row.continuation, 'hostConfirmationRequirement')) return [];
-    const toolName = row.payload['toolName'];
-    const args = row.payload['args'];
-    if (typeof toolName !== 'string' || !isRecord(args)) return [];
+    if (row.status !== 'pending' || !['tool_confirmation', 'raapp_native', 'tool_budget'].includes(row.kind)) return [];
+    const payload = isRecord(row.payload) ? row.payload : {};
+    const args = isRecord(payload['args']) ? payload['args'] : {};
+    const toolName = typeof payload['toolName'] === 'string' ? payload['toolName'] : row.kind;
+    const hostOnly = isRecord(row.continuation) && Object.hasOwn(row.continuation, 'hostConfirmationRequirement');
+    const decisionAvailable = row.kind === 'tool_confirmation' && !hostOnly;
     return [{
       id: row.id, sessionId: row.sessionId, toolName, args: sanitized(args) as Record<string, unknown>, requestedAt: row.createdAt.getTime(),
       revision: requestRevision(row), argsSha256: sha256(args),

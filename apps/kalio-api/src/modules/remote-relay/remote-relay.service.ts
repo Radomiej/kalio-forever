@@ -132,10 +132,11 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       return;
     }
     if (message.type === 'approval.decide' && message.requestId && message.payload) {
-      const { approvalId, revision, argsSha256, decision } = message.payload;
+      const { approvalId, revision, argsSha256, decision, deviceId } = message.payload;
       const result = typeof approvalId === 'string' && typeof revision === 'string'
-        && typeof argsSha256 === 'string' && (decision === 'approve' || decision === 'deny')
-        ? await this.decide({ approvalId, revision, argsSha256, decision })
+        && typeof argsSha256 === 'string' && typeof deviceId === 'string'
+        && (decision === 'approve' || decision === 'deny')
+        ? await this.decide({ approvalId, revision, argsSha256, decision, deviceId })
         : { status: 'rejected' as const };
       this.send('approval.result', { requestId: message.requestId, approvalId, ...result });
     }
