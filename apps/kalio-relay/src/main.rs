@@ -170,7 +170,7 @@ async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
                         continue
                     }
                     let clean=if typ=="session.watch" {json!({"v":1,"type":typ,"instanceId":id,"requestId":v["requestId"],"sessionId":v["sessionId"]})}
-                        else {json!({"v":1,"type":typ,"instanceId":id,"requestId":v["requestId"],"approvalId":v["approvalId"],"revision":v["revision"],"argsSha256":v["argsSha256"],"decision":v["decision"]})};
+                        else {json!({"v":1,"type":typ,"instanceId":id,"requestId":v["requestId"],"approvalId":v["approvalId"],"revision":v["revision"],"argsSha256":v["argsSha256"],"decision":v["decision"],"payload":{"deviceId":device}})};
                     if let Some(agent)=&i.agent {if agent.try_send(clean.to_string()).is_err(){break}}
                 },
                 Some(Ok(Message::Close(_)))|None=>break,
