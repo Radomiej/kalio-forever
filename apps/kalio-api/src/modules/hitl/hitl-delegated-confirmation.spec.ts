@@ -5,12 +5,18 @@ import { ToolDispatchService } from '../chat/tool-dispatch.service';
 import { TurnState } from '../chat/turn-state';
 import type { StreamContext } from '../chat/interfaces/stream-context.interface';
 
+function evaluated() {
+  return { assessment: { checks: { goal_alignment: 0.99, in_scope: 0.99, destructive_effect: 0.01,
+    unauthorized_export: 0.01, evidence_sufficient: 0.99 }, contextFingerprint: 'a'.repeat(64) },
+  model: 'test-jev', validateContext: () => true };
+}
+
 function fixture() {
   const config: HitlConfig = { mode: 'jev', confirmationAuthority: 'decision_model', autoPersonaId: null,
     unattendedFallback: 'pause', representativePersonaId: null, notificationChannel: 'none', externalPolicyEnabled: false,
     externalPolicyPersonaId: null, raAppApprovalTimeoutMs: 0, jevApprovalThreshold: 0.95, rules: [] };
   const settings = { getConfig: vi.fn(async () => structuredClone(config)), revision: 1, changing: false };
-  const model = { evaluateApproval: vi.fn(async () => ({ probability: 0.99, model: 'test-jev' })) };
+  const model = { evaluateApproval: vi.fn().mockResolvedValue(evaluated()) };
   const policy = Reflect.construct(HitlPolicyService, [settings, {}, model]) as HitlPolicyService;
   const request = { kind: 'tool' as const, sessionId: 's', toolCallId: 'c', name: 'terminal_spawn', args: { command: 'rg', cwd: '/project', args: ['foo'] } };
   return { config, settings, model, policy, request };
@@ -53,7 +59,8 @@ describe('delegated Jev confirmation authority', () => {
   });
   it('does not let an allow rule bypass delegated model assessment', async () => {
     const f = fixture(); f.config.rules = [{ id: 'allow', kind: 'tool', name: '*', decision: 'allow' }];
-    f.model.evaluateApproval.mockResolvedValue({ probability: 0.01, model: 'test-jev' });
+    const unsafe = evaluated(); unsafe.assessment.checks.destructive_effect = 0.99;
+    f.model.evaluateApproval.mockResolvedValue(unsafe);
     expect(await f.policy.resolveApproval(f.request)).toMatchObject({ status: 'rejected', source: 'jev' });
     expect(f.model.evaluateApproval).toHaveBeenCalledOnce();
   });
@@ -70,14 +77,17 @@ describe('delegated Jev confirmation authority', () => {
   it.each(['uncertain', 'unavailable', 'invalid'])('keeps %s model output manual', async kind => {
     const f = fixture();
     if (kind === 'unavailable') f.model.evaluateApproval.mockRejectedValue(new Error('offline'));
-    else f.model.evaluateApproval.mockResolvedValue({ probability: kind === 'invalid' ? NaN : 0.6, model: 'test-jev' });
+    else {
+      const result = evaluated(); result.assessment.checks.evidence_sufficient = kind === 'invalid' ? NaN : 0.6;
+      f.model.evaluateApproval.mockResolvedValue(result);
+    }
     expect(await f.policy.resolveApproval(f.request)).toHaveProperty('status', 'manual');
   });
   it('rejects changed arguments and configuration during inference', async () => {
     for (const change of ['args', 'config']) {
       const f = fixture(); f.model.evaluateApproval.mockImplementation(async () => {
         if (change === 'args') f.request.args.command = 'different'; else f.settings.revision++;
-        return { probability: 1, model: 'test-jev' };
+        return evaluated();
       });
       expect(await f.policy.resolveApproval(f.request)).toHaveProperty('status', 'manual');
     }

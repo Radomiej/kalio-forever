@@ -33,6 +33,10 @@ export interface HitlApprovalRequest {
   agentRun?: AgentRunContext;
   displayLabel?: string;
   toolCallId?: string;
+  /** Server execution identity used to resolve explanatory review context. */
+  runId?: string;
+  turnId?: string;
+  promptMessageId?: string;
 }
 
 export interface HitlApprovalResolution {

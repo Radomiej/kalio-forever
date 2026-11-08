@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { HitlConfigService } from './hitl-config.service';
 import { HitlDecisionService } from './hitl-decision.service';
 import { HitlDecisionProtocolError, HitlJevService } from './hitl-jev.service';
+import { classifyJevAssessment } from './hitl-jev-assessment';
 import { HitlLocalDecisionService } from './hitl-local-decision.service';
 import type { HitlApprovalRequest, HitlApprovalResolution, HitlConfig } from './hitl.types';
 import { matchingHitlHardRule } from './hitl-rules.utils';
@@ -136,10 +137,10 @@ export class HitlPolicyService {
     request: HitlApprovalRequest,
     afterHumanTimeout = false,
   ): Promise<HitlApprovalResolution> {
+    const delegated = this.delegatesToJev(config, request, afterHumanTimeout);
     try {
-      const delegated = this.delegatesToJev(config, request, afterHumanTimeout);
       const revision = this.hitlConfig.revision;
-      const binding = JSON.stringify({ sessionId: request.sessionId, toolCallId: request.toolCallId, name: request.name, args: request.args });
+      const binding = this.requestBinding(request);
       const policy = JSON.stringify(config);
       if (delegated && (!request.toolCallId || this.hitlConfig.changing)) return { status: 'manual', source: 'manual', reason: 'Decision authority is not current.' };
       const threshold = config.jevApprovalThreshold ?? 0.95;
@@ -149,28 +150,33 @@ export class HitlPolicyService {
       if (!this.jevService) throw new Error('Jev HITL evaluator is not configured.');
       const result = await this.jevService.evaluateApproval(config, request);
       request.abortSignal?.throwIfAborted();
+      if ('assessment' in result) {
+        if (!delegated) throw new HitlDecisionProtocolError('Unexpected contextual assessment.');
+        const decision = classifyJevAssessment(result, threshold);
+        if (result.validateContext() !== true) throw new HitlDecisionProtocolError('Review context changed; human review required.');
+        if (decision.status !== 'approved') return { ...decision, source: decision.status === 'rejected' ? 'jev' : 'manual' };
+        if (this.hitlConfig.changing || this.hitlConfig.revision !== revision || JSON.stringify(await this.hitlConfig.getConfig()) !== policy
+          || this.requestBinding(request) !== binding || result.validateContext() !== true) {
+          return { status: 'manual', source: 'manual', reason: 'Approval request, policy or context changed during Jev evaluation.' };
+        }
+        let unused = true;
+        return { status: 'approved', source: 'jev', reason: decision.reason,
+          validateBeforeExecution: async () => {
+            if (!unused) return false;
+            unused = false;
+            request.abortSignal?.throwIfAborted();
+            const fresh = await this.hitlConfig.getConfig();
+            request.abortSignal?.throwIfAborted();
+            return !this.hitlConfig.changing && this.hitlConfig.revision === revision && JSON.stringify(fresh) === policy
+              && this.requestBinding(request) === binding && result.validateContext() === true;
+          } };
+      }
+      if (delegated) throw new HitlDecisionProtocolError('Delegated approval requires contextual checks.');
       if (!Number.isFinite(result.probability) || result.probability < 0 || result.probability > 1) {
         throw new Error('Invalid Jev probability or approval threshold.');
       }
       const reason = `Jev p(allow)=${result.probability.toFixed(2)}; threshold=${threshold.toFixed(2)}.`;
       if (result.probability >= threshold) {
-        if (delegated) {
-          if (this.hitlConfig.changing || this.hitlConfig.revision !== revision || JSON.stringify(await this.hitlConfig.getConfig()) !== policy
-            || JSON.stringify({ sessionId: request.sessionId, toolCallId: request.toolCallId, name: request.name, args: request.args }) !== binding) {
-            return { status: 'manual', source: 'manual', reason: 'Approval request or policy changed during Jev evaluation.' };
-          }
-          let unused = true;
-          return { status: 'approved', source: 'jev', reason: `${reason} Delegated tool confirmation (${result.model ?? 'configured Jev'}).`,
-            validateBeforeExecution: async () => {
-              if (!unused) return false;
-              unused = false;
-              request.abortSignal?.throwIfAborted();
-              const fresh = await this.hitlConfig.getConfig();
-              request.abortSignal?.throwIfAborted();
-              return !this.hitlConfig.changing && this.hitlConfig.revision === revision && JSON.stringify(fresh) === policy
-                && JSON.stringify({ sessionId: request.sessionId, toolCallId: request.toolCallId, name: request.name, args: request.args }) === binding;
-            } };
-        }
         if (this.requiresHumanToolApproval(request)) return { status: 'manual', source: 'manual', reason };
         return { status: 'approved', source: 'jev', reason };
       }
@@ -182,6 +188,8 @@ export class HitlPolicyService {
         : { status: 'manual', source: 'manual', reason };
     } catch (err) {
       request.abortSignal?.throwIfAborted();
+      if (delegated) return { status: 'manual', source: 'manual', reason: err instanceof HitlDecisionProtocolError
+        ? err.message : 'Contextual Jev assessment failed; human review required.' };
       if (err instanceof HitlDecisionProtocolError) return { status: 'manual', source: 'manual' };
       const error = err instanceof Error ? err : new Error(String(err));
       this.logger.error('Jev HITL evaluation failed; falling back to the configured persona or manual review', error);
@@ -189,6 +197,11 @@ export class HitlPolicyService {
         ? this.resolveWithPersona(config.autoPersonaId, request, 'jev')
         : { status: 'manual', source: 'manual' };
     }
+  }
+
+  private requestBinding(request: HitlApprovalRequest): string {
+    return JSON.stringify({ sessionId: request.sessionId, runId: request.runId, turnId: request.turnId,
+      promptMessageId: request.promptMessageId, toolCallId: request.toolCallId, name: request.name, args: request.args });
   }
 
   private async resolveWithPersona(

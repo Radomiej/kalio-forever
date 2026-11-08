@@ -80,7 +80,7 @@ export class HitlRequestService {
       if (request.kind !== 'tool_confirmation' || !request.toolCallId || !isRecord(request.payload)) {
         return [];
       }
-      const { toolName, args } = request.payload;
+      const { toolName, args, policyReason } = request.payload;
       if (typeof toolName !== 'string' || !isRecord(args)) {
         return [];
       }
@@ -94,6 +94,8 @@ export class HitlRequestService {
         toolName,
         args,
         timeoutMs: 0,
+        ...(typeof policyReason === 'string' && policyReason.length <= 2048 && policyReason.trim()
+          ? { policyReason } : {}),
       }];
     });
   }

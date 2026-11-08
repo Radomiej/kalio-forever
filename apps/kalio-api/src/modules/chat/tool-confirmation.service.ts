@@ -165,6 +165,9 @@ export class ToolConfirmationService {
           abortSignal: ctx.abortSignal,
           agentRun: ctx.agentRun,
           toolCallId: callId,
+          runId: ctx.runId,
+          turnId: ctx.turnId,
+          promptMessageId: ctx.promptMessageId,
         });
 
         if (resolution.status === 'approved') {
@@ -225,6 +228,9 @@ export class ToolConfirmationService {
       const resolution = await this.hitlPolicy.resolveUnattendedApproval({
         kind: 'tool',
         sessionId: ctx.sessionId,
+        runId: ctx.runId,
+        turnId: ctx.turnId,
+        promptMessageId: ctx.promptMessageId,
         name: toolName,
         args,
         abortSignal: ctx.abortSignal,

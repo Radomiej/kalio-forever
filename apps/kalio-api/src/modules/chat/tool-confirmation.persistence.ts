@@ -21,10 +21,13 @@ export async function persistToolConfirmation(requests: HitlRequestService | nul
   const requirement = readHostConfirmationRequirement(ctx, payload.toolCallId, payload.toolName);
   if (requirement && (!requests || !ctx.onResolvedToolDispatch || !ctx.registerToolResultReceiptCommit
     || !ctx.runId || !ctx.turnId || !ctx.promptMessageId)) throw new Error('HOST_CONFIRMATION_DURABILITY_REQUIRED');
+  const policyReason = typeof payload.policyReason === 'string' && payload.policyReason.length <= 2048
+    && payload.policyReason.trim() ? payload.policyReason : undefined;
   return requests ? requests.create({
     id: payload.requestId, kind: 'tool_confirmation', sessionId: ctx.sessionId,
     turnId: ctx.turnId, runId: ctx.runId, toolCallId: payload.toolCallId,
-    payload: { toolName: payload.toolName, args: payload.args },
+    payload: { toolName: payload.toolName, args: payload.args,
+      ...(policyReason !== undefined ? { policyReason } : {}) },
     continuation: {
       version: 1, kind: 'approved_tool_then_resume_turn', phase: 'tool_pending', executionState: 'pending',
       runId: ctx.runId, sessionId: ctx.sessionId, turnId: ctx.turnId, promptMessageId: ctx.promptMessageId,

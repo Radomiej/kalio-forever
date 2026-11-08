@@ -32,7 +32,9 @@ describe('native tools integration preserving goal decisions', () => {
   }
   it.each([['allow', true], ['deny', false]] as const)('uses native %s through the real confirmation caller', async (verdict, approved) => {
     const { confirmations, transport, decisions, values, goals, ctx, persona } = await setup(verdict);
-    expect(await confirmations.approveOrRequestConfirmation('call', 'fs_read', { path: '/project/readme.md' }, ctx)).toEqual({ approved });
+    expect(await confirmations.approveOrRequestConfirmation('call', 'fs_read', { path: '/project/readme.md' }, ctx)).toEqual(approved
+      ? { approved: true }
+      : { approved: false, rejectionMessage: 'HITL policy rejected tool confirmation (ollama): Local decision (fixture:1): deny. fixture Do not retry or bypass this decision. Change approach or ask for clarification.' });
     expect(transport.post).toHaveBeenCalledTimes(1);
     expect(confirmations.getPendingConfirmations('s')).toEqual([]);
     expect(values.get('decision.config')).toBe(goals);

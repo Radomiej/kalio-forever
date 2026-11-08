@@ -35,7 +35,7 @@ describe('extracted confirmation wait parity', () => {
     await waiting;
     expect(begin).not.toHaveBeenCalled();
   });
-  it('carries a bounded policy reason only in existing requested audits with the actual wait ID', async () => {
+  it('carries a bounded policy reason in the existing request and requested audits with the actual wait ID', async () => {
     const { input } = fixture();
     input.policyReason = 'Local decision (fixture:1): ask_user. Human context required.';
     const log = vi.fn().mockResolvedValue('audit'); const notify = vi.fn().mockResolvedValue(undefined);
@@ -46,7 +46,7 @@ describe('extracted confirmation wait parity', () => {
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ eventName: 'tool.confirmation.requested',
       status: 'waiting_for_human', data: expect.objectContaining({ requestId: pending.payload.requestId, message: input.policyReason }) }));
     expect(notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: pending.payload.requestId, policyReason: input.policyReason }));
-    expect(pending.payload).not.toHaveProperty('policyReason');
+    expect(pending.payload).toHaveProperty('policyReason', input.policyReason);
     expect(input.logConfirmationLifecycle).not.toHaveBeenCalled();
     pending.reject('human rejection'); expect(await waiting).toMatchObject({ status: 'rejected', message: 'human rejection' });
   });

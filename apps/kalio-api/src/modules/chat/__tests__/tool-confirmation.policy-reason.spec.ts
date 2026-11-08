@@ -52,7 +52,8 @@ describe('manual supervisor reason remains request context, never human authorit
       label: 'tool.confirmation.requested', data: expect.objectContaining({ requestId: request.requestId,
         status: 'waiting_for_human', message: reason }) }));
     expect(f.notifications.logApprovalLifecycle).not.toHaveBeenCalled();
-    expect(request).not.toHaveProperty('policyReason'); // no socket/shared payload extension
+    expect(request).toHaveProperty('policyReason', reason);
+    expect(f.ctx.emit).toHaveBeenCalledWith('tool:confirmation_required', expect.objectContaining({ policyReason: reason }));
     const humanReason = 'Independent human decision';
     if (action === 'approve') await f.service.resolveConfirmation(request.requestId, 'session', humanReason);
     else await f.service.cancelConfirmation(request.requestId, 'session', humanReason);

@@ -108,6 +108,7 @@ export async function awaitToolConfirmation(input: ToolConfirmationWaitInput): P
       args,
       timeoutMs,
       agentRun: ctx.agentRun,
+      ...(policyReason !== undefined ? { policyReason } : {}),
     };
 
     const persisted = input.hitlRequests || Object.hasOwn(ctx, 'hostConfirmationRequirement')

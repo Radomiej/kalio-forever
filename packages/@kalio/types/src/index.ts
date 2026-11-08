@@ -1006,17 +1006,8 @@ export interface ToolResult {
   errorMessage?: string;
 }
 
-export interface ToolConfirmationRequest {
-  requestId: string;          // unique per confirmation instance
-  toolCallId: string;         // the LLM tool call ID (matches ToolResult.callId)
-  sessionId: ID;
-  turnId?: ID;
-  promptMessageId?: ID;
-  toolName: string;
-  args: Record<string, unknown>;
-  timeoutMs: number;          // confirmation timeout in ms; 0 disables timeout
-  agentRun?: AgentRunContext;
-}
+import type { ToolConfirmationRequest } from './tool-confirmation-request';
+export type { ToolConfirmationRequest } from './tool-confirmation-request';
 
 export interface ToolConfirmationInvalidated {
   requestId: string;

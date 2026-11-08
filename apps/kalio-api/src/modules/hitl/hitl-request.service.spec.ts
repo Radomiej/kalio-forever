@@ -4,6 +4,9 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { DrizzleService } from '../../database/drizzle.service';
 import * as schema from '../../database/schema';
 import { HitlRequestService } from './hitl-request.service';
+import type { ToolConfirmationRequest } from '@kalio/types';
+import { persistToolConfirmation } from '../chat/tool-confirmation.persistence';
+import { TurnState } from '../chat/turn-state';
 
 const databases: Database.Database[] = [];
 afterEach(() => { for (const database of databases.splice(0)) database.close(); });
@@ -22,6 +25,53 @@ function makeFixture() {
   return { service: new HitlRequestService(drizzleService), sqlite };
 }
 function makeService(): HitlRequestService { return makeFixture().service; }
+
+describe('durable policy reason', () => {
+  const validReasons = ['Supervisor requests human review.', 'x'.repeat(2048), '  Keep exact wording.  '];
+  const invalidReasons = [undefined, null, '', ' \n\t ', 42, {}, 'x'.repeat(2049)];
+
+  it.each([...validReasons, ...invalidReasons])('bounds the persisted annotation %#', async policyReason => {
+    const { service } = makeFixture();
+    const payload = { requestId: 'reason', toolCallId: 'call', sessionId: 's', toolName: 'fs_read',
+      args: { path: 'fixture.txt' }, timeoutMs: 0, policyReason } as ToolConfirmationRequest;
+    await persistToolConfirmation(service, payload, { sessionId: 's', messageId: 'message',
+      state: new TurnState(), abortSignal: new AbortController().signal, emit: () => undefined });
+    const row = await service.getById('reason');
+    const expected = typeof policyReason === 'string' && policyReason.trim() && policyReason.length <= 2048
+      ? { policyReason } : {};
+    expect(row?.payload).toEqual({ toolName: 'fs_read', args: { path: 'fixture.txt' }, ...expected });
+    expect(row?.outcome).toBeNull();
+    expect(row?.continuation).not.toHaveProperty('policyReason');
+    expect(await service.listPendingToolConfirmations('s')).toEqual([
+      { requestId: 'reason', toolCallId: 'call', sessionId: 's', toolName: 'fs_read',
+        args: { path: 'fixture.txt' }, timeoutMs: 0, ...expected },
+    ]);
+  });
+
+  it.each([...validReasons, ...invalidReasons])('bounds annotations read from stored rows %#', async policyReason => {
+    const { service } = makeFixture();
+    await service.create({ id: 'stored', kind: 'tool_confirmation', sessionId: 's', toolCallId: 'call',
+      payload: { toolName: 'fs_read', args: {}, policyReason } });
+    const [request] = await service.listPendingToolConfirmations('s');
+    if (typeof policyReason === 'string' && policyReason.trim() && policyReason.length <= 2048) {
+      expect(request).toHaveProperty('policyReason', policyReason);
+    } else {
+      expect(request).not.toHaveProperty('policyReason');
+    }
+  });
+
+  it.each(['approved', 'denied'] as const)('keeps supervisor text out of the human %s outcome', async status => {
+    const { service } = makeFixture();
+    const payload: ToolConfirmationRequest = { requestId: 'reason', toolCallId: 'call', sessionId: 's',
+      toolName: 'fs_read', args: {}, timeoutMs: 0, policyReason: validReasons[0] };
+    await persistToolConfirmation(service, payload, { sessionId: 's', messageId: 'message',
+      state: new TurnState(), abortSignal: new AbortController().signal, emit: () => undefined });
+    expect((await service.listPendingToolConfirmations('s'))[0]?.policyReason).toBe(validReasons[0]);
+    expect(await service.resolve('reason', 1, status, { message: 'Independent human note' })).toBe(true);
+    expect((await service.getById('reason'))?.outcome).toEqual({ message: 'Independent human note' });
+    expect(await service.listPendingToolConfirmations('s')).toEqual([]);
+  });
+});
 
 describe('durable human timeout ownership', () => {
   it('expires an ordinary request once and refuses a late human approval', async () => {
