@@ -54,8 +54,9 @@ describe('RemoteSupervisionChatAdapter', () => {
   });
   it('settles persisted native Codex approval through the native resolver', async () => {
     const { adapter, row, native, dispatch } = harness();
-    row.kind = 'raapp_native';
+    row.kind = 'tool_confirmation';
     row.payload = { toolName: 'codex_native:terminal', nativeApproval: true, nativeMethod: 'terminal', args: { method: 'terminal', params: {} } };
+    row.continuation = { version: 1, kind: 'codex_native_approval', executionState: 'pending', sessionId: 'session-1', turnId: 'turn-1', runId: 'run-1' };
     const approval = (await adapter.snapshot()).approvals[0]!;
     expect(approval).toMatchObject({ kind: 'native_approval', decisionAvailable: true });
     await expect(adapter.decide({ approvalId: approval.id, revision: approval.revision, argsSha256: approval.argsSha256, decision: 'approve', deviceId: 'device-1' }))
@@ -63,4 +64,17 @@ describe('RemoteSupervisionChatAdapter', () => {
     expect(native.resolve).toHaveBeenCalledWith('approval-1', 'session-1', 'accept', 'Remote device device-1');
     expect(dispatch.resolveConfirmation).not.toHaveBeenCalled();
   });
+  it('keeps native approval markers out of the generic tool dispatcher', async () => {
+    const { adapter, row, dispatch, native } = harness();
+    row.payload = { toolName: 'codex_native:terminal', nativeApproval: true, args: { method: 'terminal', params: {} } };
+    row.continuation = { kind: 'wrong_native_family', executionState: 'pending' };
+    const approval = (await adapter.snapshot()).approvals[0]!;
+    expect(approval.decisionAvailable).toBe(false);
+    await expect(adapter.decide({ approvalId: approval.id, revision: approval.revision,
+      argsSha256: approval.argsSha256, decision: 'approve', deviceId: 'device-1' }))
+      .resolves.toEqual({ status: 'stale' });
+    expect(dispatch.resolveConfirmation).not.toHaveBeenCalled();
+    expect(native.resolve).not.toHaveBeenCalled();
+  });
+
 });

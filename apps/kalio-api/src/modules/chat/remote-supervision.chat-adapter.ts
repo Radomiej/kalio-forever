@@ -106,7 +106,10 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
       return { status: 'rejected' };
     }
     const remoteReason = `Remote device ${input.deviceId}`;
-    if (isRecord(row.payload) && row.payload['nativeApproval'] === true && row.kind === 'raapp_native') {
+    const nativeApproval = isRecord(row.payload) && row.payload['nativeApproval'] === true
+      && row.kind === 'tool_confirmation' && isRecord(row.continuation)
+      && row.continuation['kind'] === 'codex_native_approval';
+    if (nativeApproval) {
       const settled = await this.nativeApprovals.resolve(row.id, row.sessionId,
         input.decision === 'approve' ? 'accept' : 'decline', remoteReason);
       return { status: settled ? 'settled' : 'stale' };
@@ -123,8 +126,11 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
     const args = isRecord(payload['args']) ? payload['args'] : {};
     const toolName = typeof payload['toolName'] === 'string' ? payload['toolName'] : row.kind;
     const hostOnly = isRecord(row.continuation) && Object.hasOwn(row.continuation, 'hostConfirmationRequirement');
-    const nativeCodex = row.kind === 'raapp_native' && payload['nativeApproval'] === true;
-    const decisionAvailable = (row.kind === 'tool_confirmation' && !hostOnly) || nativeCodex;
+    const nativeMarker = payload['nativeApproval'] === true || (isRecord(row.continuation)
+      && row.continuation['kind'] === 'codex_native_approval');
+    const nativeCodex = row.kind === 'tool_confirmation' && payload['nativeApproval'] === true
+      && isRecord(row.continuation) && row.continuation['kind'] === 'codex_native_approval';
+    const decisionAvailable = (row.kind === 'tool_confirmation' && !hostOnly && !nativeMarker) || nativeCodex;
     return [{
       id: row.id, sessionId: row.sessionId, toolName, args: sanitized(args) as Record<string, unknown>, requestedAt: row.createdAt.getTime(),
       revision: requestRevision(row), argsSha256: sha256(args), kind: nativeCodex ? 'native_approval' : row.kind,
