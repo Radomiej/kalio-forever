@@ -22,12 +22,12 @@ The default bind is `127.0.0.1:8787`; keep development traffic on localhost. For
 
 All envelopes use `{v:1,type,instanceId,requestId?,sequence?,payload?}`. Instance identifiers are exact and case-sensitive.
 
-* Agent connects to `GET /v1/agent/{instanceId}` with `Authorization: Bearer <agent-token>`. The token is compared by SHA-256 digest in constant time against the configured hash for that exact instance.
+* Agent connects to `GET /v1/agent/{instanceId}` and sends the first frame within five seconds: `{"v":1,"type":"agent.authenticate","instanceId":"...","payload":{"token":"..."}}`. The relay compares its SHA-256 digest in constant time against the configured hash for that exact instance and replies `auth.accepted` before sending state or accepting commands.
 * Agent may publish `snapshot`, `session.snapshot`, `approval.result`, or `pair.create`. Pair creation returns `pair.created` with a random 128-bit code valid for 120 seconds, bound to that instance and consumed once.
 * Phone calls `POST /v1/pair` with JSON `{"code":"..." }`. The response contains the instance ID, device ID, and a random 256-bit device token. Keep that token in secure device storage.
 * Device connects to `GET /v1/device`, then sends the first WebSocket frame within five seconds: `{"v":1,"type":"auth","instanceId":"...","token":"..."}`. Tokens are never accepted in URLs or query parameters.
 * Device commands are limited to `session.watch`, `approval.decide`, and `ping`. A decision carries `requestId`, `approvalId`, `revision`, `argsSha256`, and `decision`. The relay only forwards it to the online agent. The host must validate the current pending approval and the revision/digest, perform its normal human-in-the-loop settlement, then publish `approval.result`. The relay never approves an action.
-* When an agent disconnects, devices receive `instance.offline`. Decisions submitted while offline receive `approval.rejected`; commands are not queued for a later reconnect. A reconnect requires a fresh snapshot.
+* When an agent disconnects, devices receive `instance.offline`. Decisions submitted while offline receive `approval.rejected`; commands are not queued for a later reconnect. A reconnect clears cached snapshot and event history; devices wait for a fresh snapshot from the host.
 
 The relay limits WebSocket frames to 1 MiB, uses bounded queues, and disconnects slow device consumers when their queue fills. Pair codes live in a bounded in-memory map. Device registrations persist in SQLite; instance snapshots and event history are process memory only. A device token is scoped to the instance returned at pairing. Pair a device separately with each instance.
 
