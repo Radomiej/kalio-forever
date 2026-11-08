@@ -25,6 +25,7 @@ import { SearchModule } from './modules/search/search.module';
 import { CLIAgentModule } from './modules/cli-agent/cli-agent.module';
 import { ImageModule } from './modules/image/image.module';
 import { RelayModule } from './modules/relay/relay.module';
+import { RemoteRelayModule } from './modules/remote-relay/remote-relay.module';
 import { HitlModule } from './modules/hitl/hitl.module';
 import { ArchitectureModule } from './modules/architecture/architecture.module';
 import { AgentFlowModule } from './modules/agent-flow/agent-flow.module';
@@ -99,6 +100,7 @@ const renderEmbeddedUiIndex = (_req: Request, res: Response) => {
     KalioMcpBridgeModule,
     HitlModule,
     RelayModule,
+    RemoteRelayModule,
   ],
 })
 export class AppModule implements OnModuleInit {
