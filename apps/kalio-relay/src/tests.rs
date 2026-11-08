@@ -63,11 +63,11 @@ use super::*;
         let mut old=auth_device(&base,"device-secret").await;
         let mut new=auth_device(&base,"device-secret").await;
         let ended=tokio::time::timeout(Duration::from_secs(2),old.next()).await.unwrap();
-        assert!(matches!(ended, Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(ClientMessage::Close(_))))));
+        assert!(matches!(ended, None | Some(Err(_)) | Some(Ok(ClientMessage::Close(_)))));
         let state=app.0.instances.read().await;
         assert!(state.get("desk").unwrap().devices.contains_key("phone"));
         drop(state);
-        new.close().await.unwrap();
+        new.send(ClientMessage::Close(None)).await.unwrap();
         server.abort();
     }
     #[tokio::test]
