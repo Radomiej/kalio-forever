@@ -1,6 +1,6 @@
 {
   "name": "@kalio/remote",
-  "version": "0.1.0",
+  "version": "1.0.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "android:sync": "cap sync android",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "@capacitor/android": "7.4.3",
     "@capacitor/core": "7.4.3",
     "@capacitor/keyboard": "7.0.2",
-    "@capacitor/preferences": "7.0.2",
     "@capacitor/cli": "7.4.3",
     "lucide-react": "0.468.0",
     "react": "19.0.0",

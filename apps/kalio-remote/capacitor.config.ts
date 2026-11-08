@@ -1,1 +1,1 @@
-import type { CapacitorConfig } from '@capacitor/cli'; const config: CapacitorConfig = { appId: 'dev.kalio.remote', appName: 'Kalio Remote', webDir: 'dist', plugins: { Keyboard: { resize: 'body' } } }; export default config;
+import type { CapacitorConfig } from '@capacitor/cli'; const config: CapacitorConfig = { appId: 'dev.kalio.remote', appName: 'Kalio Remote', webDir: 'dist', server: { androidScheme: 'https' }, plugins: { Keyboard: { resize: 'body' } } }; export default config;
