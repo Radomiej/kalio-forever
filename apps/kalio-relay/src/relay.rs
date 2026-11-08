@@ -1,11 +1,11 @@
 use crate::{protocol::*, state::*};
-use axum::{http::{Method, header::CONTENT_TYPE}, routing::{get, post}, Json, Router};
+use axum::{extract::{State, ws::{Message, WebSocket}}, http::{Method, StatusCode, header::CONTENT_TYPE}, response::{IntoResponse, Response}, routing::{get, post}, Json, Router};
 use rand::{rngs::OsRng, RngCore};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{env, net::SocketAddr, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-use tokio::sync::Semaphore;
+use std::{collections::HashMap, env, net::SocketAddr, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use tokio::sync::{RwLock, Semaphore};
 use tower_http::{cors::{AllowOrigin, CorsLayer}, limit::RequestBodyLimitLayer};
 pub(crate) const MAX_FRAME: usize = 1_048_576;
 pub(crate) const HISTORY: usize = 32;
@@ -33,8 +33,8 @@ fn app(data: &str, config: &str) -> anyhow::Result<App> {
     Ok(App(Arc::new(Inner{allowed_origins,preauth:Arc::new(Semaphore::new(256)),agents,db:Mutex::new(db),instances:RwLock::new(HashMap::new()),pairs:Mutex::new(HashMap::new())})))
 }
 pub(crate) async fn send_socket(socket:&mut WebSocket, message:Message)->bool { matches!(tokio::time::timeout(Duration::from_secs(5),socket.send(message)).await,Ok(Ok(()))) }
-async fn health() -> Json<Value> { Json(json!({"ok":true})) }
-async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
+pub(crate) async fn health() -> Json<Value> { Json(json!({"ok":true})) }
+pub(crate) async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
     let pair={ let mut p=app.0.pairs.lock().unwrap(); p.retain(|_,v|v.expires>Instant::now()); p.remove(&req.code) };
     let Some(pair)=pair else{return error(StatusCode::UNAUTHORIZED)};
     let device=random_hex(16); let token=random_hex(32); let h=hash(&token);
@@ -51,7 +51,6 @@ async fn broadcast_serialized(app:&App,id:&str,s:String)->Result<(),()> {
     let slow:Vec<String>=i.devices.iter().filter_map(|(d,tx)|tx.try_send(s.clone()).err().map(|_|d.clone())).collect();
     for d in slow{ i.devices.remove(&d); if let Some(cancel)=i.device_cancel.remove(&d){let _=cancel.send(true);} } Ok(())
 }
-#[tokio::main]
 pub async fn run()->anyhow::Result<()> {
     let data=env::var("KALIO_RELAY_DATA").unwrap_or_else(|_|"relay.sqlite".into());
     let app=app(&data,"KALIO_RELAY_AGENTS_JSON")?;
