@@ -20,7 +20,7 @@ export class RelayClient {
   private authenticated = false;
   private closed = false;
   private generation = 0;
-  private outstanding = new Map<string, Outstanding>();
+  private outstanding = new Map<string, Outstanding>();\n  private watchRequestId: string | null = null;
   constructor(private baseUrl: string, private pair: PairReply) {}
   get instanceId(): string { return this.pair.instanceId; }
   get deviceId(): string { return this.pair.deviceId; }
@@ -36,7 +36,7 @@ export class RelayClient {
     socket.onclose = () => { if (generation !== this.generation) return; this.fresh = false; this.authenticated = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); if (!this.closed) window.setTimeout(() => this.connect(), 1500); };
     socket.onerror = () => { if (generation === this.generation) this.emit({ kind: 'error', instanceId: this.instanceId, message: 'Relay connection failed.' }); };
   }
-  watch(sessionId: string): void { this.selectedSession = sessionId || null; if (this.fresh && sessionId) this.send({ type: 'session.watch', requestId: this.id(), sessionId }); }
+  watch(sessionId: string): void { this.selectedSession = sessionId || null; this.watchRequestId = null; if (this.fresh && sessionId) { const requestId=this.id(); this.watchRequestId=requestId; this.send({ type: 'session.watch', requestId, sessionId }); } }
   decide(approval: Approval, decision: 'approve' | 'deny'): string {
     if (!this.canDecide()) throw new Error('Relay snapshot is stale or offline.');
     const requestId = this.id();
