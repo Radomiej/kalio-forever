@@ -12,6 +12,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, RemoteSupervisionPort {
   private readonly logger = new Logger(RemoteRelayService.name);
   private socket: WebSocket | null = null;
+  private connectionGeneration = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private retry = 0;
   private sequence = 0;
@@ -20,7 +21,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private readonly watchedSessions = new Map<string, { deviceId: string; sessionId: string; requestId: string }>();
   private readonly watchedSessionHashes = new Map<string, string>();
-  private refreshInFlight: Promise<void> | undefined;
+  private refreshInFlight: { generation: number; promise: Promise<void> } | undefined;
   private lastSnapshotHash = '';
   private lastSnapshotSentAt = 0;
   private readonly enabled = process.env['KALIO_REMOTE_RELAY_ENABLED'] === 'true';
@@ -41,6 +42,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   }
   onModuleDestroy(): void {
     this.stopped = true;
+    this.connectionGeneration += 1;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.socket?.close(1000, 'shutdown');
@@ -94,23 +96,33 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     if (this.stopped || !this.enabled) return;
     try {
       const socket = new WebSocket(this.url);
+      const generation = ++this.connectionGeneration;
       this.socket = socket;
       socket.addEventListener('open', () => {
+        if (!this.isCurrentConnection(socket, generation)) return;
         this.retry = 0;
         this.authenticated = false;
         this.send('agent.authenticate', { token: this.token });
       });
-      socket.addEventListener('message', event => void this.receive(event.data).catch((error: unknown) => {
-        this.logger.warn('Remote relay frame handling failed', error instanceof Error ? error.message : String(error));
-      }));
-      socket.addEventListener('close', () => this.disconnected());
-      socket.addEventListener('error', () => socket.close());
+      socket.addEventListener('message', event => {
+        if (!this.isCurrentConnection(socket, generation)) return;
+        void this.receive(event.data, socket, generation).catch((error: unknown) => {
+          this.logger.warn('Remote relay frame handling failed', error instanceof Error ? error.message : String(error));
+        });
+      });
+      socket.addEventListener('close', () => {
+        if (this.isCurrentConnection(socket, generation)) this.disconnected(socket, generation);
+      });
+      socket.addEventListener('error', () => {
+        if (this.isCurrentConnection(socket, generation)) socket.close();
+      });
     } catch {
       this.disconnected();
     }
   }
 
-  private async receive(data: unknown): Promise<void> {
+  private async receive(data: unknown, sourceSocket?: WebSocket, sourceGeneration?: number): Promise<void> {
+    if (sourceSocket && sourceGeneration !== undefined && !this.isCurrentConnection(sourceSocket, sourceGeneration)) return;
     if (typeof data !== 'string') return;
     let envelope: unknown;
     try { envelope = JSON.parse(data) as unknown; } catch { return; }
@@ -122,7 +134,10 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       this.authenticated = true;
       this.retry = 0;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
+      const authSocket = sourceSocket ?? this.socket;
+      const authGeneration = sourceGeneration ?? this.connectionGeneration;
       await this.refreshProjection(true);
+      if (!authSocket || !this.isCurrentConnection(authSocket, authGeneration) || !this.authenticated) return;
       this.refreshTimer = setInterval(() => { void this.refreshProjection(false).catch((error: unknown) => this.logger.warn('Remote projection refresh failed', error instanceof Error ? error.message : String(error))); }, 2_000);
       this.refreshTimer.unref?.();
       return;
@@ -150,6 +165,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       }
       this.watchedSessions.set(watchKey, { deviceId, sessionId, requestId: message.requestId });
       const result = await this.session(sessionId);
+      if (sourceSocket && sourceGeneration !== undefined && !this.isCurrentConnection(sourceSocket, sourceGeneration)) return;
       this.watchedSessionHashes.set(watchKey, createHash('sha256').update(JSON.stringify(result)).digest('hex'));
       this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }) });
       return;
@@ -161,20 +177,31 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
         && (decision === 'approve' || decision === 'deny')
         ? await this.decide({ approvalId, revision, argsSha256, decision, deviceId })
         : { status: 'rejected' as const };
+      if (sourceSocket && sourceGeneration !== undefined && !this.isCurrentConnection(sourceSocket, sourceGeneration)) return;
       this.send('approval.result', { requestId: message.requestId, approvalId, ...result });
       await this.refreshProjection(false);
     }
   }
 
   private refreshProjection(force: boolean): Promise<void> {
-    if (this.refreshInFlight) return this.refreshInFlight;
-    this.refreshInFlight = this.refreshProjectionNow(force).finally(() => { this.refreshInFlight = undefined; });
-    return this.refreshInFlight;
+    const socket = this.socket;
+    const generation = this.connectionGeneration;
+    if (!this.authenticated || !socket) return Promise.resolve();
+    if (this.refreshInFlight?.generation === generation) return this.refreshInFlight.promise;
+    const promise = this.refreshProjectionNow(force, socket, generation);
+    this.refreshInFlight = { generation, promise };
+    void promise.then(() => {
+      if (this.refreshInFlight?.promise === promise) this.refreshInFlight = undefined;
+    }, () => {
+      if (this.refreshInFlight?.promise === promise) this.refreshInFlight = undefined;
+    });
+    return promise;
   }
 
-  private async refreshProjectionNow(force: boolean): Promise<void> {
-    if (!this.authenticated) return;
+  private async refreshProjectionNow(force: boolean, socket: WebSocket, generation: number): Promise<void> {
+    if (!this.isCurrentConnection(socket, generation) || !this.authenticated) return;
     const current = await this.snapshot();
+    if (!this.isCurrentConnection(socket, generation) || !this.authenticated) return;
     const snapshotHash = createHash('sha256').update(JSON.stringify(current)).digest('hex');
     if (force || snapshotHash !== this.lastSnapshotHash || Date.now() - this.lastSnapshotSentAt >= 10_000) {
       this.lastSnapshotHash = snapshotHash;
@@ -183,12 +210,16 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     }
     for (const [watchKey, watch] of this.watchedSessions) {
       const projection = await this.session(watch.sessionId);
+      if (!this.isCurrentConnection(socket, generation) || !this.authenticated) return;
       const hash = createHash('sha256').update(JSON.stringify(projection)).digest('hex');
       if (force || this.watchedSessionHashes.get(watchKey) !== hash) {
         this.watchedSessionHashes.set(watchKey, hash);
         this.send('session.snapshot', { requestId: watch.requestId, ...(projection ?? { session: null }) });
       }
     }
+  }
+  private isCurrentConnection(socket: WebSocket, generation: number): boolean {
+    return this.socket === socket && this.connectionGeneration === generation;
   }
   private send(type: string, payload?: Record<string, unknown>): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
@@ -200,8 +231,10 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     this.socket.send(JSON.stringify(envelope));
     return true;
   }
-  private disconnected(): void {
+  private disconnected(socket?: WebSocket, generation?: number): void {
+    if (socket && generation !== undefined && !this.isCurrentConnection(socket, generation)) return;
     this.authenticated = false;
+    this.connectionGeneration += 1;
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.refreshTimer = undefined;
     this.watchedSessions.clear();

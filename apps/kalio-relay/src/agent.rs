@@ -1,30 +1,116 @@
-use crate::{protocol::*, state::*, relay::{broadcast,broadcast_devices,error,hash,now,random_hex,send_socket,MAX_FRAME,QUEUE,HISTORY,PAIR_LIMIT}};
-use axum::{extract::{Path, State, ws::{Message, WebSocket, WebSocketUpgrade}}, http::StatusCode, response::{IntoResponse, Response}};
+use crate::{
+    protocol::*,
+    relay::{
+        broadcast, broadcast_devices, error, hash, now, random_hex, send_socket, HISTORY,
+        MAX_FRAME, PAIR_LIMIT, QUEUE,
+    },
+    state::*,
+};
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
+    http::StatusCode,
+    response::Response,
+};
 use serde_json::{json, Value};
-use std::{collections::{HashMap, VecDeque}, time::{Duration, Instant}};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::{Duration, Instant},
+};
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
-pub(crate) async fn agent_ws(Path(id):Path<String>, State(app):State<App>, ws:WebSocketUpgrade) -> Response {
-    let Ok(permit)=app.0.preauth.clone().try_acquire_owned() else{return error(StatusCode::SERVICE_UNAVAILABLE)};
-    ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|agent_auth(socket,app,id,permit))
+pub(crate) async fn agent_ws(
+    Path(id): Path<String>,
+    State(app): State<App>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let Ok(permit) = app.0.preauth.clone().try_acquire_owned() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE);
+    };
+    ws.max_message_size(MAX_FRAME)
+        .on_upgrade(move |socket| agent_auth(socket, app, id, permit))
 }
-async fn agent_auth(mut socket:WebSocket, app:App, id:String, _permit:OwnedSemaphorePermit) {
-    let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
-    let Ok(Some(Ok(Message::Text(text))))=first else{return};
-    if text.len()>MAX_FRAME{return}
-    let Ok(e)=serde_json::from_str::<Envelope>(&text) else{return};
-    let Some(token)=e.payload.as_ref().and_then(|p|p.get("token")).and_then(Value::as_str) else{return};
-    let Some(expected)=app.0.agents.get(&id) else{return};
-    if e.v!=1 || e.kind!="agent.authenticate" || e.instance_id!=id || !bool::from(subtle::ConstantTimeEq::ct_eq(hash(token).as_slice(),expected.as_slice())){return}
-    if !send_socket(&mut socket,Message::Text(json!({"v":1,"type":"auth.accepted","instanceId":id}).to_string().into())).await{return}
-    agent_loop(socket,app,id).await
+async fn agent_auth(mut socket: WebSocket, app: App, id: String, _permit: OwnedSemaphorePermit) {
+    let first = tokio::time::timeout(Duration::from_secs(5), socket.recv()).await;
+    let Ok(Some(Ok(Message::Text(text)))) = first else {
+        return;
+    };
+    if text.len() > MAX_FRAME {
+        return;
+    }
+    let Ok(e) = serde_json::from_str::<Envelope>(&text) else {
+        return;
+    };
+    let Some(token) = e
+        .payload
+        .as_ref()
+        .and_then(|p| p.get("token"))
+        .and_then(Value::as_str)
+    else {
+        return;
+    };
+    let Some(expected) = app.0.agents.get(&id) else {
+        return;
+    };
+    if e.v != 1
+        || e.kind != "agent.authenticate"
+        || e.instance_id != id
+        || !bool::from(subtle::ConstantTimeEq::ct_eq(
+            hash(token).as_slice(),
+            expected.as_slice(),
+        ))
+    {
+        return;
+    }
+    if !send_socket(
+        &mut socket,
+        Message::Text(
+            json!({"v":1,"type":"auth.accepted","instanceId":id})
+                .to_string()
+                .into(),
+        ),
+    )
+    .await
+    {
+        return;
+    }
+    agent_loop(socket, app, id).await
 }
-async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
-    let (tx,mut rx)=mpsc::channel::<String>(QUEUE);
-    let (cancel_tx,mut cancel_rx)=watch::channel(false);
-    let generation={ let mut all=app.0.instances.write().await; let i=all.entry(id.clone()).or_insert(Instance{agent_generation:0,agent_cancel:None,agent:None,device_generation:HashMap::new(),device_cancel:HashMap::new(),devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:false});
-        if let Some(old)=i.agent_cancel.take(){let _=old.send(true);}
-        i.agent_generation+=1; let gen=i.agent_generation; i.agent_cancel=Some(cancel_tx); i.agent=Some(tx.clone()); i.offline=false; i.snapshot=None; i.history.clear(); gen };
-    let _=broadcast(&app,&id,json!({"v":1,"type":"instance.online","instanceId":id})).await;
+async fn agent_loop(mut socket: WebSocket, app: App, id: String) {
+    let (tx, mut rx) = mpsc::channel::<String>(QUEUE);
+    let (cancel_tx, mut cancel_rx) = watch::channel(false);
+    let generation = {
+        let mut all = app.0.instances.write().await;
+        let i = all.entry(id.clone()).or_insert(Instance {
+            agent_generation: 0,
+            agent_cancel: None,
+            agent: None,
+            device_generation: HashMap::new(),
+            device_cancel: HashMap::new(),
+            devices: HashMap::new(),
+            history: VecDeque::new(),
+            snapshot: None,
+            offline: false,
+        });
+        if let Some(old) = i.agent_cancel.take() {
+            let _ = old.send(true);
+        }
+        i.agent_generation += 1;
+        let gen = i.agent_generation;
+        i.agent_cancel = Some(cancel_tx);
+        i.agent = Some(tx.clone());
+        i.offline = false;
+        i.snapshot = None;
+        i.history.clear();
+        gen
+    };
+    let _ = broadcast(
+        &app,
+        &id,
+        json!({"v":1,"type":"instance.online","instanceId":id}),
+    )
+    .await;
     loop {
         tokio::select! {
             _=cancel_rx.changed()=>{let _=send_socket(&mut socket,Message::Close(None)).await;break},
@@ -62,8 +148,26 @@ async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
             }
         }
     }
-    let mut all=app.0.instances.write().await;
-    let current=if let Some(i)=all.get_mut(&id) { if i.agent_generation==generation {i.agent=None;i.agent_cancel=None;i.offline=true;true} else {false} } else {false};
+    let mut all = app.0.instances.write().await;
+    let current = if let Some(i) = all.get_mut(&id) {
+        if i.agent_generation == generation {
+            i.agent = None;
+            i.agent_cancel = None;
+            i.offline = true;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     drop(all);
-    if current {let _=broadcast(&app,&id,json!({"v":1,"type":"instance.offline","instanceId":id})).await;}
+    if current {
+        let _ = broadcast(
+            &app,
+            &id,
+            json!({"v":1,"type":"instance.offline","instanceId":id}),
+        )
+        .await;
+    }
 }

@@ -19,25 +19,6 @@ concurrency:
 env:
   ONNXRUNTIME_NODE_INSTALL: skip
 jobs:
-  dependency-lock:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
-      - name: Record generated lockfile for reviewed commit
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const b = fs.readFileSync('pnpm-lock.yaml').toString('base64');
-          console.log('KALIO_LOCK_BEGIN');
-          for (let i=0;i<b.length;i+=12000) console.log('KALIO_LOCK_CHUNK '+b.slice(i,i+12000));
-          console.log('KALIO_LOCK_END');
-          NODE
   rust-relay:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -46,12 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Format relay source
-        run: cargo fmt --manifest-path apps/kalio-relay/Cargo.toml --all
+      - name: Check relay source formatting
+        run: cargo fmt --manifest-path apps/kalio-relay/Cargo.toml --all -- --check
       - name: Real relay tests
-        run: cargo test --manifest-path apps/kalio-relay/Cargo.toml
+        run: cargo test --locked --manifest-path apps/kalio-relay/Cargo.toml
       - name: Clippy
-        run: cargo clippy --manifest-path apps/kalio-relay/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --manifest-path apps/kalio-relay/Cargo.toml --all-targets -- -D warnings
       - name: Record formatting and dependency lock for review
         if: always()
         run: |
@@ -76,7 +57,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @kalio/types --filter @kalio/sdk build
       - run: pnpm --filter kalio-api typecheck
       - run: pnpm --filter kalio-api build

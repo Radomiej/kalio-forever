@@ -23,8 +23,10 @@ function internal(service: RemoteRelayService): {
   authenticated: boolean;
   instanceId: string;
   refreshProjection(force: boolean): Promise<void>;
+  connectionGeneration: number;
+  refreshInFlight: { generation: number; promise: Promise<void> } | undefined;
 } {
-  return service as unknown as { receive(data: unknown): Promise<void>; socket: FakeWebSocket | null; authenticated: boolean; instanceId: string; refreshProjection(force: boolean): Promise<void> };
+  return service as unknown as { receive(data: unknown): Promise<void>; socket: FakeWebSocket | null; authenticated: boolean; instanceId: string; refreshProjection(force: boolean): Promise<void>; connectionGeneration: number; refreshInFlight: { generation: number; promise: Promise<void> } | undefined };
 }
 
 describe('RemoteRelayService protocol lifecycle', () => {
@@ -130,6 +132,42 @@ describe('RemoteRelayService protocol lifecycle', () => {
     expect(chat.snapshot).toHaveBeenCalledTimes(1);
     release({ sessions: [], approvals: [] });
     await Promise.all([first, second]);
+  });
+
+  it('does not send an old refresh to a new socket or clear the new generation singleflight', async () => {
+    const { service, chat } = createService();
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const state = internal(service);
+    state.instanceId = 'instance-1';
+    const oldSocket = new FakeWebSocket();
+    state.socket = oldSocket;
+    state.authenticated = true;
+    state.connectionGeneration = 1;
+    let releaseOld!: (value: { sessions: []; approvals: [] }) => void;
+    let releaseNew!: (value: { sessions: []; approvals: [] }) => void;
+    chat.snapshot.mockImplementationOnce(() => new Promise((resolve) => { releaseOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseNew = resolve; }));
+    const oldRefresh = state.refreshProjection(true);
+
+    state.authenticated = false;
+    state.socket = null;
+    state.connectionGeneration += 1;
+    state.refreshInFlight = undefined;
+    const newSocket = new FakeWebSocket();
+    state.socket = newSocket;
+    state.authenticated = true;
+    state.connectionGeneration += 1;
+    const newRefresh = state.refreshProjection(true);
+
+    releaseOld({ sessions: [], approvals: [] });
+    await oldRefresh;
+    expect(oldSocket.sent).toHaveLength(0);
+    expect(newSocket.sent).toHaveLength(0);
+    expect(state.refreshInFlight?.promise).toBe(newRefresh);
+
+    releaseNew({ sessions: [], approvals: [] });
+    await newRefresh;
+    expect(newSocket.sent.map((frame) => (JSON.parse(frame) as { type: string }).type)).toEqual(['snapshot']);
   });
 
 });

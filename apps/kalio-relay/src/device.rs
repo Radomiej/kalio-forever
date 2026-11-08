@@ -1,35 +1,121 @@
-use crate::{protocol::*, state::*, relay::{error,hash,send_socket,MAX_FRAME,QUEUE}};
-use axum::{extract::{State, ws::{Message, WebSocket, WebSocketUpgrade}}, http::{HeaderMap, StatusCode, header::ORIGIN}, response::{IntoResponse, Response}};
+use crate::{
+    protocol::*,
+    relay::{error, hash, send_socket, MAX_FRAME, QUEUE},
+    state::*,
+};
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
+    http::{header::ORIGIN, HeaderMap, StatusCode},
+    response::Response,
+};
 use rusqlite::params;
 use serde_json::{json, Value};
-use std::{collections::{HashMap,VecDeque},time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Duration,
+};
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
-pub(crate) async fn device_ws(State(app):State<App>, headers:HeaderMap, ws:WebSocketUpgrade)->Response { if let Some(origin)=headers.get(ORIGIN).and_then(|h|h.to_str().ok()){if !app.0.allowed_origins.iter().any(|allowed|allowed==origin){return error(StatusCode::FORBIDDEN)}} let Ok(permit)=app.0.preauth.clone().try_acquire_owned() else{return error(StatusCode::SERVICE_UNAVAILABLE)}; ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|device_auth(socket,app,permit)) }
-async fn device_auth(mut socket:WebSocket, app:App, _permit:OwnedSemaphorePermit) {
-    let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
-    let Ok(Some(Ok(Message::Text(text))))=first else{return};
-    let Ok(auth)=serde_json::from_str::<First>(&text) else{return};
-    if auth.v!=1 || auth.kind!="auth" || auth.instance_id.is_empty(){return}
-    let h=hash(&auth.token); let device_id={
-        let db=app.0.db.lock().unwrap();
-        db.query_row("SELECT device FROM devices WHERE instance=?1 AND token_hash=?2",params![auth.instance_id,h.as_slice()],|r|r.get::<_,String>(0)).ok()
+pub(crate) async fn device_ws(
+    State(app): State<App>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if let Some(origin) = headers.get(ORIGIN).and_then(|h| h.to_str().ok()) {
+        if !app
+            .0
+            .allowed_origins
+            .iter()
+            .any(|allowed| allowed == origin)
+        {
+            return error(StatusCode::FORBIDDEN);
+        }
+    }
+    let Ok(permit) = app.0.preauth.clone().try_acquire_owned() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE);
     };
-    let Some(device_id)=device_id else{return};
-    if !send_socket(&mut socket,Message::Text(json!({"v":1,"type":"auth.accepted","instanceId":auth.instance_id}).to_string().into())).await{return}
-    device_loop(socket,app,auth.instance_id,device_id).await
+    ws.max_message_size(MAX_FRAME)
+        .on_upgrade(move |socket| device_auth(socket, app, permit))
 }
-async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
-    let (tx,mut rx)=mpsc::channel::<String>(QUEUE);
-    let (cancel_tx,mut cancel_rx)=watch::channel(false);
-    let (generation,initial)={
-        let mut all=app.0.instances.write().await;
-        let i=all.entry(id.clone()).or_insert(Instance{agent_generation:0,agent_cancel:None,agent:None,device_generation:HashMap::new(),device_cancel:HashMap::new(),devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:true});
-        if let Some(old)=i.device_cancel.remove(&device){let _=old.send(true);}
-        let gen=i.device_generation.get(&device).copied().unwrap_or(0)+1;
-        i.device_generation.insert(device.clone(),gen); i.device_cancel.insert(device.clone(),cancel_tx);
-        i.devices.insert(device.clone(),tx); let mut h=Vec::new(); if let Some(s)=&i.snapshot{h.push(s.clone())} h.extend(i.history.iter().cloned()); (gen,h)
+async fn device_auth(mut socket: WebSocket, app: App, _permit: OwnedSemaphorePermit) {
+    let first = tokio::time::timeout(Duration::from_secs(5), socket.recv()).await;
+    let Ok(Some(Ok(Message::Text(text)))) = first else {
+        return;
     };
-    for s in initial {if !send_socket(&mut socket,Message::Text(s.into())).await{if let Some(i)=app.0.instances.write().await.get_mut(&id){if i.device_generation.get(&device)==Some(&generation){i.devices.remove(&device);i.device_cancel.remove(&device);}}return}}
+    let Ok(auth) = serde_json::from_str::<First>(&text) else {
+        return;
+    };
+    if auth.v != 1 || auth.kind != "auth" || auth.instance_id.is_empty() {
+        return;
+    }
+    let h = hash(&auth.token);
+    let device_id = {
+        let db = app.0.db.lock().unwrap();
+        db.query_row(
+            "SELECT device FROM devices WHERE instance=?1 AND token_hash=?2",
+            params![auth.instance_id, h.as_slice()],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    };
+    let Some(device_id) = device_id else { return };
+    if !send_socket(
+        &mut socket,
+        Message::Text(
+            json!({"v":1,"type":"auth.accepted","instanceId":auth.instance_id})
+                .to_string()
+                .into(),
+        ),
+    )
+    .await
+    {
+        return;
+    }
+    device_loop(socket, app, auth.instance_id, device_id).await
+}
+async fn device_loop(mut socket: WebSocket, app: App, id: String, device: String) {
+    let (tx, mut rx) = mpsc::channel::<String>(QUEUE);
+    let (cancel_tx, mut cancel_rx) = watch::channel(false);
+    let (generation, initial) = {
+        let mut all = app.0.instances.write().await;
+        let i = all.entry(id.clone()).or_insert(Instance {
+            agent_generation: 0,
+            agent_cancel: None,
+            agent: None,
+            device_generation: HashMap::new(),
+            device_cancel: HashMap::new(),
+            devices: HashMap::new(),
+            history: VecDeque::new(),
+            snapshot: None,
+            offline: true,
+        });
+        if let Some(old) = i.device_cancel.remove(&device) {
+            let _ = old.send(true);
+        }
+        let gen = i.device_generation.get(&device).copied().unwrap_or(0) + 1;
+        i.device_generation.insert(device.clone(), gen);
+        i.device_cancel.insert(device.clone(), cancel_tx);
+        i.devices.insert(device.clone(), tx);
+        let mut h = Vec::new();
+        if let Some(s) = &i.snapshot {
+            h.push(s.clone())
+        }
+        h.extend(i.history.iter().cloned());
+        (gen, h)
+    };
+    for s in initial {
+        if !send_socket(&mut socket, Message::Text(s.into())).await {
+            if let Some(i) = app.0.instances.write().await.get_mut(&id) {
+                if i.device_generation.get(&device) == Some(&generation) {
+                    i.devices.remove(&device);
+                    i.device_cancel.remove(&device);
+                }
+            }
+            return;
+        }
+    }
     loop {
         tokio::select! {
             _=cancel_rx.changed()=>{let _=socket.send(Message::Close(None)).await;break},
@@ -62,5 +148,10 @@ async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
             }
         }
     }
-    if let Some(i)=app.0.instances.write().await.get_mut(&id){if i.device_generation.get(&device)==Some(&generation){i.devices.remove(&device);i.device_cancel.remove(&device);}}
+    if let Some(i) = app.0.instances.write().await.get_mut(&id) {
+        if i.device_generation.get(&device) == Some(&generation) {
+            i.devices.remove(&device);
+            i.device_cancel.remove(&device);
+        }
+    }
 }
