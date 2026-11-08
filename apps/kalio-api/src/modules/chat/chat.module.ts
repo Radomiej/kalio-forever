@@ -1,5 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { CHAT_DURABLE_EVIDENCE_READER } from '@kalio/types';
+import { CHAT_DURABLE_EVIDENCE_READER, CHAT_REMOTE_SUPERVISION_PORT } from '@kalio/types';
 import { TextDeltaHandler } from './handlers/text-delta.handler';
 import { ThinkingDeltaHandler } from './handlers/thinking-delta.handler';
 import { ToolCallHandler } from './handlers/tool-call.handler';
@@ -47,6 +47,7 @@ import { AgentBudgetApprovalService } from './agent-budget-approval.service';
 import { SessionRuntimeWatchlistService } from './session-runtime-watchlist.service';
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
 import { ActiveSessionRegistry } from './active-session-registry.service';
+import { RemoteSupervisionChatAdapter } from './remote-supervision.chat-adapter';
 import { LLMModule } from '../llm/llm.module';
 import { PersonaModule } from '../persona/persona.module';
 import { ToolModule } from '../tool/tool.module';
@@ -117,6 +118,8 @@ import {
     SessionRuntimeWatchlistService,
     SessionRuntimeStopService,
     ActiveSessionRegistry,
+    RemoteSupervisionChatAdapter,
+    { provide: CHAT_REMOTE_SUPERVISION_PORT, useExisting: RemoteSupervisionChatAdapter },
     RuntimeExecutionScheduler,
     ProfiledLLMSource,
     SessionsService,
@@ -182,7 +185,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, PersistedGoalSourceReader, CHAT_DURABLE_EVIDENCE_READER, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
+  exports: [CHAT_REMOTE_SUPERVISION_PORT, AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, PersistedGoalSourceReader, CHAT_DURABLE_EVIDENCE_READER, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(

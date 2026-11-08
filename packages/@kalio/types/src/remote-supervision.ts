@@ -1,6 +1,7 @@
 import type { ArchitectureGraphProjection, ChatMessage } from './index';
 
 export const REMOTE_SUPERVISION_PORT = Symbol('REMOTE_SUPERVISION_PORT');
+export const CHAT_REMOTE_SUPERVISION_PORT = Symbol('CHAT_REMOTE_SUPERVISION_PORT');
 export const ARCHITECTURE_REMOTE_GRAPH_PORT = Symbol('ARCHITECTURE_REMOTE_GRAPH_PORT');
 
 export interface RemoteSupervisionApproval {
@@ -15,6 +16,16 @@ export interface RemoteSupervisionSessionSnapshot {
   messages: Array<Pick<ChatMessage, 'id' | 'sessionId' | 'role' | 'content' | 'createdAt' | 'turnId'>>;
   graph: { available: true; runId: string; projection: ArchitectureGraphProjection }
     | { available: false; reason: 'no_architecture_run' | 'projection_unavailable' };
+}
+export interface ChatRemoteSupervisionSession {
+  session: RemoteSupervisionSessionSummary;
+  messages: Array<Pick<ChatMessage, 'id' | 'sessionId' | 'role' | 'content' | 'createdAt' | 'turnId'>>;
+  architectureRunIds: string[];
+}
+export interface ChatRemoteSupervisionPort {
+  snapshot(): Promise<{ sessions: RemoteSupervisionSessionSummary[]; approvals: RemoteSupervisionApproval[] }>;
+  session(sessionId: string): Promise<ChatRemoteSupervisionSession | null>;
+  decide(input: RemoteSupervisionDecision): Promise<RemoteSupervisionDecisionResult>;
 }
 export interface RemoteSupervisionSnapshot {
   instance: { id: string; name: string };
