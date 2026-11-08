@@ -44,7 +44,7 @@ async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> Response {
 }
 fn bearer(headers:&HeaderMap)->Option<&str>{ headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ") }
 pub(crate) async fn broadcast(app:&App,id:&str,v:Value)->Result<(),()> {broadcast_serialized(app,id,v.to_string()).await}
-pub(crate) pub(crate) async fn broadcast_devices(app:&App,id:&str,s:String)->Result<(),()> {broadcast_serialized(app,id,s).await}
+pub(crate) async fn broadcast_devices(app:&App,id:&str,s:String)->Result<(),()> {broadcast_serialized(app,id,s).await}
 async fn broadcast_serialized(app:&App,id:&str,s:String)->Result<(),()> {
     let mut all=app.0.instances.write().await;
     let Some(i)=all.get_mut(id) else{return Ok(())};

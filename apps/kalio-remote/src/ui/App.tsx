@@ -17,8 +17,11 @@ const previewSession: SessionSnapshot = { sessionId: 's1', messages: [
 ], graph:{ nodes:[{id:'n1',type:'prompt',label:'User request',status:'complete'},{id:'n2',type:'agent',label:'Trace refresh flow',status:'running'},{id:'n3',type:'tool',label:'Read session.ts',status:'waiting'}], edges:[{id:'e1',source:'n1',target:'n2',type:'flow'},{id:'e2',source:'n2',target:'n3',type:'tool'}] } };
 
 export function App() {
- const [connections, setConnections] = useState<Connection[]>([]);\n const subscriptions = useRef(new Map<string, () => void>());
- const clients = useRef(new Map<string, RelayClient>());\n const latest = useRef({ selected: '', sessionId: '' });\n useEffect(() => () => { subscriptions.current.forEach(unsubscribe => unsubscribe()); subscriptions.current.clear(); clients.current.forEach(client => client.disconnect()); clients.current.clear(); }, []);
+ const [connections, setConnections] = useState<Connection[]>([]);
+ const subscriptions = useRef(new Map<string, () => void>());
+ const clients = useRef(new Map<string, RelayClient>());
+ const latest = useRef({ selected: '', sessionId: '' });
+ useEffect(() => () => { subscriptions.current.forEach(unsubscribe => unsubscribe()); subscriptions.current.clear(); clients.current.forEach(client => client.disconnect()); clients.current.clear(); }, []);
  const [selected, setSelected] = useState<string>('');
  const [view, setView] = useState<View>('sessions');
  const [session, setSession] = useState<SessionSnapshot | null>(null);
@@ -34,7 +37,8 @@ export function App() {
  const [pending, setPending] = useState<Record<string,string>>({});
  const [results, setResults] = useState<Record<string,string>>({});
  const [theme, setTheme] = useState<'dark'|'light'>('dark');
- const active = connections.find(c => c.id === selected);\n latest.current.selected = selected;
+ const active = connections.find(c => c.id === selected);
+ latest.current.selected = selected;
  const data = preview ? fixture : active?.snapshot ?? null;
  const canDecide = preview ? false : Boolean(active?.online && active.client.canDecide());
  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);

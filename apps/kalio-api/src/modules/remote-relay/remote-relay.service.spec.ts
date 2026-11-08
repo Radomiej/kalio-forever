@@ -1,0 +1,74 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RemoteRelayService } from './remote-relay.service';
+
+type Listener = (event: { data?: unknown }) => void;
+class FakeWebSocket {
+  static readonly OPEN = 1;
+  readyState = 1;
+  sent: string[] = [];
+  listeners = new Map<string, Listener>();
+  addEventListener(type: string, listener: Listener): void { this.listeners.set(type, listener); }
+  send(data: string): void { this.sent.push(data); }
+  close(): void { this.readyState = 3; }
+  emit(type: string, event: { data?: unknown } = {}): void { this.listeners.get(type)?.(event); }
+}
+function createService() {
+  const chat = { snapshot: vi.fn().mockResolvedValue({ sessions: [], approvals: [] }), session: vi.fn().mockResolvedValue(null), decide: vi.fn() };
+  const architecture = { getGraph: vi.fn().mockResolvedValue(null) };
+  return { service: new RemoteRelayService(chat as never, architecture as never), chat };
+}
+function internal(service: RemoteRelayService): {
+  receive(data: unknown): Promise<void>;
+  socket: FakeWebSocket | null;
+  authenticated: boolean;
+} {
+  return service as unknown as { receive(data: unknown): Promise<void>; socket: FakeWebSocket | null; authenticated: boolean };
+}
+
+describe('RemoteRelayService protocol lifecycle', () => {
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+  it('stays disconnected when the feature flag is disabled', () => {
+    vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'false');
+    const socketCtor = vi.fn();
+    vi.stubGlobal('WebSocket', socketCtor);
+    const { service } = createService();
+    service.onModuleInit();
+    expect(socketCtor).not.toHaveBeenCalled();
+  });
+
+  it('sends the configured first-frame credential and waits for auth.accepted', async () => {
+    vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'true');
+    vi.stubEnv('KALIO_REMOTE_RELAY_INSTANCE_ID', 'instance-1');
+    vi.stubEnv('KALIO_REMOTE_RELAY_INSTANCE_NAME', 'Kalio');
+    vi.stubEnv('KALIO_REMOTE_RELAY_TOKEN', 'a'.repeat(64));
+    vi.stubEnv('KALIO_REMOTE_RELAY_URL', 'wss://relay.example/v1/agent/instance-1');
+    let socket: FakeWebSocket | undefined;
+    vi.stubGlobal('WebSocket', class extends FakeWebSocket {
+      constructor() { super(); socket = this; }
+    });
+    const { service, chat } = createService();
+    service.onModuleInit();
+    socket!.emit('open');
+    const auth = JSON.parse(socket!.sent[0]!) as { type: string; payload: { token: string } };
+    expect(auth.type).toBe('agent.authenticate');
+    expect(auth.payload.token).toBe('a'.repeat(64));
+    expect(chat.snapshot).not.toHaveBeenCalled();
+    await internal(service).receive(JSON.stringify({ v: 1, type: 'auth.accepted', instanceId: 'instance-1' }));
+    expect(chat.snapshot).toHaveBeenCalledTimes(1);
+    expect(internal(service).authenticated).toBe(true);
+    service.onModuleDestroy();
+  });
+
+  it('ignores malformed, wrong-version, and cross-instance frames without projection calls', async () => {
+    vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'false');
+    const { service, chat } = createService();
+    const receive = internal(service).receive.bind(internal(service));
+    await receive('{');
+    await receive({ v: 1, type: 'session.watch', instanceId: 'instance-1' });
+    await receive(JSON.stringify({ v: 2, type: 'session.watch', instanceId: 'instance-1' }));
+    await receive(JSON.stringify({ v: 1, type: 'session.watch', instanceId: 'other-instance' }));
+    expect(chat.snapshot).not.toHaveBeenCalled();
+    expect(chat.session).not.toHaveBeenCalled();
+  });
+});
