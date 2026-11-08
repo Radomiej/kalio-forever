@@ -24,7 +24,7 @@ fn app(data: &str, config: &str) -> anyhow::Result<App> {
     let mut agents=HashMap::new();
     for (id,h) in values {
         if id.is_empty() || h.len()!=64 || !h.bytes().all(|c|c.is_ascii_hexdigit()) { anyhow::bail!("invalid agent hash for {id}") }
-        let mut d=[0;32]; for (i,p) in h.as_bytes().chunks_exact(2).enumerate(){ d[i]=u8::from_str_radix(std::str::from_utf8(p)?,16)?; } agents.insert(id,d);
+        let mut d=[0;32]; for (i,p) in h.as_bytes().as_chunks::<2>().0.iter().enumerate(){ d[i]=u8::from_str_radix(std::str::from_utf8(p)?,16)?; } agents.insert(id,d);
     }
     let allowed_origins:Vec<String>=match env::var("KALIO_RELAY_ALLOWED_ORIGINS"){Ok(v)=>serde_json::from_str(&v)?,Err(_)=>vec!["https://localhost".into(),"http://localhost".into()]};
     if allowed_origins.is_empty() || allowed_origins.iter().any(|o|o=="*" || (!o.starts_with("http://") && !o.starts_with("https://"))){anyhow::bail!("KALIO_RELAY_ALLOWED_ORIGINS must be a JSON list of explicit HTTP(S) origins") }
