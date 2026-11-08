@@ -1,8 +1,7 @@
-use super::*;
-    use crate::{agent::agent_ws, device::device_ws, protocol::*, relay::*, state::*};
+    use crate::{agent::agent_ws, device::device_ws, relay::*, state::*};
     use axum::{routing::{get,post},Router};
     use rusqlite::{Connection,params};
-    use serde_json::json;
+    use serde_json::{json,Value};
     use std::{collections::HashMap,sync::{Arc,Mutex},time::Duration};
     use tokio::sync::{RwLock,Semaphore};
     use tower_http::cors::{AllowOrigin,CorsLayer};
@@ -63,11 +62,11 @@ use super::*;
         let mut old=auth_device(&base,"device-secret").await;
         let mut new=auth_device(&base,"device-secret").await;
         let ended=tokio::time::timeout(Duration::from_secs(2),old.next()).await.unwrap();
-        assert!(matches!(ended, Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(ClientMessage::Close(_))))));
+        assert!(matches!(ended, None | Some(Err(_)) | Some(Ok(ClientMessage::Close(_)))));
         let state=app.0.instances.read().await;
         assert!(state.get("desk").unwrap().devices.contains_key("phone"));
         drop(state);
-        new.close().await.unwrap();
+        new.send(ClientMessage::Close(None)).await.unwrap();
         server.abort();
     }
     #[tokio::test]

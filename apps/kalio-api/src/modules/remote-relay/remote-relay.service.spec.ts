@@ -28,7 +28,7 @@ function internal(service: RemoteRelayService): {
 }
 
 describe('RemoteRelayService protocol lifecycle', () => {
-  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
   it('stays disconnected when the feature flag is disabled', () => {
     vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'false');
@@ -89,6 +89,47 @@ describe('RemoteRelayService protocol lifecycle', () => {
     expect(snapshots.filter((frame) => frame.type === 'session.snapshot').map((frame) => frame.requestId))
       .toEqual(['watch-1', 'watch-1']);
     service.onModuleDestroy();
+  });
+
+  it('sends an unchanged authoritative snapshot heartbeat every ten seconds', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'true');
+    vi.stubEnv('KALIO_REMOTE_RELAY_INSTANCE_ID', 'instance-1');
+    vi.stubEnv('KALIO_REMOTE_RELAY_INSTANCE_NAME', 'Kalio');
+    vi.stubEnv('KALIO_REMOTE_RELAY_TOKEN', 'a'.repeat(64));
+    vi.stubEnv('KALIO_REMOTE_RELAY_URL', 'wss://relay.example/v1/agent/instance-1');
+    let socket: FakeWebSocket | undefined;
+    vi.stubGlobal('WebSocket', class extends FakeWebSocket { constructor() { super(); socket = this; } });
+    const { service } = createService();
+    service.onModuleInit();
+    socket!.emit('open');
+    await internal(service).receive(JSON.stringify({ v: 1, type: 'auth.accepted', instanceId: 'instance-1' }));
+    const snapshotCount = () => socket!.sent.map((frame) => JSON.parse(frame) as { type: string })
+      .filter((frame) => frame.type === 'snapshot').length;
+    expect(snapshotCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(snapshotCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(snapshotCount()).toBe(2);
+    await internal(service).receive(JSON.stringify({ v: 1, type: 'auth.accepted', instanceId: 'instance-1' }));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(snapshotCount()).toBe(3);
+    service.onModuleDestroy();
+  });
+
+  it('shares one in-flight projection refresh across timer ticks', async () => {
+    const { service, chat } = createService();
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const state = internal(service);
+    state.authenticated = true;
+    state.socket = new FakeWebSocket();
+    let release!: (value: { sessions: []; approvals: [] }) => void;
+    chat.snapshot.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const first = state.refreshProjection(false);
+    const second = state.refreshProjection(false);
+    expect(chat.snapshot).toHaveBeenCalledTimes(1);
+    release({ sessions: [], approvals: [] });
+    await Promise.all([first, second]);
   });
 
 });

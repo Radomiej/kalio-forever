@@ -22,6 +22,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   private readonly watchedSessionHashes = new Map<string, string>();
   private refreshInFlight: Promise<void> | undefined;
   private lastSnapshotHash = '';
+  private lastSnapshotSentAt = 0;
   private readonly enabled = process.env['KALIO_REMOTE_RELAY_ENABLED'] === 'true';
   private readonly instanceId = process.env['KALIO_REMOTE_RELAY_INSTANCE_ID'] ?? '';
   private readonly instanceName = process.env['KALIO_REMOTE_RELAY_INSTANCE_NAME'] ?? '';
@@ -117,6 +118,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       || typeof envelope['type'] !== 'string') return;
     const message = envelope as unknown as Envelope;
     if (message.type === 'auth.accepted') {
+      if (this.authenticated) return;
       this.authenticated = true;
       this.retry = 0;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
@@ -174,8 +176,9 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     if (!this.authenticated) return;
     const current = await this.snapshot();
     const snapshotHash = createHash('sha256').update(JSON.stringify(current)).digest('hex');
-    if (force || snapshotHash !== this.lastSnapshotHash) {
+    if (force || snapshotHash !== this.lastSnapshotHash || Date.now() - this.lastSnapshotSentAt >= 10_000) {
       this.lastSnapshotHash = snapshotHash;
+      this.lastSnapshotSentAt = Date.now();
       this.send('snapshot', current as unknown as Record<string, unknown>);
     }
     for (const [watchKey, watch] of this.watchedSessions) {
@@ -205,6 +208,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     this.watchedSessionHashes.clear();
     this.refreshInFlight = undefined;
     this.lastSnapshotHash = '';
+    this.lastSnapshotSentAt = 0;
     this.socket = null;
     for (const [id, pending] of this.pendingPairing) {
       clearTimeout(pending.timeout);
