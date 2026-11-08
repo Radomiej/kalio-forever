@@ -28,11 +28,11 @@ describe('RelayClient device protocol',()=>{
   ws.receive(snapshot('one',1));expect(events).toHaveLength(0);ws.receive({v:1,type:'auth.accepted',instanceId:'one'});ws.receive(snapshot('one',1));expect(events).toHaveLength(1);
  });
  it('rejects stale sequence and late session.watch replies after a newer request',()=>{
-  vi.stubGlobal('WebSocket',MockWebSocket);const c=client('one');const sessions:string[]=[];c.subscribe(e=>{if(e.kind==='session')sessions.push(e.value.sessionId)});c.connect();const ws=MockWebSocket.all[0]!;ws.open();ws.receive({v:1,type:'auth.accepted',instanceId:'one'});ws.receive(snapshot('one',3));
+  vi.stubGlobal('WebSocket',MockWebSocket);const c=client('one');const sessions:string[]=[];let snapshots=0;c.subscribe(e=>{if(e.kind==='session')sessions.push(e.value.sessionId);if(e.kind==='snapshot')snapshots++;});c.connect();const ws=MockWebSocket.all[0]!;ws.open();ws.receive({v:1,type:'auth.accepted',instanceId:'one'});ws.receive(snapshot('one',3));
   c.watch('A');const reqA=JSON.parse(ws.sent.at(-1)!).requestId as string;c.watch('B');const reqB=JSON.parse(ws.sent.at(-1)!).requestId as string;
   ws.receive({v:1,type:'session.snapshot',instanceId:'one',requestId:reqA,payload:sessionDto('A')});expect(sessions).toEqual([]);
   ws.receive({v:1,type:'session.snapshot',instanceId:'one',requestId:reqB,payload:sessionDto('B')});expect(sessions).toEqual(['B']);
-  ws.receive(snapshot('one',2));expect(eventsCount(ws)).toBe(4);
+  ws.receive(snapshot('one',2));expect(snapshots).toBe(1);
  });
  it('keeps multiple client instances isolated',()=>{
   vi.stubGlobal('WebSocket',MockWebSocket);const a=client('a'),b=client('b');const seen:string[]=[];
@@ -40,4 +40,3 @@ describe('RelayClient device protocol',()=>{
   a.connect();b.connect();const [wa,wb]=MockWebSocket.all;wa!.open();wb!.open();wa!.receive({v:1,type:'auth.accepted',instanceId:'a'});wb!.receive({v:1,type:'auth.accepted',instanceId:'b'});wa!.receive(snapshot('a',1));wb!.receive(snapshot('b',1));wa!.receive(snapshot('b',2));expect(seen).toEqual(['a:a','b:b']);
  });
 });
-function eventsCount(socket:MockWebSocket):number{return socket.sent.length;}
