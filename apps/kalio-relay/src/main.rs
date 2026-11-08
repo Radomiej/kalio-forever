@@ -84,7 +84,7 @@ async fn device_auth(mut socket:WebSocket, app:App) {
 }
 async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
     let (tx,mut rx)=mpsc::channel::<String>(QUEUE);
-    { let mut all=app.0.instances.write().await; let i=all.entry(id.clone()).or_insert(Instance{agent:None,devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:false}); i.agent=Some(tx.clone()); i.offline=false; }
+    { let mut all=app.0.instances.write().await; let i=all.entry(id.clone()).or_insert(Instance{agent:None,devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:false}); i.agent=Some(tx.clone()); i.offline=false; i.snapshot=None; i.history.clear(); }
     let _=broadcast(&app,&id,json!({"v":1,"type":"instance.online","instanceId":id})).await;
     loop {
         tokio::select! {
