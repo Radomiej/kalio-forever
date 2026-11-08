@@ -25,22 +25,26 @@ describe('host terminal execution descriptor', () => {
     service = new TerminalService(allowed as unknown as AllowedPathsService);
   });
 
-  it('captures argv and owner before path authorization awaits; matches actual spawn', async () => {
+  it.each([
+    { command: 'npm', originalArgs: ['run', 'build'], shell: process.platform === 'win32' },
+    { command: 'rg', originalArgs: ['a|b', 'directory with spaces'], shell: false },
+  ])('captures argv and owner before path authorization awaits; matches actual $command spawn', async ({ command, originalArgs, shell }) => {
     let authorize!: (allowed: boolean) => void;
     allowed.isAllowed.mockReturnValueOnce(new Promise<boolean>((resolve) => { authorize = resolve; }));
-    const args = ['run', 'build'];
+    const args = [...originalArgs];
     const identity = { ...owner };
-    const pending = service.spawn('npm', args, '/project/../project', false, identity);
+    const pending = service.spawn(command, args, '/project/../project', false, identity);
     args[1] = 'dev'; identity.sessionId = 'foreign';
     authorize(true);
     const session = await pending;
-    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('npm', ['run', 'build'], expect.objectContaining({
-      cwd: '/project/../project', shell: process.platform === 'win32',
-    }));
-    expect(session.command).toBe('npm run build');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.slice(0, 2)).toEqual([command, originalArgs]);
+    expect(spawnMock.mock.calls[0]?.[2].shell).toBe(shell);
+    expect(spawnMock.mock.calls[0]?.[2].cwd).toBe('/project/../project');
+    expect(session.command).toBe([command, ...originalArgs].join(' '));
     expect(session).toHaveProperty('executionDescriptor', {
-      terminalId: session.id, executable: 'npm', argv: ['run', 'build'],
-      actualCwd: '/project/../project', shell: process.platform === 'win32', ownerIdentity: owner,
+      terminalId: session.id, executable: command, argv: originalArgs,
+      actualCwd: '/project/../project', shell, ownerIdentity: owner,
     });
   });
 

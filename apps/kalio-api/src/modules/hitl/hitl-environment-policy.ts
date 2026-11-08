@@ -13,9 +13,9 @@ export function approvalThreshold(configured: number, productionMinimum = 0.95):
 export function hasProductionTarget(inputs: readonly { text: string }[], args: Record<string, unknown>): boolean {
   const host = hostApprovalEnvironment();
   if (host === 'prod' || host === 'unknown') return true;
-  const production = /\b(?:prod(?:uction)?|produkcj\p{L}*|produkcyjn\p{L}*)/iu;
+  const production = /\b(?:prod(?:uction)?\b|produkcj\p{L}*|produkcyjn\p{L}*)/iu;
   if (production.test(JSON.stringify(args))) return true;
   // Target cues, not every mention of "production code" in an implementation task.
-  const target = /\b(?:deploy|publish|release|wdro\p{L}*|wdróż\p{L}*|target|environment|środowisko|to jest|this is|na|on)\b[^\n.!?]{0,80}\b(?:prod(?:uction)?|produkcj\p{L}*|produkcyjn\p{L}*)/iu;
+  const target = /\b(?:deploy|publish|release|wdro\p{L}*|wdróż\p{L}*|target|environment|środowisko|to jest|this is|na|on)\b[^\n.!?]{0,80}\b(?:prod(?:uction)?\b|produkcj\p{L}*|produkcyjn\p{L}*)/iu;
   return inputs.some(input => target.test(input.text));
 }

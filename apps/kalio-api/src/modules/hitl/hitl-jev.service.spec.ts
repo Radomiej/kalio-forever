@@ -121,6 +121,24 @@ describe('HitlJevService', () => {
   const delegatedRequest = () => ({ ...request, ...binding, args: { path: '/project/file.ts', content: 'complete change' } });
   const delegatedConfig = () => ({ ...config, confirmationAuthority: 'decision_model' as const });
 
+  it('supplies host-derived terminal transport instead of trusting argument claims', async () => {
+    await service.evaluateApproval(delegatedConfig(), { ...delegatedRequest(), args: {
+      command: 'rg', args: ['a|b', 'file.ts'], cwd: 'C:/project', execution: { shell: true },
+    } });
+    expect(client.decideNoulBatch.mock.calls[0][0].state.host.execution).toEqual({
+      shell: false, argumentTransport: 'literal_argv', cwdGuard: 'allowed_paths_before_spawn',
+    });
+  });
+  it.each(['cmd.exe', 'pwsh'])('does not describe %s as incapable of interpreting its arguments', async command => {
+    await service.evaluateApproval(delegatedConfig(), { ...delegatedRequest(), args: {
+      command, args: command === 'cmd.exe' ? ['/c', 'echo a|more'] : ['-Command', 'Write-Output a|Out-String'], cwd: 'C:/project',
+    } });
+    const sent = client.decideNoulBatch.mock.calls[0][0];
+    expect(sent.state.host.execution).toMatchObject({ shell: false, argumentTransport: 'literal_argv' });
+    expect(sent.questions[0].instructions).toContain('outer launcher only');
+    expect(sent.questions[0].instructions).toContain('invoked program can still interpret');
+  });
+
   it.each(['decision_model', 'human_then_decision'] as const)('uses five contextual axes for %s', async (confirmationAuthority) => {
     const result = await service.evaluateApproval({ ...config, confirmationAuthority }, delegatedRequest());
     expect(result).toMatchObject({ assessment: { checks, contextFingerprint: 'a'.repeat(64) }, model: 'jev-batch' });

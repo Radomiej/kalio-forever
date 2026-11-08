@@ -28,6 +28,8 @@ describe('host approval environment', () => {
     vi.stubEnv('KALIO_INSTALL_PROFILE', 'dev');
     expect(hasProductionTarget([{ text: 'Zrób deploy na produkcję.' }], {})).toBe(true);
     expect(hasProductionTarget([], { target: 'prod' })).toBe(true);
+    expect(hasProductionTarget([], { path: 'ecs/worker/producerConstruction.test.ts' })).toBe(false);
+    expect(hasProductionTarget([], { path: 'deployment/production/config.yaml' })).toBe(true);
     expect(hasProductionTarget([{ text: 'Read local sources.' }], {})).toBe(false);
     expect(hasProductionTarget([{ text: 'Do not weaken production validation in this local code fix.' }], {})).toBe(false);
     vi.stubEnv('KALIO_INSTALL_PROFILE', 'prod');

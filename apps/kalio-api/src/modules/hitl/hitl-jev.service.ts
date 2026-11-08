@@ -10,6 +10,7 @@ import {
 
 import type { HitlApprovalRequest } from './hitl.types';
 import { hasProductionTarget, hostApprovalEnvironment } from './hitl-environment-policy';
+import { terminalUsesShell } from '../../common/terminal-shell-policy';
 
 export { HitlDecisionProtocolError } from './hitl-jev-assessment';
 
@@ -69,8 +70,12 @@ export class HitlJevService {
       throw new HitlDecisionProtocolError('Missing or mismatched approval context requires manual review.');
     }
     const questions = jevAssessmentQuestions(config.jevInstructions ?? '');
+    const shell = request.name === 'terminal_spawn' && typeof request.args['command'] === 'string'
+      ? terminalUsesShell(request.args['command']) : null;
     const evidence = {
-      host: { platform: process.platform, environment: hostApprovalEnvironment() },
+      host: { platform: process.platform, environment: hostApprovalEnvironment(),
+        ...(shell !== null ? { execution: { shell, argumentTransport: shell ? 'shell_interpreted' : 'literal_argv',
+          cwdGuard: 'allowed_paths_before_spawn' } } : {}) },
       operation: { kind: request.kind, name: request.name, ...(request.displayLabel !== undefined ? { displayLabel: request.displayLabel } : {}), args: request.args },
       context,
     };

@@ -61,11 +61,34 @@ describe('TerminalService', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.useRealTimers();
   });
 
   // ── spawn() ──────────────────────────────────────────────────────────────
+
+  it.runIf(process.platform === 'win32')('launches native Windows rg with literal regex and spaced arguments, matching audit and metadata', async () => {
+    const args = ['a|b', 'directory with spaces'];
+    const session = await service.spawn('rg', args, '/project');
+    expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+    expect(mockSpawnFn.mock.calls[0]?.slice(0, 2)).toEqual(['rg', args]);
+    expect(mockSpawnFn.mock.calls[0]?.[2].shell).toBe(false);
+    expect(session.executionDescriptor).toMatchObject({ executable: 'rg', argv: args, shell: false });
+    expect(cmdAudit.recordInvocation).toHaveBeenCalledWith(expect.objectContaining({ command: 'rg', shell: false }));
+    proc.emit('error', new Error('ENOENT'));
+    expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it.runIf(process.platform === 'win32')('removes mixed-case NODE_ENV for native Windows launches independently of shell', async () => {
+    const backendEnv = process.env;
+    vi.spyOn(process, 'env', 'get').mockReturnValue({ PATH: backendEnv.PATH, NODE_ENV: 'production', Node_env: 'production' });
+    await service.spawn('node', ['app.js'], '/project');
+    const options = mockSpawnFn.mock.calls[0]?.[2];
+    expect(options.shell).toBe(false);
+    expect(Object.keys(options.env).filter((key) => key.toUpperCase() === 'NODE_ENV')).toEqual([]);
+    expect(process.env.Node_env).toBe('production');
+  });
 
   it('does not expose unreadable interactive stdin to background commands', async () => {
     await service.spawn('rg', ['-l', 'tradeConstruction'], '/project');
