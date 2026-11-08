@@ -236,7 +236,7 @@ mod tests {
         let mut old=auth_agent(&base).await;
         let mut new=auth_agent(&base).await;
         let ended=tokio::time::timeout(Duration::from_secs(2),old.next()).await.unwrap();
-        assert!(ended.is_none() || ended.unwrap().is_err() || matches!(ended.unwrap(),Ok(ClientMessage::Close(_))));
+        assert!(matches!(ended, Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(ClientMessage::Close(_))))));
         let state=app.0.instances.read().await;
         let current=state.get("desk").unwrap();
         assert!(!current.offline);
