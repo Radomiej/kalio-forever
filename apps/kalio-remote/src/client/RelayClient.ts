@@ -22,11 +22,14 @@ export class RelayClient {
   private generation = 0;
   private outstanding = new Map<string, Outstanding>();
   private watchRequestId: string | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   constructor(private baseUrl: string, private pair: PairReply) {}
   get instanceId(): string { return this.pair.instanceId; }
   get deviceId(): string { return this.pair.deviceId; }
   subscribe(listener: (event: RelayEvent) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   connect(): void {
+    if (this.closed) return;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     const generation = ++this.generation;
     this.authenticated = false; this.fresh = false; this.lastSequence = -1; this.snapshotAt = 0; this.outstanding.clear();
     const url = new URL('/v1/device', this.baseUrl);
@@ -34,7 +37,7 @@ export class RelayClient {
     const socket = new WebSocket(url); this.socket = socket;
     socket.onopen = () => { if (generation === this.generation) socket.send(JSON.stringify({ v: 1, type: 'auth', instanceId: this.pair.instanceId, token: this.pair.token })); };
     socket.onmessage = (event) => { if (generation === this.generation) this.receive(event.data); };
-    socket.onclose = () => { if (generation !== this.generation) return; this.fresh = false; this.authenticated = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); if (!this.closed) window.setTimeout(() => this.connect(), 1500); };
+    socket.onclose = () => { if (generation !== this.generation) return; this.fresh = false; this.authenticated = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); if (!this.closed) this.reconnectTimer = setTimeout(() => this.connect(), 1500); };
     socket.onerror = () => { if (generation === this.generation) this.emit({ kind: 'error', instanceId: this.instanceId, message: 'Relay connection failed.' }); };
   }
   watch(sessionId: string): void { this.selectedSession = sessionId || null; this.watchRequestId = null; if (this.fresh && sessionId) { const requestId=this.id(); this.watchRequestId=requestId; this.send({ type: 'session.watch', requestId, sessionId }); } }
@@ -46,7 +49,7 @@ export class RelayClient {
     return requestId;
   }
   canDecide(): boolean { return Boolean(this.socket?.readyState === WebSocket.OPEN && this.authenticated && this.fresh && Date.now() - this.snapshotAt < 15000); }
-  disconnect(): void { this.closed = true; this.generation++; this.socket?.close(); this.pair.token = ''; this.outstanding.clear(); }
+  disconnect(): void { this.closed = true; if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.generation++; this.socket?.close(); this.pair.token = ''; this.outstanding.clear(); }
   private id(): string { return 'm-' + (++this.requestSeq).toString(36); }
   private send(data: Record<string, unknown>): void { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ v: 1, instanceId: this.pair.instanceId, ...data })); }
   private emit(event: RelayEvent): void { this.listeners.forEach(listener => listener(event)); }
@@ -64,12 +67,14 @@ export class RelayClient {
       this.emit({ kind: 'snapshot', instanceId: this.instanceId, value, sequence: envelope.sequence });
       if (this.selectedSession) this.watch(this.selectedSession);
     } else if (envelope.type === 'session.snapshot') {
-      const value = parseSession(envelope.payload); if (value) this.emit({ kind: 'session', instanceId: this.instanceId, value });
+      if (envelope.requestId !== this.watchRequestId) return;
+      const value = parseSession(envelope.payload); if (value && value.sessionId === this.selectedSession) this.emit({ kind: 'session', instanceId: this.instanceId, value });
     } else if (envelope.type === 'approval.result' && typeof envelope.requestId === 'string' && isRecord(envelope.payload) && typeof envelope.payload.approvalId === 'string' && typeof envelope.payload.status === 'string') {
       const expected = this.outstanding.get(envelope.requestId);
       if (!expected || expected.approvalId !== envelope.payload.approvalId) return;
       this.outstanding.delete(envelope.requestId);
       this.emit({ kind: 'result', instanceId: this.instanceId, requestId: envelope.requestId, approvalId: envelope.payload.approvalId, status: envelope.payload.status });
+    } else if (envelope.type === 'instance.online') { this.lastSequence = -1; this.fresh = false;
     } else if (envelope.type === 'instance.offline') { this.fresh = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); }
   }
 }
