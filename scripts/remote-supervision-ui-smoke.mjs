@@ -40,7 +40,7 @@ try{
     console.log('KALIO_VIEW_END');
   }
   await page.getByRole('button',{name:/^Graph$/}).click();
-  await page.locator('.graph-panel svg').waitFor();
+  await page.locator('.graph-canvas svg').waitFor();
   await captureView('graph');
   await page.getByRole('button',{name:/^Zatwierdzenia/}).click();
   await page.locator('.approval-list').waitFor();
