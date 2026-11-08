@@ -98,7 +98,9 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
         this.authenticated = false;
         this.send('agent.authenticate', { token: this.token });
       });
-      socket.addEventListener('message', event => void this.receive(event.data));
+      socket.addEventListener('message', event => void this.receive(event.data).catch((error: unknown) => {
+        this.logger.warn('Remote relay frame handling failed', error instanceof Error ? error.message : String(error));
+      }));
       socket.addEventListener('close', () => this.disconnected());
       socket.addEventListener('error', () => socket.close());
     } catch {
@@ -135,6 +137,10 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     if (message.type === 'session.watch' && message.requestId && message.payload
       && typeof message.payload['sessionId'] === 'string') {
       this.watchedSessions.add(message.payload['sessionId']);
+      if (this.watchedSessions.size >= 20 && !this.watchedSessions.has(message.payload['sessionId'])) {
+        this.send('session.snapshot', { requestId: message.requestId, session: null, error: 'watch_limit' });
+        return;
+      }
       const result = await this.session(message.payload['sessionId']);
       this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }) });
       return;
