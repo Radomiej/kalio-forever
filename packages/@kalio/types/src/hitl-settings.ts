@@ -23,6 +23,8 @@ export interface HitlConfig {
   externalPolicyPersonaId: string | null;
   raAppApprovalTimeoutMs: number;
   jevApprovalThreshold?: number;
+  /** Minimum for production targets and unknown host environments. */
+  jevProductionApprovalThreshold?: number;
   jevInstructions?: string;
   jevFallbackToPersona?: boolean;
   rules?: HitlHardRule[];

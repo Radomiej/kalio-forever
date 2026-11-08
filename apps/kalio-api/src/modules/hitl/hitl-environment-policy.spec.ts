@@ -11,13 +11,14 @@ describe('host approval environment', () => {
   });
   it('raises the production floor without lowering a stricter configured threshold', () => {
     vi.stubEnv('KALIO_INSTALL_PROFILE', 'prod');
-    expect(approvalThreshold(0.8)).toBe(0.99);
+    expect(approvalThreshold(0.8)).toBe(0.95);
+    expect(approvalThreshold(0.8, 0.97)).toBe(0.97);
     expect(approvalThreshold(1)).toBe(1);
   });
   it('does not treat missing or unknown identity as development', () => {
     vi.stubEnv('KALIO_INSTALL_PROFILE', 'not-a-profile');
     expect(hostApprovalEnvironment()).toBe('unknown');
-    expect(approvalThreshold(0.95)).toBe(0.99);
+    expect(approvalThreshold(0.8)).toBe(0.95);
   });
   it('does not change an explicitly configured development threshold', () => {
     vi.stubEnv('KALIO_INSTALL_PROFILE', 'dev');

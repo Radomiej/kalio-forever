@@ -11,6 +11,7 @@ export interface ContextualJevEvaluation {
   assessment: { checks: Record<JevAssessmentId, number>; contextFingerprint: string };
   model: string;
   productionTarget?: boolean;
+  productionThreshold?: number;
   validateContext: () => boolean;
 }
 
@@ -88,17 +89,18 @@ export function readJevAssessment(result: unknown): Record<JevAssessmentId, numb
 export function classifyJevAssessment(result: ContextualJevEvaluation, threshold: number): {
   status: 'approved' | 'manual' | 'rejected'; reason: string;
 } {
-  if (!isRecord(result) || Object.keys(result).some((key) => !['assessment', 'model', 'validateContext', 'productionTarget'].includes(key))
+  if (!isRecord(result) || Object.keys(result).some((key) => !['assessment', 'model', 'validateContext', 'productionTarget', 'productionThreshold'].includes(key))
     || !Object.hasOwn(result, 'assessment') || !Object.hasOwn(result, 'validateContext')
     || !isRecord(result.assessment) || Object.keys(result.assessment).length !== 2
     || !Object.hasOwn(result.assessment, 'checks') || !Object.hasOwn(result.assessment, 'contextFingerprint')
     || !exactChecks(result.assessment.checks) || !validContextFingerprint(result.assessment.contextFingerprint)
     || typeof result.validateContext !== 'function' || !validJevModel(result.model)
     || (result.productionTarget !== undefined && typeof result.productionTarget !== 'boolean')
+    || (result.productionThreshold !== undefined && (!validScore(result.productionThreshold) || result.productionThreshold <= 0.5))
     || !Number.isFinite(threshold) || threshold <= 0.5 || threshold > 1) {
     return { status: 'manual', reason: 'Invalid Jev assessment requires manual review.' };
   }
-  if (result.productionTarget === true) threshold = Math.max(threshold, 0.99);
+  if (result.productionTarget === true) threshold = Math.max(threshold, result.productionThreshold ?? 0.95);
   const { checks, contextFingerprint } = result.assessment;
   const reason = `Jev ${JEV_ASSESSMENT_IDS.map((id) => `${id}=${checks[id]}`).join('; ')}; threshold=${threshold}; productionTarget=${result.productionTarget === true}; model=${JSON.stringify(result.model)}; contextFingerprint=${JSON.stringify(contextFingerprint)}.`;
   if (checks.destructive_effect >= threshold || checks.unauthorized_export >= threshold

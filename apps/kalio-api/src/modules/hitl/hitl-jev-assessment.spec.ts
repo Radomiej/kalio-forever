@@ -7,13 +7,15 @@ const evaluation = (): ContextualJevEvaluation => ({
 });
 
 describe('classifyJevAssessment', () => {
-  it('requires .99 for a production target even when the local threshold is .80', () => {
+  it('uses the editable production minimum for a production target', () => {
     const result = evaluation(); result.productionTarget = true;
-    result.assessment.checks.goal_alignment = 0.98;
+    result.assessment.checks.goal_alignment = 0.94;
     expect(classifyJevAssessment(result, 0.8).status).toBe('manual');
-    result.assessment.checks.goal_alignment = 0.99;
+    result.assessment.checks.goal_alignment = 0.95;
     expect(classifyJevAssessment(result, 0.8).status).toBe('approved');
     expect(classifyJevAssessment(result, 0.8).reason).toContain('productionTarget=true');
+    result.productionThreshold = .97;
+    expect(classifyJevAssessment(result, 0.8).status).toBe('manual');
   });
   it.each(['destructive_effect', 'unauthorized_export'] as const)('approves the exact .80/.20 boundary on %s', (id) => {
     const result = evaluation();

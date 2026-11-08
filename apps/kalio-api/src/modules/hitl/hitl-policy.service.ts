@@ -149,7 +149,7 @@ export class HitlPolicyService {
       const binding = this.requestBinding(request);
       const policy = JSON.stringify(config);
       if (delegated && (!request.toolCallId || this.hitlConfig.changing)) return { status: 'manual', source: 'manual', reason: 'Decision authority is not current.' };
-      const threshold = approvalThreshold(config.jevApprovalThreshold ?? 0.95);
+      const threshold = approvalThreshold(config.jevApprovalThreshold ?? 0.95, config.jevProductionApprovalThreshold ?? 0.95);
       if (!Number.isFinite(threshold) || threshold <= 0.5 || threshold > 1) {
         throw new Error('Invalid Jev approval threshold.');
       }

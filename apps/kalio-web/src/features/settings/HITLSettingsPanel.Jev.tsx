@@ -34,13 +34,21 @@ export function HITLJevSettings({ config, onChange }: {
       {config.confirmationAuthority !== 'human' && config.confirmationAuthority !== undefined && <p className="text-xs text-warning" role="note">
         Jev may approve commands and file changes without asking you. Terminal commands run with Kalio's system permissions; this is not an OS sandbox.
       </p>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <label className="form-control gap-1">
-        <span className="text-xs font-semibold text-base-content/70">Approval threshold</span>
+        <span className="text-xs font-semibold text-base-content/70">DEV/QA threshold</span>
         <input aria-label="Jev approval threshold" type="number" min="0.5" max="1" step="any"
           className="input input-sm input-bordered w-full" value={Number.isNaN(config.jevApprovalThreshold) ? '' : config.jevApprovalThreshold ?? 0.95}
           onChange={(event) => onChange({ ...config, jevApprovalThreshold: event.target.value === '' ? NaN : Number(event.target.value) })} />
       </label>
-      <p className="text-xs text-base-content/60">The default is 0.95. The threshold must be greater than 0.5 and at most 1.</p>
+      <label className="form-control gap-1">
+        <span className="text-xs font-semibold text-base-content/70">Production minimum</span>
+        <input aria-label="Jev production approval threshold" type="number" min="0.5" max="1" step="any"
+          className="input input-sm input-bordered w-full" value={Number.isNaN(config.jevProductionApprovalThreshold) ? '' : config.jevProductionApprovalThreshold ?? 0.95}
+          onChange={(event) => onChange({ ...config, jevProductionApprovalThreshold: event.target.value === '' ? NaN : Number(event.target.value) })} />
+      </label>
+      </div>
+      <p className="text-xs text-base-content/60">Both default to 0.95 and must be greater than 0.5 and at most 1. Production uses the higher of the DEV/QA threshold and the production minimum.</p>
       <label className="form-control gap-1">
         <span className="text-xs font-semibold text-base-content/70">Jev instructions</span>
         <textarea aria-label="Jev approval instructions" maxLength={2000}

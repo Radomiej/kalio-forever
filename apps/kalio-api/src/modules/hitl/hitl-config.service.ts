@@ -24,6 +24,7 @@ const DEFAULT_HITL_CONFIG: ResolvedHitlConfig = {
   raAppApprovalTimeoutMs: 600_000,
   jevInstructions: '',
   jevApprovalThreshold: 0.95,
+  jevProductionApprovalThreshold: 0.95,
   jevFallbackToPersona: false,
   rules: [],
   confirmationAuthority: 'human',
@@ -41,6 +42,7 @@ const HITL_SETTING_KEYS = {
   raAppApprovalTimeoutMs: 'hitl.raAppApprovalTimeoutMs',
   jevInstructions: 'hitl.jevInstructions',
   jevApprovalThreshold: 'hitl.jevApprovalThreshold',
+  jevProductionApprovalThreshold: 'hitl.jevProductionApprovalThreshold',
   jevFallbackToPersona: 'hitl.jevFallbackToPersona',
   rules: 'hitl.rules',
 } as const;
@@ -106,6 +108,7 @@ export class HitlConfigService {
       raAppApprovalTimeoutMs: this.parseStoredRaAppApprovalTimeout(storedRaAppApprovalTimeoutMs),
       jevInstructions: this.normalizeJevInstructions(storedJevInstructions ?? ''),
       jevApprovalThreshold: this.parseStoredJevApprovalThreshold(storedJevApprovalThreshold),
+      jevProductionApprovalThreshold: this.parseStoredJevApprovalThreshold(await this.appSettings.get(HITL_SETTING_KEYS.jevProductionApprovalThreshold)),
       jevFallbackToPersona: this.parseStoredJevFallback(storedJevFallbackToPersona),
       rules: this.parseStoredRules(storedRules),
       confirmationAuthority: this.confirmationAuthority(await this.appSettings.get('hitl.confirmationAuthority')),
@@ -143,6 +146,9 @@ export class HitlConfigService {
     const nextJevApprovalThreshold = dto.jevApprovalThreshold !== undefined
       ? this.normalizeJevApprovalThreshold(dto.jevApprovalThreshold)
       : current.jevApprovalThreshold;
+    const nextJevProductionApprovalThreshold = dto.jevProductionApprovalThreshold !== undefined
+      ? this.normalizeJevApprovalThreshold(dto.jevProductionApprovalThreshold)
+      : current.jevProductionApprovalThreshold ?? 0.95;
     const nextRules = dto.rules !== undefined
       ? this.normalizeRules(dto.rules)
       : current.rules;
@@ -217,6 +223,7 @@ export class HitlConfigService {
     await this.appSettings.set(HITL_SETTING_KEYS.raAppApprovalTimeoutMs, String(nextRaAppApprovalTimeoutMs));
     await this.appSettings.set(HITL_SETTING_KEYS.jevInstructions, nextJevInstructions);
     await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
+    await this.appSettings.set(HITL_SETTING_KEYS.jevProductionApprovalThreshold, String(nextJevProductionApprovalThreshold));
     await this.appSettings.set(HITL_SETTING_KEYS.jevFallbackToPersona, String(nextJevFallbackToPersona));
     await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
     await this.appSettings.set('hitl.confirmationAuthority', confirmationAuthority);
@@ -234,6 +241,7 @@ export class HitlConfigService {
       raAppApprovalTimeoutMs: nextRaAppApprovalTimeoutMs,
       jevInstructions: nextJevInstructions,
       jevApprovalThreshold: nextJevApprovalThreshold,
+      jevProductionApprovalThreshold: nextJevProductionApprovalThreshold,
       jevFallbackToPersona: nextJevFallbackToPersona,
       rules: nextRules,
       confirmationAuthority,

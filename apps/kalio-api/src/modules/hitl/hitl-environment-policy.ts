@@ -4,9 +4,9 @@ export function hostApprovalEnvironment(): 'prod' | 'dev' | 'qa' | 'unknown' {
   return profile === 'prod' || profile === 'dev' || profile === 'qa' ? profile : 'unknown';
 }
 
-export function approvalThreshold(configured: number): number {
+export function approvalThreshold(configured: number, productionMinimum = 0.95): number {
   const profile = hostApprovalEnvironment();
-  return profile === 'prod' || profile === 'unknown' ? Math.max(configured, 0.99) : configured;
+  return profile === 'prod' || profile === 'unknown' ? Math.max(configured, productionMinimum) : configured;
 }
 
 /** Untrusted hints can only RAISE scrutiny, never grant permission or downgrade production. */

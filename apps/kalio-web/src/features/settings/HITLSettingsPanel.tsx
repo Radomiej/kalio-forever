@@ -19,6 +19,7 @@ const DEFAULT_CONFIG: HitlConfig = {
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
   jevApprovalThreshold: 0.95,
+  jevProductionApprovalThreshold: 0.95,
   jevInstructions: '',
   jevFallbackToPersona: false,
   rules: [],
@@ -78,6 +79,8 @@ export function HITLSettingsPanel() {
         raAppApprovalTimeoutMs: loadedConfig.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
         // TODO: legacy fallback — older persisted HITL configs predate Jev and rules.
         jevApprovalThreshold: loadedConfig.jevApprovalThreshold ?? 0.95,
+        // TODO: legacy fallback — older HITL configs predate the production minimum.
+        jevProductionApprovalThreshold: loadedConfig.jevProductionApprovalThreshold ?? 0.95,
         jevInstructions: loadedConfig.jevInstructions ?? '',
         jevFallbackToPersona: loadedConfig.jevFallbackToPersona ?? false,
         rules: loadedConfig.rules ?? [],
@@ -106,8 +109,11 @@ export function HITLSettingsPanel() {
     : null;
   const timeoutMinutes = Math.round(config.raAppApprovalTimeoutMs / 60_000);
   const jevThreshold = config.jevApprovalThreshold ?? 0.95;
+  const jevProductionThreshold = config.jevProductionApprovalThreshold ?? 0.95;
   const jevValidationMessage = config.mode === 'ollama' ? null : !Number.isFinite(jevThreshold) || jevThreshold <= 0.5 || jevThreshold > 1
     ? 'Jev approval threshold must be greater than 0.5 and at most 1.'
+    : !Number.isFinite(jevProductionThreshold) || jevProductionThreshold <= 0.5 || jevProductionThreshold > 1
+      ? 'Jev production approval threshold must be greater than 0.5 and at most 1.'
     : (config.jevInstructions?.length ?? 0) > 2000
       ? 'Jev instructions must be at most 2000 characters.'
       : null;
@@ -143,7 +149,7 @@ export function HITLSettingsPanel() {
         externalPolicyEnabled: config.externalPolicyEnabled,
         externalPolicyPersonaId: config.externalPolicyPersonaId,
         raAppApprovalTimeoutMs: config.raAppApprovalTimeoutMs,
-        ...(config.mode !== 'ollama' ? { jevApprovalThreshold: jevThreshold, jevInstructions: config.jevInstructions } : {}),
+        ...(config.mode !== 'ollama' ? { jevApprovalThreshold: jevThreshold, jevProductionApprovalThreshold: jevProductionThreshold, jevInstructions: config.jevInstructions } : {}),
         jevFallbackToPersona: config.mode === 'ollama' ? false : config.jevFallbackToPersona,
         rules: config.rules ?? [],
       };
@@ -167,6 +173,8 @@ export function HITLSettingsPanel() {
         externalPolicyPersonaId: updated.externalPolicyPersonaId ?? null,
         raAppApprovalTimeoutMs: updated.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
         jevApprovalThreshold: updated.jevApprovalThreshold ?? 0.95,
+        // TODO: legacy fallback — older HITL responses omit the production minimum.
+        jevProductionApprovalThreshold: updated.jevProductionApprovalThreshold ?? 0.95,
         jevInstructions: updated.jevInstructions ?? '',
         jevFallbackToPersona: updated.jevFallbackToPersona ?? false,
         rules: updated.rules ?? [],

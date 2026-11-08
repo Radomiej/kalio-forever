@@ -102,7 +102,8 @@ export class HitlJevService {
     };
     if (!validateContext()) throw new HitlDecisionProtocolError('Approval context changed; manual review required.');
     return { assessment: { checks, contextFingerprint: fingerprint }, model: result.model ?? connection.model,
-      productionTarget: hasProductionTarget(context.inputs, request.args), validateContext };
+      productionTarget: hasProductionTarget(context.inputs, request.args),
+      productionThreshold: config.jevProductionApprovalThreshold ?? 0.95, validateContext };
   }
 }
 

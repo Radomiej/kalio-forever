@@ -100,6 +100,60 @@ describe('HITLSettingsPanel', () => {
     installFetchMock();
   });
 
+  it('defaults both legacy Jev thresholds to 0.95 without saving', async () => {
+    installFetchMock(terminalConfig);
+    render(<HITLSettingsPanel />);
+    expect(await screen.findByLabelText('Jev approval threshold')).toHaveValue(0.95);
+    expect(screen.getByLabelText('Jev production approval threshold')).toHaveValue(0.95);
+    expect(screen.getByText('DEV/QA threshold')).toBeInTheDocument();
+    expect(screen.getByText('Production minimum')).toBeInTheDocument();
+    expect(getPutBody()).toBeNull();
+  });
+
+  it('hydrates and independently edits both Jev thresholds and saves them', async () => {
+    installFetchMock({ ...terminalConfig, jevApprovalThreshold: 0.8, jevProductionApprovalThreshold: 0.95 });
+    render(<HITLSettingsPanel />);
+    const local = await screen.findByLabelText('Jev approval threshold');
+    const production = screen.getByLabelText('Jev production approval threshold');
+    expect(local).toHaveValue(0.8);
+    expect(production).toHaveValue(0.95);
+    fireEvent.change(local, { target: { value: '0.85' } });
+    fireEvent.change(production, { target: { value: '1' } });
+    expect(getPutBody()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('HITL settings saved.');
+    expect(getPutBody()).toMatchObject({ jevApprovalThreshold: 0.85, jevProductionApprovalThreshold: 1 });
+    expect(local).toHaveValue(0.85);
+    expect(production).toHaveValue(1);
+  });
+
+  it.each([
+    ['Jev approval threshold', ''], ['Jev approval threshold', '0.5'],
+    ['Jev approval threshold', '1.01'], ['Jev approval threshold', '1e309'],
+    ['Jev production approval threshold', ''], ['Jev production approval threshold', '0.5'],
+    ['Jev production approval threshold', '1.01'], ['Jev production approval threshold', '1e309'],
+  ])('rejects invalid %s value "%s" without PUT', async (label, value) => {
+    installFetchMock(terminalConfig);
+    render(<HITLSettingsPanel />);
+    fireEvent.change(await screen.findByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('must be greater than 0.5 and at most 1');
+    expect(getPutBody()).toBeNull();
+  });
+
+  it('hydrates production threshold from the saved response', async () => {
+    installFetchMock(terminalConfig);
+    render(<HITLSettingsPanel />);
+    await screen.findByLabelText('Jev approval threshold');
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      ...terminalConfig, jevApprovalThreshold: 0.82, jevProductionApprovalThreshold: 0.97,
+    }), { status: 200 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('HITL settings saved.');
+    expect(screen.getByLabelText('Jev approval threshold')).toHaveValue(0.82);
+    expect(screen.getByLabelText('Jev production approval threshold')).toHaveValue(0.97);
+  });
+
   it('defaults legacy terminal approvals to manual without saving the draft', async () => {
     installFetchMock(terminalConfig);
     render(<HITLSettingsPanel />);
@@ -200,6 +254,7 @@ describe('HITLSettingsPanel', () => {
         humanReviewTimeoutMs: 60_000,
         autoPersonaId: 'ops-persona',
         jevApprovalThreshold: 0.95,
+        jevProductionApprovalThreshold: 0.95,
         jevInstructions: '',
         jevFallbackToPersona: false,
         rules: [],
@@ -252,6 +307,7 @@ describe('HITLSettingsPanel', () => {
         confirmationAuthority: 'human',
         humanReviewTimeoutMs: 60_000,
         jevApprovalThreshold: 0.95,
+        jevProductionApprovalThreshold: 0.95,
         jevInstructions: '',
         jevFallbackToPersona: false,
         rules: [],
@@ -460,6 +516,7 @@ it('saves explicit Ollama mode with no persona fallback or probability controls'
   expect(option).toBeChecked();
   expect(screen.getByText(/Only eligible read-only operations/)).toHaveTextContent('Protected operations and errors require manual approval');
   expect(screen.queryByLabelText('Jev approval threshold')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Jev production approval threshold')).not.toBeInTheDocument();
   expect(screen.queryByLabelText('Jev approval instructions')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Approval persona')).toBeDisabled();
   expect(getPutBody()).toBeNull();
@@ -468,5 +525,6 @@ it('saves explicit Ollama mode with no persona fallback or probability controls'
   expect(getPutBody()).toMatchObject({ mode: 'ollama', jevFallbackToPersona: false });
   expect(getPutBody()).not.toHaveProperty('autoPersonaId');
   expect(getPutBody()).not.toHaveProperty('jevApprovalThreshold');
+  expect(getPutBody()).not.toHaveProperty('jevProductionApprovalThreshold');
   expect(getPutBody()).not.toHaveProperty('jevInstructions');
 });

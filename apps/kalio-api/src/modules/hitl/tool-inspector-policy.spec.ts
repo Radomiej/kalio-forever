@@ -13,7 +13,7 @@ function fixture() {
     externalPolicyPersonaId: null, raAppApprovalTimeoutMs: 0, rules: [] };
   const settings = { getConfig: async () => structuredClone(config), revision: 1, changing: false };
   const model = { evaluateApproval: vi.fn().mockResolvedValue({ assessment: { checks: {
-    goal_alignment: .98, in_scope: .99, destructive_effect: .01, unauthorized_export: .01,
+    goal_alignment: .94, in_scope: .99, destructive_effect: .01, unauthorized_export: .01,
     evidence_sufficient: .99 }, contextFingerprint: 'a'.repeat(64) }, model: 'test', validateContext: () => true }) };
   const policy = new HitlPolicyService(settings as unknown as HitlConfigService,
     {} as HitlDecisionService, model as unknown as HitlJevService);

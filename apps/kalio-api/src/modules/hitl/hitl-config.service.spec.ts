@@ -20,6 +20,7 @@ const DEFAULT_CONFIG: HitlConfig = {
   raAppApprovalTimeoutMs: 600_000,
   jevInstructions: '',
   jevApprovalThreshold: 0.95,
+  jevProductionApprovalThreshold: 0.95,
   jevFallbackToPersona: false,
   rules: [],
   confirmationAuthority: 'human',
@@ -68,6 +69,17 @@ describe('HitlConfigService', () => {
   });
 
   it('returns manual defaults when no HITL config is stored', async () => {
+    await expect(service.getConfig()).resolves.toEqual(DEFAULT_CONFIG);
+  });
+  it('persists independently editable local and production thresholds', async () => {
+    await expect(service.updateConfig({ mode: 'manual', jevApprovalThreshold: .8, jevProductionApprovalThreshold: .95 }))
+      .resolves.toMatchObject({ jevApprovalThreshold: .8, jevProductionApprovalThreshold: .95 });
+    await expect(service.getConfig()).resolves.toMatchObject({ jevApprovalThreshold: .8, jevProductionApprovalThreshold: .95 });
+    await service.updateConfig({ mode: 'manual', jevProductionApprovalThreshold: .97 });
+    await expect(service.getConfig()).resolves.toMatchObject({ jevApprovalThreshold: .8, jevProductionApprovalThreshold: .97 });
+  });
+  it.each([NaN, Infinity, .5, 1.01])('rejects invalid production threshold %s before writes', async value => {
+    await expect(service.updateConfig({ mode: 'manual', jevProductionApprovalThreshold: value })).rejects.toThrow(BadRequestException);
     await expect(service.getConfig()).resolves.toEqual(DEFAULT_CONFIG);
   });
 

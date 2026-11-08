@@ -60,3 +60,4 @@ tmp-*.json
 docs/todos/
 # Private user corrections and project/workflow decisions; never publish by default.
 docs/cto/
+docs/meetings/
