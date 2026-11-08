@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::{HashMap, VecDeque}, env, net::SocketAddr, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-use tokio::sync::{mpsc, RwLock, Semaphore};
+use tokio::sync::{mpsc, watch, RwLock, Semaphore};
 use tower_http::limit::RequestBodyLimitLayer;
 
 const MAX_FRAME: usize = 1_048_576;
@@ -18,7 +18,7 @@ struct Envelope { v: u8, #[serde(rename="type")] kind: String, #[serde(rename="i
 #[derive(Clone)]
 struct App(Arc<Inner>);
 struct Inner { preauth: Arc<Semaphore>, agents: HashMap<String, [u8;32]>, db: Mutex<Connection>, instances: RwLock<HashMap<String, Instance>>, pairs: Mutex<HashMap<String, Pair>> }
-struct Instance { agent: Option<mpsc::Sender<String>>, devices: HashMap<String,mpsc::Sender<String>>, history: VecDeque<String>, snapshot: Option<String>, offline: bool }
+struct Instance { agent_generation: u64, agent_cancel: Option<watch::Sender<bool>>, agent: Option<mpsc::Sender<String>>, device_generation: HashMap<String,u64>, device_cancel: HashMap<String,watch::Sender<bool>>, devices: HashMap<String,mpsc::Sender<String>>, history: VecDeque<String>, snapshot: Option<String>, offline: bool }
 struct Pair { instance: String, expires: Instant }
 #[derive(Deserialize)]
 struct PairRequest { code: String }
@@ -84,10 +84,14 @@ async fn device_auth(mut socket:WebSocket, app:App, _permit:tokio::sync::OwnedSe
 }
 async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
     let (tx,mut rx)=mpsc::channel::<String>(QUEUE);
-    { let mut all=app.0.instances.write().await; let i=all.entry(id.clone()).or_insert(Instance{agent:None,devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:false}); i.agent=Some(tx.clone()); i.offline=false; i.snapshot=None; i.history.clear(); }
+    let (cancel_tx,mut cancel_rx)=watch::channel(false);
+    let generation={ let mut all=app.0.instances.write().await; let i=all.entry(id.clone()).or_insert(Instance{agent_generation:0,agent_cancel:None,agent:None,device_generation:HashMap::new(),device_cancel:HashMap::new(),devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:false});
+        if let Some(old)=i.agent_cancel.take(){let _=old.send(true);}
+        i.agent_generation+=1; let gen=i.agent_generation; i.agent_cancel=Some(cancel_tx); i.agent=Some(tx.clone()); i.offline=false; i.snapshot=None; i.history.clear(); gen };
     let _=broadcast(&app,&id,json!({"v":1,"type":"instance.online","instanceId":id})).await;
     loop {
         tokio::select! {
+            _=cancel_rx.changed()=>break,
             out=rx.recv()=> match out {Some(out)=>if socket.send(Message::Text(out.into())).await.is_err(){break},None=>break},
             incoming=socket.recv()=> match incoming {
                 Some(Ok(Message::Text(text))) if text.len()<=MAX_FRAME => {
@@ -106,6 +110,7 @@ async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
                     if let Ok(s)=serde_json::to_string(&e) {
                         let mut all=app.0.instances.write().await;
                         if let Some(i)=all.get_mut(&id) {
+                            if i.agent_generation!=generation {continue}
                             if e.kind=="snapshot" {i.snapshot=Some(s.clone())}
                             if !private {i.history.push_back(s.clone()); while i.history.len()>HISTORY{i.history.pop_front();}}
                         }
@@ -121,21 +126,25 @@ async fn agent_loop(mut socket:WebSocket, app:App, id:String) {
         }
     }
     let mut all=app.0.instances.write().await;
-    if let Some(i)=all.get_mut(&id) { i.agent=None; i.offline=true; }
+    let current=if let Some(i)=all.get_mut(&id) { if i.agent_generation==generation {i.agent=None;i.agent_cancel=None;i.offline=true;true} else {false} } else {false};
     drop(all);
-    let _=broadcast(&app,&id,json!({"v":1,"type":"instance.offline","instanceId":id})).await;
+    if current {let _=broadcast(&app,&id,json!({"v":1,"type":"instance.offline","instanceId":id})).await;}
 }
 async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
     let (tx,mut rx)=mpsc::channel::<String>(QUEUE);
-    let initial={
+    let (cancel_tx,mut cancel_rx)=watch::channel(false);
+    let (generation,initial)={
         let mut all=app.0.instances.write().await;
-        let i=all.entry(id.clone()).or_insert(Instance{agent:None,devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:true});
-        i.devices.insert(device.clone(),tx); let mut h=Vec::new(); if let Some(s)=&i.snapshot{h.push(s.clone())} h.extend(i.history.iter().cloned()); h
+        let i=all.entry(id.clone()).or_insert(Instance{agent_generation:0,agent_cancel:None,agent:None,device_generation:HashMap::new(),device_cancel:HashMap::new(),devices:HashMap::new(),history:VecDeque::new(),snapshot:None,offline:true});
+        if let Some(old)=i.device_cancel.remove(&device){let _=old.send(true);}
+        let gen=i.device_generation.get(&device).copied().unwrap_or(0)+1;
+        i.device_generation.insert(device.clone(),gen); i.device_cancel.insert(device.clone(),cancel_tx);
+        i.devices.insert(device.clone(),tx); let mut h=Vec::new(); if let Some(s)=&i.snapshot{h.push(s.clone())} h.extend(i.history.iter().cloned()); (gen,h)
     };
     for s in initial {if socket.send(Message::Text(s.into())).await.is_err(){return}}
     loop {
         tokio::select! {
-            Some(out)=rx.recv()=> if socket.send(Message::Text(out.into())).await.is_err(){break},
+            out=rx.recv()=> match out {Some(out)=>if socket.send(Message::Text(out.into())).await.is_err(){break},None=>break},
             incoming=socket.recv()=> match incoming {
                 Some(Ok(Message::Text(text))) if text.len()<=MAX_FRAME=>{
                     let Ok(v)=serde_json::from_str::<Value>(&text) else {continue};
@@ -164,7 +173,7 @@ async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
             }
         }
     }
-    if let Some(i)=app.0.instances.write().await.get_mut(&id){i.devices.remove(&device);}
+    if let Some(i)=app.0.instances.write().await.get_mut(&id){if i.device_generation.get(&device)==Some(&generation){i.devices.remove(&device);i.device_cancel.remove(&device);}}
 }
 async fn broadcast(app:&App,id:&str,v:Value)->Result<(),()> {broadcast_serialized(app,id,v.to_string()).await}
 async fn broadcast_devices(app:&App,id:&str,s:String)->Result<(),()> {broadcast_serialized(app,id,s).await}
@@ -172,7 +181,7 @@ async fn broadcast_serialized(app:&App,id:&str,s:String)->Result<(),()> {
     let mut all=app.0.instances.write().await;
     let Some(i)=all.get_mut(id) else{return Ok(())};
     let slow:Vec<String>=i.devices.iter().filter_map(|(d,tx)|tx.try_send(s.clone()).err().map(|_|d.clone())).collect();
-    for d in slow{i.devices.remove(&d);} Ok(())
+    for d in slow{ i.devices.remove(&d); if let Some(cancel)=i.device_cancel.remove(&d){let _=cancel.send(true);} } Ok(())
 }
 #[tokio::main]
 async fn main()->anyhow::Result<()> {
