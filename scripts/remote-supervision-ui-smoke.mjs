@@ -32,5 +32,18 @@ try{
   await page.setViewportSize({width:390,height:844});
   const png=await page.screenshot({path:resolve(root,'test-results/remote-mobile.png'),fullPage:true});
   console.log('KALIO_SCREENSHOT_BEGIN');const b=png.toString('base64');for(let i=0;i<b.length;i+=12000)console.log('KALIO_SCREENSHOT_CHUNK '+b.slice(i,i+12000));console.log('KALIO_SCREENSHOT_END');
+  async function captureView(label) {
+    const png=await page.screenshot({path:resolve(root,'test-results/remote-'+label+'.png'),fullPage:true});
+    console.log('KALIO_VIEW_BEGIN '+label);
+    const b=png.toString('base64');
+    for(let i=0;i<b.length;i+=12000)console.log('KALIO_VIEW_CHUNK '+b.slice(i,i+12000));
+    console.log('KALIO_VIEW_END');
+  }
+  await page.getByRole('button',{name:/^Graph$/}).click();
+  await page.locator('.graph-panel svg').waitFor();
+  await captureView('graph');
+  await page.getByRole('button',{name:/^Zatwierdzenia/}).click();
+  await page.locator('.approval-list').waitFor();
+  await captureView('approvals');
   if(errors.length)throw new Error(errors.join('; '));
 }finally{if(browser)await browser.close();server.kill('SIGTERM');}

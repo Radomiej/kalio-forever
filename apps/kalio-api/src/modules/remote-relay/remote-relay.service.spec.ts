@@ -163,7 +163,7 @@ describe('RemoteRelayService protocol lifecycle', () => {
     await oldRefresh;
     expect(oldSocket.sent).toHaveLength(0);
     expect(newSocket.sent).toHaveLength(0);
-    expect(state.refreshInFlight?.promise).toBe(newRefresh);
+    expect(internal(service).refreshInFlight?.promise).toBe(newRefresh);
 
     releaseNew({ sessions: [], approvals: [] });
     await newRefresh;
