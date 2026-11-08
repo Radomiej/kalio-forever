@@ -42,7 +42,6 @@ pub(crate) async fn pair(State(app):State<App>, Json(req):Json<PairRequest>) -> 
     if db.execute("INSERT INTO devices(instance,device,token_hash) VALUES(?1,?2,?3)",params![pair.instance,device,h.as_slice()]).is_err(){return error(StatusCode::INTERNAL_SERVER_ERROR)}
     Json(PairResponse{v:1,instance_id:pair.instance,device_id:device,token}).into_response()
 }
-fn bearer(headers:&HeaderMap)->Option<&str>{ headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ") }
 pub(crate) async fn broadcast(app:&App,id:&str,v:Value)->Result<(),()> {broadcast_serialized(app,id,v.to_string()).await}
 pub(crate) async fn broadcast_devices(app:&App,id:&str,s:String)->Result<(),()> {broadcast_serialized(app,id,s).await}
 async fn broadcast_serialized(app:&App,id:&str,s:String)->Result<(),()> {
@@ -57,7 +56,7 @@ pub async fn run()->anyhow::Result<()> {
     let cors=CorsLayer::new().allow_origin(AllowOrigin::list(app.0.allowed_origins.iter().map(|o|o.parse().expect("validated origin"))))
         .allow_methods([Method::GET,Method::POST,Method::OPTIONS]).allow_headers([CONTENT_TYPE]);
     let router=Router::new().route("/healthz",get(health)).route("/v1/pair",post(pair))
-      .route("/v1/agent/{instance}",get(agent::agent_ws)).route("/v1/device",get(device::device_ws))
+      .route("/v1/agent/{instance}",get(crate::agent::agent_ws)).route("/v1/device",get(crate::device::device_ws))
       .layer(cors).layer(RequestBodyLimitLayer::new(MAX_FRAME)).with_state(app);
     let addr:SocketAddr=env::var("KALIO_RELAY_BIND").unwrap_or_else(|_|"127.0.0.1:8787".into()).parse()?;
     axum::serve(tokio::net::TcpListener::bind(addr).await?,router).await?; Ok(())
