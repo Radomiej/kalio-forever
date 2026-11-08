@@ -3,9 +3,9 @@ use axum::{extract::{State, ws::{Message, WebSocket, WebSocketUpgrade}}, http::{
 use rusqlite::params;
 use serde_json::{json, Value};
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit};
 pub(crate) async fn device_ws(State(app):State<App>, headers:HeaderMap, ws:WebSocketUpgrade)->Response { if let Some(origin)=headers.get(ORIGIN).and_then(|h|h.to_str().ok()){if !app.0.allowed_origins.iter().any(|allowed|allowed==origin){return error(StatusCode::FORBIDDEN)}} let Ok(permit)=app.0.preauth.clone().try_acquire_owned() else{return error(StatusCode::SERVICE_UNAVAILABLE)}; ws.max_message_size(MAX_FRAME).on_upgrade(move|socket|device_auth(socket,app,permit)) }
-async fn device_auth(mut socket:WebSocket, app:App, _permit:tokio::sync::OwnedSemaphorePermit) {
+async fn device_auth(mut socket:WebSocket, app:App, _permit:OwnedSemaphorePermit) {
     let first=tokio::time::timeout(Duration::from_secs(5),socket.recv()).await;
     let Ok(Some(Ok(Message::Text(text))))=first else{return};
     let Ok(auth)=serde_json::from_str::<First>(&text) else{return};
