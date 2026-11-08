@@ -52,7 +52,7 @@ async fn device_loop(mut socket:WebSocket, app:App, id:String, device:String) {
                         if typ=="approval.decide" {let _=socket.send(Message::Text(json!({"v":1,"type":"approval.rejected","instanceId":id,"requestId":v.get("requestId"),"reason":"instance_offline"}).to_string().into())).await;}
                         continue
                     }
-                    let clean=if typ=="session.watch" {json!({"v":1,"type":typ,"instanceId":id,"requestId":v["requestId"],"payload":{"sessionId":v["sessionId"]}})}
+                    let clean=if typ=="session.watch" {json!({"v":1,"type":typ,"instanceId":id,"requestId":v["requestId"],"payload":{"sessionId":v["sessionId"],"deviceId":device}})}
                         else {json!({"v":1,"type":typ,"instanceId":id,"requestId":v["requestId"],"payload":{"approvalId":v["approvalId"],"revision":v["revision"],"argsSha256":v["argsSha256"],"decision":v["decision"],"deviceId":device}})};
                     if let Some(agent)=&i.agent {if agent.try_send(clean.to_string()).is_err(){break}}
                 },
