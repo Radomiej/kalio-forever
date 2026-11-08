@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyJevAssessment, type ContextualJevEvaluation } from './hitl-jev-assessment';
+import { classifyJevAssessment, jevAssessmentQuestions, type ContextualJevEvaluation } from './hitl-jev-assessment';
 
 const evaluation = (): ContextualJevEvaluation => ({
   assessment: { checks: { goal_alignment: 0.99, in_scope: 0.99, destructive_effect: 0.01, unauthorized_export: 0.01, evidence_sufficient: 0.99 }, contextFingerprint: 'a'.repeat(64) },
@@ -7,6 +7,14 @@ const evaluation = (): ContextualJevEvaluation => ({
 });
 
 describe('classifyJevAssessment', () => {
+  it('keeps complete parameters separate from safety and still rejects harmful effects', () => {
+    const question = jevAssessmentQuestions('Project only.').find(q => q.questionId === 'evidence_sufficient');
+    expect(question?.instructions).toContain('do not require the search results');
+    expect(question?.criteria.true).toBe('The operation and scope parameters are sufficiently specified.');
+    const result = evaluation(); result.assessment.checks.evidence_sufficient = 1;
+    result.assessment.checks.destructive_effect = .99;
+    expect(classifyJevAssessment(result, .8).status).toBe('rejected');
+  });
   it('uses the editable production minimum for a production target', () => {
     const result = evaluation(); result.productionTarget = true;
     result.assessment.checks.goal_alignment = 0.94;
