@@ -5,7 +5,7 @@ import { useAgentStore } from '../../store/agentStore';
 import { useSessionStore } from '../../store/sessionStore';
 import type { PendingRaAppApprovalItem } from '../../store/agentRuntimeRaAppApprovals';
 import { eventBus } from '../../services/eventBus';
-import { getToolTargetLabel } from '../chat/toolTargetLabel';
+import { HomeHitlToolCard } from './HomeHitlToolCard';
 
 interface HomeHitlInboxProps {
   onOpenSession: (sessionId: string) => void;
@@ -13,31 +13,8 @@ interface HomeHitlInboxProps {
   onRaAppApprovalSettled?: (sessionId: string, requestId: string) => void;
 }
 
-function formatArgValue(value: unknown): string {
-  if (value === null || value === undefined) return 'null';
-  if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 80)}...` : value;
-  const serialized = JSON.stringify(value);
-  return serialized.length > 80 ? `${serialized.slice(0, 80)}...` : serialized;
-}
-
-function buildArgPreview(args: Record<string, unknown>): string | null {
-  const firstEntry = Object.entries(args)[0];
-  if (!firstEntry) {
-    return null;
-  }
-  return `${firstEntry[0]}: ${formatArgValue(firstEntry[1])}`;
-}
-
 function sessionTitle(session: ChatSession | undefined, sessionId: string): string {
   return session?.title?.trim() || `Session ${sessionId.slice(0, 8)}`;
-}
-
-function timeoutLabel(timeoutMs: number): string {
-  if (timeoutMs === 0) {
-    return 'no timeout';
-  }
-  const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
-  return `${minutes}m timeout`;
 }
 
 export function HomeHitlInbox({
@@ -141,7 +118,7 @@ export function HomeHitlInbox({
           Nothing to do. Waiting for agents that need your approval.
         </div>
       ) : (
-      <div className="grid gap-2 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         {budgetApprovals.map((approval) => {
           const session = sessionsById.get(approval.sessionId);
           const nextLimit = approval.suggestedNextLimit ?? Math.min(1000, approval.currentLimit + 10);
@@ -267,84 +244,18 @@ export function HomeHitlInbox({
             (candidate) => candidate.callId === confirmation.toolCallId,
           );
           const args = activity?.args ?? confirmation.args;
-          const targetLabel = getToolTargetLabel(confirmation.toolName, args);
-          const argPreview = buildArgPreview(args);
-          const agentLabel = confirmation.agentRun?.label;
-
           return (
-            <article
+            <HomeHitlToolCard
               key={confirmation.requestId}
-              className="rounded-xl border border-warning/55 border-l-4 border-l-warning bg-warning/10 p-3 shadow-sm"
-            >
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-xs font-bold text-amber-300">{confirmation.toolName}</span>
-                    {targetLabel && (
-                      <span className="max-w-[14rem] truncate font-mono text-[10px] text-base-content/45" title={targetLabel}>
-                        {targetLabel}
-                      </span>
-                    )}
-                    <span className="rounded bg-warning/10 px-1.5 py-0.5 font-mono text-[10px] text-warning/80">
-                      {timeoutLabel(confirmation.timeoutMs)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs font-semibold text-base-content/80">
-                    {sessionTitle(session, confirmation.sessionId)}
-                  </p>
-                  {agentLabel && (
-                    <p className="text-[11px] text-base-content/45">{agentLabel}</p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs h-7 min-h-0 gap-1 px-2"
-                  onClick={() => onOpenSession(confirmation.sessionId)}
-                  data-testid={`home-hitl-open-${confirmation.requestId}`}
-                >
-                  <MessageSquare size={12} />
-                  Open
-                </button>
-              </div>
-
-              {argPreview && (
-                <div className="mt-2 truncate rounded bg-base-200/70 px-2 py-1 font-mono text-[10px] text-base-content/45">
-                  {argPreview}
-                </div>
-              )}
-
-              <textarea
-                className="textarea textarea-bordered mt-2 min-h-16 w-full resize-none bg-base-200/60 text-xs"
-                placeholder="Optional note. Reject notes are sent to the agent; approve notes are logged."
-                value={notes[confirmation.requestId] ?? ''}
-                onChange={(event) => setNotes((current) => ({
-                  ...current,
-                  [confirmation.requestId]: event.target.value,
-                }))}
-                data-testid={`home-hitl-note-${confirmation.requestId}`}
-              />
-
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-success btn-xs min-h-0 flex-1 gap-1"
-                  onClick={() => approve(confirmation)}
-                  data-testid={`home-hitl-approve-${confirmation.requestId}`}
-                >
-                  <Check size={12} />
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs min-h-0 flex-1 gap-1 text-error hover:bg-error/10"
-                  onClick={() => reject(confirmation)}
-                  data-testid={`home-hitl-reject-${confirmation.requestId}`}
-                >
-                  <X size={12} />
-                  Reject
-                </button>
-              </div>
-            </article>
+              confirmation={confirmation}
+              session={session}
+              args={args}
+              note={notes[confirmation.requestId] ?? ''}
+              onNoteChange={(note) => setNotes((current) => ({ ...current, [confirmation.requestId]: note }))}
+              onOpenSession={() => onOpenSession(confirmation.sessionId)}
+              onApprove={approve}
+              onReject={reject}
+            />
           );
         })}
       </div>
