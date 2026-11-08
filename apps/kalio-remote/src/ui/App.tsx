@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Check, CircleHelp, GitBranch, Layers, Link2, Moon, Search, ShieldAlert, Sun, X } from 'lucide-react';
 import { Approval, SessionSnapshot, Snapshot } from '../protocol';
-import { pairRelay, RelayClient, RelayEvent } from '../client/RelayClient';
+import { pairRelay, RelayClient } from '../client/RelayClient';
 
 type View = 'sessions' | 'approvals' | 'graph';
 type Connection = { id: string; name: string; client: RelayClient; snapshot: Snapshot | null; online: boolean };

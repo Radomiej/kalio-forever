@@ -8,8 +8,6 @@ export type Snapshot = { instance: { id: string; name: string }; sessions: Sessi
 export type SessionSnapshot = { sessionId: string; title: string; updatedAt?: string; active: boolean; messages: Message[]; graph: { nodes: GraphNode[]; edges: GraphEdge[]; available: boolean; reason?: string; runId?: string } };
 export type Envelope = { v: 1; type: string; instanceId: string; sequence?: number; requestId?: string; payload?: unknown };
 export function isRecord(value: unknown): value is UnknownRecord { return typeof value === 'object' && value !== null && !Array.isArray(value); }
-const str = (v: unknown, fallback = ''): string => typeof v === 'string' ? v : fallback;
-const isoDate = (v: unknown): string | undefined => typeof v === 'number' && Number.isFinite(v) ? new Date(v).toISOString() : typeof v === 'string' ? v : undefined;
 export function parseSnapshot(value: unknown): Snapshot | null {
   if (!isRecord(value) || !isRecord(value.instance) || typeof value.instance.id !== 'string' || typeof value.instance.name !== 'string' || !Array.isArray(value.sessions) || !Array.isArray(value.approvals)) return null;
   const sessions = value.sessions.flatMap((item): SessionSummary[] => {
@@ -38,7 +36,11 @@ export function parseSession(value: unknown): SessionSnapshot | null {
   }
   const graph = value.graph;
   const summary = value.session;
-  const model: SessionSnapshot = { sessionId: summary.id, title: summary.title, updatedAt: new Date(summary.updatedAt).toISOString(), active: summary.active, messages, graph:{available:false,nodes:[],edges:[]} };
+  const sessionId = summary.id as string;
+  const title = summary.title as string;
+  const updatedAt = summary.updatedAt as number;
+  const active = summary.active as boolean;
+  const model: SessionSnapshot = { sessionId, title, updatedAt: new Date(updatedAt).toISOString(), active, messages, graph:{available:false,nodes:[],edges:[]} };
   if (graph.available === false && (graph.reason === 'no_architecture_run' || graph.reason === 'projection_unavailable')) {
     model.graph.reason = graph.reason; return model;
   }
