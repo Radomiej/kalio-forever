@@ -43,7 +43,7 @@ function architectureRunIds(value: unknown): string[] {
   if (!isRecord(value)) return [];
   const architecture = value['architectureContext'];
   if (!isRecord(architecture)) return [];
-  const ids = [architecture['architectureRunId'], architecture['hostSessionId']];
+  const ids = [architecture['architectureRunId']];
   return [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.trim().length > 0))];
 }
 
