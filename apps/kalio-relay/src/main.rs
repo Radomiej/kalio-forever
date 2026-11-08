@@ -244,7 +244,7 @@ mod tests {
         assert!(!current.offline);
         assert!(current.agent.is_some());
         drop(state);
-        new.close(None).await.unwrap();
+        new.close().await.unwrap();
         server.abort();
     }
     #[tokio::test]
