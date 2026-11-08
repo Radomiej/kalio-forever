@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type {
   ChatRemoteSupervisionPort, RemoteSupervisionApproval, RemoteSupervisionDecision,
   RemoteSupervisionDecisionResult, RemoteSupervisionSessionSummary, ChatRemoteSupervisionSession,
@@ -8,6 +8,7 @@ import { SessionsService } from './sessions.service';
 import { ActiveSessionRegistry } from './active-session-registry.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { HitlRequestService } from '../hitl/hitl-request.service';
+import { NativeApprovalService } from '../agent-runtime/native-approval.service';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -28,12 +29,10 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(stable(value), 'utf8').digest('hex');
 }
 function requestRevision(row: { id: string; sessionId: string; turnId: string | null; toolCallId: string | null;
+  runId: string | null; revision: number; continuation: Record<string, unknown> | null;
   payload: Record<string, unknown> | null; createdAt: Date }): string {
   const payload = row.payload ?? {};
-  return sha256({
-    id: row.id, sessionId: row.sessionId, turnId: row.turnId, toolCallId: row.toolCallId,
-    toolName: payload['toolName'], args: payload['args'], requestedAt: row.createdAt.getTime(),
-  });
+  return sha256({ ...row, payload, requestedAt: row.createdAt.getTime() });
 }
 function summary(session: Awaited<ReturnType<SessionsService['list']>>[number], active: ActiveSessionRegistry): RemoteSupervisionSessionSummary {
   return {
@@ -61,16 +60,14 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
     private readonly active: ActiveSessionRegistry,
     private readonly hitl: HitlRequestService,
     private readonly dispatch: ToolDispatchService,
+    private readonly nativeApprovals: NativeApprovalService,
   ) {}
 
   async snapshot(): Promise<{ sessions: RemoteSupervisionSessionSummary[]; approvals: RemoteSupervisionApproval[] }> {
     const sessions = await this.sessions.list({ limit: 500 });
     const projected = sessions.map((session) => summary(session, this.active));
-    const approvals: RemoteSupervisionApproval[] = [];
-    for (const session of sessions) {
-      const pending = await this.hitl.listPending(session.id);
-      for (const row of pending) approvals.push(...this.approval(row));
-    }
+    const pending = await this.hitl.listPendingForSessions(sessions.map((session) => session.id));
+    const approvals = pending.flatMap((row) => this.approval(row));
     return { sessions: projected, approvals };
   }
 
@@ -108,12 +105,16 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
       && Object.hasOwn(row.continuation, 'hostConfirmationRequirement')) {
       return { status: 'rejected' };
     }
+    const remoteReason = `Remote device ${input.deviceId}`;
+    if (isRecord(row.payload) && row.payload['nativeApproval'] === true && row.kind === 'raapp_native') {
+      const settled = await this.nativeApprovals.resolve(row.id, row.sessionId,
+        input.decision === 'approve' ? 'accept' : 'decline', remoteReason);
+      return { status: settled ? 'settled' : 'stale' };
+    }
     const status = input.decision === 'approve'
-      ? await this.dispatch.resolveConfirmation(row.id, row.sessionId, `Remote device ${input.deviceId}`)
-      : await this.dispatch.cancelConfirmation(row.id, row.sessionId, `Remote device ${input.deviceId}`);
-    return status === 'resolved' || status === 'rejected'
-      ? { status: 'settled' }
-      : { status: 'stale' };
+      ? await this.dispatch.resolveConfirmation(row.id, row.sessionId, remoteReason)
+      : await this.dispatch.cancelConfirmation(row.id, row.sessionId, remoteReason);
+    return status === 'resolved' || status === 'rejected' ? { status: 'settled' } : { status: 'stale' };
   }
 
   private approval(row: Awaited<ReturnType<HitlRequestService['getById']>> extends infer R ? Exclude<R, null> : never): RemoteSupervisionApproval[] {
@@ -122,10 +123,12 @@ export class RemoteSupervisionChatAdapter implements ChatRemoteSupervisionPort {
     const args = isRecord(payload['args']) ? payload['args'] : {};
     const toolName = typeof payload['toolName'] === 'string' ? payload['toolName'] : row.kind;
     const hostOnly = isRecord(row.continuation) && Object.hasOwn(row.continuation, 'hostConfirmationRequirement');
-    const decisionAvailable = row.kind === 'tool_confirmation' && !hostOnly;
+    const nativeCodex = row.kind === 'raapp_native' && payload['nativeApproval'] === true;
+    const decisionAvailable = (row.kind === 'tool_confirmation' && !hostOnly) || nativeCodex;
     return [{
       id: row.id, sessionId: row.sessionId, toolName, args: sanitized(args) as Record<string, unknown>, requestedAt: row.createdAt.getTime(),
-      revision: requestRevision(row), argsSha256: sha256(args),
+      revision: requestRevision(row), argsSha256: sha256(args), kind: nativeCodex ? 'native_approval' : row.kind,
+      decisionAvailable, ...(decisionAvailable ? {} : { availabilityReason: 'desktop_only' as const }),
     }];
   }
 }

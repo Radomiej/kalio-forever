@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject } from '@nest
 import type { ArchitectureRemoteGraphPort, ChatRemoteSupervisionPort, RemoteSupervisionPort, RemoteSupervisionSessionSnapshot } from '@kalio/types';
 import { ARCHITECTURE_REMOTE_GRAPH_PORT, CHAT_REMOTE_SUPERVISION_PORT } from '@kalio/types';
 import { nanoid } from 'nanoid';
+import { createHash } from 'node:crypto';
 
 interface Envelope { v: 1; type: string; instanceId: string; requestId?: string; sequence?: number; payload?: Record<string, unknown> }
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -16,6 +17,10 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   private sequence = 0;
   private stopped = false;
   private authenticated = false;
+  private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly watchedSessions = new Set<string>();
+  private readonly watchedSessionHashes = new Map<string, string>();
+  private lastSnapshotHash = '';
   private readonly enabled = process.env['KALIO_REMOTE_RELAY_ENABLED'] === 'true';
   private readonly instanceId = process.env['KALIO_REMOTE_RELAY_INSTANCE_ID'] ?? '';
   private readonly instanceName = process.env['KALIO_REMOTE_RELAY_INSTANCE_NAME'] ?? '';
@@ -35,6 +40,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   onModuleDestroy(): void {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.socket?.close(1000, 'shutdown');
     this.socket = null;
   }
@@ -110,8 +116,9 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     if (message.type === 'auth.accepted') {
       this.authenticated = true;
       this.retry = 0;
-      const snapshot = await this.snapshot();
-      this.send('snapshot', snapshot as unknown as Record<string, unknown>);
+      await this.refreshProjection(true);
+      this.refreshTimer = setInterval(() => { void this.refreshProjection(false).catch((error: unknown) => this.logger.warn('Remote projection refresh failed', error instanceof Error ? error.message : String(error))); }, 2_000);
+      this.refreshTimer.unref?.();
       return;
     }
     if (!this.authenticated) return;
@@ -127,6 +134,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     }
     if (message.type === 'session.watch' && message.requestId && message.payload
       && typeof message.payload['sessionId'] === 'string') {
+      this.watchedSessions.add(message.payload['sessionId']);
       const result = await this.session(message.payload['sessionId']);
       this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }) });
       return;
@@ -139,9 +147,27 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
         ? await this.decide({ approvalId, revision, argsSha256, decision, deviceId })
         : { status: 'rejected' as const };
       this.send('approval.result', { requestId: message.requestId, approvalId, ...result });
+      await this.refreshProjection(false);
     }
   }
 
+  private async refreshProjection(force: boolean): Promise<void> {
+    if (!this.authenticated) return;
+    const current = await this.snapshot();
+    const snapshotHash = createHash('sha256').update(JSON.stringify(current)).digest('hex');
+    if (force || snapshotHash !== this.lastSnapshotHash) {
+      this.lastSnapshotHash = snapshotHash;
+      this.send('snapshot', current as unknown as Record<string, unknown>);
+    }
+    for (const sessionId of this.watchedSessions) {
+      const projection = await this.session(sessionId);
+      const hash = createHash('sha256').update(JSON.stringify(projection)).digest('hex');
+      if (force || this.watchedSessionHashes.get(sessionId) !== hash) {
+        this.watchedSessionHashes.set(sessionId, hash);
+        this.send('session.snapshot', { sessionId, ...(projection ?? { session: null }) });
+      }
+    }
+  }
   private send(type: string, payload?: Record<string, unknown>): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
     const requestId = payload && typeof payload['requestId'] === 'string' ? payload['requestId'] as string : undefined;
@@ -154,6 +180,11 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   }
   private disconnected(): void {
     this.authenticated = false;
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
+    this.watchedSessions.clear();
+    this.watchedSessionHashes.clear();
+    this.lastSnapshotHash = '';
     this.socket = null;
     for (const [id, pending] of this.pendingPairing) {
       clearTimeout(pending.timeout);

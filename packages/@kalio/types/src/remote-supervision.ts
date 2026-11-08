@@ -7,7 +7,7 @@ export const ARCHITECTURE_REMOTE_GRAPH_PORT = Symbol('ARCHITECTURE_REMOTE_GRAPH_
 export interface RemoteSupervisionApproval {
   id: string; sessionId: string; toolName: string; args: Record<string, unknown>;
   requestedAt: number; revision: string; argsSha256: string;
-  kind: 'tool_confirmation' | 'raapp_native' | 'tool_budget';
+  kind: 'tool_confirmation' | 'raapp_native' | 'tool_budget' | 'native_approval';
   decisionAvailable: boolean; availabilityReason?: 'desktop_only';
 }
 export interface RemoteSupervisionSessionSummary {
