@@ -307,3 +307,8 @@ classDiagram
 - Kalio's history budget and the provider's actual context capacity are separate limits. A larger history setting must not be presented as enlarging the provider window.
 - The benchmark's proposed tool discovery separates the authorized catalog from schemas currently advertised to a model. Discovery must not broaden persona/MCP permissions or bypass execution validation and HITL.
 - Static profiles, dynamic discovery and semantic compaction remain distinct implementation choices; benchmark proposals must not be described as shipped behavior. Preserve durable source material and measure correctness plus retrieval/recovery cost before adopting lossy compression.
+
+
+## Remote supervision boundary (2026-11-08)
+
+The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.

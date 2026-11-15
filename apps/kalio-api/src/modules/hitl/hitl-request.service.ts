@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { ToolConfirmationRequest, ToolResult, HostHitlExecutionCommit } from '@kalio/types';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { DrizzleService } from '../../database/drizzle.service';
 import { hitlRequests, type HitlRequestRow } from '../../database/schema';
@@ -67,8 +67,14 @@ export class HitlRequestService {
   }
 
   async listPending(sessionId: string): Promise<HitlRequestRow[]> {
+    return this.listPendingForSessions([sessionId]);
+  }
+
+  async listPendingForSessions(sessionIds: readonly string[]): Promise<HitlRequestRow[]> {
+    const ids = [...new Set(sessionIds)].filter(Boolean).slice(0, 500);
+    if (ids.length === 0) return [];
     return this.drizzle.db.select().from(hitlRequests)
-      .where(and(eq(hitlRequests.sessionId, sessionId), eq(hitlRequests.status, 'pending')));
+      .where(and(inArray(hitlRequests.sessionId, ids), eq(hitlRequests.status, 'pending')));
   }
 
   async listPendingToolConfirmations(sessionId: string): Promise<ToolConfirmationRequest[]> {
