@@ -269,7 +269,7 @@ export class RunJournalService implements OnModuleInit {
   }
 
   async getCompletedTurn(sessionId: string, turnId: string): Promise<ChatRunSnapshot | null> {
-    const [row] = await this.drizzle.db
+    const rows = await this.drizzle.db
       .select()
       .from(chatRuns)
       .where(and(
@@ -277,9 +277,8 @@ export class RunJournalService implements OnModuleInit {
         eq(chatRuns.turnId, turnId),
         eq(chatRuns.status, 'completed'),
       ))
-      .orderBy(desc(chatRuns.updatedAt), desc(sql`rowid`))
-      .limit(1);
-    return row ? this.toSnapshot(row) : null;
+      .limit(2);
+    return rows.length === 1 ? this.toSnapshot(rows[0]!) : null;
   }
 
   async getLatestCompletedForSession(sessionId: string): Promise<ChatRunSnapshot | null> {
@@ -423,9 +422,9 @@ export class RunJournalService implements OnModuleInit {
     }
 
     const now = new Date();
-    await Promise.all(activeRows.map(async (row) => {
+    const updated = await Promise.all(activeRows.map(async (row) => {
       const safeResume = SAFE_LLM_PHASES.has(row.phase);
-      await this.drizzle.db
+      return this.drizzle.db
         .update(chatRuns)
         .set({
           status: 'interrupted_needs_retry',
@@ -438,10 +437,12 @@ export class RunJournalService implements OnModuleInit {
           updatedAt: now,
           lastHeartbeatAt: now,
         })
-        .where(eq(chatRuns.id, row.id));
+        .where(and(eq(chatRuns.id, row.id), eq(chatRuns.status, row.status), eq(chatRuns.revision, row.revision)))
+        .returning({ id: chatRuns.id });
     }));
 
-    this.logger.warn(`Recovered ${activeRows.length} stale active chat run(s) after restart`);
+    const recovered = updated.reduce((sum, rows) => sum + rows.length, 0);
+    if (recovered > 0) this.logger.warn(`Recovered ${recovered} stale active chat run(s) after restart`);
   }
 
   private async getRun(id: string): Promise<ChatRunSnapshot> {
