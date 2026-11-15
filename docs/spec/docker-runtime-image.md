@@ -53,3 +53,18 @@ Keep the volume when replacing the container with a new image. It holds SQLite
 state, workspaces, memory, and the generated credential key. Supply provider
 credentials at runtime, for example with `docker run --env-file` using a file
 outside the build context.
+
+## Install from a registry image
+
+Once a release image is published, place the accompanying compose.kalio.yml
+in a local directory. Set KALIO_IMAGE in the shell to the image reference
+from that release, preferably including its digest. Run:
+
+```bash
+docker compose -f compose.kalio.yml pull
+docker compose -f compose.kalio.yml up -d
+```
+
+Open http://127.0.0.1:4016. Set KALIO_HTTP_PORT before starting if port
+4016 is occupied. Configure a provider in the Kalio UI. Keep the same Compose
+project directory and named volume when updating the image reference.

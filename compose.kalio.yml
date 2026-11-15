@@ -1,0 +1,11 @@
+services:
+  kalio:
+    image: ${KALIO_IMAGE:?Set KALIO_IMAGE to a versioned or digest-pinned Kalio image}
+    ports:
+      - '127.0.0.1:${KALIO_HTTP_PORT:-4016}:4016'
+    volumes:
+      - kalio-data:/data
+    restart: unless-stopped
+
+volumes:
+  kalio-data:
