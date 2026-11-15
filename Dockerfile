@@ -14,7 +14,9 @@ RUN --mount=type=bind,source=release,target=/release,readonly \
       --no-launch --no-desktop-icon && \
     rm /opt/kalio/data/.env && \
     mv /opt/kalio/data /data && \
-    ln -s /data /opt/kalio/data
+    ln -s /data /opt/kalio/data && \
+    chgrp -R 10001 /opt/kalio && \
+    chmod -R g+rX /opt/kalio
 
 FROM ubuntu:24.04
 
