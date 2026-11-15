@@ -2255,3 +2255,5 @@ export * from './chat-durable-evidence-reader';
 export * from './goal-launch-decision';
 export { PROJECT_CONTEXT_PORT } from './embedding-resources';
 export type { ProjectContextSettings, ProjectContextPort } from './embedding-resources';
+
+export * from './remote-supervision';
