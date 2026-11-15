@@ -116,6 +116,7 @@ async fn replacing_device_closes_only_the_old_connection() {
         )
         .unwrap();
     let mut old = auth_device(&base, "device-secret").await;
+    assert_eq!(text_json(&mut old).await["type"], "instance.offline");
     let mut new = auth_device(&base, "device-secret").await;
     let ended = tokio::time::timeout(Duration::from_secs(2), old.next())
         .await
@@ -239,12 +240,12 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
 
     phone.send(ClientMessage::Text(json!({"v":1,"type":"session.watch","instanceId":"desk","requestId":"watch-1","sessionId":"session-7","extra":"drop"}).to_string().into())).await.unwrap();
     let watch = text_json(&mut host).await;
-    assert_eq!(watch["requestId"], "watch-1");
+    assert_ne!(watch["requestId"], "watch-1");
     assert_eq!(watch["payload"]["sessionId"], "session-7");
     assert_eq!(watch["payload"]["deviceId"], credentials["deviceId"]);
     assert!(watch.get("sessionId").is_none());
     assert!(watch.get("extra").is_none());
-    host.send(ClientMessage::Text(json!({"v":1,"type":"session.snapshot","instanceId":"desk","requestId":"watch-1","payload":{"deviceId":credentials["deviceId"],"session":{"id":"session-7"}}}).to_string().into())).await.unwrap();
+    host.send(ClientMessage::Text(json!({"v":1,"type":"session.snapshot","instanceId":"desk","requestId":watch["requestId"],"payload":{"deviceId":credentials["deviceId"],"session":{"id":"session-7"}}}).to_string().into())).await.unwrap();
     assert_eq!(text_json(&mut phone).await["requestId"], "watch-1");
 
     phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"decision-1","approvalId":"approval-2","revision":"rev-3","argsSha256":"digest","decision":"approve","payload":{"deviceId":"spoof"}}).to_string().into())).await.unwrap();
@@ -281,13 +282,194 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
     assert!(replay.is_err());
     phone = reconnected_phone;
     host.send(ClientMessage::Close(None)).await.unwrap();
-    phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"offline-1","approvalId":"a","revision":"r","argsSha256":"d","decision":"deny"}).to_string().into())).await.unwrap();
-    let rejected = loop {
-        let message = text_json(&mut phone).await;
-        if message["type"] == "approval.rejected" {
-            break message;
-        }
-    };
-    assert_eq!(rejected["type"], "approval.rejected");
+    assert_eq!(text_json(&mut phone).await["type"], "instance.offline");
+    assert_eq!(
+        text_json(&mut second_phone).await["type"],
+        "instance.offline"
+    );
+    let mut offline_phone = auth_device(&base, "second-token").await;
+    assert_eq!(
+        text_json(&mut offline_phone).await["type"],
+        "instance.offline"
+    );
+
+    send_json(&mut phone, json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"offline-1","approvalId":"a","revision":"r","argsSha256":"d","decision":"deny"})).await;
+    assert_eq!(
+        text_json(&mut phone).await,
+        json!({"v":1,"type":"approval.rejected","instanceId":"desk","requestId":"offline-1","reason":"instance_offline"})
+    );
+    send_json(&mut phone, watch_command("offline-watch", "session-7")).await;
+    assert_eq!(
+        text_json(&mut phone).await,
+        json!({"v":1,"type":"session.snapshot","instanceId":"desk","requestId":"offline-watch","payload":{"session":null,"error":"instance_offline"}})
+    );
+
+    let mut reconnect = auth_agent(&base).await;
+    send_json(&mut reconnect, json!({"v":1,"type":"snapshot","instanceId":"desk","sequence":1,"payload":{"overview":"fresh"}})).await;
+    for device in [&mut phone, &mut offline_phone] {
+        assert_eq!(text_json(device).await["type"], "instance.online");
+        let fresh = text_json(device).await;
+        assert_eq!(fresh["type"], "snapshot");
+        assert_eq!(fresh["payload"]["overview"], "fresh");
+    }
+    let mut hydrated_phone = auth_device(&base, "second-token").await;
+    assert_eq!(
+        text_json(&mut hydrated_phone).await["payload"]["overview"],
+        "fresh"
+    );
     server.abort();
+}
+
+async fn send_json<S>(socket: &mut S, frame: Value)
+where
+    S: futures_util::Sink<ClientMessage, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    socket
+        .send(ClientMessage::Text(frame.to_string().into()))
+        .await
+        .unwrap();
+}
+
+fn watch_command(request_id: &str, session_id: &str) -> Value {
+    json!({"v":1,"type":"session.watch","instanceId":"desk","requestId":request_id,"sessionId":session_id})
+}
+
+fn watch_response(watch: &Value, device: &str, projection: Value) -> Value {
+    let mut payload = projection;
+    payload["deviceId"] = json!(device);
+    json!({"v":1,"type":"session.snapshot","instanceId":"desk","requestId":watch["requestId"],"payload":payload})
+}
+
+#[tokio::test]
+async fn reused_watch_ids_are_scoped_to_the_latest_watch_and_device_socket() {
+    let (base, server, app) = test_server().await;
+    for device in ["first", "second"] {
+        app.0
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO devices(instance,device,token_hash) VALUES(?1,?2,?3)",
+                params!["desk", device, hash(device).as_slice()],
+            )
+            .unwrap();
+    }
+    let mut host = auth_agent(&base).await;
+    let mut first = auth_device(&base, "first").await;
+    let mut second = auth_device(&base, "second").await;
+
+    send_json(&mut first, watch_command("same", "")).await;
+    send_json(&mut first, watch_command("same", "old")).await;
+    let invalid = text_json(&mut first).await;
+    assert_eq!(invalid["requestId"], "same");
+    assert_eq!(invalid["payload"]["error"], "invalid_session");
+    let old = text_json(&mut host).await;
+    send_json(&mut first, watch_command("same", "current")).await;
+    let current = text_json(&mut host).await;
+    send_json(&mut second, watch_command("same", "second")).await;
+    let other = text_json(&mut host).await;
+    assert_ne!(old["requestId"], current["requestId"]);
+    assert_ne!(current["requestId"], other["requestId"]);
+
+    send_json(
+        &mut host,
+        watch_response(&old, "first", json!({"session":{"id":"old"}})),
+    )
+    .await;
+    send_json(
+        &mut host,
+        watch_response(&current, "second", json!({"session":{"id":"current"}})),
+    )
+    .await;
+    send_json(
+        &mut host,
+        watch_response(
+            &current,
+            "first",
+            json!({"session":null,"error":"projection_failed"}),
+        ),
+    )
+    .await;
+    send_json(
+        &mut host,
+        watch_response(&other, "second", json!({"session":{"id":"second"}})),
+    )
+    .await;
+    let failed = text_json(&mut first).await;
+    assert_eq!(failed["requestId"], "same");
+    assert_eq!(failed["payload"]["error"], "projection_failed");
+    let isolated = text_json(&mut second).await;
+    assert_eq!(isolated["requestId"], "same");
+    assert_eq!(isolated["payload"]["session"]["id"], "second");
+
+    let mut replacement = auth_device(&base, "first").await;
+    let unwatch = text_json(&mut host).await;
+    assert_eq!(unwatch["type"], "session.unwatch");
+    assert_eq!(unwatch["payload"]["deviceId"], "first");
+    send_json(&mut replacement, watch_command("same", "current")).await;
+    let new = text_json(&mut host).await;
+    assert_ne!(current["requestId"], new["requestId"]);
+    send_json(
+        &mut host,
+        watch_response(&current, "first", json!({"session":{"id":"stale-socket"}})),
+    )
+    .await;
+    send_json(
+        &mut host,
+        watch_response(&new, "first", json!({"session":{"id":"current"}})),
+    )
+    .await;
+    let fresh = text_json(&mut replacement).await;
+    assert_eq!(fresh["requestId"], "same");
+    assert_eq!(fresh["payload"]["session"]["id"], "current");
+    send_json(&mut second, json!({"v":1,"type":"session.unwatch","instanceId":"desk","deviceId":"first","payload":{"deviceId":"first"}})).await;
+    let unwatch = text_json(&mut host).await;
+    assert_eq!(unwatch["type"], "session.unwatch");
+    assert_eq!(unwatch["payload"]["deviceId"], "second");
+
+    send_json(
+        &mut host,
+        watch_response(&other, "second", json!({"session":{"id":"unwatched"}})),
+    )
+    .await;
+    send_json(
+        &mut host,
+        watch_response(&new, "first", json!({"session":{"id":"still-current"}})),
+    )
+    .await;
+    assert_eq!(
+        text_json(&mut replacement).await["payload"]["session"]["id"],
+        "still-current"
+    );
+    send_json(
+        &mut host,
+        json!({"v":1,"type":"snapshot","instanceId":"desk","payload":{"overview":"barrier"}}),
+    )
+    .await;
+    assert_eq!(text_json(&mut second).await["type"], "snapshot");
+    server.abort();
+}
+
+#[test]
+fn failed_unwatch_cancels_the_host_to_reclaim_watch_slots() {
+    let (agent, mut queue) = tokio::sync::mpsc::channel(1);
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    agent.try_send("already queued".to_owned()).unwrap();
+    let mut instance = Instance {
+        agent: Some(agent),
+        agent_cancel: Some(cancel),
+        ..Instance::default()
+    };
+    instance.watches.insert(
+        "device".into(),
+        SessionWatch {
+            client_id: "client".into(),
+            host_id: "host".into(),
+        },
+    );
+    instance.clear_watch("desk", "device");
+    assert!(instance.watches.is_empty());
+    assert!(*cancelled.borrow());
+    assert!(queue.try_recv().is_ok());
+    assert_eq!(instance.forward("new command".into()), Err("relay_busy"));
 }

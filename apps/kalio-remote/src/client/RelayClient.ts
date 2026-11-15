@@ -4,8 +4,10 @@ import { isRecord, parseSession, parseSnapshot } from '../protocol';
 export type RelayEvent =
   | { kind: 'snapshot'; instanceId: string; value: Snapshot; sequence: number }
   | { kind: 'session'; instanceId: string; value: SessionSnapshot }
+  | { kind: 'session-error'; instanceId: string; sessionId: string; message: string }
+  | { kind: 'hydrating'; instanceId: string }
   | { kind: 'offline'; instanceId: string }
-  | { kind: 'result'; instanceId: string; requestId: string; approvalId: string; status: string }
+  | { kind: 'result'; instanceId: string; requestId: string; approvalId: string; status: string; reason?: string }
   | { kind: 'error'; instanceId: string; message: string };
 export type PairReply = { v: 1; instanceId: string; deviceId: string; token: string };
 type Outstanding = { approvalId: string; decision: 'approve'|'deny'; revision: string };
@@ -16,6 +18,7 @@ export class RelayClient {
   private snapshotAt = 0;
   private lastSequence = -1;
   private fresh = false;
+  private hostOffline = false;
   private authenticated = false;
   private closed = false;
   private generation = 0;
@@ -33,16 +36,39 @@ export class RelayClient {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     const generation = ++this.generation;
     this.socket?.close();
-    this.authenticated = false; this.fresh = false; this.lastSequence = -1; this.snapshotAt = 0; this.outstanding.clear();
+    this.authenticated = false; this.fresh = false; this.hostOffline = false; this.lastSequence = -1; this.snapshotAt = 0;
+    this.watchRequestId = null;
+    this.outstanding.clear();
     const url = new URL('/v1/device', this.baseUrl);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(url); this.socket = socket;
     socket.onopen = () => { if (generation === this.generation) socket.send(JSON.stringify({ v: 1, type: 'auth', instanceId: this.pair.instanceId, token: this.pair.token })); };
     socket.onmessage = (event) => { if (generation === this.generation) this.receive(event.data); };
-    socket.onclose = () => { if (generation !== this.generation) return; this.fresh = false; this.authenticated = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); if (!this.closed) this.reconnectTimer = setTimeout(() => this.connect(), 1500); };
+    socket.onclose = () => {
+      if (generation !== this.generation) return;
+      this.generation++;
+      this.fresh = false;
+      this.authenticated = false;
+      this.watchRequestId = null;
+      this.outstanding.clear();
+      this.emit({ kind: 'offline', instanceId: this.instanceId });
+      if (!this.closed) this.reconnectTimer = setTimeout(() => this.connect(), 1500);
+    };
     socket.onerror = () => { if (generation === this.generation) this.emit({ kind: 'error', instanceId: this.instanceId, message: 'Relay connection failed.' }); };
   }
-  watch(sessionId: string): void { this.selectedSession = sessionId || null; this.watchRequestId = null; if (this.fresh && sessionId) { const requestId=this.id(); this.watchRequestId=requestId; this.send({ type: 'session.watch', requestId, sessionId }); } }
+  watch(sessionId: string): void {
+    const previousSession = this.selectedSession;
+    this.selectedSession = sessionId || null;
+    this.watchRequestId = null;
+    if (!this.fresh) return;
+    if (!sessionId) {
+      if (previousSession) this.send({ type: 'session.unwatch' });
+      return;
+    }
+    const requestId = this.id();
+    this.watchRequestId = requestId;
+    this.send({ type: 'session.watch', requestId, sessionId });
+  }
   decide(approval: Approval, decision: 'approve' | 'deny'): string {
     if (!this.canDecide()) throw new Error('Relay snapshot is stale or offline.');
     const requestId = this.id();
@@ -51,7 +77,7 @@ export class RelayClient {
     return requestId;
   }
   canDecide(): boolean { return Boolean(this.socket?.readyState === WebSocket.OPEN && this.authenticated && this.fresh && Date.now() - this.snapshotAt < 15000); }
-  disconnect(): void { this.closed = true; if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.generation++; this.socket?.close(); this.pair.token = ''; this.outstanding.clear(); }
+  disconnect(): void { this.closed = true; if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.generation++; this.socket?.close(); this.pair.token = ''; this.watchRequestId = null; this.outstanding.clear(); }
   private id(): string { return crypto.randomUUID(); }
   private send(data: Record<string, unknown>): void { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ v: 1, instanceId: this.pair.instanceId, ...data })); }
   private emit(event: RelayEvent): void { this.listeners.forEach(listener => listener(event)); }
@@ -62,22 +88,46 @@ export class RelayClient {
     if (envelope.type === 'auth.accepted') { this.authenticated = true; return; }
     if (!this.authenticated) return;
     if (envelope.type === 'snapshot' && typeof envelope.sequence === 'number') {
-      if (envelope.sequence <= this.lastSequence) return;
+      if (this.hostOffline || envelope.sequence <= this.lastSequence) return;
       const value = parseSnapshot(envelope.payload);
       if (!value || value.instance.id !== this.pair.instanceId) return;
       this.lastSequence = envelope.sequence; this.snapshotAt = Date.now(); this.fresh = true;
       this.emit({ kind: 'snapshot', instanceId: this.instanceId, value, sequence: envelope.sequence });
-      if (this.selectedSession) this.watch(this.selectedSession);
+      if (this.selectedSession && !this.watchRequestId) this.watch(this.selectedSession);
     } else if (envelope.type === 'session.snapshot') {
-      if (envelope.requestId !== this.watchRequestId) return;
-      const value = parseSession(envelope.payload); if (value && value.sessionId === this.selectedSession) this.emit({ kind: 'session', instanceId: this.instanceId, value });
+      const sessionId = this.selectedSession;
+      if (!this.fresh || !sessionId || !this.watchRequestId || envelope.requestId !== this.watchRequestId) return;
+      const payload = envelope.payload;
+      if (isRecord(payload) && typeof payload.error === 'string') {
+        if (payload.error === 'relay_busy' || payload.error === 'watch_limit') this.watchRequestId = null;
+        this.emit({ kind: 'session-error', instanceId: this.instanceId, sessionId, message: 'Nie udało się wczytać sesji: ' + payload.error });
+        return;
+      }
+      const value = parseSession(payload);
+      if (value && value.sessionId === this.selectedSession) this.emit({ kind: 'session', instanceId: this.instanceId, value });
     } else if (envelope.type === 'approval.result' && typeof envelope.requestId === 'string' && isRecord(envelope.payload) && typeof envelope.payload.approvalId === 'string' && typeof envelope.payload.status === 'string') {
       const expected = this.outstanding.get(envelope.requestId);
       if (!expected || expected.approvalId !== envelope.payload.approvalId) return;
       this.outstanding.delete(envelope.requestId);
       this.emit({ kind: 'result', instanceId: this.instanceId, requestId: envelope.requestId, approvalId: envelope.payload.approvalId, status: envelope.payload.status });
-    } else if (envelope.type === 'instance.online') { this.lastSequence = -1; this.fresh = false;
-    } else if (envelope.type === 'instance.offline') { this.fresh = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); }
+    } else if (envelope.type === 'approval.rejected' && typeof envelope.requestId === 'string' && typeof data.reason === 'string') {
+      const expected = this.outstanding.get(envelope.requestId);
+      if (!expected) return;
+      this.outstanding.delete(envelope.requestId);
+      this.emit({ kind: 'result', instanceId: this.instanceId, requestId: envelope.requestId, approvalId: expected.approvalId, status: 'rejected', reason: data.reason });
+    } else if (envelope.type === 'instance.online') {
+      this.hostOffline = false;
+      this.lastSequence = -1;
+      this.fresh = false;
+      this.watchRequestId = null;
+      this.outstanding.clear();
+      this.emit({ kind: 'hydrating', instanceId: this.instanceId });
+    } else if (envelope.type === 'instance.offline') {
+      this.hostOffline = true;
+      this.fresh = false;
+      this.watchRequestId = null;
+      this.emit({ kind: 'offline', instanceId: this.instanceId });
+    }
   }
 }
 export function relayOrigin(relayUrl: string): string {

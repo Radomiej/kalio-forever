@@ -26,7 +26,6 @@ use tower_http::{
     limit::RequestBodyLimitLayer,
 };
 pub(crate) const MAX_FRAME: usize = 1_048_576;
-pub(crate) const HISTORY: usize = 32;
 pub(crate) const QUEUE: usize = 64;
 pub(crate) const PAIR_LIMIT: usize = 2048;
 
@@ -125,52 +124,6 @@ pub(crate) async fn pair(State(app): State<App>, Json(req): Json<PairRequest>) -
         token,
     })
     .into_response()
-}
-pub(crate) async fn broadcast(app: &App, id: &str, v: Value) -> Result<(), ()> {
-    broadcast_serialized(app, id, v.to_string()).await
-}
-pub(crate) async fn send_to_device(
-    app: &App,
-    id: &str,
-    generation: u64,
-    device: &str,
-    frame: String,
-) {
-    let mut instances = app.0.instances.write().await;
-    let Some(instance) = instances
-        .get_mut(id)
-        .filter(|instance| instance.agent_generation == generation)
-    else {
-        return;
-    };
-    if instance
-        .devices
-        .get(device)
-        .is_some_and(|tx| tx.try_send(frame).is_err())
-    {
-        instance.devices.remove(device);
-        if let Some(cancel) = instance.device_cancel.remove(device) {
-            let _ = cancel.send(true);
-        }
-    }
-}
-async fn broadcast_serialized(app: &App, id: &str, s: String) -> Result<(), ()> {
-    let mut all = app.0.instances.write().await;
-    let Some(i) = all.get_mut(id) else {
-        return Ok(());
-    };
-    let slow: Vec<String> = i
-        .devices
-        .iter()
-        .filter_map(|(d, tx)| tx.try_send(s.clone()).err().map(|_| d.clone()))
-        .collect();
-    for d in slow {
-        i.devices.remove(&d);
-        if let Some(cancel) = i.device_cancel.remove(&d) {
-            let _ = cancel.send(true);
-        }
-    }
-    Ok(())
 }
 pub async fn run() -> anyhow::Result<()> {
     let data = env::var("KALIO_RELAY_DATA").unwrap_or_else(|_| "relay.sqlite".into());

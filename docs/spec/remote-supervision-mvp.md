@@ -14,7 +14,7 @@ Use a broker instead of exposing the entire desktop API through a tunnel: this b
 - Host wire endpoint /v1/agent/:instanceId: first frame agent.authenticate with payload.token; wait for auth.accepted.
 - Device wire endpoint /v1/device: first frame auth with top-level instanceId and token; wait for auth.accepted and fresh snapshot.
 - Pairing: authenticated host requests pair.create; one-use 128-bit code expires after 120 seconds. POST /v1/pair exchanges it for a device capability scoped to one instance. Pair each additional instance separately.
-- Device commands session.watch and approval.decide are allowlisted. Relay constructs the host-bound payload and supplies authenticated deviceId; the phone cannot nominate its identity.
+- Device commands session.watch, session.unwatch and approval.decide are allowlisted. Relay constructs the host-bound payload and supplies authenticated deviceId; the phone cannot nominate its identity.
 - Overview/session snapshots and approval.result come from Kalio. Correlate request, instance, approval and observed revision; only persisted settlement acknowledgement is success.
 - Revalidate current pending request, original argument hash and revision immediately before the existing domain CAS/continuation. Do not synthesize a gateway socket identity.
 - Never queue decisions offline or replay ambiguous state-changing requests. Reconnection discards stale transport state and hydrates authoritative snapshots.
@@ -33,4 +33,7 @@ Unsupported approval families must be projected with decisionAvailable=false and
 Initial source is under integration and must not be deployed as a verified public service. Local execution is unavailable in this chat; CI is the verification path. Mock images illustrate intended screens, not screenshots of tested implementation. See the session note and PR for actual results.
 
 Session-detail snapshots and approval results are routed only to the requesting authenticated device and are excluded from relay replay history. Deploy the updated Kalio connector and relay together so private results include their destination device.
-Reconnect sends the latest overview snapshot once. Overview snapshots are excluded from event replay history.
+A device reconnecting to an online host receives its latest overview snapshot once, if available. Overview snapshots are excluded from event replay history.
+
+A new session watch replaces the previous watch for the same authenticated device. Leaving session detail releases the watch. Session replies and errors are correlated to the current watch; replies from an older watch or replaced connection are dropped. Unavailable sessions and projection failures produce a visible error on the requesting device.
+A device authenticated while its host is offline receives offline state instead of a cached snapshot. When the host returns, the device accepts a fresh overview and reissues its selected session watch. A correlated relay rejection clears only that pending decision and is never shown as settlement.

@@ -6,6 +6,14 @@ import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
 
 interface Envelope { v: 1; type: string; instanceId: string; requestId?: string; sequence?: number; payload?: Record<string, unknown> }
+interface SessionWatch {
+  deviceId: string;
+  sessionId: string;
+  requestId: string;
+  refreshing: boolean;
+  hash?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -20,8 +28,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   private stopped = false;
   private authenticated = false;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
-  private readonly watchedSessions = new Map<string, { deviceId: string; sessionId: string; requestId: string }>();
-  private readonly watchedSessionHashes = new Map<string, string>();
+  private readonly watchedSessions = new Map<string, SessionWatch>();
   private refreshInFlight: { generation: number; promise: Promise<void> } | undefined;
   private lastSnapshotHash = '';
   private lastSnapshotSentAt = 0;
@@ -135,12 +142,9 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       this.authenticated = true;
       this.retry = 0;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
-      const authSocket = sourceSocket ?? this.socket;
-      const authGeneration = sourceGeneration ?? this.connectionGeneration;
-      await this.refreshProjection(true);
-      if (!authSocket || !this.isCurrentConnection(authSocket, authGeneration) || !this.authenticated) return;
       this.refreshTimer = setInterval(() => { void this.refreshProjection(false).catch((error: unknown) => this.logger.warn('Remote projection refresh failed', error instanceof Error ? error.message : String(error))); }, 2_000);
       this.refreshTimer.unref?.();
+      await this.refreshProjection(true);
       return;
     }
     if (!this.authenticated) return;
@@ -154,21 +158,23 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       }
       return;
     }
+    if (message.type === 'session.unwatch' && typeof message.payload?.['deviceId'] === 'string') {
+      this.watchedSessions.delete(message.payload['deviceId']);
+      return;
+    }
     if (message.type === 'session.watch' && message.requestId && message.payload
       && typeof message.payload['sessionId'] === 'string' && typeof message.payload['deviceId'] === 'string'
       && /^[a-zA-Z0-9_-]{1,128}$/.test(message.payload['deviceId'])) {
-      const sessionId = message.payload['sessionId'];
-      const deviceId = message.payload['deviceId'];
-      const watchKey = `${deviceId}:${sessionId}`;
-      if (this.watchedSessions.size >= 20 && !this.watchedSessions.has(watchKey)) {
+      const { sessionId, deviceId } = message.payload as { sessionId: string; deviceId: string };
+      if (this.watchedSessions.size >= 20 && !this.watchedSessions.has(deviceId)) {
         this.send('session.snapshot', { requestId: message.requestId, deviceId, session: null, error: 'watch_limit' });
         return;
       }
-      this.watchedSessions.set(watchKey, { deviceId, sessionId, requestId: message.requestId });
-      const result = await this.session(sessionId);
-      if (sourceSocket && sourceGeneration !== undefined && !this.isCurrentConnection(sourceSocket, sourceGeneration)) return;
-      this.watchedSessionHashes.set(watchKey, createHash('sha256').update(JSON.stringify(result)).digest('hex'));
-      this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }), deviceId });
+      const watch: SessionWatch = { deviceId, sessionId, requestId: message.requestId, refreshing: false };
+      this.watchedSessions.set(deviceId, watch);
+      const socket = sourceSocket ?? this.socket;
+      const generation = sourceGeneration ?? this.connectionGeneration;
+      if (socket) await this.refreshWatch(watch, socket, generation, true);
       return;
     }
     if (message.type === 'approval.decide' && message.requestId && message.payload) {
@@ -209,14 +215,31 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       this.lastSnapshotSentAt = Date.now();
       this.send('snapshot', current as unknown as Record<string, unknown>);
     }
-    for (const [watchKey, watch] of this.watchedSessions) {
-      const projection = await this.session(watch.sessionId);
-      if (!this.isCurrentConnection(socket, generation) || !this.authenticated) return;
-      const hash = createHash('sha256').update(JSON.stringify(projection)).digest('hex');
-      if (force || this.watchedSessionHashes.get(watchKey) !== hash) {
-        this.watchedSessionHashes.set(watchKey, hash);
-        this.send('session.snapshot', { requestId: watch.requestId, ...(projection ?? { session: null }), deviceId: watch.deviceId });
-      }
+    for (const watch of [...this.watchedSessions.values()]) {
+      await this.refreshWatch(watch, socket, generation, force);
+    }
+  }
+
+  private async refreshWatch(watch: SessionWatch, socket: WebSocket, generation: number, force: boolean): Promise<void> {
+    const current = () => this.isCurrentConnection(socket, generation) && this.authenticated
+      && this.watchedSessions.get(watch.deviceId) === watch;
+    if (!current() || watch.refreshing) return;
+    watch.refreshing = true;
+    let payload: RemoteSupervisionSessionSnapshot | { session: null; error: string };
+    try {
+      payload = await this.session(watch.sessionId) ?? { session: null, error: 'session_not_found' };
+    } catch (error) {
+      if (!current()) return;
+      this.logger.warn('Remote watched session projection failed', error instanceof Error ? error.message : String(error));
+      payload = { session: null, error: 'projection_failed' };
+    } finally {
+      watch.refreshing = false;
+    }
+    if (!current()) return;
+    const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    if (force || watch.hash !== hash) {
+      watch.hash = hash;
+      this.send('session.snapshot', { ...payload, requestId: watch.requestId, deviceId: watch.deviceId });
     }
   }
   private isCurrentConnection(socket: WebSocket, generation: number): boolean {
@@ -239,7 +262,6 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.refreshTimer = undefined;
     this.watchedSessions.clear();
-    this.watchedSessionHashes.clear();
     this.refreshInFlight = undefined;
     this.lastSnapshotHash = '';
     this.lastSnapshotSentAt = 0;
