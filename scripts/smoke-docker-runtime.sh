@@ -28,7 +28,14 @@ start_container() {
   local binding
   binding="$("${compose[@]}" port kalio 4016)"
   url="http://$binding"
-  curl --max-time 3 --retry 20 --retry-connrefused --retry-delay 1 -fsS "$url/api/health" >/dev/null
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    if curl --max-time 2 -fsS "$url/api/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Kalio health check did not become ready at $url" >&2
+  return 1
 }
 
 start_container
