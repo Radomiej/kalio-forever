@@ -12,7 +12,6 @@ type Outstanding = { approvalId: string; decision: 'approve'|'deny'; revision: s
 export class RelayClient {
   private socket: WebSocket | null = null;
   private listeners = new Set<(event: RelayEvent) => void>();
-  private requestSeq = 0;
   private selectedSession: string | null = null;
   private snapshotAt = 0;
   private lastSequence = -1;
@@ -53,7 +52,7 @@ export class RelayClient {
   }
   canDecide(): boolean { return Boolean(this.socket?.readyState === WebSocket.OPEN && this.authenticated && this.fresh && Date.now() - this.snapshotAt < 15000); }
   disconnect(): void { this.closed = true; if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.generation++; this.socket?.close(); this.pair.token = ''; this.outstanding.clear(); }
-  private id(): string { return 'm-' + (++this.requestSeq).toString(36); }
+  private id(): string { return crypto.randomUUID(); }
   private send(data: Record<string, unknown>): void { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ v: 1, instanceId: this.pair.instanceId, ...data })); }
   private emit(event: RelayEvent): void { this.listeners.forEach(listener => listener(event)); }
   private receive(raw: unknown): void {

@@ -129,8 +129,30 @@ pub(crate) async fn pair(State(app): State<App>, Json(req): Json<PairRequest>) -
 pub(crate) async fn broadcast(app: &App, id: &str, v: Value) -> Result<(), ()> {
     broadcast_serialized(app, id, v.to_string()).await
 }
-pub(crate) async fn broadcast_devices(app: &App, id: &str, s: String) -> Result<(), ()> {
-    broadcast_serialized(app, id, s).await
+pub(crate) async fn send_to_device(
+    app: &App,
+    id: &str,
+    generation: u64,
+    device: &str,
+    frame: String,
+) {
+    let mut instances = app.0.instances.write().await;
+    let Some(instance) = instances
+        .get_mut(id)
+        .filter(|instance| instance.agent_generation == generation)
+    else {
+        return;
+    };
+    if instance
+        .devices
+        .get(device)
+        .is_some_and(|tx| tx.try_send(frame).is_err())
+    {
+        instance.devices.remove(device);
+        if let Some(cancel) = instance.device_cancel.remove(device) {
+            let _ = cancel.send(true);
+        }
+    }
 }
 async fn broadcast_serialized(app: &App, id: &str, s: String) -> Result<(), ()> {
     let mut all = app.0.instances.write().await;

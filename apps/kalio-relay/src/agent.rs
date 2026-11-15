@@ -1,8 +1,8 @@
 use crate::{
     protocol::*,
     relay::{
-        broadcast, broadcast_devices, error, hash, now, random_hex, send_socket, HISTORY,
-        MAX_FRAME, PAIR_LIMIT, QUEUE,
+        broadcast, error, hash, now, random_hex, send_socket, send_to_device, HISTORY, MAX_FRAME,
+        PAIR_LIMIT, QUEUE,
     },
     state::*,
 };
@@ -129,17 +129,24 @@ async fn agent_loop(mut socket: WebSocket, app: App, id: String) {
                         if let Ok(s)=serde_json::to_string(&created){if tx.try_send(s).is_err(){break}}
                         continue
                     }
-                    let private=e.kind=="session.snapshot";
+                    if matches!(e.kind.as_str(),"session.snapshot"|"approval.result") {
+                        if let Some(device) = e.payload.as_ref().and_then(|p|p.get("deviceId")).and_then(Value::as_str) {
+                            if let Ok(frame) = serde_json::to_string(&e) {
+                                send_to_device(&app,&id,generation,device,frame).await;
+                            }
+                        }
+                        continue;
+                    }
                     if let Ok(s)=serde_json::to_string(&e) {
                         let mut all=app.0.instances.write().await;
                         if let Some(i)=all.get_mut(&id) {
                             if i.agent_generation!=generation {continue}
                             if e.kind=="snapshot" {i.snapshot=Some(s.clone())}
-                            if !private {i.history.push_back(s.clone()); while i.history.len()>HISTORY{i.history.pop_front();}}
+                            i.history.push_back(s.clone()); while i.history.len()>HISTORY{i.history.pop_front();}
                         }
                         drop(all);
                         let value=serde_json::from_str(&s).unwrap_or(Value::Null);
-                        if private {let _=broadcast_devices(&app,&id,s).await;} else {let _=broadcast(&app,&id,value).await;}
+                        let _=broadcast(&app,&id,value).await;
                     }
                 },
                 Some(Ok(Message::Close(_)))|None=>break,

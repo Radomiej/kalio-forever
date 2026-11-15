@@ -430,3 +430,5 @@ Codex launch selection distinguishes an unchecked model catalog from a successfu
 ## Remote supervision boundary (2026-11-08)
 
 The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.
+
+Remote session-detail snapshots and approval results are confined to the requesting paired device and excluded from relay replay history.

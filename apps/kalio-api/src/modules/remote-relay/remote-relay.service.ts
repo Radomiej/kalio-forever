@@ -161,14 +161,14 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       const deviceId = message.payload['deviceId'];
       const watchKey = `${deviceId}:${sessionId}`;
       if (this.watchedSessions.size >= 20 && !this.watchedSessions.has(watchKey)) {
-        this.send('session.snapshot', { requestId: message.requestId, session: null, error: 'watch_limit' });
+        this.send('session.snapshot', { requestId: message.requestId, deviceId, session: null, error: 'watch_limit' });
         return;
       }
       this.watchedSessions.set(watchKey, { deviceId, sessionId, requestId: message.requestId });
       const result = await this.session(sessionId);
       if (sourceSocket && sourceGeneration !== undefined && !this.isCurrentConnection(sourceSocket, sourceGeneration)) return;
       this.watchedSessionHashes.set(watchKey, createHash('sha256').update(JSON.stringify(result)).digest('hex'));
-      this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }) });
+      this.send('session.snapshot', { requestId: message.requestId, ...(result ?? { session: null }), deviceId });
       return;
     }
     if (message.type === 'approval.decide' && message.requestId && message.payload) {
@@ -179,7 +179,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
         ? await this.decide({ approvalId, revision, argsSha256, decision, deviceId })
         : { status: 'rejected' as const };
       if (sourceSocket && sourceGeneration !== undefined && !this.isCurrentConnection(sourceSocket, sourceGeneration)) return;
-      this.send('approval.result', { requestId: message.requestId, approvalId, ...result });
+      this.send('approval.result', { requestId: message.requestId, approvalId, ...result, deviceId });
       await this.refreshProjection(false);
     }
   }
@@ -215,7 +215,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       const hash = createHash('sha256').update(JSON.stringify(projection)).digest('hex');
       if (force || this.watchedSessionHashes.get(watchKey) !== hash) {
         this.watchedSessionHashes.set(watchKey, hash);
-        this.send('session.snapshot', { requestId: watch.requestId, ...(projection ?? { session: null }) });
+        this.send('session.snapshot', { requestId: watch.requestId, ...(projection ?? { session: null }), deviceId: watch.deviceId });
       }
     }
   }

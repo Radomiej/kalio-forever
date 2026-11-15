@@ -184,7 +184,7 @@ where
 }
 #[tokio::test]
 async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
-    let (base, server, _app) = test_server().await;
+    let (base, server, app) = test_server().await;
     let http = base.replacen("ws://", "http://", 1);
     let client = reqwest::Client::new();
     let mut host = auth_agent(&base).await;
@@ -215,6 +215,16 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
         .unwrap();
     assert_eq!(replay.status(), reqwest::StatusCode::UNAUTHORIZED);
     let mut phone = auth_device(&base, credentials["token"].as_str().unwrap()).await;
+    app.0
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO devices(instance,device,token_hash) VALUES(?1,?2,?3)",
+            params!["desk", "second-device", hash("second-token").as_slice()],
+        )
+        .unwrap();
+    let mut second_phone = auth_device(&base, "second-token").await;
 
     host.send(ClientMessage::Text(
         json!({"v":1,"type":"snapshot","instanceId":"desk","payload":{"overview":"ready"}})
@@ -225,13 +235,17 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
     .unwrap();
     let snapshot = text_json(&mut phone).await;
     assert_eq!(snapshot["type"], "snapshot");
+    assert_eq!(text_json(&mut second_phone).await["type"], "snapshot");
 
     phone.send(ClientMessage::Text(json!({"v":1,"type":"session.watch","instanceId":"desk","requestId":"watch-1","sessionId":"session-7","extra":"drop"}).to_string().into())).await.unwrap();
     let watch = text_json(&mut host).await;
     assert_eq!(watch["requestId"], "watch-1");
     assert_eq!(watch["payload"]["sessionId"], "session-7");
+    assert_eq!(watch["payload"]["deviceId"], credentials["deviceId"]);
     assert!(watch.get("sessionId").is_none());
     assert!(watch.get("extra").is_none());
+    host.send(ClientMessage::Text(json!({"v":1,"type":"session.snapshot","instanceId":"desk","requestId":"watch-1","payload":{"deviceId":credentials["deviceId"],"session":{"id":"session-7"}}}).to_string().into())).await.unwrap();
+    assert_eq!(text_json(&mut phone).await["requestId"], "watch-1");
 
     phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"decision-1","approvalId":"approval-2","revision":"rev-3","argsSha256":"digest","decision":"approve","payload":{"deviceId":"spoof"}}).to_string().into())).await.unwrap();
     let decision = text_json(&mut host).await;
@@ -241,9 +255,14 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
     assert_eq!(decision["payload"]["deviceId"], credentials["deviceId"]);
     assert!(decision.get("approvalId").is_none());
 
-    host.send(ClientMessage::Text(json!({"v":1,"type":"approval.result","instanceId":"desk","requestId":"decision-1","payload":{"approvalId":"approval-2","status":"settled"}}).to_string().into())).await.unwrap();
+    host.send(ClientMessage::Text(json!({"v":1,"type":"approval.result","instanceId":"desk","requestId":"decision-1","payload":{"deviceId":credentials["deviceId"],"approvalId":"approval-2","status":"settled"}}).to_string().into())).await.unwrap();
     let result = text_json(&mut phone).await;
     assert_eq!(result["payload"]["status"], "settled");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), second_phone.next())
+            .await
+            .is_err()
+    );
     host.send(ClientMessage::Close(None)).await.unwrap();
     phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"offline-1","approvalId":"a","revision":"r","argsSha256":"d","decision":"deny"}).to_string().into())).await.unwrap();
     let rejected = loop {
