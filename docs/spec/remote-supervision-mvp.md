@@ -23,6 +23,8 @@ Use a broker instead of exposing the entire desktop API through a tunnel: this b
 - Background Android delivery is not promised by an open foreground WebSocket; push notifications/foreground service are a later explicit slice.
 
 ## Acceptance
+
+Remote opens on Sessions with the current connection and active-session count visible. Sessions and pending approvals stay accessible from the bottom navigation. The menu holds instance switching, pairing, demo and theme. Filters open on demand. In a narrow viewport a selected conversation takes the place of the list, with explicit return controls from both the conversation and graph. Content can scroll inside the viewport while the header and main navigation stay visible.
 Real WebSocket tests must cover role and instance isolation, pairing replay/expiry, offline decisions, duplicate connection generations, slow consumers and acknowledgement correlation. Backend tests cover stale digest/revision, races with local resolution, actual waiter settlement and secret-free projections. Browser tests cover read-only surfaces, multiple instances, unavailable graphs, approval waiting/denial/error states, reconnect and 320/390px layout. Build a debug APK; do not claim device/emulator execution from compilation.
 
 Unsupported approval families must be projected with decisionAvailable=false and a clear desktop-only reason. Native CLI, host-required terminal, RA-App native effects and extra-budget decisions retain their distinct authorities; never route them all through a generic database update. Native-family implementation is tracked separately until its actor-bound continuation tests pass.

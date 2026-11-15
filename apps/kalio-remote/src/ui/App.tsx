@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Check, CircleHelp, GitBranch, Layers, Link2, Moon, Search, ShieldAlert, Sun, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Activity, ArrowLeft, Check, CircleHelp, GitBranch, Layers, Link2, Menu, Moon, Search, ShieldAlert, SlidersHorizontal, Sun, X } from 'lucide-react';
 import { Approval, SessionSnapshot, Snapshot } from '../protocol';
 import { pairRelay, RelayClient } from '../client/RelayClient';
 
@@ -24,6 +24,8 @@ export function App() {
  useEffect(() => () => { subscriptions.current.forEach(unsubscribe => unsubscribe()); subscriptions.current.clear(); clients.current.forEach(client => client.disconnect()); clients.current.clear(); }, []);
  const [selected, setSelected] = useState<string>('');
  const [view, setView] = useState<View>('sessions');
+ const [sheet, setSheet] = useState<'instances'|'pair'|'filters'|null>(null);
+ const [selectedSessionId, setSelectedSessionId] = useState('');
  const [session, setSession] = useState<SessionSnapshot | null>(null);
  const [query, setQuery] = useState('');
  const [project, setProject] = useState('all');
@@ -33,6 +35,7 @@ export function App() {
  const [code, setCode] = useState('');
  const [notice, setNotice] = useState('');
  const [pairing, setPairing] = useState(false);
+ const [pairError, setPairError] = useState('');
  const [preview, setPreview] = useState(false);
  const [pending, setOczekuje] = useState<Record<string,string>>({});
  const [results, setResults] = useState<Record<string,string>>({});
@@ -46,33 +49,117 @@ export function App() {
  const projects = useMemo(()=>Array.from(new Set(sessions.flatMap(s=>s.project?[s.project]:[]))),[data]);
  const personas = useMemo(()=>Array.from(new Set(sessions.flatMap(s=>s.persona?[s.persona]:[]))),[data]);
  const filtered = sessions.filter(s => (s.title+' '+(s.project??'')+' '+(s.persona??'')).toLowerCase().includes(query.toLowerCase()) && (project==='all'||s.project===project) && (persona==='all'||s.persona===persona) && (statusFilter==='all'||(statusFilter==='active')===s.active));
- async function doPair() { try { setPairing(true); setNotice(''); const client=await pairRelay(relayUrl.trim(),code.trim()); const id=client.instanceId; const old=connections.find(c=>c.id===id); if(old){subscriptions.current.get(id)?.(); subscriptions.current.delete(id); old.client.disconnect(); clients.current.delete(id);} const connection:Connection={id,name:'Connecting…',client,snapshot:null,online:false}; const unsubscribe=client.subscribe(event=>{ if(event.kind==='snapshot')setConnections(cs=>cs.map(c=>c.id===id?{...c,snapshot:event.value,online:true,name:event.value.instance.name}:c)); if(event.kind==='offline'){setConnections(cs=>cs.map(c=>c.id===id?{...c,online:false}:c));setOczekuje(p=>Object.fromEntries(Object.entries(p).filter(([key])=>!key.startsWith(id+'|'))));} if(event.kind==='session'&&latest.current.selected===id&&event.value.sessionId===latest.current.sessionId)setSession(event.value); if(event.kind==='result'){const key=id+'|'+event.approvalId;setOczekuje(p=>{const next={...p};delete next[key];return next;});setResults(p=>({...p,[key]:event.status==='settled'?'Settled':event.status==='stale'?'Stale decision rejected':'Decision rejected'}));} if(event.kind==='error')setNotice(event.message); }); subscriptions.current.set(id,unsubscribe); clients.current.set(id,client); setConnections(cs=>[...cs.filter(c=>c.id!==id),connection]); setSelected(id); setPreview(false); setSession(null); setProject('all');setPersona('all');setStatusFilter('all');setQuery('');latest.current={selected:id,sessionId:''};client.connect();setCode(''); } catch(e) { setNotice(e instanceof Error?e.message:'Pairing failed.'); } finally { setPairing(false); } }
- function enterPreview(){ setPreview(true); setSelected(''); latest.current={selected:'',sessionId:''}; setSession(previewSession); setView('sessions'); }
- function watchSession(id:string){ if(preview){setSession(previewSession);return;} if(!active)return; latest.current={selected:active.id,sessionId:id}; setSession(null); active.client.watch(id); setView('sessions'); }
- async function decide(a:Approval, choice:'approve'|'deny') { if(!active||!canDecide)return; try { const requestId=active.client.decide(a,choice); setOczekuje(p=>({...p,[active.id+'|'+a.id]:requestId})); setNotice('Decision sent. Waiting for Kalio to confirm.'); } catch(e){setNotice(e instanceof Error?e.message:'Decision was not sent.');} }
+ async function doPair() { try { setPairing(true); setPairError(''); const client=await pairRelay(relayUrl.trim(),code.trim()); const id=client.instanceId; const old=connections.find(c=>c.id===id); if(old){subscriptions.current.get(id)?.(); subscriptions.current.delete(id); old.client.disconnect(); clients.current.delete(id);} const connection:Connection={id,name:'Connecting…',client,snapshot:null,online:false}; const unsubscribe=client.subscribe(event=>{ if(event.kind==='snapshot')setConnections(cs=>cs.map(c=>c.id===id?{...c,snapshot:event.value,online:true,name:event.value.instance.name}:c)); if(event.kind==='offline'){setConnections(cs=>cs.map(c=>c.id===id?{...c,online:false}:c));setOczekuje(p=>Object.fromEntries(Object.entries(p).filter(([key])=>!key.startsWith(id+'|'))));} if(event.kind==='session'&&latest.current.selected===id&&event.value.sessionId===latest.current.sessionId)setSession(event.value); if(event.kind==='result'){const key=id+'|'+event.approvalId;setOczekuje(p=>{const next={...p};delete next[key];return next;});setResults(p=>({...p,[key]:event.status==='settled'?'Settled':event.status==='stale'?'Stale decision rejected':'Decision rejected'}));} if(event.kind==='error')setNotice(event.message); }); subscriptions.current.set(id,unsubscribe); clients.current.set(id,client); setConnections(cs=>[...cs.filter(c=>c.id!==id),connection]); setSelected(id); setPreview(false); setSession(null); setProject('all');setPersona('all');setStatusFilter('all');setQuery('');latest.current={selected:id,sessionId:''};client.connect();setCode('');setSelectedSessionId('');setView('sessions');setSheet(null); } catch(e) { setPairError(e instanceof Error?e.message:'Nie udało się połączyć.'); } finally { setPairing(false); } }
+
+ function resetSession() {
+  latest.current.sessionId = '';
+  setSelectedSessionId('');
+  setSession(null);
+  setView('sessions');
+ }
+ function selectInstance(id: string) {
+  setPreview(false);
+  setSelected(id);
+  latest.current.selected = id;
+  resetSession();
+  setProject('all'); setPersona('all'); setStatusFilter('all'); setQuery('');
+  setSheet(null);
+ }
+ function enterPreview() {
+  selectInstance('');
+  setPreview(true);
+ }
+ function watchSession(id: string) {
+  setSelectedSessionId(id);
+  setView('sessions');
+  if (preview) {
+   const previewItem = fixture.sessions.find(item => item.id === id);
+   setSession(id === previewSession.sessionId ? previewSession : previewItem
+    ? { sessionId: id, title: previewItem.title, active: previewItem.active, messages: [],
+      graph: { available: false, reason: 'no_architecture_run', nodes: [], edges: [] } } : null);
+   return;
+  }
+  if (!active) return;
+  latest.current = { selected: active.id, sessionId: id };
+  setSession(null);
+  active.client.watch(id);
+ }
+ async function decide(a:Approval, choice:'approve'|'deny') { if(!active||!canDecide)return; try { const requestId=active.client.decide(a,choice); setOczekuje(p=>({...p,[active.id+'|'+a.id]:requestId})); setNotice('Wysłano decyzję. Oczekiwanie na potwierdzenie Kalio.'); } catch(e){setNotice(e instanceof Error?e.message:'Nie udało się wysłać decyzji.');} }
+ const activeCount = sessions.filter(item => item.active).length;
+ const approvalCount = data?.approvals.length ?? 0;
+ const connectionLabel = preview ? 'Demo' : active?.online ? 'Online' : active?.snapshot ? 'Offline' : active ? 'Łączenie…' : 'Niepołączono';
  return <main className="app-shell">
-  <header className="topbar"><div className="brand"><span className="brand-mark">K</span><span>kalio</span><small>ZDALNY PODGLĄD</small></div><div className="header-actions"><span className={data?'connection-dot live':'connection-dot'} />{data?.instance.name ?? 'Brak połączonej instancji'}<button className="icon-button" aria-label="Toggle theme" onClick={()=>setTheme(theme==='dark'?'light':'dark')}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>}</button></div></header>
-  <div className="mobile-layout"><aside className="sidebar">
-   <div className="section-label">INSTANCJE <span>{connections.length+(preview?1:0)}</span></div>
-   {connections.map(c=><button key={c.id} className={'instance '+(!preview&&selected===c.id?'selected':'')} onClick={()=>{setPreview(false);setSelected(c.id);latest.current={selected:c.id,sessionId:''};setSession(null);setProject('all');setPersona('all');setStatusFilter('all');setQuery('')}}><span className={c.online?'live-dot':'offline-dot'} />{c.name}<small>{c.online?'Online':'Offline'}</small></button>)}
-   {preview&&<button className="instance selected" onClick={()=>setView('sessions')}><span className="preview-dot"/>Studio workstation<small>Preview</small></button>}
-   <div className="pair-box"><div className="pair-heading"><Link2 size={15}/> Połącz instancję</div><input aria-label="Relay URL" placeholder="https://relay.example.com" value={relayUrl} onChange={e=>setRelayUrl(e.target.value)}/><input aria-label="One-use pairing code" placeholder="Kod jednorazowy" value={code} onChange={e=>setCode(e.target.value)}/><button className="primary-button" disabled={pairing||!relayUrl||!code} onClick={doPair}>{pairing?'Łączenie…':'Połącz bezpiecznie'}</button><small>Wklej jednorazowy kod z hosta Kalio.</small></div>
-   <button className="preview-link" onClick={enterPreview}><CircleHelp size={15}/> Otwórz podgląd demo</button>
-  </aside><section className="content">
-   {notice&&<div className="notice" role="status"><ShieldAlert size={16}/>{notice}<button aria-label="Dismiss" onClick={()=>setNotice('')}><X size={15}/></button></div>}
-   {!data&&!preview?<div className="empty"><div className="empty-icon"><Link2/></div><h1>Połącz z hostem Kalio</h1><p>Połącz się przez relay, aby obserwować sesje i zatwierdzać narzędzia.</p><p className="muted">Dane dostępu są przechowywane w pamięci i znikają po zamknięciu aplikacji.</p></div>:<>
-    <div className="page-heading"><div><span className="eyebrow">{preview?'PODGLĄD DEMO':data?.instance.name}</span><h1>{view==='approvals'?'Zatwierdzenia':view==='graph'?'Graf wykonania':'Sesje'}</h1></div><nav className="tabs"><button className={view==='sessions'?'active':''} onClick={()=>setView('sessions')}><Activity size={16}/>Sesje</button><button className={view==='approvals'?'active':''} onClick={()=>setView('approvals')}><ShieldAlert size={16}/>Zatwierdzenia{data?.approvals.length? <b>{data.approvals.length}</b>:null}</button></nav></div>
-    {preview&&<div className="preview-banner"><span>DANE DEMONSTRACYJNE</span> Dane lokalne. Brak połączenia sieciowego i możliwości zatwierdzania.</div>}
-    {!preview&&active&&!canDecide&&<div className="stale-banner"><span className="offline-dot"/> Dane są nieaktualne albo brak połączenia. Decyzje będą dostępne po otrzymaniu aktualnego stanu.</div>}
-    {view==='sessions'&&<div className="split"><div className="session-list"><div className="filter-row"><label className="search"><Search size={16}/><input value={query} placeholder="Szukaj sesji" onChange={e=>setQuery(e.target.value)}/></label><select aria-label="Filter project" value={project} onChange={e=>setProject(e.target.value)}><option value="all">Wszystkie projekty</option>{projects.map(x=><option key={x}>{x}</option>)}</select><select aria-label="Filter status" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="all">Każdy stan</option><option value="active">Aktywna</option><option value="ended">Zakończona</option></select><select aria-label="Filter persona" value={persona} onChange={e=>setPersona(e.target.value)}><option value="all">Wszystkie persony</option>{personas.map(x=><option key={x}>{x}</option>)}</select></div>{filtered.map(s=><button key={s.id} className={'session-row '+(session?.sessionId===s.id?'chosen':'')} onClick={()=>watchSession(s.id)}><span className={s.active?'active-mark':'idle-mark'}/><span className="session-copy"><strong>{s.parentSessionId?'↳ ':''}{s.title}</strong><small>{s.project??'Bez projektu'} · {s.persona??'Domyślna persona'}</small></span><span className="row-status">{s.active?'W toku':'Zakończona'}</span></button>)}{filtered.length===0&&<div className="empty-list">Brak sesji spełniających filtry.</div>}</div><SessionPanel session={session} onGraph={()=>setView('graph')}/></div>}
-    {view==='approvals'&&<div className="approval-list">{(data?.approvals??[]).map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}{!data?.approvals.length&&<div className="empty-list">Brak oczekujących zatwierdzeń.</div>}</div>}
-    {view==='graph'&&<GraphPanel session={session}/>}
+  <header className="topbar">
+   <div className="brand"><span className="brand-mark">K</span><div><strong>Kalio Remote</strong><small>{preview ? 'Dane demonstracyjne' : active?.snapshot?.instance.name ?? 'Podgląd instancji'}</small></div></div>
+   <div className="header-actions">
+    <span className="connection-status"><span className={preview ? 'preview-dot' : active?.online ? 'live-dot' : 'offline-dot'} />{connectionLabel}</span>
+    <button className="icon-button" aria-label="Menu Remote" aria-haspopup="dialog" onClick={()=>setSheet('instances')}><Menu size={22}/></button>
+   </div>
+  </header>
+  <section className="content" aria-label="Aktywność Kalio">
+   {notice&&<div className="notice" role="status"><ShieldAlert size={16}/>{notice}<button aria-label="Zamknij komunikat" onClick={()=>setNotice('')}><X size={15}/></button></div>}
+   {preview&&<div className="preview-banner"><span>DEMO</span> Przykładowe dane bez połączenia z Kalio.</div>}
+   {!preview&&active?.snapshot&&!canDecide&&<div className="stale-banner"><span className="offline-dot"/> Ostatni zapisany stan. Zgody są chwilowo niedostępne.</div>}
+   {(!data&&!preview)?<div className="empty">
+    <div className="empty-icon"><Link2/></div><h1>{active ? 'Łączenie z Kalio' : 'Połącz Kalio'}</h1>
+    <p>{active ? 'Czekam na aktualny stan instancji.' : 'Zobacz aktywność i oczekujące zgody z komputera.'}</p>
+    {!active&&<button className="primary-button" onClick={()=>{setPairError('');setSheet('pair')}}>Połącz instancję</button>}
+   </div>:<>
+    {view==='sessions'&&<>
+     <div className="page-heading session-heading">
+      <div><h1>Sesje</h1><p>{activeCount ? 'W toku: '+activeCount : 'Brak aktywnych sesji'}</p></div>
+      <button className="icon-button filter-button" aria-label="Filtry sesji" aria-haspopup="dialog" onClick={()=>setSheet('filters')}><SlidersHorizontal size={20}/></button>
+     </div>
+     <div className={'split'+(selectedSessionId?' has-session':'')}>
+      <div className="session-list">
+       {filtered.map(s=><button key={s.id} className={'session-row '+(selectedSessionId===s.id?'chosen':'')} onClick={()=>watchSession(s.id)}><span className={s.active?'active-mark':'idle-mark'}/><span className="session-copy"><strong>{s.parentSessionId?'↳ ':''}{s.title}</strong><small>{s.project??'Bez projektu'} · {s.persona??'Domyślna persona'}</small></span><span className="row-status">{s.active?'W toku':'Zakończona'}</span></button>)}
+       {filtered.length===0&&<div className="empty-list">{sessions.length?'Brak wyników dla wybranych filtrów.':'Nie ma jeszcze sesji.'}</div>}
+      </div>
+      {selectedSessionId&&<div className="session-detail"><button className="subtle-button back-button" onClick={resetSession}><ArrowLeft size={16}/> Wróć do sesji</button><SessionPanel session={session} onGraph={()=>setView('graph')}/></div>}
+     </div>
+    </>}
+    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{(data?.approvals??[]).map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
+    {view==='graph'&&<><button className="subtle-button back-button" onClick={()=>setView('sessions')}><ArrowLeft size={16}/> Wróć do rozmowy</button><GraphPanel session={session}/></>}
    </>}
-  </section></div>
-  <footer className="bottom-note"><span><ShieldAlert size={14}/> Podgląd bez możliwości edycji</span><span>Bez poleceń czatu · Bez automatycznych zatwierdzeń</span></footer>
+  </section>
+  <nav className="tabs bottom-tabs" aria-label="Widoki Remote">
+   <button className={view==='sessions'||view==='graph'?'active':''} aria-current={view==='sessions'||view==='graph'?'page':undefined} onClick={resetSession}><Activity size={18}/>Sesje</button>
+   <button className={view==='approvals'?'active':''} aria-current={view==='approvals'?'page':undefined} onClick={()=>setView('approvals')} disabled={!data}><ShieldAlert size={18}/>Zgody{approvalCount>0&&<b>{approvalCount}</b>}</button>
+  </nav>
+  {sheet==='instances'&&<RemoteSheet title="Menu Remote" onClose={()=>setSheet(null)}>
+   {connections.length>0&&<div className="instance-menu"><h3>Instancje</h3>{connections.map(c=><button key={c.id} className={'instance '+(!preview&&selected===c.id?'selected':'')} aria-pressed={!preview&&selected===c.id} onClick={()=>selectInstance(c.id)}><span className={c.online?'live-dot':'offline-dot'}/>{c.name}<small>{c.online?'Online':'Offline'}</small></button>)}</div>}
+   <button className="menu-action" onClick={()=>{setPairError('');setSheet('pair')}}><Link2 size={18}/> Połącz instancję</button>
+   <button className="menu-action" onClick={enterPreview}><CircleHelp size={18}/> Podgląd demo</button>
+   <button className="menu-action" onClick={()=>{setTheme(theme==='dark'?'light':'dark');setSheet(null)}}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>} {theme==='dark'?'Jasny motyw':'Ciemny motyw'}</button>
+  </RemoteSheet>}
+  {sheet==='pair'&&<RemoteSheet title="Połącz instancję" onClose={()=>setSheet(null)}>
+   <form className="pair-form" onSubmit={event=>{event.preventDefault();void doPair()}}>
+    <label>Adres Relay<input type="url" autoComplete="off" placeholder="https://kalio-remote.nekko.software" value={relayUrl} onChange={event=>setRelayUrl(event.target.value)}/></label>
+    <label>Kod jednorazowy<input autoComplete="off" autoCapitalize="none" spellCheck={false} value={code} onChange={event=>setCode(event.target.value)}/></label>
+    {pairError&&<p className="form-error" role="alert">{pairError}</p>}
+    <button className="primary-button" type="submit" disabled={pairing||!relayUrl.trim()||!code.trim()}>{pairing?'Łączenie…':'Połącz'}</button>
+   </form>
+  </RemoteSheet>}
+  {sheet==='filters'&&<RemoteSheet title="Filtry sesji" onClose={()=>setSheet(null)}>
+   <div className="pair-form">
+    <label className="search"><Search size={16}/><input aria-label="Szukaj sesji" value={query} placeholder="Szukaj sesji" onChange={e=>setQuery(e.target.value)}/></label>
+    <label>Projekt<select value={project} onChange={e=>setProject(e.target.value)}><option value="all">Wszystkie projekty</option>{projects.map(x=><option key={x}>{x}</option>)}</select></label>
+    <label>Stan<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="all">Każdy stan</option><option value="active">Aktywna</option><option value="ended">Zakończona</option></select></label>
+    <label>Persona<select value={persona} onChange={e=>setPersona(e.target.value)}><option value="all">Wszystkie persony</option>{personas.map(x=><option key={x}>{x}</option>)}</select></label>
+    <button className="primary-button" onClick={()=>setSheet(null)}>Pokaż wyniki</button>
+   </div>
+  </RemoteSheet>}
  </main>;
 }
-function SessionPanel({session,onGraph}:{session:SessionSnapshot|null;onGraph:()=>void}) { return <section className="detail-panel"><div className="panel-title"><div><span className="eyebrow">SESSION VIEW</span><h2>{session?'Activity':'Wybierz sesję'}</h2></div>{session&&<button className="subtle-button" onClick={onGraph}><GitBranch size={15}/> Graph</button>}</div>{!session?<div className="detail-empty">Wybierz sesję, aby zobaczyć wiadomości i postęp.</div>:<div className="messages">{session.messages.map(m=><article key={m.id} className={'message '+(m.role==='user'?'from-user':'')}><span className="message-role">{m.role==='user'?'TY':'KALIO'}</span><p>{m.content}</p>{m.createdAt&&<time>{new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>}</article>)}</div>}</section>; }
+function RemoteSheet({title,children,onClose}:{title:string;children:ReactNode;onClose:()=>void}) {
+ const dialog = useRef<HTMLDialogElement>(null);
+ useEffect(()=>{const element=dialog.current; if(element&&!element.open)element.showModal();},[]);
+ return <dialog ref={dialog} className="remote-sheet" aria-label={title} onCancel={event=>{event.preventDefault();onClose()}}>
+  <div className="sheet-heading"><h2>{title}</h2><button className="icon-button" aria-label="Zamknij" onClick={onClose}><X size={20}/></button></div>
+  {children}
+ </dialog>;
+}
+function SessionPanel({session,onGraph}:{session:SessionSnapshot|null;onGraph:()=>void}) { return <section className="detail-panel"><div className="panel-title"><div><h2>{session?.title ?? 'Wczytywanie sesji…'}</h2></div>{session&&<button className="subtle-button" onClick={onGraph}><GitBranch size={15}/> Graf</button>}</div>{!session?<div className="detail-empty">Wybierz sesję, aby zobaczyć wiadomości i postęp.</div>:<div className="messages">{session.messages.map(m=><article key={m.id} className={'message '+(m.role==='user'?'from-user':'')}><span className="message-role">{m.role==='user'?'TY':'KALIO'}</span><p>{m.content}</p>{m.createdAt&&<time>{new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>}</article>)}</div>}</section>; }
 function ApprovalCard({approval,disabled,pending,result,onDecide}:{approval:Approval;disabled:boolean;pending?:string;result?:string;onDecide:(choice:'approve'|'deny')=>void}) { return <article className="approval-card"><div className="approval-head"><div><span className="eyebrow">ZATWIERDZENIE NARZĘDZIA</span><h2>{approval.toolName}</h2></div><span className="pending-pill">{result??(pending?'Oczekiwanie na hosta':'Oczekuje')}</span></div><dl><div><dt>Session</dt><dd>{approval.sessionId}</dd></div><div><dt>Wersja</dt><dd>{approval.revision}</dd></div><div><dt>Suma SHA-256 argumentów</dt><dd className="digest">{approval.argsSha256}</dd></div><div><dt>Wysłano</dt><dd>{approval.requestedAt?new Date(approval.requestedAt).toLocaleString():'Brak informacji o czasie'}</dd></div></dl><div className="args-box"><div className="args-label">ARGUMENTY · DANE POUFNE ZAMASKOWANE</div><pre>{JSON.stringify(approval.args,null,2)}</pre></div>{pending&&<p className="decision-wait">Wysłano decyzję. Oczekiwanie na odpowiedź hosta.</p>}{result&&<p className="decision-result">{result}</p>}<div className="decision-actions"><button className="deny-button" disabled={disabled} onClick={()=>onDecide('deny')}><X size={16}/> Odrzuć raz</button><button className="approve-button" disabled={disabled} onClick={()=>onDecide('approve')}><Check size={16}/> Zatwierdź raz</button></div>{disabled&&<small className="disabled-reason">Wymaga aktywnego połączenia i aktualnych danych.</small>}</article>; }
 function GraphPanel({session}:{session:SessionSnapshot|null}) {
  const [zoom,setZoom]=useState(1);

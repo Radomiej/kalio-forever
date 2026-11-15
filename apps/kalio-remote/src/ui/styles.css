@@ -6,3 +6,49 @@
 @media(max-width:620px){.topbar{height:56px;padding:0 15px}.header-actions{font-size:0}.header-actions .icon-button{font-size:14px}.mobile-layout{display:flex;flex-direction:column}.sidebar{padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:7px;border-right:0;border-bottom:1px solid var(--line)}.section-label,.pair-box{grid-column:1/-1}.section-label{padding-bottom:0}.instance{padding:8px 6px;font-size:10px}.instance small{display:none}.pair-box{margin-top:4px;display:grid;grid-template-columns:1fr 1fr}.pair-heading,.pair-box small{grid-column:1/-1}.pair-box .primary-button{align-self:stretch}.preview-link{margin:0}.content{padding:17px 12px;overflow:visible}.page-heading{display:block}.page-heading h1{font-size:21px}.tabs{margin-top:14px}.tabs button{flex:1;justify-content:center}.filter-row{padding:9px;gap:6px}.filter-row select{font-size:10px}.split{min-height:0}.session-list{max-height:48vh;overflow:auto}.detail-panel{min-height:290px}.approval-list{grid-template-columns:1fr}.approval-card{padding:14px}.bottom-note{padding:10px 12px;font-size:9px}.bottom-note span:last-child{text-align:right}.preview-banner,.stale-banner{align-items:flex-start}.empty{min-height:35vh}}
 
 button,input,select{min-height:44px} .icon-button,.notice button{min-height:44px;min-width:44px}.graph-canvas{overflow:auto;max-width:100%;max-height:70vh;overscroll-behavior:contain;border-radius:10px;background:var(--bg);touch-action:pan-x pan-y}.graph-canvas svg{display:block}.graph-accessible{margin-top:12px;color:var(--muted);font-size:12px}.graph-accessible summary{cursor:pointer;padding:8px}.graph-accessible li{padding:5px}
+
+.app-shell{height:100dvh;min-height:0}
+.topbar{height:auto;min-height:64px;flex:none;gap:8px;padding:8px clamp(12px,4vw,28px)}
+.brand{min-width:0;gap:10px;font-size:16px;letter-spacing:-.25px}
+.brand strong,.brand small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand small{margin:3px 0 0;font:400 11px 'DM Sans',sans-serif;letter-spacing:0}
+.brand-mark{width:36px;height:36px;flex:none;font-size:18px}
+.header-actions,.connection-status{display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
+.content{flex:1;min-height:0;width:100%;max-width:1060px;margin-inline:auto;padding:clamp(14px,3vw,26px);overflow:auto}
+.page-heading{display:flex;align-items:center;margin-bottom:14px}
+.page-heading p{margin:4px 0 0;color:var(--muted)}
+.filter-button{border:1px solid var(--line);background:var(--surface)}
+.split{grid-template-columns:minmax(0,1fr);min-height:0}
+.split.has-session{grid-template-columns:minmax(220px,.9fr) minmax(0,1.1fr)}
+.session-list{max-height:none;overflow:visible}
+.session-detail{min-width:0}
+.detail-panel{min-height:0}
+.back-button{margin-bottom:10px}
+.empty{min-height:0;padding:clamp(24px,9vh,78px) 10px 12px}
+.empty p{margin:6px 0 16px;font-size:14px}
+.primary-button{padding-inline:16px;font-size:14px}
+.bottom-tabs{flex:none;justify-content:center;gap:8px;margin:0;padding:5px 12px 6px;border-top:1px solid var(--line);border-bottom:0;background:var(--surface)}
+.bottom-tabs button{flex:0 1 170px;justify-content:center;border:0;border-radius:9px;font-size:14px}
+.bottom-tabs button.active{background:var(--primary-soft)}
+.remote-sheet{width:min(420px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:16px;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--text)}
+.remote-sheet::backdrop{background:rgb(0 0 0 / .5)}
+.sheet-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sheet-heading h2{margin:0;font-size:18px}
+.instance-menu{margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.instance-menu h3{margin:0 0 4px;color:var(--muted);font-size:12px;font-weight:500}
+.instance-menu .instance{width:100%;font-size:14px}
+.instance-menu .instance small{display:block}
+.menu-action{display:flex;align-items:center;gap:12px;width:100%;padding:8px;border:0;border-radius:8px;background:none;text-align:left}
+.menu-action:hover,.menu-action:focus-visible{background:var(--surface2)}
+.pair-form,.pair-form label{display:grid;gap:8px}
+.pair-form{gap:14px}
+.pair-form input,.pair-form select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font-size:16px}
+.pair-form .search{display:flex}
+.pair-form .search input{border:0}
+.form-error{margin:0;color:var(--red)}
+@media(max-width:620px){
+ .split.has-session{grid-template-columns:minmax(0,1fr)}
+ .split.has-session .session-list{display:none}
+ .bottom-tabs button{flex:1}
+ .remote-sheet{margin:auto auto 8px}
+}
