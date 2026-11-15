@@ -40,6 +40,7 @@ start_container() {
 
 start_container
 test "$("${compose[@]}" exec -T kalio id -u)" = 10001
+"${compose[@]}" exec -T kalio test -d /data/ra-apps
 curl --max-time 5 -fsS "$url/" | grep -F 'id="root"' >/dev/null
 session="$(curl --max-time 5 -fsS "$url/api/sessions" -H 'Content-Type: application/json' \
   --data '{"title":"OCI volume smoke"}' | node -pe "JSON.parse(require('node:fs').readFileSync(0,'utf8')).id")"

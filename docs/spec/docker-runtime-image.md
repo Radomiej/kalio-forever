@@ -50,7 +50,7 @@ is still readable. Use one container per volume. For a bind mount, provide a
 directory writable by UID/GID 10001.
 
 Keep the volume when replacing the container with a new image. It holds SQLite
-state, workspaces, memory, and the generated credential key. Supply provider
+state, workspaces, memory, RA-Apps, the architecture registry, and the generated credential key. Supply provider
 credentials at runtime, for example with `docker run --env-file` using a file
 outside the build context.
 

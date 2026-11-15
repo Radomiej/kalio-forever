@@ -33,7 +33,9 @@ RUN chown 10001:10001 /opt/kalio
 
 ENV HOME=/home/kalio \
     KALIO_HOST=0.0.0.0 \
-    KALIO_PORT=4016
+    KALIO_PORT=4016 \
+    RA_APPS_PATH=/data/ra-apps \
+    ARCHITECTURE_REGISTRY_PATH=/data/architecture-registry
 WORKDIR /opt/kalio
 USER 10001:10001
 VOLUME ["/data"]
