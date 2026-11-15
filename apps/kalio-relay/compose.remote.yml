@@ -1,6 +1,7 @@
 services:
   relay:
     build: .
+    restart: unless-stopped
     environment:
       KALIO_RELAY_AGENTS_JSON: ${KALIO_RELAY_AGENTS_JSON:?Set the agent token hashes}
       KALIO_RELAY_ALLOWED_ORIGINS: '["https://localhost","http://127.0.0.1:8788","https://kalio-remote.nekko.software"]'
@@ -9,6 +10,7 @@ services:
 
   web:
     image: nginx:alpine
+    restart: unless-stopped
     depends_on:
       - relay
     ports:
