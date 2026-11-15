@@ -33,3 +33,4 @@ Unsupported approval families must be projected with decisionAvailable=false and
 Initial source is under integration and must not be deployed as a verified public service. Local execution is unavailable in this chat; CI is the verification path. Mock images illustrate intended screens, not screenshots of tested implementation. See the session note and PR for actual results.
 
 Session-detail snapshots and approval results are routed only to the requesting authenticated device and are excluded from relay replay history. Deploy the updated Kalio connector and relay together so private results include their destination device.
+Reconnect sends the latest overview snapshot once. Overview snapshots are excluded from event replay history.

@@ -141,8 +141,12 @@ async fn agent_loop(mut socket: WebSocket, app: App, id: String) {
                         let mut all=app.0.instances.write().await;
                         if let Some(i)=all.get_mut(&id) {
                             if i.agent_generation!=generation {continue}
-                            if e.kind=="snapshot" {i.snapshot=Some(s.clone())}
-                            i.history.push_back(s.clone()); while i.history.len()>HISTORY{i.history.pop_front();}
+                            if e.kind=="snapshot" {
+                                i.snapshot=Some(s.clone());
+                            } else {
+                                i.history.push_back(s.clone());
+                                while i.history.len()>HISTORY {i.history.pop_front();}
+                            }
                         }
                         drop(all);
                         let value=serde_json::from_str(&s).unwrap_or(Value::Null);

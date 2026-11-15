@@ -270,7 +270,10 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
             let frame = frame.expect("reconnected device socket");
             if let ClientMessage::Text(text) = frame {
                 let message: Value = serde_json::from_str(&text).unwrap();
-                assert_eq!(message["type"], "snapshot");
+                panic!(
+                    "unexpected replay after current snapshot: {}",
+                    message["type"]
+                );
             }
         }
     })
