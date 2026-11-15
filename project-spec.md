@@ -426,3 +426,7 @@ Windows terminal transport: native executables receive literal argv without an o
 Approval evidence axis: complete parameters and assigned scope are evaluated separately from harmful effects. A proposed read must not need successful output before it can run; all remaining risk axes, configured thresholds and hard controls remain mandatory.
 
 Codex launch selection distinguishes an unchecked model catalog from a successfully checked catalog that excludes the model. Unknown catalogs show 'Models not checked yet' (or the existing probe error), while selection remains blocked until the existing model admission succeeds. This is a display correction, not an availability or authorization bypass.
+
+## Remote supervision boundary (2026-11-08)
+
+The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.
