@@ -1,0 +1,8 @@
+**
+!scripts/
+scripts/**
+!scripts/install.sh
+!release/
+release/**
+!release/kalio-runtime-*-linux-x64.tar.gz
+release/kalio-runtime-*-bun-linux-x64.tar.gz

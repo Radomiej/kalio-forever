@@ -184,6 +184,12 @@ jobs:
           archive=$(find release -maxdepth 1 -name 'kalio-runtime-*-linux-x64.tar.gz' -print -quit)
           test -n "$archive"
           node scripts/smoke-linux-runtime.mjs --archive "$archive" --output output/linux-runtime-smoke.json
+      - name: Build and smoke-test the Linux container image
+        shell: bash
+        run: |
+          archive=$(find release -maxdepth 1 -name 'kalio-runtime-*-linux-x64.tar.gz' -print -quit)
+          test -n "$archive"
+          bash scripts/smoke-docker-runtime.sh "$archive"
       - name: Upload the runtime smoke receipt
         if: always()
         uses: actions/upload-artifact@v4
