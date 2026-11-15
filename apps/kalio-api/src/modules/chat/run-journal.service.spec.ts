@@ -48,7 +48,38 @@ function makeFixture() {
 
 function makeService(): RunJournalService { return makeFixture().service; }
 
+it('marks the same active run interrupted only once across concurrent recovery scans', async () => {
+  const { service, sqlite } = makeFixture();
+  try {
+    const run = await service.startRun({ sessionId: 's', turnId: 't' });
+    expect(run.revision).toBe(1);
+    await Promise.all([service.recoverStaleActiveRuns(), service.recoverStaleActiveRuns()]);
+    await expect(service.getTurn('s', 't')).resolves.toMatchObject({
+      status: 'interrupted_needs_retry', revision: 2,
+    });
+  } finally {
+    sqlite.close();
+  }
+});
+
 describe('RunJournalService completeRequired', () => {
+  it('preserves a completed outcome when a recovery scan has already read the active row', async () => {
+    const { service, sqlite } = makeFixture();
+    try {
+      const run = await service.startRun({ sessionId: 's', turnId: 't' });
+      expect(run.revision).toBe(1);
+      const recover = service.recoverStaleActiveRuns();
+      const finalText = 'Completed during startup recovery';
+      await service.completeRequired(run.id, 1, { finalText });
+      await recover;
+      await expect(service.getCompletedTurn('s', 't')).resolves.toMatchObject({
+        status: 'completed', revision: 2, outcome: { finalText },
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it.each(['root-getter', 'nested-getter', 'toJSON', 'nested-toJSON', 'toJSON-getter', 'array-getter', 'proxy'])('rejects %s without executing user code or entering transaction', async kind => {
     const { service, sqlite, db } = makeFixture();
     try {
@@ -439,6 +470,15 @@ describe('RunJournalService', () => {
         messageId: 'message-1',
       },
     });
+  });
+
+  it('does not choose between two completed results for the same turn', async () => {
+    const first = await service.startRun({ sessionId: 's1', turnId: 't1' });
+    await service.complete(first.id, { finalText: 'First result' });
+    const second = await service.startRun({ sessionId: 's1', turnId: 't1' });
+    await expect(service.getCompletedTurn('s1', 't1')).resolves.toMatchObject({ id: first.id });
+    await service.complete(second.id, { finalText: 'Second result' });
+    await expect(service.getCompletedTurn('s1', 't1')).resolves.toBeNull();
   });
 
   it('increments the durable revision for every state transition', async () => {
