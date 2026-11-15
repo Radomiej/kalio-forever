@@ -114,8 +114,8 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       });
       socket.addEventListener('message', event => {
         if (!this.isCurrentConnection(socket, generation)) return;
-        void this.receive(event.data, socket, generation).catch((error: unknown) => {
-          this.logger.warn('Remote relay frame handling failed', error instanceof Error ? error.message : String(error));
+        void this.receive(event.data, socket, generation).catch(() => {
+          this.logger.warn('Remote relay frame handling failed');
         });
       });
       socket.addEventListener('close', () => {
@@ -142,7 +142,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
       this.authenticated = true;
       this.retry = 0;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
-      this.refreshTimer = setInterval(() => { void this.refreshProjection(false).catch((error: unknown) => this.logger.warn('Remote projection refresh failed', error instanceof Error ? error.message : String(error))); }, 2_000);
+      this.refreshTimer = setInterval(() => { void this.refreshProjection(false).catch(() => this.logger.warn('Remote projection refresh failed')); }, 2_000);
       this.refreshTimer.unref?.();
       await this.refreshProjection(true);
       return;
@@ -228,9 +228,9 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
     let payload: RemoteSupervisionSessionSnapshot | { session: null; error: string };
     try {
       payload = await this.session(watch.sessionId) ?? { session: null, error: 'session_not_found' };
-    } catch (error) {
+    } catch {
       if (!current()) return;
-      this.logger.warn('Remote watched session projection failed', error instanceof Error ? error.message : String(error));
+      this.logger.warn('Remote watched session projection failed');
       payload = { session: null, error: 'projection_failed' };
     } finally {
       watch.refreshing = false;

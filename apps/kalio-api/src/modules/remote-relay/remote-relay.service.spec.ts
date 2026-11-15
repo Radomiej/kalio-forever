@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hostname } from 'node:os';
 import { RemoteRelayService } from './remote-relay.service';
@@ -150,8 +151,11 @@ describe('RemoteRelayService protocol lifecycle', () => {
     await state.receive(JSON.stringify({ v: 1, type: 'session.unwatch', instanceId: 'instance-1', payload: { deviceId: 'device' } }));
     state.socket = new FakeWebSocket();
     state.connectionGeneration += 1;
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     chat.session.mockRejectedValueOnce(new Error('internal projection data'));
     await watch('current');
+    expect(warning.mock.calls).toEqual([['Remote watched session projection failed']]);
+    warning.mockRestore();
     rejectOld(new Error('old socket projection'));
     await oldRefresh;
     expect(watchFrames(socket)).toEqual([]);
