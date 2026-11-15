@@ -7,7 +7,7 @@ export type RelayEvent =
   | { kind: 'offline'; instanceId: string }
   | { kind: 'result'; instanceId: string; requestId: string; approvalId: string; status: string }
   | { kind: 'error'; instanceId: string; message: string };
-type PairReply = { v: 1; instanceId: string; deviceId: string; token: string };
+export type PairReply = { v: 1; instanceId: string; deviceId: string; token: string };
 type Outstanding = { approvalId: string; decision: 'approve'|'deny'; revision: string };
 export class RelayClient {
   private socket: WebSocket | null = null;
@@ -26,11 +26,14 @@ export class RelayClient {
   constructor(private baseUrl: string, private pair: PairReply) {}
   get instanceId(): string { return this.pair.instanceId; }
   get deviceId(): string { return this.pair.deviceId; }
+  get connectionKey(): string { return this.baseUrl + '|' + this.pair.instanceId; }
+  credentials(): { relayUrl: string; pair: PairReply } { return { relayUrl: this.baseUrl, pair: { ...this.pair } }; }
   subscribe(listener: (event: RelayEvent) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   connect(): void {
     if (this.closed) return;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     const generation = ++this.generation;
+    this.socket?.close();
     this.authenticated = false; this.fresh = false; this.lastSequence = -1; this.snapshotAt = 0; this.outstanding.clear();
     const url = new URL('/v1/device', this.baseUrl);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -78,12 +81,16 @@ export class RelayClient {
     } else if (envelope.type === 'instance.offline') { this.fresh = false; this.emit({ kind: 'offline', instanceId: this.instanceId }); }
   }
 }
-export async function pairRelay(relayUrl: string, code: string): Promise<RelayClient> {
+export function relayOrigin(relayUrl: string): string {
   const parsed = new URL(relayUrl);
-  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname))) throw new Error('Use HTTPS for relay pairing, except loopback development.');
-  const response = await fetch(new URL('/v1/pair', parsed), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  if (parsed.username || parsed.password || (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)))) throw new Error('Podaj adres HTTPS Relay.');
+  return parsed.origin;
+}
+export async function pairRelay(relayUrl: string, code: string): Promise<RelayClient> {
+  const origin = relayOrigin(relayUrl);
+  const response = await fetch(new URL('/v1/pair', origin), { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
   if (!response.ok) throw new Error('Pairing failed. Check the one-use code and relay address.');
   const result: unknown = await response.json();
   if (!isRecord(result) || result.v !== 1 || typeof result.instanceId !== 'string' || typeof result.deviceId !== 'string' || typeof result.token !== 'string') throw new Error('Relay returned an invalid pairing response.');
-  return new RelayClient(parsed.toString(), { v: 1, instanceId: result.instanceId, deviceId: result.deviceId, token: result.token });
+  return new RelayClient(origin, { v: 1, instanceId: result.instanceId, deviceId: result.deviceId, token: result.token });
 }

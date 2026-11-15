@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hostname } from 'node:os';
 import { RemoteRelayService } from './remote-relay.service';
 
 type Listener = (event: { data?: unknown }) => void;
@@ -31,6 +32,13 @@ function internal(service: RemoteRelayService): {
 
 describe('RemoteRelayService protocol lifecycle', () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+  it('publishes the computer name when no explicit instance name is configured', async () => {
+    vi.stubEnv('KALIO_REMOTE_RELAY_INSTANCE_NAME', '  ');
+    vi.stubEnv('KALIO_REMOTE_RELAY_INSTANCE_ID', 'qa-host');
+    const { service } = createService();
+    await expect(service.snapshot()).resolves.toMatchObject({ instance: { id: 'qa-host', name: hostname() } });
+  });
 
   it('stays disconnected when the feature flag is disabled', () => {
     vi.stubEnv('KALIO_REMOTE_RELAY_ENABLED', 'false');

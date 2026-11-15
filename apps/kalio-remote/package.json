@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "android:sync": "cap sync android",
+    "android:sync": "node android-template/install.mjs && cap sync android",
     "android:open": "cap open android",
     "preview": "vite preview --host 0.0.0.0"
   },

@@ -3,6 +3,7 @@ import type { ArchitectureRemoteGraphPort, ChatRemoteSupervisionPort, RemoteSupe
 import { ARCHITECTURE_REMOTE_GRAPH_PORT, CHAT_REMOTE_SUPERVISION_PORT } from '@kalio/types';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
+import { hostname } from 'node:os';
 
 interface Envelope { v: 1; type: string; instanceId: string; requestId?: string; sequence?: number; payload?: Record<string, unknown> }
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -26,7 +27,7 @@ export class RemoteRelayService implements OnModuleInit, OnModuleDestroy, Remote
   private lastSnapshotSentAt = 0;
   private readonly enabled = process.env['KALIO_REMOTE_RELAY_ENABLED'] === 'true';
   private readonly instanceId = process.env['KALIO_REMOTE_RELAY_INSTANCE_ID'] ?? '';
-  private readonly instanceName = process.env['KALIO_REMOTE_RELAY_INSTANCE_NAME'] ?? '';
+  private readonly instanceName = process.env['KALIO_REMOTE_RELAY_INSTANCE_NAME']?.trim() || hostname();
   private readonly token = process.env['KALIO_REMOTE_RELAY_TOKEN'] ?? '';
   private readonly url = process.env['KALIO_REMOTE_RELAY_URL'] ?? '';
 

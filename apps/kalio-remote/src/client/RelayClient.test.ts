@@ -39,4 +39,25 @@ describe('RelayClient device protocol',()=>{
   a.subscribe(e=>{if(e.kind==='snapshot')seen.push('a:'+e.value.instance.id)});b.subscribe(e=>{if(e.kind==='snapshot')seen.push('b:'+e.value.instance.id)});
   a.connect();b.connect();const [wa,wb]=MockWebSocket.all;wa!.open();wb!.open();wa!.receive({v:1,type:'auth.accepted',instanceId:'a'});wb!.receive({v:1,type:'auth.accepted',instanceId:'b'});wa!.receive(snapshot('a',1));wb!.receive(snapshot('b',1));wa!.receive(snapshot('b',2));expect(seen).toEqual(['a:a','b:b']);
  });
+ it('refreshes the socket using saved credentials and ignores the replaced connection',()=>{
+  vi.stubGlobal('WebSocket',MockWebSocket);
+  const original=client('one');
+  const saved=original.credentials();
+  original.disconnect();
+  const restored=new RelayClient(saved.relayUrl,saved.pair);
+  const seen:string[]=[];
+  restored.subscribe(event=>seen.push(event.kind));
+  restored.connect();
+  const old=MockWebSocket.all[0]!;
+  restored.connect();
+  const next=MockWebSocket.all[1]!;
+  expect(old.readyState).toBe(3);
+  old.receive({v:1,type:'auth.accepted',instanceId:'one'});
+  old.receive(snapshot('one',2));
+  next.open();
+  expect(JSON.parse(next.sent[0]!)).toMatchObject({type:'auth',token:'secret-one'});
+  next.receive({v:1,type:'auth.accepted',instanceId:'one'});
+  next.receive(snapshot('one',1));
+  expect(seen).toEqual(['snapshot']);
+ });
 });

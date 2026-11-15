@@ -19,7 +19,7 @@ Use a broker instead of exposing the entire desktop API through a tunnel: this b
 - Revalidate current pending request, original argument hash and revision immediately before the existing domain CAS/continuation. Do not synthesize a gateway socket identity.
 - Never queue decisions offline or replay ambiguous state-changing requests. Reconnection discards stale transport state and hydrates authoritative snapshots.
 - Browser/native pairing uses explicit CORS origins (Android https://localhost); public connections use HTTPS/WSS. No bearer values in URLs or access logs.
-- Android prototype capabilities remain memory-only until a verified Keystore-backed vault is integrated. No localStorage/plain Preferences token persistence.
+- Android restores saved hosts and instance aliases after restart from an app-private AES-GCM vault using a key in Android Keystore. Browser credentials remain memory-only. No localStorage/plain Preferences token persistence.
 - Background Android delivery is not promised by an open foreground WebSocket; push notifications/foreground service are a later explicit slice.
 
 ## Acceptance

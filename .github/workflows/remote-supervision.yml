@@ -100,7 +100,7 @@ jobs:
       - name: Generate Android shell and sync reviewed web bundle
         run: |
           npx cap add android
-          npx cap sync android
+          npm run android:sync
           node <<'NODE'
           const fs=require('node:fs');
           const path='android/gradle/wrapper/gradle-wrapper.properties';
