@@ -6,7 +6,7 @@ version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
 test "$(basename "$archive")" = "kalio-runtime-${version}-linux-x64.tar.gz"
 sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
 suffix="$(node -p "require('node:crypto').randomUUID()")"
-image="kalio-runtime-smoke:$suffix"
+image="${KALIO_SMOKE_IMAGE:-kalio-runtime-smoke:$suffix}"
 project="kalio-runtime-smoke-$suffix"
 export KALIO_IMAGE="$image" KALIO_HTTP_PORT=0
 compose=(docker compose -p "$project" -f compose.kalio.yml)
@@ -15,7 +15,9 @@ cleanup() {
   local status=$?
   if (( status != 0 )); then "${compose[@]}" logs --tail 80 kalio || true; fi
   "${compose[@]}" down --volumes >/dev/null 2>&1 || true
-  docker image rm "$image" >/dev/null 2>&1 || true
+  if (( status != 0 )) || [[ -z "${KALIO_SMOKE_IMAGE:-}" ]]; then
+    docker image rm "$image" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 

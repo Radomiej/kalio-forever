@@ -1,0 +1,52 @@
+name: Publish Kalio Linux OCI image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-linux:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Build Linux runtime
+        run: |
+          node scripts/bump-version.mjs --check
+          pnpm install --frozen-lockfile
+          pnpm build
+          node scripts/build-runtime-package.mjs --platform linux --runtime node --output release
+      - name: Verify the image that will be published
+        shell: bash
+        run: |
+          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:v${version}-${GITHUB_SHA}"
+          archive="release/kalio-runtime-${version}-linux-x64.tar.gz"
+          KALIO_SMOKE_IMAGE="$image" bash scripts/smoke-docker-runtime.sh "$archive"
+          printf 'KALIO_VERIFIED_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+      - name: Publish the verified image
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          docker push "$KALIO_VERIFIED_IMAGE"
+          digest="$(docker image inspect "$KALIO_VERIFIED_IMAGE" --format '{{index .RepoDigests 0}}')"
+          [[ "$digest" =~ @sha256:[a-f0-9]{64}$ ]]
+          printf 'Install with `KALIO_IMAGE=%s` and `compose.kalio.yml` from this commit.\n' "$digest" >> "$GITHUB_STEP_SUMMARY"

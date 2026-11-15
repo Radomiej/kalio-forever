@@ -68,3 +68,8 @@ docker compose -f compose.kalio.yml up -d
 Open http://127.0.0.1:4016. Set KALIO_HTTP_PORT before starting if port
 4016 is occupied. Configure a provider in the Kalio UI. Keep the same Compose
 project directory and named volume when updating the image reference.
+
+The **Publish Kalio Linux OCI image** workflow is manually dispatched on main.
+It builds and tests the image with Compose before logging in to GHCR. It pushes
+a version-and-commit tag and reports the digest for installation. Registry
+visibility controls whether users need to authenticate before pulling.
