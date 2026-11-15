@@ -52,25 +52,30 @@ function replayToolEvents(
   messages: ChatMessage[],
 ): void {
   const calls = new Map<string, NonNullable<ChatMessage['toolCalls']>[number]>();
+  const events: Array<() => void> = [];
   for (const message of messages) {
     if (message.role === 'assistant') {
       for (const call of message.toolCalls ?? []) {
         calls.set(call.id, call);
-        emit('tool:start', {
+        events.push(() => emit('tool:start', {
           callId: call.id,
           toolName: call.name,
           args: call.args,
           sessionId,
           turnId,
-        });
+        }));
       }
       continue;
     }
     if (message.role !== 'tool_result' || !message.toolCallId) continue;
     const call = calls.get(message.toolCallId);
     if (!call) continue;
-    emit('tool:result', parseToolResult(message, call.name, sessionId));
+    const result = parseToolResult(message, call.name, sessionId);
+    calls.delete(message.toolCallId);
+    events.push(() => emit('tool:result', result));
   }
+  if (calls.size > 0) throw new Error(`Unable to replay tool result: missing result in child turn ${turnId}`);
+  for (const publish of events) publish();
 }
 
 function parseToolResult(message: ChatMessage, toolName: string, sessionId: string): ToolResult {
