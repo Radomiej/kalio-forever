@@ -263,6 +263,20 @@ async fn paired_device_can_watch_and_submit_authenticated_approval_decisions() {
             .await
             .is_err()
     );
+    let mut reconnected_phone = auth_device(&base, credentials["token"].as_str().unwrap()).await;
+    assert_eq!(text_json(&mut reconnected_phone).await["type"], "snapshot");
+    let replay = tokio::time::timeout(Duration::from_millis(150), async {
+        while let Some(frame) = reconnected_phone.next().await {
+            let frame = frame.expect("reconnected device socket");
+            if let ClientMessage::Text(text) = frame {
+                let message: Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(message["type"], "snapshot");
+            }
+        }
+    })
+    .await;
+    assert!(replay.is_err());
+    phone = reconnected_phone;
     host.send(ClientMessage::Close(None)).await.unwrap();
     phone.send(ClientMessage::Text(json!({"v":1,"type":"approval.decide","instanceId":"desk","requestId":"offline-1","approvalId":"a","revision":"r","argsSha256":"d","decision":"deny"}).to_string().into())).await.unwrap();
     let rejected = loop {
