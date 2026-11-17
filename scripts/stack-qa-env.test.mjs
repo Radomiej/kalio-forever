@@ -10,6 +10,12 @@ const configuredLlm = {
 const resolveEnv = (options = {}) => resolveQaEnvValues({ fileEnv: {}, processEnv: {}, ...options });
 const llmFields = (env) => Object.fromEntries(Object.keys(emptyLlm).map((key) => [key, env[key]]));
 
+test('managed QA defaults to the QA install profile and preserves explicit profiles', () => {
+  assert.equal(resolveEnv().KALIO_INSTALL_PROFILE, 'qa');
+  assert.equal(resolveEnv({ processEnv: { KALIO_INSTALL_PROFILE: 'dev' } }).KALIO_INSTALL_PROFILE, 'dev');
+  assert.equal(resolveEnv({ fileEnv: { KALIO_INSTALL_PROFILE: 'prod' } }).KALIO_INSTALL_PROFILE, 'prod');
+});
+
 test('manual QA without credentials stays unconfigured and does not enable fast mock', () => {
   const env = resolveEnv({ useEnvLlm: true });
   assert.deepEqual(llmFields(env), emptyLlm);

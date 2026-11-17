@@ -15,6 +15,7 @@ export function resolveQaEnvValues({
   return {
     ...processEnv,
     ...fileEnv,
+    KALIO_INSTALL_PROFILE: fileEnv.KALIO_INSTALL_PROFILE ?? processEnv.KALIO_INSTALL_PROFILE ?? 'qa',
     LLM_PROVIDER: resolvedProvider,
     LLM_API_KEY: apiKey ?? llmEnv.LLM_API_KEY ?? fallback,
     LLM_BASE_URL: baseUrl ?? llmEnv.LLM_BASE_URL ?? fallback,
