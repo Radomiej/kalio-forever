@@ -1,6 +1,19 @@
 import type { ChatSession, SessionRuntimeContext } from '@kalio/types';
 import type { SessionsService } from './sessions.service';
 
+function preserveExistingBranchPaths(previous: SessionRuntimeContext | undefined, next: SessionRuntimeContext): SessionRuntimeContext {
+  const saved = previous?.architectureContext;
+  const incoming = next.architectureContext;
+  // TODO: legacy fallback. A reconstructed run may omit project metadata from its prompt context.
+  if (previous?.runtimeKind !== 'agent-flow-branch' || next.runtimeKind !== 'agent-flow-branch'
+    || !saved?.architectureRunId || saved.architectureRunId !== incoming?.architectureRunId
+    || !previous.architectureSlotId || previous.architectureSlotId !== next.architectureSlotId
+    || typeof saved.projectPath !== 'string' || !saved.projectPath
+    || typeof saved.executionCwd !== 'string' || !saved.executionCwd
+    || incoming.projectPath !== undefined || incoming.executionCwd !== undefined) return next;
+  return { ...next, architectureContext: { ...incoming, projectPath: saved.projectPath, executionCwd: saved.executionCwd } };
+}
+
 export async function ensureSubagentSession(input: {
   sessions: SessionsService;
   requestedChildSessionId?: string;
@@ -31,12 +44,14 @@ export async function ensureSubagentSession(input: {
   if (childSession.parentSessionId !== input.parentSessionId) {
     throw new Error(`Sub-agent session ${childSession.id} does not belong to parent session ${input.parentSessionId}`);
   }
+  const runtimeContext = input.requestedChildSessionId
+    ? preserveExistingBranchPaths(childSession.runtimeContext, input.runtimeContext) : input.runtimeContext;
   if (
     (input.requestedChildSessionId || input.reloadAfterUpdate)
-    && (!childSession.runtimeContext || JSON.stringify(childSession.runtimeContext) !== JSON.stringify(input.runtimeContext))
+    && (!childSession.runtimeContext || JSON.stringify(childSession.runtimeContext) !== JSON.stringify(runtimeContext))
   ) {
-    await input.sessions.updateRuntimeContext(childSession.id, input.runtimeContext, {
-      registerRuntimeProjectPath: true,
+    await input.sessions.updateRuntimeContext(childSession.id, runtimeContext, {
+      registerRuntimeProjectPath: runtimeContext === input.runtimeContext,
     });
     if (input.reloadAfterUpdate) return input.sessions.get(childSession.id);
   }

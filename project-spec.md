@@ -433,6 +433,8 @@ Devin ACP continuation budgets count the rendered assistant text. Over-budget hi
 
 Contextual tool approval sends Jev the current operation, host environment and project scope, up to three recent user inputs and the bound delegated objective (2,000-character excerpts), up to five recent tool names and statuses from the current session, and tool names from prior denials. Prior tool arguments and results stay local. Freshness and production targeting still use the host-owned snapshot.
 
+Reusing an architecture branch within the same run and role preserves its existing project execution paths if reconstructed context omits both. Explicit paths and the normal scope checks retain their existing behavior.
+
 ## Remote supervision boundary (2026-11-08)
 
 The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.

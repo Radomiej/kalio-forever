@@ -1,5 +1,7 @@
 # Architecture Runtime Stack
 
+When Kalio reuses a branch in the same run and role, a reconstructed context that omits both execution paths preserves the saved project path and execution cwd. The copied values do not re-register an allowed path, and normal scope validation still applies.
+
 This document shows the current architecture orchestration layer and the stream boundary it must preserve.
 
 The important design rule: architecture runtime controls graph execution, but the LLM stream remains the normal Kalio chat stream.
