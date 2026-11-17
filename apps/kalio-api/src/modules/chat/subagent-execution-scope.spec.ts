@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { prepareSubagentExecution, resolveObservedSubagentScope } from './subagent-execution-scope';
+import { ensureSubagentSession } from './subagent-session-bootstrap';
+import type { SessionRuntimeContext } from '@kalio/types';
 
 function fixture() {
   const parent = { id: 'parent', projectId: 'project', executionProfileId: 'saved-profile', runtimeContext: { runtimeKind: 'chat', architectureContext: { executionCwd: '/root/src' } } };
@@ -22,6 +24,29 @@ function fixture() {
 }
 
 describe('observed persisted subagent execution scope', () => {
+  it.each([
+    { run: 'run', paths: {}, expected: { projectPath: '/root', executionCwd: '/root/src' } },
+    { run: 'other-run', paths: {}, expected: {} },
+    { run: 'run', paths: { executionCwd: '/explicit' }, expected: { executionCwd: '/explicit' } },
+  ])('keeps saved paths only for an omitted pair in the same branch ($run, $paths)', async ({ run, paths, expected }) => {
+    const context: SessionRuntimeContext = {
+      runtimeKind: 'agent-flow-branch', architectureSlotId: 'core',
+      architectureContext: { architectureRunId: 'run', projectPath: '/root', executionCwd: '/root/src' },
+    };
+    const sessions = {
+      get: vi.fn(async () => ({ id: 'child', kind: 'subagent', parentSessionId: 'parent', runtimeContext: context })),
+      updateRuntimeContext: vi.fn<(id: string, context: SessionRuntimeContext, options: { registerRuntimeProjectPath: boolean }) => Promise<void>>().mockResolvedValue(undefined),
+    };
+    await ensureSubagentSession({
+      sessions: sessions as never, requestedChildSessionId: 'child', childSessionId: 'child',
+      parentSessionId: 'parent', personaId: 'core', objective: 'verify',
+      runtimeContext: { ...context, architectureContext: { architectureRunId: run, roleLabel: 'Core', ...paths } },
+    });
+    expect(sessions.updateRuntimeContext.mock.calls[0]?.[1].architectureContext)
+      .toEqual({ architectureRunId: run, roleLabel: 'Core', ...expected });
+    expect(sessions.updateRuntimeContext.mock.calls[0]?.[2].registerRuntimeProjectPath)
+      .toBe(!(run === 'run' && Object.keys(paths).length === 0));
+  });
   it.each(['bootstrap', 'profile'] as const)('rejects changed persisted cwd during awaited %s despite unchanged linkage', async stage => {
     const f = fixture();
     if (stage === 'bootstrap') {

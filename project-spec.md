@@ -309,6 +309,8 @@ classDiagram
 - Static profiles, dynamic discovery and semantic compaction remain distinct implementation choices; benchmark proposals must not be described as shipped behavior. Preserve durable source material and measure correctness plus retrieval/recovery cost before adopting lossy compression.
 
 
+Reusing an architecture branch within the same run and role preserves its existing project execution paths if reconstructed context omits both. Explicit paths and the normal scope checks retain their existing behavior.
+
 ## Remote supervision boundary (2026-11-08)
 
 The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.
