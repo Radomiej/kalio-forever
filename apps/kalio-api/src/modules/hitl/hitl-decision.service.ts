@@ -149,6 +149,7 @@ export class HitlDecisionService {
     messages: ContextManagedLLMMessage[],
     input: HitlDecisionInput,
   ): Promise<string> {
+    if (profileId && !this.executionProfiles) throw new Error('HITL execution profiles are not configured.');
     const profile = profileId && this.executionProfiles
       ? await this.executionProfiles.assertEnabled(profileId)
       : undefined;
@@ -166,6 +167,10 @@ export class HitlDecisionService {
         if (chunk.type === 'text_delta') response += chunk.delta;
       }
       return response;
+    }
+
+    if (profile && profile.kind !== 'direct-llm') {
+      throw new Error('The selected execution profile does not support HITL evaluation.');
     }
 
     let response = '';
