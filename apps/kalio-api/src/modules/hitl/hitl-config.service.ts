@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { DECISION_SETTINGS, type DecisionSettingsPort, type HitlHardRule } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { PersonaService } from '../persona/persona.service';
+import { HitlDecisionService } from './hitl-decision.service';
 import {
   isHitlMode,
   isHitlNotificationChannel,
@@ -62,6 +63,7 @@ export class HitlConfigService {
     private readonly appSettings: AppSettingsService,
     private readonly personaService: PersonaService,
     @Inject(DECISION_SETTINGS) private readonly decisions: DecisionSettingsPort,
+    private readonly approvalEvaluator: HitlDecisionService,
   ) {}
 
   async getConfig(): Promise<ResolvedHitlConfig> {
@@ -392,10 +394,14 @@ export class HitlConfigService {
   }
 
   private async ensurePersonaExists(personaId: string): Promise<void> {
-    try {
-      await this.personaService.findOne(personaId);
-    } catch {
+    const persona = await this.personaService.findOne(personaId).catch(() => {
       throw new BadRequestException(`Auto HITL persona "${personaId}" was not found.`);
+    });
+    if (!persona.executionProfileId) return;
+    try {
+      await this.approvalEvaluator.resolveEvaluationProfile(persona.executionProfileId);
+    } catch {
+      throw new BadRequestException(`HITL persona "${personaId}" requires an enabled Codex or direct LLM execution profile.`);
     }
   }
 }

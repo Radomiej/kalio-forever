@@ -144,15 +144,22 @@ export class HitlDecisionService {
     }
   }
 
+  async resolveEvaluationProfile(profileId: string | undefined) {
+    if (!profileId) return undefined;
+    if (!this.executionProfiles) throw new Error('HITL execution profiles are not configured.');
+    const profile = await this.executionProfiles.assertEnabled(profileId);
+    if (profile.kind !== 'codex-app-server' && profile.kind !== 'direct-llm') {
+      throw new Error('The selected execution profile does not support HITL evaluation.');
+    }
+    return profile;
+  }
+
   private async evaluateWithConfiguredProfile(
     profileId: string | undefined,
     messages: ContextManagedLLMMessage[],
     input: HitlDecisionInput,
   ): Promise<string> {
-    if (profileId && !this.executionProfiles) throw new Error('HITL execution profiles are not configured.');
-    const profile = profileId && this.executionProfiles
-      ? await this.executionProfiles.assertEnabled(profileId)
-      : undefined;
+    const profile = await this.resolveEvaluationProfile(profileId);
     if (profile?.kind === 'codex-app-server') {
       if (!this.codexSource) throw new Error('Codex App Server evaluator is not configured.');
       let response = '';
@@ -167,10 +174,6 @@ export class HitlDecisionService {
         if (chunk.type === 'text_delta') response += chunk.delta;
       }
       return response;
-    }
-
-    if (profile && profile.kind !== 'direct-llm') {
-      throw new Error('The selected execution profile does not support HITL evaluation.');
     }
 
     let response = '';

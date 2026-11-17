@@ -48,6 +48,7 @@ describe('HitlConfigService', () => {
   let service: HitlConfigService;
   let appSettings: AppSettingsService;
   let personaService: { findOne: ReturnType<typeof vi.fn> };
+  let evaluator: { resolveEvaluationProfile: ReturnType<typeof vi.fn> };
   let credentialsService: { getProviderConfigForCredential: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
@@ -65,10 +66,20 @@ describe('HitlConfigService', () => {
     };
     const decisionCredentials = { ...credentialsService, findAll: vi.fn().mockResolvedValue([{id:'openrouter-management', provider:'openrouter', createdAt:1}]) };
     const decisions = new DecisionSettingsService(appSettings, decisionCredentials as never);
-    service = new HitlConfigService(appSettings, personaService as never, decisions);
+    evaluator = { resolveEvaluationProfile: vi.fn() };
+    service = new HitlConfigService(appSettings, personaService as never, decisions, evaluator as never);
   });
 
   it('returns manual defaults when no HITL config is stored', async () => {
+    await expect(service.getConfig()).resolves.toEqual(DEFAULT_CONFIG);
+  });
+  it('rejects a representative with an incompatible profile before storing settings', async () => {
+    personaService.findOne.mockResolvedValueOnce({ id: 'reviewer-persona', executionProfileId: 'devin' });
+    evaluator.resolveEvaluationProfile.mockRejectedValueOnce(new Error('unsupported profile'));
+    await expect(service.updateConfig({
+      mode: 'manual', unattendedFallback: 'representative', representativePersonaId: 'reviewer-persona',
+    })).rejects.toThrow('requires an enabled Codex or direct LLM execution profile');
+    expect(evaluator.resolveEvaluationProfile).toHaveBeenCalledWith('devin');
     await expect(service.getConfig()).resolves.toEqual(DEFAULT_CONFIG);
   });
   it('persists independently editable local and production thresholds', async () => {
