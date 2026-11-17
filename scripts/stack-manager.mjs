@@ -327,7 +327,7 @@ function commonEnv(qaEnv) {
   return {
     ...qaEnv,
     NODE_ENV: 'production',
-    KALIO_INSTALL_PROFILE: isProdProfile ? 'prod' : qaEnv.KALIO_INSTALL_PROFILE,
+    KALIO_INSTALL_PROFILE: isProdProfile ? 'prod' : qaEnv.KALIO_INSTALL_PROFILE ?? 'qa',
     KALIO_ENABLE_TEST_SUPPORT: isProdProfile ? 'false' : 'true',
     CREDENTIALS_MASTER_KEY: resolveCredentialsMasterKey(qaEnv),
     DATABASE_PATH: dataPaths.databasePath,
