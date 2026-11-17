@@ -205,6 +205,12 @@ function sanitizeWebSearchPayload(payload: {
   });
 }
 
+export class ActiveTurnContextBudgetError extends Error {
+  constructor() {
+    super('Active turn exceeds safe context budget; committed tool evidence cannot be discarded.');
+  }
+}
+
 export function getSafeContextTarget(contextWindowSize: number): number {
   return Math.max(256, Math.floor(contextWindowSize * SAFE_CONTEXT_RATIO));
 }
@@ -400,7 +406,7 @@ export function compactLLMHistory(
       body = body.map((message, index) => (index === truncationIndex ? truncateMessageContent(message) : message));
       continue;
     }
-    throw new Error('Active turn exceeds safe context budget; committed tool evidence cannot be discarded.');
+    throw new ActiveTurnContextBudgetError();
   }
 
   return systemMessage ? [systemMessage, ...body] : body;

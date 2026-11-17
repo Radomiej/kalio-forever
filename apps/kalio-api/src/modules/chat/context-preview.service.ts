@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import type {
   ContextPreviewRequest,
   LLMContextPreview,
@@ -12,6 +12,7 @@ import { ContextAssemblyService } from './context-assembly.service';
 import { SessionManagerService } from './session-manager.service';
 import { SessionsService } from './sessions.service';
 import {
+  ActiveTurnContextBudgetError,
   estimateMessageTokens,
   estimateTextTokens,
   estimateToolTokens,
@@ -41,6 +42,9 @@ export class ContextPreviewService {
       historySessionId: historySessionIdForRuntime(runtimeContext, sessionId),
       draftUserMessage: request.draftUserMessage,
       attachments: request.attachments,
+    }).catch((error: unknown) => {
+      if (!(error instanceof ActiveTurnContextBudgetError)) throw error;
+      throw new UnprocessableEntityException({ code: 'ACTIVE_TURN_CONTEXT_BUDGET_EXCEEDED', message: error.message });
     });
     const messages = this.toPreviewMessages(prepared.history);
     const estimatedTokens = this.estimatePreviewTokens(prepared.history, assembled.toolMetas);
