@@ -207,10 +207,12 @@ describe('useContextPreview', () => {
     expect(result.current.loading).toBe(false);
   });
 
-  it('keeps the previous preview marked stale when a refresh fails', async () => {
+  it('explains the budget limit and keeps the previous preview marked stale', async () => {
     apiPostMock
       .mockResolvedValueOnce({ data: makePreview() })
-      .mockRejectedValueOnce(new Error('Preview failed'));
+      .mockRejectedValueOnce({ isAxiosError: true, response: {
+        status: 422, data: { code: 'ACTIVE_TURN_CONTEXT_BUDGET_EXCEEDED' },
+      } });
 
     const { result } = renderHook(() => useContextPreview({
       sessionId: 'session-1',
@@ -223,7 +225,7 @@ describe('useContextPreview', () => {
 
     act(() => result.current.invalidate());
 
-    await waitFor(() => expect(result.current.error).toBe('Preview failed'));
+    await waitFor(() => expect(result.current.error).toBe('This turn exceeds the context budget. Its tool results are still saved.'));
     expect(result.current.preview).toBeTruthy();
     expect(result.current.stale).toBe(true);
   });
