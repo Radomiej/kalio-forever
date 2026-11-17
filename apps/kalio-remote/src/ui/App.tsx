@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Activity, ArrowLeft, Check, CircleHelp, GitBranch, Layers, Link2, Menu, Moon, Pencil, RefreshCw, Search, ShieldAlert, SlidersHorizontal, Sun, X } from 'lucide-react';
-import { Approval, SessionSnapshot, Snapshot } from '../protocol';
+import { Activity, ArrowLeft, CircleHelp, Link2, Menu, Moon, Pencil, RefreshCw, Search, ShieldAlert, SlidersHorizontal, Sun, X } from 'lucide-react';
+import type { Approval, SessionSnapshot, Snapshot } from '../protocol';
+import { ApprovalCard, GraphPanel } from './RunDetails';
+import { SessionPanel } from './SessionPanel';
 import { pairRelay, RelayClient } from '../client/RelayClient';
 import { canSaveHosts, readSavedHosts, saveHosts, type SavedHost } from '../client/deviceVault';
 
@@ -55,7 +57,15 @@ export function App() {
  const active = connections.find(c => c.id === selected);
  latest.current.selected = selected;
  const data = preview ? fixture : active?.snapshot ?? null;
- const canDecide = !preview && active?.status === 'online' && active.client.canDecide();
+ const [approvalSnapshotFresh, setApprovalSnapshotFresh] = useState(false);
+ useEffect(() => {
+  const refresh = () => setApprovalSnapshotFresh(active?.status === 'online' && active.client.canDecide());
+  refresh();
+  if (!active?.snapshot?.approvals.length || active.status !== 'online') return;
+  const timer = setInterval(refresh, 1000);
+  return () => clearInterval(timer);
+ }, [active]);
+ const canDecide = !preview && active?.status === 'online' && approvalSnapshotFresh && active.client.canDecide();
  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
  const sessions = data?.sessions ?? [];
  const projects = useMemo(()=>Array.from(new Set(sessions.flatMap(s=>s.project?[s.project]:[]))),[data]);
@@ -177,7 +187,8 @@ export function App() {
  }
  async function decide(a:Approval, choice:'approve'|'deny') { if(!active||!canDecide)return; try { const requestId=active.client.decide(a,choice); setOczekuje(p=>({...p,[active.id+'|'+a.id]:requestId})); setNotice('Wysłano decyzję. Oczekiwanie na potwierdzenie Kalio.'); } catch(e){setNotice(e instanceof Error?e.message:'Nie udało się wysłać decyzji.');} }
  const activeCount = sessions.filter(item => item.active).length;
- const approvalCount = data?.approvals.length ?? 0;
+ const approvals = canDecide ? (data?.approvals ?? []).filter(a => results[active.id+'|'+a.id] !== 'Rozstrzygnięto') : [];
+ const approvalCount = approvals.length;
  const connectionLabel = preview ? 'Demo' : active ? connectionLabels[active.status] : restoring ? 'Wczytywanie…' : 'Niepołączono';
  return <main className="app-shell">
   <header className="topbar">
@@ -210,7 +221,7 @@ export function App() {
       {selectedSessionId&&<div className="session-detail"><button className="subtle-button back-button" onClick={resetSession}><ArrowLeft size={16}/> Wróć do sesji</button><SessionPanel session={session} onGraph={()=>setView('graph')}/></div>}
      </div>
     </>}
-    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{(data?.approvals??[]).map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
+    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{approvals.map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
     {view==='graph'&&<><button className="subtle-button back-button" onClick={()=>setView('sessions')}><ArrowLeft size={16}/> Wróć do rozmowy</button><GraphPanel session={session}/></>}
    </>}
   </section>
@@ -258,14 +269,4 @@ function RemoteSheet({title,children,onClose}:{title:string;children:ReactNode;o
   <div className="sheet-heading"><h2>{title}</h2><button className="icon-button" aria-label="Zamknij" onClick={onClose}><X size={20}/></button></div>
   {children}
  </dialog>;
-}
-function SessionPanel({session,onGraph}:{session:SessionSnapshot|null;onGraph:()=>void}) { return <section className="detail-panel"><div className="panel-title"><div><h2>{session?.title ?? 'Wczytywanie sesji…'}</h2></div>{session&&<button className="subtle-button" onClick={onGraph}><GitBranch size={15}/> Graf</button>}</div>{!session?<div className="detail-empty">Wybierz sesję, aby zobaczyć wiadomości i postęp.</div>:<div className="messages">{session.messages.map(m=><article key={m.id} className={'message '+(m.role==='user'?'from-user':'')}><span className="message-role">{m.role==='user'?'TY':'KALIO'}</span><p>{m.content}</p>{m.createdAt&&<time>{new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>}</article>)}</div>}</section>; }
-function ApprovalCard({approval,disabled,pending,result,onDecide}:{approval:Approval;disabled:boolean;pending?:string;result?:string;onDecide:(choice:'approve'|'deny')=>void}) { return <article className="approval-card"><div className="approval-head"><div><span className="eyebrow">ZATWIERDZENIE NARZĘDZIA</span><h2>{approval.toolName}</h2></div><span className="pending-pill">{result??(pending?'Oczekiwanie na hosta':'Oczekuje')}</span></div><dl><div><dt>Session</dt><dd>{approval.sessionId}</dd></div><div><dt>Wersja</dt><dd>{approval.revision}</dd></div><div><dt>Suma SHA-256 argumentów</dt><dd className="digest">{approval.argsSha256}</dd></div><div><dt>Wysłano</dt><dd>{approval.requestedAt?new Date(approval.requestedAt).toLocaleString():'Brak informacji o czasie'}</dd></div></dl><div className="args-box"><div className="args-label">ARGUMENTY · DANE POUFNE ZAMASKOWANE</div><pre>{JSON.stringify(approval.args,null,2)}</pre></div>{pending&&<p className="decision-wait">Wysłano decyzję. Oczekiwanie na odpowiedź hosta.</p>}{result&&<p className="decision-result">{result}</p>}<div className="decision-actions"><button className="deny-button" disabled={disabled} onClick={()=>onDecide('deny')}><X size={16}/> Odrzuć raz</button><button className="approve-button" disabled={disabled} onClick={()=>onDecide('approve')}><Check size={16}/> Zatwierdź raz</button></div>{disabled&&<small className="disabled-reason">Wymaga aktywnego połączenia i aktualnych danych.</small>}</article>; }
-function GraphPanel({session}:{session:SessionSnapshot|null}) {
- const [zoom,setZoom]=useState(1);
- const graph=session?.graph;
- if(!session||!graph?.available||graph.nodes.length===0) return <div className="graph-panel"><div className="graph-heading"><Layers size={17}/><div><strong>Execution trace</strong><small>Graf tylko do odczytu</small></div></div><div className="detail-empty">{graph?.reason==='no_architecture_run'?'Ta sesja nie ma grafu architektury.':graph?.reason==='projection_unavailable'?'Graf wykonania jest chwilowo niedostępny.':'Graf wykonania jest niedostępny.'}</div>{session&&<ol className="graph-list">{session.messages.map(m=><li key={m.id}><span className="node-dot">{m.role==='user'?'U':'K'}</span><div><strong>{m.role==='user'?'You':'Kalio'}</strong><small>{m.content}</small></div></li>)}</ol>}</div>;
- const width=Math.max(720,graph.nodes.length*210), height=Math.max(420,Math.ceil(graph.nodes.length/3)*125+100);
- const positions=new Map(graph.nodes.map((node,index)=>[node.id,{x:90+(index%3)*220,y:80+Math.floor(index/3)*125}]));
- return <div className="graph-panel"><div className="graph-heading"><Layers size={17}/><div><strong>Execution trace</strong><small>Uruchomienie {graph.runId} · pan and zoom · read-only</small></div><button className="subtle-button" onClick={()=>setZoom(z=>Math.max(.6,z-.2))} aria-label="Zoom out">−</button><button className="subtle-button" onClick={()=>setZoom(z=>Math.min(1.8,z+.2))} aria-label="Zoom in">+</button></div><div className="graph-canvas" tabIndex={0} aria-label="Pannable execution graph"><svg width={width*zoom} height={height*zoom} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Graf wykonania with nodes and connections"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--primary)"/></marker></defs>{graph.edges.map(edge=>{const a=positions.get(edge.source),b=positions.get(edge.target);return a&&b?<g key={edge.id}><path d={`M ${a.x+65} ${a.y+25} C ${(a.x+b.x)/2} ${a.y+25}, ${(a.x+b.x)/2} ${b.y+25}, ${b.x-65} ${b.y+25}`} fill="none" stroke="var(--primary)" strokeWidth="2" markerEnd="url(#arrow)"/><text x={(a.x+b.x)/2} y={(a.y+b.y)/2+16} fill="var(--muted)" fontSize="10" textAnchor="middle">{edge.type}</text></g>:null})}{graph.nodes.map(node=>{const p=positions.get(node.id);return p?<g key={node.id}><rect x={p.x-65} y={p.y} width="130" height="52" rx="10" fill="var(--surface2)" stroke={node.status==='running'?'var(--primary)':'var(--line)'} strokeWidth="2"/><text x={p.x} y={p.y+21} fill="var(--text)" fontSize="12" textAnchor="middle">{node.label.slice(0,18)}</text><text x={p.x} y={p.y+39} fill="var(--muted)" fontSize="10" textAnchor="middle">{node.type} · {node.status??'unknown'}</text></g>:null})}</svg></div><details className="graph-accessible"><summary>Lista węzłów grafu</summary><ol>{graph.nodes.map(n=><li key={n.id}>{n.label} — {n.type}, {n.status??'unknown'}</li>)}</ol></details></div>;
 }

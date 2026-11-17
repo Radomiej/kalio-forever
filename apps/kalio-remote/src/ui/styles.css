@@ -52,3 +52,15 @@ button,input,select{min-height:44px} .icon-button,.notice button{min-height:44px
  .bottom-tabs button{flex:1}
  .remote-sheet{margin:auto auto 8px}
 }
+.approval-head h2{display:flex;align-items:center;gap:7px}
+.approval-card dl{display:grid;grid-template-columns:1fr;gap:8px;margin:0}
+.approval-card dd{margin:3px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.approval-card ol{margin:0;padding-inline-start:20px}
+.approval-meta{margin-top:12px;color:var(--muted)}
+.approval-meta dl{padding:10px 0}
+.remote-graph-steps{list-style:none;padding:0;margin:12px 0;display:grid;gap:10px}
+.remote-graph-steps>li{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface2)}
+.remote-graph-steps>li>div{min-width:0;display:grid;gap:5px;overflow-wrap:anywhere}
+.remote-graph-steps .node-dot{flex:none}
+.remote-graph-steps small{color:var(--muted)}
+.remote-graph-steps ul{padding:0;list-style:none;color:var(--primary)}
