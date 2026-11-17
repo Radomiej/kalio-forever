@@ -52,3 +52,36 @@ button,input,select{min-height:44px} .icon-button,.notice button{min-height:44px
  .bottom-tabs button{flex:1}
  .remote-sheet{margin:auto auto 8px}
 }
+
+.session-copy .session-activity{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:11px;line-height:1.4}
+.session-activity time{font-variant-numeric:tabular-nums}
+
+.message{align-self:flex-start;min-width:0;overflow-wrap:anywhere}
+.message.from-user{border-radius:16px 16px 4px 16px;padding:9px 13px}
+.message-role{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:0}
+.message p,.tool-message dd,.approval-card dd{white-space:pre-wrap;overflow-wrap:anywhere}
+.tool-message{align-self:stretch;max-width:100%;background:var(--surface);border-radius:10px}
+.tool-message dl{display:grid;gap:6px;margin:8px 0}
+.tool-message dt{color:var(--muted);font-size:11px}
+.tool-message dd{margin:2px 0 0}
+.approval-meta{margin-top:12px;color:var(--muted)}
+.approval-meta dl{padding:10px 0}
+.approval-head h2{display:flex;align-items:center;gap:7px}
+.approval-card dl{grid-template-columns:1fr}
+.remote-graph-mobile{display:none}
+.remote-graph-steps{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:10px}
+.remote-graph-steps>li{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface2)}
+.remote-graph-steps>li>div{min-width:0;display:grid;gap:5px;overflow-wrap:anywhere}
+.remote-graph-steps .node-dot{flex:none}
+.remote-graph-steps small{color:var(--muted)}
+.remote-graph-steps ul{padding:0;list-style:none;color:var(--primary)}
+
+@media(max-width:620px){
+ .content-focused{padding-inline:0;padding-bottom:0}
+ .content-focused>.session-heading{display:none}
+ .content-focused>.notice,.content-focused>.stale-banner,.content-focused>.preview-banner,.content-focused .back-button{margin-inline:12px}
+ .content-focused .detail-panel,.content-focused .graph-panel{border-inline:0;border-radius:0}
+ .content-focused .messages{padding-inline:12px}
+ .remote-graph-desktop{display:none}
+ .remote-graph-mobile{display:block}
+}
