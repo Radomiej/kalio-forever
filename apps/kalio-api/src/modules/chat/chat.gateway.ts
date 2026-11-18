@@ -30,6 +30,7 @@ import { ChatGatewayRuntime, nextApprovedBudgetLimit } from './chat.gateway.runt
 import { SessionRuntimeStopService } from './session-runtime-stop.service';
 import { getSocketEventSessionId, isActionableSessionEvent } from './chat.gateway.event-routing';
 import { emitSessionLifecycleEventToSubscribers } from './chat.gateway.lifecycle';
+import { SessionIdentifyReplay } from './chat.gateway.identify';
 import { emitRuntimeEventToSubscribers, enqueueSessionEvent } from './chat.gateway.runtime-events';
 import {
   buildRuntimeActivitySnapshot,
@@ -56,6 +57,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   private readonly runtime: ChatGatewayRuntime;
   private readonly unsubscribeSessionEvents: (() => void)[];
   private readonly disposal = new AbortController();
+  private readonly identifyReplay = new SessionIdentifyReplay();
 
   constructor(
     private readonly toolDispatch: ToolDispatchService,
@@ -126,6 +128,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SocketEvents['session:identify'],
   ): Promise<void> {
+    return this.identifyReplay.run(client, payload.sessionId, () => this.replaySessionIdentity(client, payload));
+  }
+
+  private async replaySessionIdentity(client: Socket, payload: SocketEvents['session:identify']): Promise<void> {
     this.subscribeSocketToSession(client.id, payload.sessionId);
 
     const replayedRequestIds = new Set<string>();

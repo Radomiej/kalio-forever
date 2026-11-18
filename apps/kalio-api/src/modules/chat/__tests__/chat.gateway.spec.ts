@@ -1330,10 +1330,15 @@ describe('ChatGateway', () => {
         queueLength: 0,
       }));
 
-      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+      await Promise.all([
+        gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' }),
+        gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' }),
+      ]);
 
       expect(sessions.listChildren).toHaveBeenCalledTimes(2);
       expect(pipeline.getSessionStatusWithRun).toHaveBeenCalledTimes(2);
+      await gateway.handleSessionIdentify(client as never, { sessionId: 'session-1' });
+      expect(sessions.listChildren).toHaveBeenCalledTimes(4);
     });
 
     it('REGRESSION: re-identifying the root session replays descendant session metadata for hydration', async () => {
