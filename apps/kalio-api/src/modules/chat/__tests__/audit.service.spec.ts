@@ -104,6 +104,15 @@ describe('AuditService', () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  it('starts only one retention pass for concurrent audit writes', async () => {
+    const fixture = makeDrizzle();
+    const audit = new AuditService(fixture.drizzle);
+    await Promise.all(['first', 'second'].map(label => audit.log({ type: 'llm_request', label })));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(fixture.inserted).toHaveLength(2);
+    expect(fixture.runQueries).toHaveLength(4);
+  });
+
   it('periodically prunes old audit rows and caps hot storage rows', async () => {
     vi.stubEnv('AUDIT_LOG_PRUNE_EVERY_WRITES', '2');
     const fixture = makeDrizzle();
