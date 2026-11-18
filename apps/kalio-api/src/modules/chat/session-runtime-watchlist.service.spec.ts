@@ -75,6 +75,16 @@ describe('SessionRuntimeWatchlistService', () => {
     );
   });
 
+  it('shares concurrent reads and refreshes after settlement', async () => {
+    const [first, second] = await Promise.all([service.list(), service.list()]);
+    expect(second).toEqual(first);
+    expect(sessionsService.list).toHaveBeenCalledTimes(1);
+
+    sessionsService.list.mockResolvedValue([]);
+    await expect(service.list()).resolves.toEqual([]);
+    expect(sessionsService.list).toHaveBeenCalledTimes(2);
+  });
+
   it('returns only roots that still need runtime replay', async () => {
     await expect(service.list()).resolves.toEqual([
       { sessionId: 'root-active', reasons: ['active'] },
