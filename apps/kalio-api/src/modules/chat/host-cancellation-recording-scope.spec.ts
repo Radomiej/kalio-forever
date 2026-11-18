@@ -40,20 +40,20 @@ describe('host-owned bounded cancellation recording scope', () => {
     expect(f.handle.permitFor('other', f.recorder)).toBeNull(); expect(f.handle.permitFor('call', {})).toBeNull();
   });
   it('gives no permit to a failed admission ACK', async () => {
-    const f = fixture(); await expect(f.handle.registerAdmission(admission, f.recorder, Promise.reject(new Error('secret')))).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION$/);
+    const f = fixture(); await expect(f.handle.registerAdmission(admission, f.recorder, Promise.reject(new Error('secret')))).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION_ACK_REJECTED$/);
     f.handle.stop(); expect(f.handle.permitFor('call', f.recorder)).toBeNull();
   });
   it('fences pending ACK settlement synchronously at Stop and rejects new registrations', async () => {
     const f = fixture(); let acknowledge!: () => void;
     const pending = f.handle.registerAdmission(admission, f.recorder, new Promise<void>(resolve => { acknowledge = resolve; }));
-    const expected = expect(pending).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION$/);
+    const expected = expect(pending).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION_FENCED$/);
     f.handle.stop(); acknowledge(); await expected;
     expect(f.handle.permitFor('call', f.recorder)).toBeNull();
     await expect(f.handle.registerAdmission(admission, f.recorder, Promise.resolve())).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_CLOSED$/);
   });
   it('does not grant an ACK that was fulfilled but not observed before Stop', async () => {
     const f = fixture(); const pending = f.handle.registerAdmission(admission, f.recorder, Promise.resolve());
-    const expected = expect(pending).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION$/);
+    const expected = expect(pending).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION_FENCED$/);
     f.handle.stop(); await expected; expect(f.handle.permitFor('call', f.recorder)).toBeNull();
   });
   it('never renews or replaces a lease on repeated Stop', async () => {
@@ -101,13 +101,13 @@ describe('host-owned bounded cancellation recording scope', () => {
   it('closes irreversibly and rejects late registration settlement', async () => {
     const f = fixture(); let acknowledge!: () => void;
     const pending = f.handle.registerAdmission(admission, f.recorder, new Promise<void>(resolve => { acknowledge = resolve; }));
-    const expected = expect(pending).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION$/);
+    const expected = expect(pending).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION_FENCED$/);
     f.handle.close(); acknowledge(); await expected; f.handle.stop();
     expect(f.acquire).not.toHaveBeenCalled(); expect(f.scope.lookup(f.executionIdentity, f.execution.signal)).toBeNull();
   });
   it('rejects duplicate/cross-scope admissions without replacing eligible calls', async () => {
     const f = fixture(); await f.handle.registerAdmission(admission, f.recorder, Promise.resolve());
-    await expect(f.handle.registerAdmission(admission, {}, Promise.resolve())).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION$/);
+    await expect(f.handle.registerAdmission(admission, {}, Promise.resolve())).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_ADMISSION_DUPLICATE_CALL$/);
     await expect(f.handle.registerAdmission({ ...admission, identity: { ...identity, runId: 'other' } }, {}, Promise.resolve())).rejects.toThrow(/^HOST_CANCELLATION_RECORDING_INVALID$/);
     f.handle.stop(); expect(f.handle.permitFor('call', f.recorder)).not.toBeNull();
   });

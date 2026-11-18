@@ -114,11 +114,11 @@ export function createHostCancellationRecordingScope(input: HostCancellationReco
         || typeof supplied.callId !== 'string' || !supplied.callId
         || typeof supplied.toolName !== 'string' || !supplied.toolName || !object(supplied.args)) return fail('INVALID');
       const callId = supplied.callId;
-      if (calls.has(callId)) return fail('ADMISSION');
+      if (calls.has(callId)) return fail('ADMISSION_DUPLICATE_CALL');
       const call = { recorder, accepted: false };
       calls.set(callId, call);
-      try { await ack; } catch { return fail('ADMISSION'); }
-      if (closed || stopped) return fail('ADMISSION');
+      try { await ack; } catch { return fail('ADMISSION_ACK_REJECTED'); }
+      if (closed || stopped) return fail('ADMISSION_FENCED');
       call.accepted = true;
     },
     stop(): void {
