@@ -79,6 +79,22 @@ export class DrizzleMessageRepository implements IMessageRepository {
     return rows.map((row) => this.toChatMessage(row));
   }
 
+  async loadArchitectureMessageCandidates(runId: string, boundSessionIds: string[]): Promise<ChatMessage[]> {
+    const bound = JSON.stringify(boundSessionIds);
+    const escaped = '\\u';
+    const rows = await this.drizzle.db.select().from(messages).where(or(
+      sql`${messages.sessionId} in (select value from json_each(${bound}))`,
+      sql`instr(${messages.id}, ${runId}) > 0`,
+      sql`instr(${messages.toolCallId}, ${runId}) > 0`,
+      sql`instr(${messages.content}, ${runId}) > 0`,
+      sql`instr(${messages.toolCalls}, ${runId}) > 0`,
+      // Escaped JSON can contain a reference that is absent from the raw text.
+      sql`(instr(${messages.content}, ${escaped}) > 0 and json_valid(${messages.content}))`,
+      sql`instr(${messages.toolCalls}, ${escaped}) > 0`,
+    )).orderBy(asc(messages.createdAt));
+    return rows.map((row) => this.toChatMessage(row));
+  }
+
   async loadHistoryPage(sessionId: string, options: SessionMessagePageOptions = {}): Promise<SessionMessagePage> {
     const normalizedLimit = Number.isInteger(options.limit)
       ? Math.max(1, Math.min(100, options.limit as number))

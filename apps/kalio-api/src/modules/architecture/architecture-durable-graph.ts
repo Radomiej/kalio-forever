@@ -34,6 +34,22 @@ export async function reconstructDurableArchitectureGraph(
 async function findPersistedArchitectureMessages(runId: string, sessions: SessionsService): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   const chatSessions = await sessions.list({ includeArchived: true });
+  const boundSessionIds = chatSessions.filter((session) => sessionReferencesArchitectureRun(session, runId)).map((session) => session.id);
+  const candidates = /^[\w-]+$/.test(runId)
+    ? await sessions.getArchitectureMessageCandidates?.(runId, boundSessionIds)
+    : undefined;
+  if (candidates) {
+    const bound = new Set(boundSessionIds);
+    const bySession = new Map<string, ChatMessage[]>();
+    for (const message of candidates) {
+      if (!bound.has(message.sessionId) && !messageReferencesArchitectureRun(message, runId)) continue;
+      const matches = bySession.get(message.sessionId) ?? [];
+      matches.push(message);
+      bySession.set(message.sessionId, matches);
+    }
+    return chatSessions.flatMap((session) => bySession.get(session.id) ?? []);
+  }
+  // TODO: legacy fallback - alternate message repositories may lack candidate reads.
   for (const session of chatSessions) {
     const sessionMessages = await sessions.getMessages(session.id);
     if (sessionReferencesArchitectureRun(session, runId)) {

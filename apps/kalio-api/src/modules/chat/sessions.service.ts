@@ -117,7 +117,9 @@ export class SessionsService {
     await this.assertExists(sessionId);
     return this.repo.loadHistory(sessionId);
   }
-
+  getArchitectureMessageCandidates(runId: string, boundSessionIds: string[]): Promise<ChatMessage[]> | undefined {
+    return this.repo.loadArchitectureMessageCandidates?.(runId, boundSessionIds);
+  }
   async getMessagePage(
     sessionId: string,
     options: { limit?: number; beforeMessageId?: string } = {},

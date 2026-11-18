@@ -30,6 +30,22 @@ describe('DrizzleMessageRepository assistant updates (SQLite)', () => {
   });
   afterEach(() => client.close());
 
+  it('selects scoped histories and legacy references without returning unrelated messages', async () => {
+    const records: Array<Partial<ChatMessage> & Pick<ChatMessage, 'id'>> = [
+      { id: 'unrelated' },
+      { id: 'bound', sessionId: 'session-2' },
+      { id: 'architecture:run-x:summary' },
+      { id: 'legacy-result', toolCallId: 'architecture:run-x:call' },
+      { id: 'legacy-json', content: '{"runId":"run-\\u0078"}' },
+      { id: 'legacy-tool', toolCalls: [{ id: 'call', name: 'run_subagent', args: { architectureRunId: 'run-x' } }] },
+    ];
+    for (const [index, record] of records.entries()) {
+      await repository.saveMessage({ ...initial, toolCalls: undefined, ...record, createdAt: index + 1 });
+    }
+    const candidates = await repository.loadArchitectureMessageCandidates('run-x', ['session-2']);
+    expect(candidates.map(({ id }) => id)).toEqual(records.slice(1).map(({ id }) => id));
+  });
+
   it('persists nonempty thinking, tool result linkage and VFS attachments on insert', async () => {
     await repository.saveMessage({
       ...initial, content: 'Draft response', thinking: 'Inspect the uploaded image',
