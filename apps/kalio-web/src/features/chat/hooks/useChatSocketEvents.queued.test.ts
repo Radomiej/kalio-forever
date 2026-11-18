@@ -5,7 +5,7 @@ import { useAgentStore } from '../../../store/agentStore';
 import { useSessionStore } from '../../../store/sessionStore';
 import { eventBus } from '../../../services/eventBus';
 import { apiClient } from '../../../services/apiClient';
-import { clearSessionWatchRegistry } from '../../../services/sessionWatchRegistry';
+import { clearSessionWatchRegistry, identifyWatchedSession, resetSessionWatchConnectionEpoch } from '../../../services/sessionWatchRegistry';
 import { selectPendingApprovalCount } from '../../../store/agentRuntimeSelectors';
 
 type QueuedPayload = { sessionId: string; queueLength: number; position?: number };
@@ -415,6 +415,12 @@ describe('useChatSocketEvents queue depth (fail-first)', () => {
       parentSessionId: 'session-1',
     }));
     expect(eventBus.identifySession).toHaveBeenCalledWith('child-session');
+    identifyWatchedSession('session-1', 'active', { sticky: true });
+    vi.mocked(eventBus.identifySession).mockClear();
+
+    resetSessionWatchConnectionEpoch('reconnect');
+
+    expect(eventBus.identifySession).toHaveBeenCalledExactlyOnceWith('session-1');
   });
 
   it('stores child HITL notifications as pending approval live state', () => {

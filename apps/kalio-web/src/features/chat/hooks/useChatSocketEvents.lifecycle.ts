@@ -115,7 +115,8 @@ export function registerSessionLifecycleHandlers({
 
   const offSessionUpdated = eventBus.onSessionUpdated?.((session) => {
     addSession(session);
-    identifyWatchedSession(session.id, 'session-updated', { sticky: true });
+    // Replaying a parent also emits updates for its descendants.
+    identifyWatchedSession(session.id, 'session-updated');
   });
 
   const offQueued = eventBus.onQueued((payload) => {
