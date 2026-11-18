@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql, type SQLWrapper } from 'drizzle-orm';
 import type { ToolApprovalContextBinding, ToolApprovalContextPort, ToolApprovalContextSnapshot } from '../common/tool-approval-context.port';
 import { DrizzleService } from './drizzle.service';
-import { auditLog, chatRuns, messages, projects, sessions } from './schema';
+import { auditLog, auditLogArchive, chatRuns, messages, projects, sessions } from './schema';
 import type { KalioDrizzleDatabase } from './sqlite-runtime';
 
 const MAX_BYTES = 48 * 1024;
@@ -23,6 +23,39 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function readArchitectureInput(tx: ReadTransaction, hostId: string, rootId: string,
+  context: typeof sessions.$inferSelect.runtimeContext) {
+  const runId = context?.architectureContext?.architectureRunId;
+  if (context?.runtimeKind !== 'agent-flow-root' || !nonempty(runId) || rootId !== `arch-${runId}-root`
+    || context.architectureContext?.hostSessionId !== hostId) return null;
+  const read = (table: typeof auditLog | typeof auditLogArchive) => {
+    const data = sql`CASE WHEN json_valid(${table.data}) THEN ${table.data} ELSE '{}' END`;
+    return tx.select({ data: boundedText(table.data) }).from(table).where(and(
+      eq(table.sessionId, hostId), eq(table.type, 'architecture_event'),
+      sql`json_extract(${data}, '$.domain') = 'architecture'`,
+      sql`json_extract(${data}, '$.kind') = 'architecture_event'`,
+      sql`json_extract(${data}, '$.eventType') = 'run_created'`,
+      sql`json_extract(${data}, '$.runId') = ${runId}`,
+    )).limit(2).all();
+  };
+  const rows = [...read(auditLog), ...read(auditLogArchive)];
+  if (rows.length !== 1 || !rows[0]?.data) return null;
+  const event: unknown = JSON.parse(rows[0].data);
+  if (!record(event) || event['architectureRunId'] !== runId || event['rootSessionId'] !== rootId
+    || event['parentSessionId'] !== hostId || event['schemaId'] !== context.architectureContext?.schemaId
+    || !nonempty(event['promptMessageId']) || !nonempty(event['prompt'])) return null;
+  const original = tx.select({ id: messages.id, sessionId: messages.sessionId, turnId: messages.turnId,
+    text: boundedText(messages.content), role: messages.role,
+  }).from(messages).where(eq(messages.id, event['promptMessageId'])).get();
+  if (original) return original.sessionId === hostId && original.role === 'user' && original.text === event['prompt']
+    ? original : null;
+  const input = tx.select({ id: messages.id, sessionId: messages.sessionId, turnId: messages.turnId,
+    text: boundedText(messages.content), source: messages.promptMessageId,
+  }).from(messages).where(and(eq(messages.id, `architecture:${runId}:user`),
+    eq(messages.sessionId, hostId), eq(messages.role, 'user'))).get();
+  return input && input.source === event['promptMessageId'] && input.text === event['prompt'] ? input : null;
 }
 
 @Injectable()
@@ -95,10 +128,17 @@ export class ToolApprovalContextService implements ToolApprovalContextPort {
     if (latest?.id !== prompt.id) return null;
 
     const inputs: Snapshot['inputs'][number][] = [];
+    const workflowRoot = chain[1];
+    const workflowContext = workflowRoot && tx.select({ context: sessions.runtimeContext }).from(sessions)
+      .where(eq(sessions.id, workflowRoot.sessionId)).get()?.context;
+    const isArchitectureChild = workflowContext?.runtimeKind === 'agent-flow-root';
+    const architectureInput = isArchitectureChild && workflowRoot
+      ? readArchitectureInput(tx, root.sessionId, workflowRoot.sessionId, workflowContext) : null;
+    if (isArchitectureChild && !architectureInput) return null;
     for (const session of chain) {
       const isRoot = session.sessionId === root.sessionId;
       const isCurrent = session.sessionId === binding.sessionId;
-      const selected = isCurrent && !isRoot ? [prompt] : tx.select({ id: messages.id,
+      const selected = isRoot && architectureInput ? [architectureInput] : isCurrent && !isRoot ? [prompt] : tx.select({ id: messages.id,
         sessionId: messages.sessionId, turnId: messages.turnId, text: boundedText(messages.content),
       }).from(messages).where(and(eq(messages.sessionId, session.sessionId), eq(messages.role, 'user')))
         .orderBy(asc(messages.createdAt), sql`messages.rowid ASC`).limit(isRoot ? 33 : 2).all();

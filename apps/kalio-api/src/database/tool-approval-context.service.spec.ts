@@ -155,6 +155,37 @@ describe('ToolApprovalContextService (real SQLite)', () => {
     expect(f.service.read(f.binding)).toBeNull();
   });
 
+  it.each(['audit_log', 'audit_log_archive'] as const)('reads only the bound workflow prompt from %s', table => {
+    const f = fixture(true);
+    f.session('arch-workflow-root', 'host', 'chat');
+    f.client.exec("UPDATE sessions SET parent_session_id='arch-workflow-root' WHERE id='core'");
+    const context = { runtimeKind: 'agent-flow-root',
+      architectureContext: { architectureRunId: 'workflow', schemaId: 'schema', hostSessionId: 'host' } };
+    f.client.prepare("UPDATE sessions SET runtime_context=? WHERE id='arch-workflow-root'").run(JSON.stringify(context));
+    f.message('architecture:workflow:user', 'host', 'bound goal', 'parent-turn', 2);
+    f.client.exec("UPDATE messages SET prompt_message_id='source-message' WHERE id='architecture:workflow:user'");
+    f.message('unrelated-later', 'host', 'unrelated goal', 'other-turn', 3);
+    const event = { domain: 'architecture', kind: 'architecture_event', eventType: 'run_created',
+      runId: 'workflow', architectureRunId: 'workflow', schemaId: 'schema', rootSessionId: 'arch-workflow-root',
+      parentSessionId: 'host', promptMessageId: 'source-message', prompt: 'bound goal' };
+    const insert = f.client.prepare(`INSERT INTO ${table}(id, session_id, type, label, data, created_at${table === 'audit_log_archive' ? ', archived_at' : ''})
+      VALUES(?, 'host', 'architecture_event', 'architecture_event:run_created:runtime', ?, 1${table === 'audit_log_archive' ? ', 2' : ''})`);
+    insert.run('created', JSON.stringify(event));
+    expect(f.service.read(f.binding)?.inputs.map(input => input.messageId)).toEqual(['architecture:workflow:user', 'prompt']);
+    f.client.exec("UPDATE messages SET prompt_message_id='other-message' WHERE id='architecture:workflow:user'");
+    expect(f.service.read(f.binding)).toBeNull();
+    f.client.exec("UPDATE messages SET prompt_message_id='source-message' WHERE id='architecture:workflow:user'");
+    f.message('source-message', 'host', 'bound goal', 'parent-turn', 2);
+    expect(f.service.read(f.binding)?.inputs[0]?.messageId).toBe('source-message');
+    f.client.exec("UPDATE messages SET content='different' WHERE id='source-message'");
+    expect(f.service.read(f.binding)).toBeNull();
+    f.client.exec("UPDATE messages SET content='bound goal' WHERE id='source-message'");
+    f.client.exec("DELETE FROM messages WHERE id='architecture:workflow:user'");
+    expect(f.service.read(f.binding)?.inputs[0]?.messageId).toBe('source-message');
+    insert.run('duplicate', JSON.stringify(event));
+    expect(f.service.read(f.binding)).toBeNull();
+  });
+
   it.each([false, true])('later input invalidates exact current prompt (child=%s)', child => {
     const f = fixture(child); const snapshot = f.service.read(f.binding)!;
     f.message('later', f.binding.sessionId, 'Stop', 'later', 3);

@@ -62,6 +62,26 @@ function fixture(change?: (db: Database.Database) => void) {
 }
 
 describe('SQLite context through actual Jev parser, policy and dispatcher', () => {
+  it.each([false, true])('binds the workflow input in a multi-run chat (changed before entry=%s)', async changed => {
+    const f = fixture(changed ? db => db.exec("UPDATE messages SET content='Changed' WHERE id='architecture:workflow:user'") : undefined);
+    const context = JSON.stringify({ runtimeKind: 'agent-flow-root',
+      architectureContext: { architectureRunId: 'workflow', schemaId: 'schema', hostSessionId: 'host' } });
+    f.sqlite.prepare(`INSERT INTO sessions(id,persona_id,project_id,kind,parent_session_id,runtime_context,created_at,updated_at)
+      VALUES('arch-workflow-root','persona','project','chat','host',?,1,1)`).run(context);
+    f.sqlite.exec(`UPDATE sessions SET parent_session_id='arch-workflow-root' WHERE id='child';
+      INSERT INTO messages(id,session_id,role,content,turn_id,prompt_message_id,created_at)
+      VALUES('architecture:workflow:user','host','user','Inspect local code.','workflow-turn','source',2);`);
+    f.sqlite.prepare("INSERT INTO audit_log(id,session_id,type,label,data,created_at) VALUES('created','host','architecture_event','architecture_event:run_created:runtime',?,2)")
+      .run(JSON.stringify({ domain: 'architecture', kind: 'architecture_event', eventType: 'run_created',
+        runId: 'workflow', architectureRunId: 'workflow', schemaId: 'schema', rootSessionId: 'arch-workflow-root',
+        parentSessionId: 'host', promptMessageId: 'source', prompt: 'Inspect local code.' }));
+    const result = await f.dispatcher.dispatch('call', 'terminal_spawn', { command: 'rg', args: ['cleanup'], cwd: 'C:/project' }, f.ctx);
+    expect(result.status).toBe(changed ? 'cancelled' : 'success');
+    expect(f.fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(f.fetchMock.mock.calls[0]?.[1].body)).state.context.inputs[0].messageId).toBe('architecture:workflow:user');
+    expect(f.execute).toHaveBeenCalledTimes(changed ? 0 : 1);
+  }, 3_000);
+
   it('executes only after the host-bound five-axis review', async () => {
     const f = fixture();
     expect((await f.dispatcher.dispatch('call', 'terminal_spawn', { command: 'rg', args: ['cleanup'], cwd: 'C:/project' }, f.ctx)).status).toBe('success');
