@@ -7,6 +7,35 @@ import { ArchitectureRegistryService } from './architecture-registry.service';
 import { createGoalPacket, appendGoalSource } from './architecture-goal-source';
 import { DevinStructuredOutput } from '../agent-runtime/devin-structured-output';
 import { workflowFailureFromError } from '../../common/utils/workflow-error.util';
+import { ArchitectureRoleObjective } from './architecture-role-objective';
+
+it('bounds repeated QA visit context while retaining the latest report and handoff', () => {
+  const schema = new ArchitectureRegistryService().findOne('game-development-2');
+  const node = schema?.nodes?.find(row => row.id === 'loop-qa');
+  const slot = schema?.roleSlots.find(row => row.id === node?.roleSlotId);
+  if (!schema || !node || !slot) throw new Error('Expected Core Loop QA');
+  const reports: ArchitectureExecutionEvent[] = Array.from({ length: 110 }, (_, sequence) => ({
+    id: `qa-${sequence}`, runId: 'run', sequence, createdAt: sequence,
+    type: 'participant_output', nodeId: 'input-qa',
+    message: `QA visit ${sequence}: ${'Browser evidence. '.repeat(80)}`,
+  }));
+  const handoffs: ArchitectureExecutionEvent[] = reports.map(report => ({
+    ...report, id: `handoff-${report.sequence}`, nodeId: 'release', type: 'router_output',
+    data: { routerOutput: { mergedDecision: `Handoff ${report.sequence}`, targetNodeId: 'loop-qa', nextAction: 'route_to' } },
+  }));
+  const objective = new ArchitectureRoleObjective().buildObjective({
+    schema, slot, node, run: { ...createRun('subagent_execution'), schemaId: schema.id, prompt: 'Verify Prestige.' },
+    branchSessionId: 'loop-qa-branch', personaId: slot.defaultPersonaId, incomingEvents: [...reports, ...handoffs],
+  });
+  expect(objective.length).toBeLessThan(18_000);
+  expect(objective).toContain('Task: Verify Prestige.');
+  expect(objective).toContain('QA visit 109');
+  expect(objective).toContain('Handoff 109');
+  expect(objective).toContain('[event=qa-109, seq=109]');
+  expect(objective).toContain('[event=handoff-109, seq=109]');
+  expect(objective).not.toContain('QA visit 0:');
+  expect(reports).toHaveLength(110);
+});
 
 describe('TASK56 invalid structured routing containment', () => {
   function fixture(slotId: 'orchestrator' | 'release_guard') {

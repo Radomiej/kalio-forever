@@ -290,6 +290,8 @@ Decisions use the existing required route checkpoint, with source-start and term
 
 Downstream role context treats a status condition as a transparent control hop. Alongside the gate decision, the selected receiver gets the original source participant contribution from the exact source-start/terminal checkpoint interval, including recoverable failure and partial tool evidence. The latest source visit and selected receiver must match; missing, forged, cross-run or stale binding fails closed. Recovery reconstructs the same handoff from durable events. Forwarded partial evidence does not turn a failed source into completed work or acceptance. Ordinary direct inputs and judge/finalizer selectors retain their existing behavior.
 
+The role prompt renders incoming graph summaries and handoff packets with separate character budgets of 12,000 and 4,000. If either section exceeds its budget, it prioritizes contributions over lifecycle events and takes recent entries per source node and event type. Included entries carry event IDs and sequence numbers. This projection leaves routing inputs, tool receipts and the full workflow trace available to their existing consumers.
+
 ### Non-interactive terminal input
 TerminalService background commands use ignored stdin, preserving stdout/stderr capture. Explicit closeStdin CLI callers retain a pipe closed immediately for EOF compatibility. This prevents rg without a path from waiting indefinitely for input. It does not change project boundaries, confirmation policy, or cancellation.
 

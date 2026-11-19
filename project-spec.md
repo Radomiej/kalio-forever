@@ -132,6 +132,7 @@ flowchart TD
 - Router, judge, and finalizer control flow must prefer provider-native structured output/schema.
 - If a model must return a decision, use structured output. Do not parse `message.includes`, prose JSON blocks, or status words from assistant text.
 - Router/parent nodes pass downstream context as typed handoff packets derived from `ArchitectureRouterOutput`: target, action, confidence, accepted inputs, rejected inputs, conflicts, risks, and response.
+- Role prompts bound accumulated graph summaries and handoff packets. When the projection exceeds its budget, it prioritizes recent contributions per source and event type and includes durable event references. The workflow trace retains the complete evidence.
 - `routerOutput.nextAction` is the control contract. Only `route_to` may become a downstream route call; `ask_human` and other pause actions may keep `targetNodeId` as context, but must not emit route hops or selected downstream nodes.
 - A visible handoff bubble is display-only. The actual route is selected from typed `routerOutput` and graph edges.
 
