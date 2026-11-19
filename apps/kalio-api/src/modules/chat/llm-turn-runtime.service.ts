@@ -113,6 +113,7 @@ export class LLMTurnRuntimeService {
       const { history, unboundedHistoryCount } = await this.sessionManager.loadHistoryForLLM(request.sessionId, {
         systemPrompt: request.effectiveSystemPrompt,
         toolMetas: request.toolMetas,
+        ...(request.executionProfile?.kind === 'devin-cli-acp' ? { devinAcp: true } : {}),
         ...(request.historySessionId ? { historySessionId: request.historySessionId } : {}),
       });
 

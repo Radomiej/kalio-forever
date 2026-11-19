@@ -81,7 +81,7 @@ export class SessionManagerService {
 
   async loadHistoryForLLM(
     sessionId: string,
-    options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string },
+    options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string; devinAcp?: boolean },
   ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean }> {
     const historySessionIds = options.historySessionId && options.historySessionId !== sessionId
       ? [options.historySessionId, sessionId]
@@ -97,6 +97,7 @@ export class SessionManagerService {
       options.systemPrompt,
       contextWindowSize,
       options.toolMetas,
+      options.devinAcp,
     );
     const unboundedHistory = options.systemPrompt
       ? [{ role: 'system', content: options.systemPrompt } satisfies ContextManagedLLMMessage, ...rawHistory]
