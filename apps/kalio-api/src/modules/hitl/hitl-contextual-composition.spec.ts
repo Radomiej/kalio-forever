@@ -78,9 +78,26 @@ describe('SQLite context through actual Jev parser, policy and dispatcher', () =
     const result = await f.dispatcher.dispatch('call', 'terminal_spawn', { command: 'rg', args: ['cleanup'], cwd: 'C:/project' }, f.ctx);
     expect(result.status).toBe(changed ? 'cancelled' : 'success');
     expect(f.fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(f.fetchMock.mock.calls[0]?.[1].body)).state.context.inputs[0].messageId).toBe('architecture:workflow:user');
+    expect(JSON.parse(String(f.fetchMock.mock.calls[0]?.[1].body)).state.context.inputs[0])
+      .toEqual({ origin: 'host_recorded_input', text: 'Inspect local code.' });
     expect(f.execute).toHaveBeenCalledTimes(changed ? 0 : 1);
   }, 3_000);
+
+  it('sends recent tool names and statuses with no persisted results or arguments', async () => {
+    const f = fixture();
+    const insert = f.sqlite.prepare("INSERT INTO audit_log(id,session_id,type,label,data,created_at) VALUES(?,?,'tool_result',?,?,?)");
+    for (let index = 0; index < 6; index += 1) {
+      insert.run(`audit-${index}`, 'child', `read_${index}`,
+        JSON.stringify({ status: 'success', args: { path: 'private-argument-marker' }, result: 'private-result-marker' }), index);
+    }
+    insert.run('sibling', 'host', 'host_tool', '{"status":"success"}', 7);
+    await f.dispatcher.dispatch('call', 'terminal_spawn', { command: 'rg', args: ['cleanup'], cwd: 'C:/project' }, f.ctx);
+    const body = String(f.fetchMock.mock.calls[0]?.[1].body);
+    expect(JSON.parse(body).state.context.recentTools).toEqual(
+      [1, 2, 3, 4, 5].map(index => ({ name: `read_${index}`, status: 'success' })),
+    );
+    expect(body).not.toMatch(/private-argument-marker|private-result-marker|host_tool/);
+  });
 
   it('executes only after the host-bound five-axis review', async () => {
     const f = fixture();

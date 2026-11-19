@@ -430,3 +430,5 @@ Approval evidence axis: complete parameters and assigned scope are evaluated sep
 
 Codex launch selection distinguishes an unchecked model catalog from a successfully checked catalog that excludes the model. Unknown catalogs show 'Models not checked yet' (or the existing probe error), while selection remains blocked until the existing model admission succeeds. This is a display correction, not an availability or authorization bypass.
 Devin ACP continuation budgets count the rendered assistant text. Over-budget history may shorten earlier fs_read text previews while preserving their path, digest, line count and call linkage, the five latest tool results, and the full persisted evidence.
+
+Contextual tool approval sends Jev the current operation, host environment and project scope, up to three recent user inputs and the bound delegated objective (2,000-character excerpts), up to five recent tool names and statuses from the current session, and tool names from prior denials. Prior tool arguments and results stay local. Freshness and production targeting still use the host-owned snapshot.

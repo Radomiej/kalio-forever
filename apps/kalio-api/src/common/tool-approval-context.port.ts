@@ -25,6 +25,7 @@ export interface ToolApprovalContextSnapshot {
     readonly requestId: string; readonly sessionId: string; readonly toolName: string; readonly reason?: string;
   }[];
   readonly fingerprint: string;
+  readonly recentTools?: readonly { readonly name: string; readonly status: string }[];
 }
 
 export interface ToolApprovalContextPort {

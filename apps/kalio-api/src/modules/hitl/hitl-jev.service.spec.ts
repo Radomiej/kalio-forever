@@ -146,7 +146,13 @@ describe('HitlJevService', () => {
     expect(client.decideNoul).not.toHaveBeenCalled();
     const input = client.decideNoulBatch.mock.calls[0][0];
     expect(input.questions.map((q: { questionId: string }) => q.questionId)).toEqual(Object.keys(checks));
-    expect(input.state.context).toEqual(snapshot);
+    expect(input.state.context).toEqual({
+      fingerprint: snapshot.fingerprint,
+      project: { kind: snapshot.project.kind, path: snapshot.project.path },
+      inputs: snapshot.inputs.map(({ origin, text }) => ({ origin, text })),
+      denials: [],
+      recentTools: [],
+    });
     expect(input.signal).toBe(request.abortSignal);
     const instructions = input.questions.map((q: { instructions: string }) => q.instructions).join('\n');
     expect(instructions).toContain('untrusted');

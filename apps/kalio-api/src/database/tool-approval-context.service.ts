@@ -171,9 +171,15 @@ export class ToolApprovalContextService implements ToolApprovalContextPort {
       denials.push({ requestId: denial['requestId'], sessionId: row.sessionId, toolName: denial['request']['name'],
         ...(typeof denial['reason'] === 'string' ? { reason: denial['reason'] } : {}) });
     }
+    const recentResults = tx.select({ name: auditLog.label, status: sql<unknown>`json_extract(${data}, '$.status')` })
+      .from(auditLog).where(and(eq(auditLog.sessionId, binding.sessionId), eq(auditLog.type, 'tool_result')))
+      .orderBy(desc(auditLog.createdAt), sql`audit_log.rowid DESC`).limit(5).all();
+    const recentTools = recentResults.flatMap(({ name, status }) =>
+      /^[\w.:-]{1,128}$/.test(name) && typeof status === 'string'
+        && ['success', 'error', 'cancelled', 'denied', 'failed'].includes(status) ? [{ name, status }] : []).reverse();
     const context = { version: 1 as const, binding, project: { id: project.id, kind: project.kind, path: project.path },
       lineage: chain.map(({ sessionId: id, parentSessionId, kind, title }) => ({ sessionId: id, parentSessionId, kind, title })),
-      inputs, denials };
+      inputs, denials, recentTools };
     // Include audit membership as well as the visible selected fields. Never hash volatile run timestamps/revision.
     const fingerprint = createHash('sha256').update(JSON.stringify({ context, denialIds: rows.map(row => row.id) }), 'utf8').digest('hex');
     const snapshot = { ...context, fingerprint };
