@@ -44,7 +44,7 @@ jobs:
         run: pnpm --filter @kalio/e2e test
 
       - name: Linux installer, updater and local-model harness regressions
-        run: node --test scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs scripts/local-model-benchmark.test.mjs scripts/runtime-dependencies.test.mjs scripts/corepack-path.test.mjs
+        run: node --test scripts/macos-installer.test.mjs scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs scripts/local-model-benchmark.test.mjs scripts/runtime-dependencies.test.mjs scripts/corepack-path.test.mjs
 
   backend:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
