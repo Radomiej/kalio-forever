@@ -144,6 +144,27 @@ health-checks the new process, and rolls back on failure. User data is preserved
 For an older installation or a repair, run the CMD installer again. It refuses
 to replace a runtime while it is running and preserves the data directory.
 
+### Install Kalio on macOS
+
+Experimental Apple Silicon source installation is available from a checkout
+containing the macOS installer:
+
+~~~sh
+bash scripts/install-macos.sh --repository "$PWD"
+export PATH="$HOME/Library/Application Support/Kalio/bin:$PATH"
+kalio start
+kalio open
+~~~
+
+Install Node.js 22 or newer, pnpm 9, Git, OpenSSL and Apple's Command Line
+Tools first. The browser UI uses **http://127.0.0.1:6188**. `kalio update`
+rebuilds the tracked Git branch and preserves user data and its encryption key.
+The original Mac agent reported installation/start and a same-revision update
+on macOS 26.3 arm64; upgrades between different revisions remain unverified.
+See [macOS installation](docs/macos-installation.md) for prerequisites,
+recovery limits and configuration. GitHub bootstrap commands become available
+on `main` after this change is merged there.
+
 ### Optional Tauri/NSIS desktop installer
 
 The Tauri/NSIS desktop installer is optional. Use it when you specifically want

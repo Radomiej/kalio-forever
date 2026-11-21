@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  platform-installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Runtime and installer contracts
+        run: node --test scripts/runtime-scripts.test.mjs scripts/kalio-updater.test.mjs scripts/stack-state.test.mjs
+      - name: macOS installer lifecycle regressions
+        if: runner.os != 'Windows'
+        run: node --test scripts/macos-installer.test.mjs
+
   tests:
     runs-on: ubuntu-latest
     steps:

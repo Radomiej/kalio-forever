@@ -294,3 +294,8 @@ flowchart TD
   MCP server. Clients that only support stdio may use an HTTP-to-stdio adapter;
   managed Devin ACP uses Kalio's compiled `kalio-mcp-bridge-stdio.js` so the
   bearer token stays in the child environment and never in repo-managed config.
+
+## macOS source installation
+
+The experimental Apple Silicon source installer reuses the existing Node.js runtime and stack manager. The local kalio CLI supports start, stop, status, open and update. Source and user data remain separate; updates follow the tracked Git branch and preserve the credential encryption key and database. See docs/macos-installation.md. Windows and Linux retain their existing runtime archive installers.
+
