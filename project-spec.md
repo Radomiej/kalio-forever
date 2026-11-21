@@ -315,3 +315,11 @@ The Android companion is a read-only projection of paired Kalio instances with a
 
 Remote session-detail snapshots and approval results are confined to the requesting paired device and excluded from relay replay history.
 On reconnect, the relay hydrates devices from a fresh host overview and keeps overview snapshots out of event replay. Each authenticated device has at most one active session watch. Replaced watch replies are discarded, and correlated relay rejections clear the matching pending decision without indicating settlement.
+
+## macOS source installation
+
+The macOS source installer builds the existing Node.js runtime and exposes
+start, stop, status, open and update through a local kalio CLI. Installation
+keeps source and user data in separate directories. Updates follow the tracked
+Git branch and preserve the credential encryption key and database. See
+[macOS installation](docs/macos-installation.md).
