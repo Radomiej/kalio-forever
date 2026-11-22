@@ -54,6 +54,24 @@ describe('ImageGenerateTool', () => {
     });
   });
 
+  it('uses ChatGPT without reading an API key and saves actual image metadata', async () => {
+    mockGetConfig.mockResolvedValue({ provider: 'chatgpt', executionProfileId: 'native' });
+    const generate = vi.fn().mockResolvedValue({ bytes: Buffer.from('native-image'), mimeType: 'image/png', format: 'png', model: 'native-model', width: 1536, height: 1024 });
+    tool = new ImageGenerateTool(mockImageGenerationService, mockImageConfigService, mockVfsService, { generate });
+    const result = await tool.execute(makeRequest());
+    expect(mockGetApiKey).not.toHaveBeenCalled();
+    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(generate).toHaveBeenCalledWith(expect.objectContaining({ executionProfileId: 'native', prompt: 'cute sea otter' }));
+    expect(result).toMatchObject({ size: '1536x1024', model: 'native-model', path: 'images/sea-otter.png' });
+  });
+
+  it('rejects ChatGPT without a selected integration instead of falling back', async () => {
+    mockGetConfig.mockResolvedValue({ provider: 'chatgpt' });
+    await expect(tool.execute(makeRequest())).rejects.toThrow('Select a ChatGPT');
+    expect(mockGetApiKey).not.toHaveBeenCalled();
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
   it('REGRESSION: requires HITL confirmation because it writes generated files to VFS', () => {
     const metadata = reflector.get(TOOL_METADATA, ImageGenerateTool);
 

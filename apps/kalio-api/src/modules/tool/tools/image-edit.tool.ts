@@ -1,19 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
-import type { ToolCallRequest, ImageRef } from '@kalio/types';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { IMAGE_EDITOR, IMAGE_PROVIDER_CAPABILITIES, type ImageEditor, type ToolCallRequest, type ImageRef } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { ImageConfigService } from '../../image/image-config.service';
 import { VFSService } from '../../vfs/vfs.service';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const COMET_API_BASE = 'https://api.cometapi.com';
-const SUPPORTED_IMAGE_PROVIDERS = ['cometapi', 'openai', 'openrouter'];
-const MODEL_MAP: Record<string, string> = {
-  flash: 'gemini-3.1-flash-image-preview',
-  pro:   'gemini-3-pro-image-preview',
-};
 const ROLE_ORDER: ImageRef['role'][] = ['character', 'object', 'style', 'background', 'base'];
-const MAX_REFS = 14;
 
 const ROLE_HINT: Record<string, string> = {
   base:       'BASE IMAGE TO EDIT — apply only the requested changes to this specific image; preserve everything else exactly.',
@@ -38,33 +31,6 @@ function buildStructuredPrompt(refs: ImageRef[], userPrompt: string, iterationOf
     lines.push(`\nGenerate: ${userPrompt}`);
   }
   return lines.join('\n');
-}
-
-interface GeminiPart {
-  text?: string;
-  inline_data?: { mime_type: string; data: string };
-}
-
-function buildGeminiPayload(
-  loadedRefs: Array<{ ref: ImageRef; base64: string; mimeType: string }>,
-  structuredPrompt: string,
-  aspectRatio: string,
-  imageSize: string,
-  thinkingLevel: string,
-) {
-  const parts: GeminiPart[] = [{ text: structuredPrompt }];
-  const sorted = [...loadedRefs].sort((a, b) => ROLE_ORDER.indexOf(a.ref.role) - ROLE_ORDER.indexOf(b.ref.role));
-  for (const item of sorted) {
-    parts.push({ inline_data: { mime_type: item.mimeType, data: item.base64 } });
-  }
-  return {
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      responseModalities: ['TEXT', 'IMAGE'],
-      imageConfig: { aspectRatio, imageSize },
-      thinkingConfig: { thinkingLevel, includeThoughts: false },
-    },
-  };
 }
 
 function resolveVersionedPath(existingPaths: string[], requestedPath: string): string {
@@ -96,7 +62,7 @@ function resolveVersionedPath(existingPaths: string[], requestedPath: string): s
 @Tool({
   name: 'image_edit',
   domain: 'image',
-  description: `Generate or edit images using Gemini (via CometAPI) with VFS reference images.
+  description: `Generate or edit images using the editing-capable provider selected in settings (ChatGPT / Codex, OpenAI API, or CometAPI) with VFS reference images.
 
 ALWAYS use this tool (not image_generate) when the user:
 - wants to EDIT an existing image (change background, style, add/remove elements)
@@ -122,7 +88,7 @@ Each output is auto-versioned in VFS (never overwrites existing files).`,
       outputPath:    { type: 'string', description: 'Desired VFS output path, e.g. "generated/portrait-v1.png". Auto-versioned.' },
       refs: {
         type: 'array',
-        description: 'Reference images from VFS. Max 14. Each: { vfsPath: string, role: "base"|"character"|"object"|"style"|"background", label: string }.',
+        description: 'Reference images from VFS. Limit depends on the provider. Each: { vfsPath: string, role: "base"|"character"|"object"|"style"|"background", label: string }.',
         items: {
           type: 'object',
           required: ['vfsPath', 'role', 'label'],
@@ -136,7 +102,7 @@ Each output is auto-versioned in VFS (never overwrites existing files).`,
       prompt:        { type: 'string',  description: 'Edit instruction or generation description.' },
       aspectRatio:   { type: 'string',  description: 'Aspect ratio: "1:1", "4:5", "16:9", "9:16", "3:4". Default: "1:1"' },
       imageSize:     { type: 'string',  description: 'Output resolution: "512px", "1K", "2K", "4K". Default: "1K"' },
-      model:         { type: 'string',  description: 'Model: "flash" (fast/cheap) or "pro" (highest quality). Default: flash' },
+      model:         { type: 'string',  description: 'Optional provider editing model; defaults to settings. ChatGPT uses its execution profile.' },
       thinkingLevel: { type: 'string',  description: 'Gemini thinking effort: "minimal" or "high". Default: minimal' },
       iterationOf:   { type: 'string',  description: 'VFS path of the source image when editing. Required when role="base".' },
     },
@@ -149,6 +115,7 @@ export class ImageEditTool {
   constructor(
     private readonly imageConfig: ImageConfigService,
     private readonly vfs: VFSService,
+    @Inject(IMAGE_EDITOR) private readonly editor: ImageEditor,
   ) {}
 
   async execute(request: ToolCallRequest): Promise<object> {
@@ -161,28 +128,19 @@ export class ImageEditTool {
     const prompt = request.args['prompt'] as string;
     const aspectRatio = (request.args['aspectRatio'] as string | undefined) ?? '1:1';
     const imageSize = (request.args['imageSize'] as string | undefined) ?? '1K';
-    const modelKey = (request.args['model'] as string | undefined) ?? 'flash';
+    const modelKey = request.args['model'] as string | undefined;
     const thinkingLevel = (request.args['thinkingLevel'] as string | undefined) ?? 'minimal';
     const iterationOf = request.args['iterationOf'] as string | undefined;
 
-    if (refs.length > MAX_REFS) {
-      throw new Error(`Too many references: ${refs.length}. Maximum is ${MAX_REFS}.`);
-    }
-
-    const apiKey = await this.imageConfig.getApiKey();
-    if (!apiKey) {
-      throw new Error('No API key configured for image editing. Go to Settings → Image Generation to add a key.');
-    }
-
     const cfg = await this.imageConfig.getConfig();
-    const effectiveBaseUrl = cfg.baseUrl?.replace(/\/$/, '').replace(/\/v\d+$/, '');
-    const needsFallback =
-      cfg.provider !== 'auto' && !SUPPORTED_IMAGE_PROVIDERS.includes(cfg.provider);
-    const baseUrl = needsFallback ? COMET_API_BASE : (effectiveBaseUrl ?? COMET_API_BASE);
+    const capability = IMAGE_PROVIDER_CAPABILITIES[cfg.provider];
+    if (!capability?.edit) throw new Error(`Image editing is not supported by ${cfg.provider}. Choose an editing provider in Settings.`);
+    if (refs.length > capability.maxReferences) throw new Error(`Too many references: ${refs.length}. Maximum is ${capability.maxReferences}.`);
+    const apiKey = capability.needsApiKey ? await this.imageConfig.getApiKey() : null;
 
     // Load all reference images from VFS
     const loadedRefs: Array<{ ref: ImageRef; base64: string; mimeType: string }> = [];
-    for (const ref of refs) {
+    for (const ref of [...refs].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role))) {
       let buffer: Buffer;
       try {
         buffer = this.vfs.readBinary(vfsSessionId, ref.vfsPath);
@@ -204,55 +162,15 @@ export class ImageEditTool {
 
     // List existing VFS files for versioning
     const existingFiles = this.vfs.listFiles(vfsSessionId);
-    const vfsPath = resolveVersionedPath(existingFiles.files.map((f) => f.path), outputPath);
+    const pngPath = /\.[^/.]+$/.test(outputPath) ? outputPath.replace(/\.[^/.]+$/, '.png') : `${outputPath}.png`;
+    const vfsPath = resolveVersionedPath(existingFiles.files.map((f) => f.path), pngPath);
 
     const structuredPrompt = buildStructuredPrompt(refs, prompt, iterationOf);
-    const modelId = MODEL_MAP[modelKey] ?? MODEL_MAP['flash'];
-    const geminiPayload = buildGeminiPayload(loadedRefs, structuredPrompt, aspectRatio, imageSize, thinkingLevel);
-
-    const url = `${baseUrl}/v1beta/models/${modelId}:generateContent`;
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(geminiPayload),
-      });
-    } catch (err) {
-      this.logger.error('[image_edit] Network error', err instanceof Error ? err : new Error(String(err)));
-      throw new Error(`Network error: ${err instanceof Error ? err.message : String(err)}`, {
-        cause: err,
-      });
-    }
-
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => 'unknown');
-      if (response.status === 429) {
-        throw new Error('Image generation rate limit reached. Please wait a moment and try again.');
-      }
-      throw new Error(`Image generation failed (HTTP ${response.status}): ${errBody.slice(0, 200)}`);
-    }
-
-    const data = await response.json() as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
-        };
-      }>;
-    };
-
-    const parts = data.candidates?.[0]?.content?.parts ?? [];
-    const imagePart = parts.find((p) => p.inlineData?.data);
-    if (!imagePart?.inlineData) {
-      this.logger.error('[image_edit] No image in Gemini response', { parts: parts.map((p) => Object.keys(p)) });
-      throw new Error('Gemini returned no image data. Try adjusting your prompt or references.');
-    }
-
-    const imageBase64 = imagePart.inlineData.data;
-    const imageMime = imagePart.inlineData.mimeType || 'image/png';
-    const dataUrl = `data:${imageMime};base64,${imageBase64}`;
-    const binaryBuf = Buffer.from(imageBase64, 'base64');
+    const edited = await this.editor.edit({ config: cfg, apiKey: apiKey ?? undefined, prompt: structuredPrompt, references: loadedRefs,
+      aspectRatio, imageSize, model: modelKey, thinkingLevel, abortSignal: request.abortSignal });
+    const modelId = edited.model;
+    const binaryBuf = Buffer.from(edited.bytes);
+    const dataUrl = `data:${edited.mimeType};base64,${binaryBuf.toString('base64')}`;
     try {
       this.vfs.writeBinary(vfsSessionId, vfsPath, binaryBuf);
     } catch (err) {

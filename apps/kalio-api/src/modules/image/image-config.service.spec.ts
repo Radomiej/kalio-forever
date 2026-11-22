@@ -67,6 +67,12 @@ describe('ImageConfigService — persistence', () => {
     expect(await service.getApiKey()).toBeNull();
   });
 
+  it('persists native integration and separate editing model without exposing credentials', async () => {
+    await service.updateConfig({ provider: 'chatgpt', executionProfileId: 'native-profile', editModel: '' });
+    expect(await service.getConfig()).toMatchObject({ provider: 'chatgpt', executionProfileId: 'native-profile', editModel: '', source: 'db' });
+    expect(await service.getConfig()).not.toHaveProperty('apiKey');
+  });
+
   it('saves provider + apiKey + model via updateConfig', async () => {
     await service.updateConfig({
       provider: 'cometapi',

@@ -106,6 +106,9 @@ jobs:
       - name: Frontend coverage gate
         run: pnpm --filter kalio-web test:cov
 
+      - name: Frontend mutation gate
+        run: pnpm --filter kalio-web test:mutation
+
   audit:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
     runs-on: ubuntu-latest
@@ -136,6 +139,8 @@ jobs:
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
       KALIO_E2E_PROJECT_PATH: ${{ github.workspace }}
+      KALIO_CONTROL_PLANE_AUTH: disabled
+      KALIO_HOST: 127.0.0.1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
