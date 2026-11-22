@@ -76,7 +76,7 @@ The default root is `~/Library/Application Support/Kalio`.
   `LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` values.
 
 Preserve the entire data directory and its encryption key when moving or backing
-up the installation. Installation starts with the mock model until a provider
+up the installation. Direct LLM access stays unconfigured until a provider
 is configured in the UI or environment file. Updating preserves this directory.
 
 Concurrent install/start/stop/update operations are refused with a lock directory.

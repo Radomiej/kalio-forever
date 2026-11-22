@@ -388,9 +388,44 @@ jobs:
           if-no-files-found: ignore
           path: src-tauri/target/release/bundle/appimage/*.sig
 
+  build-macos-source:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Verify release and installer regressions
+        run: |
+          node scripts/bump-version.mjs --check
+          bash -n scripts/install-macos.sh scripts/macos-cli.sh
+          node --test scripts/macos-installer.test.mjs scripts/corepack-path.test.mjs scripts/stack-qa-env.test.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @kalio/types --filter @kalio/sdk build
+      - name: Build and smoke test native macOS source runtime
+        run: node scripts/source-runtime-smoke.mjs
+      - name: Package experimental macOS source distribution
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release
+          git archive --format=tar.gz --prefix="kalio-$version/" -o "release/kalio-source-$version.tar.gz" HEAD
+          cp docs/macos-installation.md release/MACOS_INSTALLATION.md
+          (cd release && shasum -a 256 "kalio-source-$version.tar.gz" MACOS_INSTALLATION.md) > release/SHA256SUMS-macos-source.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kalio-macos-source
+          retention-days: 3
+          if-no-files-found: error
+          path: release/*
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-macos-source]
     runs-on: windows-latest
     permissions:
       contents: write

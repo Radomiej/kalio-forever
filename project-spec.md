@@ -460,3 +460,24 @@ start, stop, status, open and update through a local kalio CLI. Installation
 keeps source and user data in separate directories. Updates follow the tracked
 Git branch and preserve the credential encryption key and database. See
 [macOS installation](docs/macos-installation.md).
+
+## Release integration boundaries (2026-11-22)
+
+Managed source stacks record the listener PID only after readiness confirms a
+process launched by this invocation or its verified descendant. Status never
+adopts a process found on a saved port. Stop/restart validates both recorded
+listeners before terminating either; mismatched or unknown ownership fails
+closed and preserves state for inspection. Unix source stacks require `lsof`.
+
+After Stop, a late Jev checkpoint may remain in immutable event history, but
+`createRun` returns the recorded cancelled run rather than an obsolete running
+object. Accepted-goal activation remains disabled until trusted adapter,
+durable visit, worker-attempt and terminal callbacks are composed and proven.
+
+Native ChatGPT image generation rejects execution profiles that inherit MCP
+servers before opening a provider connection. Image generation must not gain
+the profile's unrelated MCP capabilities.
+
+The 1.1.0 release workflow builds Windows/Linux artifacts and separately builds
+and smoke-tests the macOS source runtime. macOS remains an experimental source
+distribution, without a native DMG or notarization claim.

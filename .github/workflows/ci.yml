@@ -16,6 +16,26 @@ env:
   ONNXRUNTIME_NODE_INSTALL: skip
 
 jobs:
+  platform-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify platform lifecycle contracts
+        run: node --test scripts/stack-state.test.mjs scripts/stack-port-owners.test.mjs scripts/stack-ownership.test.mjs scripts/corepack-path.test.mjs scripts/stack-qa-env.test.mjs
+      - name: Verify macOS source installer contracts
+        if: runner.os != 'Windows'
+        run: node --test scripts/macos-installer.test.mjs
+      - name: Verify Linux archive installer contracts
+        if: runner.os == 'Linux'
+        run: node --test scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs
+
   tests:
     runs-on: ubuntu-latest
     steps:

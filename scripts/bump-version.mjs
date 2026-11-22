@@ -4,7 +4,30 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const textVersionPatterns = {
+  'README.md': [/Kalio_(\d+\.\d+\.\d+)_x64-setup\.exe/g],
+  'docs/spec/desktop-build.md': [
+    /Kalio_(\d+\.\d+\.\d+)_x64-setup\.exe/g,
+    /v(\d+\.\d+\.\d+)(?=`)/g,
+    /version `(\d+\.\d+\.\d+)`/g,
+  ],
+  'scripts/install.ps1': [/kalio-runtime-(\d+\.\d+\.\d+)-windows-x64\.zip/g],
+};
 const targets = [
+  ...Object.entries(textVersionPatterns).map(([path, patterns]) => ({
+    path,
+    readVersion(content) {
+      const versions = patterns.flatMap(pattern => [...content.matchAll(pattern)].map(match => match[1]));
+      if (!versions.length || new Set(versions).size !== 1) {
+        throw new Error(path + ' release references are missing or inconsistent');
+      }
+      return versions[0];
+    },
+    update(content, version) {
+      return patterns.reduce((text, pattern) => text.replace(pattern,
+        (match, previous) => match.replace(previous, version)), content);
+    },
+  })),
   ...[
     'package.json',
     'apps/kalio-api/package.json',

@@ -36,7 +36,7 @@ tool access, durable execution events, and an inspectable result.
 ## Install Kalio on Windows
 
 Open **Command Prompt (`cmd.exe`)** and run this one line. The installer uses the
-local production profile and the mock provider, so no API key is required:
+local production profile. Configure a provider or use an authenticated CLI agent:
 
 ~~~bat
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
@@ -64,7 +64,7 @@ Open **http://127.0.0.1:4016**. The API health endpoint is
 **http://127.0.0.1:4016/api/health**.
 
 1. Open **Settings**.
-2. Keep mock for a fully offline first run, or add a provider.
+2. Configure a provider or select an authenticated CLI agent.
 3. Create a session in **Talk**.
 4. Send a message and approve tool calls when the HITL prompt appears.
 
@@ -134,7 +134,7 @@ kalio open
 
 Add the PATH export to `~/.zshrc` to keep the CLI available in new Terminal
 windows. The UI opens at **http://127.0.0.1:6188**. Configure a model provider
-in Settings or use the initial mock provider.
+in Settings or select an authenticated CLI agent. Direct LLM access starts unconfigured.
 
 ~~~sh
 kalio status
@@ -153,7 +153,7 @@ configuration and recovery.
 
 The Tauri/NSIS desktop installer is optional. Use it when you specifically want
 the native desktop shell; the CMD installation above is the primary Windows path.
-Releases ship `Kalio_1.0.6_x64-setup.exe` on the
+Releases ship `Kalio_1.1.0_x64-setup.exe` on the
 [releases page](https://github.com/Radomiej/kalio-forever/releases). The desktop
 backend uses `http://127.0.0.1:4516`.
 
