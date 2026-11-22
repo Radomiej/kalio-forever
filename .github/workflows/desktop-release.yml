@@ -467,12 +467,12 @@ jobs:
           node --input-type=module -e "import { createRuntimeManifest } from './scripts/generate-runtime-release-manifest.mjs'; import { writeFile } from 'node:fs/promises'; const manifest=await createRuntimeManifest('release-assets',process.env.DRAFT_TAG); await writeFile('release-assets/kalio-runtime-manifest.json',JSON.stringify(manifest,null,2)+'\\n');"
       - name: Attach artifacts without publishing or creating a tag
         run: |
-          for asset in release-assets/*; do
+          while IFS= read -r -d '' asset; do
             case "$asset" in
               *.exe|*.zip|*.tar.gz|*.AppImage|*.deb|*.md|*.txt|*.json|*.sig)
                 gh release upload "$DRAFT_TAG" "$asset" --clobber ;;
             esac
-          done
+          done < <(find release-assets -type f -print0)
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
