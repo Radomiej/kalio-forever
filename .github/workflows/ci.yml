@@ -37,7 +37,7 @@ jobs:
         run: node --test scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs
 
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,6 +56,9 @@ jobs:
 
       - name: Build workspace packages
         run: pnpm --filter @kalio/types --filter @kalio/sdk build
+
+      - name: Install Chromium for browser storage tests
+        run: pnpm --filter kalio-web exec playwright install --with-deps chromium
 
       - name: Run workspace tests
         run: pnpm turbo run test --filter=!@kalio/e2e
@@ -103,7 +106,7 @@ jobs:
 
   frontend:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -122,6 +125,9 @@ jobs:
 
       - name: Frontend typecheck
         run: pnpm --filter kalio-web typecheck
+
+      - name: Install Chromium for browser storage tests
+        run: pnpm --filter kalio-web exec playwright install --with-deps chromium
 
       - name: Frontend coverage gate
         run: pnpm --filter kalio-web test:cov
