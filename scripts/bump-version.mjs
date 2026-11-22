@@ -12,6 +12,7 @@ const targets = [
     'apps/e2e/package.json',
     'apps/kalio-demo/package.json',
     'apps/kalio-video/package.json',
+    'apps/kalio-remote/package.json',
     'packages/@kalio/sdk/package.json',
     'packages/@kalio/types/package.json',
   ].map(path => ({

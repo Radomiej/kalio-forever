@@ -1,0 +1,33 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      KALIO_RELAY_AGENTS_JSON: ${KALIO_RELAY_AGENTS_JSON:?Set the agent token hashes}
+      KALIO_RELAY_ALLOWED_ORIGINS: '["https://localhost","http://127.0.0.1:8788","https://kalio-remote.nekko.software"]'
+    volumes:
+      - relay-data:/var/lib/kalio-relay
+
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - relay
+    ports:
+      - '127.0.0.1:8788:80'
+    volumes:
+      - ./remote.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../kalio-remote/dist:/usr/share/nginx/html:ro
+
+  cloudflared:
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:latest
+    depends_on:
+      - web
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${KALIO_REMOTE_TUNNEL_TOKEN:-}
+    restart: unless-stopped
+
+volumes:
+  relay-data:

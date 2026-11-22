@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ARCHITECTURE_REMOTE_GRAPH_PORT } from '@kalio/types';
 import { ChatModule } from '../chat/chat.module';
 import { SessionEventsService } from '../chat/session-events.service';
 import { ARCHITECTURE_RUNTIME_EVENTS, type ArchitectureRuntimeEmit } from './architecture-runtime-events.port';
@@ -108,6 +109,8 @@ import { CHAT_DURABLE_EVIDENCE_READER, type ChatDurableEvidenceReaderPort } from
     ArchitectureRuntimeChatProjectionService,
     ArchitectureRuntimeGraphProjectionService,
     ArchitectureRuntimeService,
+    { provide: ARCHITECTURE_REMOTE_GRAPH_PORT, inject: [ArchitectureRuntimeService],
+      useFactory: (runtime: ArchitectureRuntimeService) => ({ getGraph: (runId: string) => runtime.getGraphDurable(runId) }) },
     {
       provide: ARCHITECTURE_RUNTIME_EVENTS,
       inject: [SessionEventsService],
@@ -122,6 +125,6 @@ import { CHAT_DURABLE_EVIDENCE_READER, type ChatDurableEvidenceReaderPort } from
       useClass: ArchitectureRoleExecutorService,
     },
   ],
-  exports: [ArchitectureRegistryModule, ArchitectureRuntimeService],
+  exports: [ArchitectureRegistryModule, ArchitectureRuntimeService, ARCHITECTURE_REMOTE_GRAPH_PORT],
 })
 export class ArchitectureModule {}

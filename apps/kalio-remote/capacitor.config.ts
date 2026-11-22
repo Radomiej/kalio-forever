@@ -1,0 +1,12 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'dev.kalio.remote',
+  appName: 'Kalio Remote',
+  webDir: 'dist',
+  server: { androidScheme: 'https' },
+  android: { adjustMarginsForEdgeToEdge: 'auto' },
+  plugins: { Keyboard: { resize: 'body' } },
+};
+
+export default config;

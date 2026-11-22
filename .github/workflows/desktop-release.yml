@@ -151,6 +151,7 @@ jobs:
       - name: Upload independently reviewable Windows checksums
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-windows-metadata
           if-no-files-found: error
           path: release/SHA256SUMS-windows.txt
@@ -158,6 +159,7 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-windows
           if-no-files-found: error
           path: |
@@ -172,6 +174,7 @@ jobs:
       - name: Upload optional Windows updater signatures
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-windows-updater
           if-no-files-found: ignore
           path: src-tauri/target/release/bundle/nsis/*.sig
@@ -246,6 +249,7 @@ jobs:
       - name: Upload Linux runtime archives
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-runtime
           if-no-files-found: error
           path: |
@@ -264,6 +268,7 @@ jobs:
       - name: Upload Linux Bun runtime part 00
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-bun-part-00
           if-no-files-found: ignore
           path: release-bun-parts/kalio-bun-runtime.part.00
@@ -271,6 +276,7 @@ jobs:
       - name: Upload Linux Bun runtime part 01
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-bun-part-01
           if-no-files-found: ignore
           path: release-bun-parts/kalio-bun-runtime.part.01
@@ -278,6 +284,7 @@ jobs:
       - name: Upload Linux Bun runtime part 02
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-bun-part-02
           if-no-files-found: ignore
           path: release-bun-parts/kalio-bun-runtime.part.02
@@ -285,6 +292,7 @@ jobs:
       - name: Upload Linux Bun runtime part 03
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-bun-part-03
           if-no-files-found: ignore
           path: release-bun-parts/kalio-bun-runtime.part.03
@@ -351,6 +359,7 @@ jobs:
       - name: Upload independently reviewable Linux checksums
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-metadata
           if-no-files-found: error
           path: release/SHA256SUMS-linux.txt
@@ -358,6 +367,7 @@ jobs:
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux
           if-no-files-found: error
           path: |
@@ -373,6 +383,7 @@ jobs:
       - name: Upload optional Linux updater signatures
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: kalio-linux-updater
           if-no-files-found: ignore
           path: src-tauri/target/release/bundle/appimage/*.sig
