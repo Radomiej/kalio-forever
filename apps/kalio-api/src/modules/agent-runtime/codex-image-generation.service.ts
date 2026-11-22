@@ -3,6 +3,7 @@ import type { NativeImageGenerator, NativeImageRequest, NativeImageResult } from
 import sharp from 'sharp';
 import { CodexAppServerHost } from './codex-app-server.host';
 import { ExecutionProfileService } from './execution-profile.service';
+import { CodexMcpPolicyService } from './codex-mcp-policy.service';
 import { runCodexImageTurn } from './codex-image-turn';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -11,13 +12,19 @@ const record = (value: unknown): value is Record<string, unknown> => typeof valu
 @Injectable()
 export class CodexImageGenerationService implements NativeImageGenerator {
   private readonly logger = new Logger(CodexImageGenerationService.name);
-  constructor(private readonly host: CodexAppServerHost, private readonly profiles: ExecutionProfileService) {}
+  constructor(
+    private readonly host: CodexAppServerHost,
+    private readonly profiles: ExecutionProfileService,
+    private readonly mcpPolicy: CodexMcpPolicyService,
+  ) {}
 
   async generate(request: NativeImageRequest): Promise<NativeImageResult> {
     if (request.abortSignal?.aborted) throw new Error('ChatGPT image generation cancelled.');
     const profile = await this.profiles.assertEnabled(request.executionProfileId);
     if (profile.kind !== 'codex-app-server' || (profile.provider && profile.provider !== 'openai')) throw new Error('Select an enabled ChatGPT / Codex execution profile for image generation.');
     const authProfileId = profile.authProfileId?.trim() || profile.id;
+    const policy = await this.mcpPolicy.get(authProfileId);
+    if (policy.inheritConfiguredMcp) throw new Error('Disable inherited MCP servers for the selected Codex integration in Settings, or select a separate integration without inherited MCP servers, before generating images.');
     const connection = await this.host.getConnection(authProfileId, 'read-only');
     const account = await connection.request('account/read', { refreshToken: false });
     if (!record(account) || !record(account['account']) || account['account']['type'] !== 'chatgpt') throw new Error('Sign in with ChatGPT in the selected Codex integration before generating images. API-key login is billed separately.');

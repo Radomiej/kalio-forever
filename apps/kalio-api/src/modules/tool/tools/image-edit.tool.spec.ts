@@ -9,7 +9,8 @@
  * If writeFileSync threw (e.g. ENOSPC, permission denied), the error would
  * escape execute() rather than being logged and returned gracefully.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import sharp from 'sharp';
 import { Reflector } from '@nestjs/core';
 import { ImageEditTool } from './image-edit.tool';
 import { ImageEditingService } from '../../image/image-editing.service';
@@ -26,6 +27,10 @@ const mockGetConfig = vi.fn().mockResolvedValue({
 const mockReadBinary = vi.fn();
 const mockWriteBinary = vi.fn();
 const mockListFiles = vi.fn().mockReturnValue({ files: [] });
+let png: string;
+beforeAll(async () => {
+  png = (await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()).toString('base64');
+});
 
 const mockImageConfig = {
   getApiKey: mockGetApiKey,
@@ -75,7 +80,7 @@ describe('ImageEditTool', () => {
           content: {
             parts: [{
               inlineData: {
-                data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII=',
+                data: png,
                 mimeType: 'image/png',
               },
             }],

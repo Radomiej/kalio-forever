@@ -76,9 +76,10 @@ describe('llm-panel.utils', () => {
     const secondRequest = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(firstRequest[0]).toBe('/api/thing');
     expect(firstRequest[1]).toMatchObject({ cache: 'no-store' });
-    expect((firstRequest[1].headers as Headers).get('content-type')).toBe('application/json');
+    expect(new Headers(firstRequest[1].headers).get('content-type')).toBe('application/json');
     expect(secondRequest[0]).toBe('/api/submit');
-    expect((secondRequest[1].headers as Headers).get('content-type')).toBe('application/json');
+    expect(new Headers(secondRequest[1].headers).get('content-type')).toBe('application/json');
+    expect(secondRequest[1].cache).toBeUndefined();
   });
 
   it('returns readable messages from API responses', async () => {

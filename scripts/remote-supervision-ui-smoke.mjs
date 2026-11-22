@@ -74,6 +74,8 @@ try{
 
   // Drive the real UI against protocol fixtures on the same device socket.
   const paired=await browser.newPage({viewport:{width:390,height:844}});
+  await paired.clock.install();
+  await paired.clock.install();
   const instanceId='fixture-host';
   const summary={id:'fixture-session',title:'Fixture session',active:true,updatedAt:1};
   const verificationPath='C:/workspace/'+ 'long-directory-'.repeat(18) +'file.ts';
@@ -148,6 +150,26 @@ try{
   await status.filter({hasText:/decyzja odrzucona/i}).waitFor();
   if(await paired.getByText('Rozstrzygnięto',{exact:true}).count())throw new Error('Relay rejection was shown as settlement');
   console.log('Paired Remote recovery smoke passed at 390px');
+
+  // Expiration must update the UI without another relay frame or user action.
+  snapshot(2);
+  await approve.waitFor({state:'visible'});
+  await paired.clock.fastForward(16_000);
+  await paired.locator('.approval-card').waitFor({state:'hidden'});
+  await paired.locator('.stale-banner').waitFor();
+  snapshot(2);
+  await paired.clock.fastForward(1_000);
+  assert.equal(await paired.locator('.approval-card').count(),0,'An old snapshot restored an expired approval');
+  snapshot(3);
+  await approve.waitFor({state:'visible'});
+  await approve.click();
+  await waiting.waitFor();
+  frame('approval.result',{requestId:approvalId,payload:{approvalId:approval.id,status:'settled'}});
+  await paired.locator('.approval-card').waitFor({state:'hidden'});
+  snapshot(4);
+  await paired.clock.fastForward(1_000);
+  assert.equal(await paired.locator('.approval-card').count(),0,'A snapshot restored a host-settled approval');
+  console.log('Remote approval freshness and settlement smoke passed');
 
 
   const restored=await browser.newPage({viewport:{width:320,height:844}});

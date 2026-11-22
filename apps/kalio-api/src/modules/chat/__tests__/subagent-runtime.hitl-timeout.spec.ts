@@ -111,13 +111,15 @@ function fixture(options: { ordinary?: boolean; count?: number; finish?: boolean
 afterEach(() => vi.useRealTimers());
 
 it('propagates a parent stop to the active child and cancels its durable tool approval', async () => {
+  vi.useFakeTimers();
   const parent = new AbortController();
   const f = fixture({ parentSignal: parent.signal });
   try {
     await f.entered.promise;
     f.startTools.open();
+    await vi.advanceTimersByTimeAsync(0);
     const sessionId = f.params.sessionId!;
-    await vi.waitFor(() => expect(f.confirmations.getPendingConfirmations(sessionId)).toHaveLength(1));
+    expect(f.confirmations.getPendingConfirmations(sessionId)).toHaveLength(1);
     const [request] = f.confirmations.getPendingConfirmations(sessionId);
     parent.abort(new Error('Parent stopped.'));
     await f.settled;
@@ -125,6 +127,8 @@ it('propagates a parent stop to the active child and cancels its durable tool ap
     expect(f.confirmations.getPendingConfirmations(sessionId)).toHaveLength(0);
     expect(f.write).not.toHaveBeenCalled();
   } finally {
+    await f.runtime.stopAndDrainSessions(['parent']);
+    await f.settled;
     f.sqlite.close();
   }
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HitlDecisionService } from './hitl-decision.service';
 import { HitlPolicyService } from './hitl-policy.service';
 import type { HitlJevService } from './hitl-jev.service';
@@ -27,6 +27,7 @@ function makeConfig(overrides: Partial<HitlConfig> = {}): HitlConfig {
 }
 
 describe('HitlPolicyService', () => {
+  afterEach(() => vi.unstubAllEnvs());
   let service: HitlPolicyService;
   let configService: { getConfig: ReturnType<typeof vi.fn> };
   let decisionService: { evaluateApproval: ReturnType<typeof vi.fn> };
@@ -218,7 +219,8 @@ describe('HitlPolicyService', () => {
     expect(jevService.evaluateApproval).not.toHaveBeenCalled();
   });
 
-  it('allows and denies Jev decisions at the configured threshold boundaries', async () => {
+  it('allows and denies Jev decisions at the configured DEV threshold boundaries', async () => {
+    vi.stubEnv('KALIO_INSTALL_PROFILE', 'dev');
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev' }));
     const request = { kind: 'tool' as const, sessionId: 'sess-1', name: 'fs_read', args: { path: 'demo.txt' } };
     jevService.evaluateApproval.mockResolvedValue({ probability: 0.9 });
@@ -298,9 +300,20 @@ describe('HitlPolicyService', () => {
   });
 
   it.each([0.50001, 1])('honors supported threshold %s', async (jevApprovalThreshold) => {
+    vi.stubEnv('KALIO_INSTALL_PROFILE', 'dev');
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevApprovalThreshold }));
     jevService.evaluateApproval.mockResolvedValue({ probability: jevApprovalThreshold });
     await expect(service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).resolves.toMatchObject({ status: 'approved' });
+  });
+
+  it.each(['prod', ''])('retains the production minimum for host profile %j', async profile => {
+    vi.stubEnv('KALIO_INSTALL_PROFILE', profile);
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevApprovalThreshold: 0.9 }));
+    const request = { kind: 'tool' as const, sessionId: 's', name: 'fs_read', args: {} };
+    jevService.evaluateApproval.mockResolvedValue({ probability: 0.9 });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'manual' });
+    jevService.evaluateApproval.mockResolvedValue({ probability: 0.95 });
+    await expect(service.resolveApproval(request)).resolves.toMatchObject({ status: 'approved', reason: expect.stringContaining('threshold=0.95') });
   });
 
   it('defaults missing legacy Jev fields to .95 and manual fallback', async () => {

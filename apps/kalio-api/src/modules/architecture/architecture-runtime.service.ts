@@ -255,7 +255,7 @@ export class ArchitectureRuntimeService implements ArchitectureRuntimeStopPort {
       return run;
     }
     if (this.stoppedRunIds.has(run.id) || run.status !== 'running') {
-      return run;
+      return this.runs.get(run.id) ?? run;
     }
     const completedAt = Date.now();
     run.status = statusFromArchitectureEvents(events);

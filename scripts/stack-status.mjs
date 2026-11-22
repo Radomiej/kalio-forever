@@ -44,8 +44,8 @@ export async function readEffectiveLlmConfig(state, fetchImpl = globalThis.fetch
 export async function buildStackStatusReport({ status, state, repoRoot, isProcessAlive, fetchImpl = globalThis.fetch }) {
   return {
     status,
-    backendUp: isProcessAlive(state?.backend?.pid),
-    frontendUp: isProcessAlive(state?.frontend?.pid),
+    backendUp: isProcessAlive(state?.backend?.listenerPid ?? state?.backend?.pid),
+    frontendUp: isProcessAlive(state?.frontend?.listenerPid ?? state?.frontend?.pid),
     state: state ?? null,
     effectiveLlm: await readEffectiveLlmConfig(state, fetchImpl),
     paths: resolveStackPaths(repoRoot),
@@ -53,13 +53,13 @@ export async function buildStackStatusReport({ status, state, repoRoot, isProces
 }
 
 export function hasAliveChild(state, isProcessAlive) {
-  return Boolean(state && (isProcessAlive(state?.backend?.pid) || isProcessAlive(state?.frontend?.pid)));
+  return Boolean(state && (isProcessAlive(state?.backend?.listenerPid ?? state?.backend?.pid) || isProcessAlive(state?.frontend?.listenerPid ?? state?.frontend?.pid)));
 }
 
 export function renderStateProcesses(state) {
   const lines = [
-    `[stack] backend pid ${state?.backend?.pid ?? 'unknown'}  (${state?.backend?.cwd ?? 'unknown cwd'})`,
-    `[stack] frontend pid ${state?.frontend?.pid ?? 'unknown'} (${state?.frontend?.cwd ?? 'unknown cwd'})`,
+    `[stack] backend pid ${state?.backend?.listenerPid ?? state?.backend?.pid ?? 'unknown'}  (${state?.backend?.cwd ?? 'unknown cwd'})`,
+    `[stack] frontend pid ${state?.frontend?.listenerPid ?? state?.frontend?.pid ?? 'unknown'} (${state?.frontend?.cwd ?? 'unknown cwd'})`,
     `[stack] ports: backend=${state?.backendPort ?? 'unknown'}, frontend=${state?.frontendPort ?? 'unknown'}`,
   ];
 

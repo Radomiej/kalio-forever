@@ -1,10 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
+import sharp from 'sharp';
 import { CodexImageGenerationService } from './codex-image-generation.service';
 import type { CodexAppServerConnection, CodexServerNotification } from './codex-app-server.host';
 import { CodexAppServerHost } from './codex-app-server.host';
 import { ExecutionProfileService } from './execution-profile.service';
+import { CodexMcpPolicyService } from './codex-mcp-policy.service';
 
-const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII=';
+let png: string;
+beforeAll(async () => {
+  png = (await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()).toString('base64');
+});
 function setup(accountType: string | null = 'chatgpt', result = png) {
   const listeners = new Set<(event: CodexServerNotification) => void>();
   const emit = (method: string, params: unknown) => listeners.forEach(fn => fn({ method, params }));
@@ -22,7 +27,8 @@ function setup(accountType: string | null = 'chatgpt', result = png) {
     onNotification: fn => { listeners.add(fn); return () => listeners.delete(fn); }, onRequest: () => vi.fn() };
   const host = { getConnection: vi.fn().mockResolvedValue(connection), registerThread: vi.fn(), unregisterThread: vi.fn() };
   const profiles = { assertEnabled: vi.fn().mockResolvedValue({ id: 'profile', kind: 'codex-app-server', model: 'gpt-5.4', authProfileId: 'chatgpt-default' }) };
-  return { rpc, host, profiles, service: new CodexImageGenerationService(host as unknown as CodexAppServerHost, profiles as unknown as ExecutionProfileService) };
+  const policy = { get: vi.fn().mockResolvedValue({ inheritConfiguredMcp: false, source: 'default' }) };
+  return { rpc, host, profiles, policy, service: new CodexImageGenerationService(host as unknown as CodexAppServerHost, profiles as unknown as ExecutionProfileService, policy as unknown as CodexMcpPolicyService) };
 }
 const request = { executionProfileId: 'profile', prompt: 'edit the image', size: '1024x1024', quality: 'high' as const, outputFormat: 'webp' as const };
 describe('Native ChatGPT image generation adapter', () => {
@@ -53,5 +59,14 @@ describe('Native ChatGPT image generation adapter', () => {
     const f = setup('chatgpt', 'not-image!');
     await expect(f.service.generate(request)).rejects.toThrow('invalid');
     expect(f.host.unregisterThread).toHaveBeenCalled();
+  });
+
+  it('refuses inherited MCP servers before opening an image connection', async () => {
+    const f = setup();
+    f.policy.get.mockResolvedValue({ inheritConfiguredMcp: true, source: 'settings' });
+    await expect(f.service.generate(request)).rejects.toThrow('Disable inherited MCP servers');
+    expect(f.policy.get).toHaveBeenCalledWith('chatgpt-default');
+    expect(f.host.getConnection).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
   });
 });

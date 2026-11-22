@@ -216,9 +216,10 @@ describe('Jev runtime integration', () => {
     };
     const execution = service.createRun({ schemaId: 'jev-runtime-fixture', prompt: 'Build home-site' });
     await writing;
-    await service.stopRun('jev-run');
+    const stopped = await service.stopRun('jev-run');
     release();
     const run = await execution;
+    expect(run).toBe(stopped);
     expect(run.status).toBe('cancelled');
     expect(decisions).toHaveLength(1);
     const events = service.getEvents(run.id);

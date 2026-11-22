@@ -129,7 +129,7 @@ describe('ContextPreviewService', () => {
         { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(1) } },
+        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(512) } },
         {
           provide: PersonaService,
           useValue: {
@@ -159,6 +159,13 @@ describe('ContextPreviewService', () => {
     expect(preview.compaction.applied).toBe(true);
     expect(preview.messages.some((message) => typeof message.content === 'string' && message.content.startsWith('draft that may be removed') && message.source === 'draft')).toBe(true);
     expect(preview.messages.some((message) => message.source === 'history' && message.role === 'user')).toBe(false);
+    expect(preview.estimatedTokens.total).toBeLessThanOrEqual(preview.compaction.safeTargetTokens);
+
+    moduleRef.get(CredentialsService).getContextWindowSize = vi.fn().mockResolvedValue(1);
+    await expect(service.buildPreview('sid', {
+      target: 'session', sessionId: 'sid', personaId: 'persona-1',
+      draftUserMessage: 'draft that cannot fit ' + 'z'.repeat(700),
+    })).rejects.toMatchObject({ response: { code: 'ACTIVE_TURN_CONTEXT_BUDGET_EXCEEDED' } });
   });
 
   it('marks compaction as applied when fallback truncation edits a message in place', async () => {

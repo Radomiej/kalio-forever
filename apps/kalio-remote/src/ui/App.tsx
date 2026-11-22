@@ -66,7 +66,15 @@ export function App() {
  const active = connections.find(c => c.id === selected);
  latest.current.selected = selected;
  const data = preview ? fixture : active?.snapshot ?? null;
- const canDecide = !preview && active?.status === 'online' && active.client.canDecide();
+ const [approvalSnapshotFresh, setApprovalSnapshotFresh] = useState(false);
+ useEffect(() => {
+  const refresh = () => setApprovalSnapshotFresh(active?.status === 'online' && active.client.canDecide());
+  refresh();
+  if (!active?.snapshot?.approvals.length || active.status !== 'online') return;
+  const timer = window.setInterval(refresh, 1000);
+  return () => window.clearInterval(timer);
+ }, [active]);
+ const canDecide = !preview && active?.status === 'online' && approvalSnapshotFresh && active.client.canDecide();
  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
  const sessions = data?.sessions ?? [];
  const projects = useMemo(()=>Array.from(new Set(sessions.flatMap(s=>s.project?[s.project]:[]))),[data]);
@@ -258,7 +266,8 @@ export function App() {
   }
  }
  const activeCount = sessions.filter(item => item.active).length;
- const approvalCount = data?.approvals.length ?? 0;
+ const approvals = canDecide ? (data?.approvals ?? []).filter(approval => results[active.id+'|'+approval.id] !== 'Rozstrzygnięto') : [];
+ const approvalCount = approvals.length;
  const connectionLabel = preview ? 'Demo' : active ? connectionLabels[active.status] : restoring ? 'Wczytywanie…' : 'Niepołączono';
  const watchNotice = view !== 'approvals' && !sessionError?.dismissed ? sessionError?.message : undefined;
  const detailError = sessionError?.message ?? (active?.status === 'offline' ? 'Instancja niedostępna.' : undefined);
@@ -311,7 +320,7 @@ export function App() {
       {selectedSessionId&&<div className="session-detail"><button className="subtle-button back-button" onClick={resetSession}><ArrowLeft size={16}/> Wróć do sesji</button><SessionPanel session={session} error={detailError} onGraph={()=>setView('graph')}/></div>}
      </div>
     </>}
-    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{(data?.approvals??[]).map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
+    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{approvals.map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
     {view==='graph'&&<><button className="subtle-button back-button" onClick={()=>setView('sessions')}><ArrowLeft size={16}/> Wróć do rozmowy</button><div className="remote-graph-desktop"><GraphPanel session={session} error={detailError}/></div><div className="remote-graph-mobile"><GraphSteps session={session} error={detailError}/></div></>}
    </>}
   </section>

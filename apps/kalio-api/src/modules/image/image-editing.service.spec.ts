@@ -1,8 +1,13 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import sharp from 'sharp';
 import { ImageEditingService } from './image-editing.service';
 import type { ImageEditRequest } from '@kalio/types';
 
-const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII=';
+let png = '';
+beforeAll(async () => {
+  png = (await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()).toString('base64');
+  request.references[0]!.base64 = png;
+});
 const request: ImageEditRequest = { config: { provider: 'chatgpt', executionProfileId: 'profile', source: 'db' }, prompt: 'change background',
   references: [{ ref: { vfsPath: 'base.png', role: 'base', label: 'source' }, base64: png, mimeType: 'image/png' }], aspectRatio: '1:1', imageSize: '1K', thinkingLevel: 'minimal' };
 afterEach(() => vi.unstubAllGlobals());

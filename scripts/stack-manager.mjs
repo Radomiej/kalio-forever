@@ -9,6 +9,7 @@ import { resolveQaEnvValues } from './stack-qa-env.mjs';
 import { readStackState, resolveStackPaths } from './stack-state.mjs';
 import { buildStackStatusReport, hasAliveChild, renderEffectiveLlmLine, renderStateProcesses } from './stack-status.mjs';
 import { ensureRequestedPortsAreFree, resolveListeningPids } from './stack-port-owners.mjs';
+import { preflightStackStop, recordStartupListeners } from './stack-ownership.mjs';
 
 const scriptDir = resolve(fileURLToPath(import.meta.url), '..');
 const repoRoot = resolve(scriptDir, '..');
@@ -362,33 +363,6 @@ function resolveFrontendLauncher() {
   };
 }
 
-async function refreshStatePortOwners(state) {
-  if (!state) {
-    return state;
-  }
-
-  const owners = await resolveListeningPids([Number(state.backendPort), Number(state.frontendPort)]);
-  const backendPid = owners.get(Number(state.backendPort));
-  const frontendPid = owners.get(Number(state.frontendPort));
-  const nextState = structuredClone(state);
-  let changed = false;
-
-  if (backendPid && nextState.backend?.pid !== backendPid) {
-    nextState.backend.pid = backendPid;
-    changed = true;
-  }
-  if (frontendPid && nextState.frontend?.pid !== frontendPid) {
-    nextState.frontend.pid = frontendPid;
-    changed = true;
-  }
-
-  if (changed) {
-    writeState(nextState);
-  }
-
-  return nextState;
-}
-
 async function detectKnownManagedPortConflicts() {
   const owners = await resolveListeningPids([3316, 5288, 4016, 6188]);
   const conflictEntries = [];
@@ -555,7 +529,7 @@ async function startStack() {
   try {
     await waitForUrl(`${backendUrl}/api/health`, 60_000);
     await waitForUrl(frontendUrl, 60_000);
-    await refreshStatePortOwners(readState());
+    writeState(await recordStartupListeners(readState()));
   } catch (error) {
     await stopStack();
     throw error;
@@ -612,7 +586,7 @@ async function runProcess(command, commandArgs, options, label) {
 }
 
 async function showStatus() {
-  const state = await refreshStatePortOwners(readState());
+  const state = readState();
   if (!state) {
     const conflicts = await detectKnownManagedPortConflicts();
     if (conflicts.length > 0) {
@@ -645,7 +619,6 @@ async function showStatus() {
       return;
     }
 
-    clearLastState();
     if (outputJson) {
       console.log(JSON.stringify(await buildStackStatusReport({ status: 'stopped', state: null, repoRoot, isProcessAlive }), null, 2));
       return;
@@ -654,8 +627,8 @@ async function showStatus() {
     return;
   }
 
-  const backendUp = isProcessAlive(state?.backend?.pid);
-  const frontendUp = isProcessAlive(state?.frontend?.pid);
+  const backendUp = isProcessAlive(state?.backend?.listenerPid ?? state?.backend?.pid);
+  const frontendUp = isProcessAlive(state?.frontend?.listenerPid ?? state?.frontend?.pid);
   if (!backendUp || !frontendUp) {
     if (outputJson) {
       console.log(
@@ -688,14 +661,14 @@ async function showStatus() {
 }
 
 async function stopStack(exitCode) {
-  const state = await refreshStatePortOwners(readState() ?? readLastState());
+  const state = readState() ?? readLastState();
   if (!state) {
     console.log('[stack] stop: already stopped');
     return;
   }
 
-  const pids = new Set([state.backend?.pid, state.frontend?.pid]);
-  const jobs = [...pids].filter(Boolean).map((pid) => killProcessTree(pid));
+  const pids = await preflightStackStop(state, isProcessAlive);
+  const jobs = pids.map((pid) => killProcessTree(pid));
   const results = await Promise.allSettled(jobs);
   let failed = false;
   results.forEach((result) => {
@@ -749,38 +722,13 @@ function clearLastState() {
 }
 
 async function clearIfRunning() {
-  const state = readState();
-  if (!state && !hasAliveChild(readLastState(), isProcessAlive)) {
-    clearLastState();
-    return;
-  }
-  if (!hasAliveChild(state, isProcessAlive)) {
-    clearState();
-    clearLastState();
-    return;
-  }
-  await stopStack();
+  if (readState() ?? readLastState()) await stopStack();
 }
 
 async function forceRestartStack() {
-  const state = await refreshStatePortOwners(readState() ?? readLastState());
-  if (state && hasAliveChild(state, isProcessAlive)) {
-    await stopStack();
-  } else {
-    clearState();
-    clearLastState();
-  }
-
+  await clearIfRunning();
   const portsToFree = [backendPortArg, frontendPortArg].filter((port) => Number.isInteger(port) && port > 0);
-  for (const port of portsToFree) {
-    // Keep a fresh per-port read immediately before destructive termination.
-    const pid = (await resolveListeningPids([port])).get(port);
-    if (!pid) {
-      continue;
-    }
-    console.log(`[stack] force-restart: stopping pid ${pid} on port ${port}`);
-    await killProcessTree(pid);
-  }
+  await ensureRequestedPortsAreFree(portsToFree);
 }
 
 function reportStateProcesses(state) {

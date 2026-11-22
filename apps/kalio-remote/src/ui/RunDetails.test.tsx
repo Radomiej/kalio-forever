@@ -5,6 +5,32 @@ import { ApprovalCard, GraphPanel } from './RunDetails';
 import { SessionPanel } from './SessionPanel';
 
 describe('Remote run details', () => {
+  it.each(['Nie udało się wczytać sesji: projection_failed', 'Instancja niedostępna.'])(
+    'preserves the current session error in conversation and graph details: %s', error => {
+      const sessionHtml = renderToStaticMarkup(<SessionPanel session={null} error={error} onGraph={vi.fn()}/>);
+      const graphHtml = renderToStaticMarkup(<GraphPanel session={null} error={error}/>);
+      expect(sessionHtml).toContain('Sesja niedostępna');
+      expect(sessionHtml).toContain(error);
+      expect(sessionHtml).not.toContain('Wczytywanie sesji');
+      expect(graphHtml).toContain(error);
+      expect(graphHtml).not.toContain('Wczytywanie grafu');
+    },
+  );
+
+  it('keeps a sent approval pending until the host acknowledges its outcome', () => {
+    const approval: Approval = {
+      id: 'approval', sessionId: 'session', toolName: 'fs_write', args: {},
+      revision: '1', argsSha256: 'digest',
+    };
+    const html = renderToStaticMarkup(<ApprovalCard approval={approval} disabled pending="request" onDecide={vi.fn()}/>);
+    expect(html).toContain('Wysyłanie…');
+    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(html).not.toContain('Rozstrzygnięto');
+    const settled = renderToStaticMarkup(<ApprovalCard approval={approval} disabled result="Rozstrzygnięto" onDecide={vi.fn()}/>);
+    expect(settled).toContain('Rozstrzygnięto');
+    expect(settled).not.toContain('Wysyłanie…');
+  });
+
   it('renders approval arguments as fields and keeps technical identifiers in details', () => {
     const approval: Approval = {
       id: 'approval', sessionId: 'session', toolName: 'terminal_spawn',
