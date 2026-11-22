@@ -63,7 +63,7 @@ jobs:
       - run: pnpm --filter kalio-api build
       - run: pnpm --filter kalio-api exec vitest run src/modules/remote-relay src/modules/chat/remote-supervision.chat-adapter.spec.ts
   mobile:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
       run:
