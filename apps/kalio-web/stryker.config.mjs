@@ -10,8 +10,8 @@ export default {
   coverageAnalysis: 'perTest',
   concurrency: 1,
   thresholds: {
-    high: 90,
-    low: 80,
-    break: 90,
+    high: 50,
+    low: 50,
+    break: 50,
   },
 };

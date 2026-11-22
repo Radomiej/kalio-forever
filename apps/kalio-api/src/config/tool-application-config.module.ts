@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { ToolMeta } from '@kalio/types';
+import { IMAGE_EDITOR } from '@kalio/types';
+import { ImageEditingService } from '../modules/image/image-editing.service';
 import { TOOL_METADATA, type ToolOptions } from '../common/decorators/tool.decorator';
 import { VFSModule } from '../modules/vfs/vfs.module';
 import { DatabaseModule } from '../database/database.module';
@@ -12,6 +14,7 @@ import { MCPModule } from '../modules/mcp/mcp.module';
 import { SearchModule } from '../modules/search/search.module';
 import { CLIAgentModule } from '../modules/cli-agent/cli-agent.module';
 import { ImageModule } from '../modules/image/image.module';
+import { AgentRuntimeModule } from '../modules/agent-runtime/agent-runtime.module';
 import { SkillsModule } from '../modules/skills/skills.module';
 import { PersonaModule } from '../modules/persona/persona.module';
 import { CredentialsModule } from '../modules/credentials/credentials.module';
@@ -52,8 +55,10 @@ function buildToolCatalog(reflector: Reflector): ToolCatalogPort {
 }
 
 @Module({
-  imports: [DatabaseModule, VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule, RelayModule, CodeIntelligenceModule],
+  imports: [DatabaseModule, VFSModule, LLMModule, RAAppModule, MemoryModule, AllowedPathsModule, MCPModule, SearchModule, CLIAgentModule, AgentRuntimeModule, ImageModule, SkillsModule, PersonaModule, CredentialsModule, RelayModule, CodeIntelligenceModule],
   providers: [
+    ImageEditingService,
+    { provide: IMAGE_EDITOR, useExisting: ImageEditingService },
     ...TOOL_CONFIGURATION_PROVIDERS,
     {
       provide: TOOL_CATALOG,

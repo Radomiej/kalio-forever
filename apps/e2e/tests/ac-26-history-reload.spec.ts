@@ -1,22 +1,24 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, expectComposerEnabled, sendMessageFromComposer } from './helpers/test-config';
+import {
+  API_BASE,
+  expectComposerEnabled,
+  selectSession,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 // AC-26: After page reload, selecting a session restores the full conversation history
 test.describe('AC-26: Session history restored after reload', () => {
   test('user message and agent response are visible after page reload', async ({ page, request }) => {
+    const title = `AC26 Reload Test ${Date.now()}`;
     const res = await request.post(`${API_BASE}/sessions`, {
-      data: { title: 'AC26 Reload Test', personaId: 'default' },
+      data: { title, personaId: 'default' },
     });
     expect(res.ok()).toBeTruthy();
     const session = await res.json() as { id: string };
 
     await page.goto('/');
     await page.getByTestId('nav-talk').click();
-
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first().click();
+    await selectSession(page, session.id, title);
 
     await expectComposerEnabled(page, 5000);
     await sendMessageFromComposer(page, 'Say the single word: PINEAPPLE');
@@ -33,12 +35,7 @@ test.describe('AC-26: Session history restored after reload', () => {
     // Reload the page — simulates browser refresh
     await page.reload();
     await page.getByTestId('nav-talk').click();
-
-    // Select same session
-    await expect(
-      page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await page.getByTestId('session-item').filter({ hasText: 'AC26 Reload Test' }).first().click();
+    await selectSession(page, session.id, title);
 
     // User message must still be visible
     const userBubble = page.locator('[data-testid="message-bubble"][data-role="user"]').first();

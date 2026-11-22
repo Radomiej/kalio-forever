@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,7 +14,7 @@ import { createRuntimeManifest } from './generate-runtime-release-manifest.mjs';
 import { loadRelease, verifyUpdateSignature } from './kalio-updater-helpers.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const expectedVersion = '1.0.2';
+const expectedVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const execFileAsync = promisify(execFile);
 const gunzipAsync = promisify(gunzip);
 const workspaceManifestPaths = [
@@ -40,7 +41,7 @@ function readRootFile(path) {
   return readFile(join(root, path), 'utf8');
 }
 
-test('v1.0.2 release surfaces stay synchronized across Node, Tauri, Rust, and docs', async () => {
+test('release surfaces stay synchronized across Node, Tauri, Rust, and docs', async () => {
   for (const path of workspaceManifestPaths) {
     const manifest = JSON.parse(await readRootFile(path));
     assert.equal(manifest.version, expectedVersion, `${path} has a mismatched release version`);
@@ -57,10 +58,14 @@ test('v1.0.2 release surfaces stay synchronized across Node, Tauri, Rust, and do
   assert.ok(kalioLockEntry, 'Kalio package is missing from Cargo.lock');
   assert.equal(kalioLockEntry[1], expectedVersion);
 
-  assert.match(await readRootFile('README.md'), /Kalio_1\.0\.2_x64-setup\.exe/);
-  assert.match(await readRootFile('docs/desktop-build.md'), /Kalio_1\.0\.2_x64-setup\.exe/);
-  assert.match(await readRootFile('docs/desktop-build.md'), /v1\.0\.2.*version `1\.0\.2`/s);
-  assert.match(await readRootFile('scripts/install.ps1'), /kalio-runtime-1\.0\.2-windows-x64\.zip/);
+  const escapedVersion = expectedVersion.replaceAll('.', '\\.');
+  assert.match(await readRootFile('README.md'), new RegExp(`Kalio_${escapedVersion}_x64-setup\\.exe`));
+  assert.match(await readRootFile('docs/desktop-build.md'), new RegExp(`Kalio_${escapedVersion}_x64-setup\\.exe`));
+  assert.match(
+    await readRootFile('docs/desktop-build.md'),
+    new RegExp('v' + escapedVersion + '.*version `' + escapedVersion + '`', 's'),
+  );
+  assert.match(await readRootFile('scripts/install.ps1'), new RegExp(`kalio-runtime-${escapedVersion}-windows-x64\\.zip`));
 });
 
 test('tagged desktop release is version-gated and unsigned Windows signing is explicit', async () => {
@@ -95,8 +100,8 @@ test('runtime manifest includes only the tagged archives and detects payload tam
   await withTempDirectory(async (directory) => {
     const nestedDirectory = join(directory, 'nested');
     await mkdir(nestedDirectory);
-    await writeFile(join(directory, 'kalio-runtime-1.0.2-windows-x64.zip'), 'node runtime');
-    await writeFile(join(nestedDirectory, 'kalio-runtime-1.0.2-bun-windows-x64.zip'), 'bun runtime');
+    await writeFile(join(directory, `kalio-runtime-${expectedVersion}-windows-x64.zip`), 'node runtime');
+    await writeFile(join(nestedDirectory, `kalio-runtime-${expectedVersion}-bun-windows-x64.zip`), 'bun runtime');
     await writeFile(join(directory, 'kalio-runtime-1.0.1-windows-x64.zip'), 'stale runtime');
 
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -107,8 +112,8 @@ test('runtime manifest includes only the tagged archives and detects payload tam
     const assetNames = payload.assets.map((asset) => asset.name);
 
     assert.deepEqual(assetNames, [
-      'kalio-runtime-1.0.2-bun-windows-x64.zip',
-      'kalio-runtime-1.0.2-windows-x64.zip',
+      `kalio-runtime-${expectedVersion}-bun-windows-x64.zip`,
+      `kalio-runtime-${expectedVersion}-windows-x64.zip`,
     ]);
     assert.equal(payload.version, expectedVersion);
     assert.equal(
@@ -246,8 +251,8 @@ test('updater manifest finds signatures flattened by GitHub artifact download', 
   await withTempDirectory(async (directory) => {
     const windowsDirectory = join(directory, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
     const linuxDirectory = join(directory, 'src-tauri', 'target', 'release', 'bundle', 'appimage');
-    const windowsName = 'Kalio_1.0.2_x64-setup.exe';
-    const linuxName = 'Kalio_1.0.2_amd64.AppImage';
+    const windowsName = `Kalio_${expectedVersion}_x64-setup.exe`;
+    const linuxName = `Kalio_${expectedVersion}_amd64.AppImage`;
     const outputPath = join(directory, 'latest.json');
     await mkdir(windowsDirectory, { recursive: true });
     await mkdir(linuxDirectory, { recursive: true });
@@ -259,7 +264,7 @@ test('updater manifest finds signatures flattened by GitHub artifact download', 
     await execFileAsync(
       process.execPath,
       [join(root, 'scripts', 'generate-tauri-latest-json.mjs'), directory, outputPath],
-      { env: { ...process.env, GITHUB_REF_NAME: 'v1.0.2', KALIO_RELEASE_VERSION: expectedVersion } },
+      { env: { ...process.env, GITHUB_REF_NAME: `v${expectedVersion}`, KALIO_RELEASE_VERSION: expectedVersion } },
     );
 
     const manifest = JSON.parse(await readFile(outputPath, 'utf8'));

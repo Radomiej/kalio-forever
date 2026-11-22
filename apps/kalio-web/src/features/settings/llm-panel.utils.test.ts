@@ -72,13 +72,13 @@ describe('llm-panel.utils', () => {
     await expect(apiFetch<{ value: number }>('/thing')).resolves.toEqual({ value: 1 });
     await expect(apiFetch('/submit', { method: 'POST' })).resolves.toBeUndefined();
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/thing', expect.objectContaining({
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-    }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/submit', expect.objectContaining({
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    const firstRequest = fetchMock.mock.calls[0] as [string, RequestInit];
+    const secondRequest = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(firstRequest[0]).toBe('/api/thing');
+    expect(firstRequest[1]).toMatchObject({ cache: 'no-store' });
+    expect((firstRequest[1].headers as Headers).get('content-type')).toBe('application/json');
+    expect(secondRequest[0]).toBe('/api/submit');
+    expect((secondRequest[1].headers as Headers).get('content-type')).toBe('application/json');
   });
 
   it('returns readable messages from API responses', async () => {

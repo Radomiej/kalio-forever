@@ -266,6 +266,15 @@ flowchart TD
 - External security/auto-check evaluation is a no-tools model call selected by the configured evaluator persona/profile. Its typed result preserves `allow`, `deny`, and `ask_user`; critical-risk actions always retain the human gate.
 - Codex `thread/resume` currently cannot replace dynamic tool definitions. Until fingerprint mismatch handling is implemented, changing a session's effective toolset requires an explicit fresh thread/rebinding decision.
 
+## Image Generation and Editing Boundary
+
+- Image settings select a provider without recommending a service. The shared `IMAGE_PROVIDER_CAPABILITIES` table owns generation/editing availability, reference limits, credential requirements, and editing transport for Settings and backend dispatch.
+- `image_edit` loads references through VFS, preserves role/number ordering, and writes a new versioned PNG. `ImageEditingService` owns provider dispatch: ChatGPT/Codex native image inputs, OpenAI multipart edits, and the existing Gemini-compatible CometAPI transport. Unsupported editing providers fail explicitly without switching services.
+- ChatGPT uses an enabled OpenAI Codex execution profile and its ChatGPT login, not an OpenAI API key. The adapter reuses the auth-profile App Server, creates an ephemeral image thread, accepts native `imageGeneration` result bytes, and removes scoped listeners/thread registration after success, cancellation, disconnect, or error. It does not close the shared process.
+- Shell/edit/browser features are disabled for the image thread and approval requests are declined. Image threads have no Kalio dynamic tools; the host's inherited MCP policy remains a separate boundary.
+- Account/model image availability and limits are checked by Codex at execution; a selectable integration does not guarantee image entitlement. API billing remains separate from ChatGPT subscriptions. Output dimensions are decoded from the returned image rather than assumed from the requested size.
+- Legacy `auto` settings retain historical CometAPI routing and are labelled accordingly. `editModel` is independent from the generation model; ChatGPT uses the execution profile model.
+
 ## Native MCP Interoperability Boundary
 
 - Kalio exposes a separate authenticated Streamable HTTP MCP server at

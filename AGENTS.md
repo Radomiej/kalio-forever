@@ -164,6 +164,7 @@ Boris Cherny (creator of Claude Code) keeps his team's file around 100 lines. Un
 - Lint: `pnpm turbo run lint`
 - Typecheck: `pnpm turbo run typecheck`
 - Audit report: `pnpm audit:report`
+- Release version: `pnpm release:version <MAJOR.MINOR.PATCH>` then `pnpm release:version --check`
 - Dev (hot reload): `pnpm dev` / `.\start-dev.ps1` (API :3016, web :5188)
 - QA (built dist): `pnpm qa` / `pnpm qa:rebuild` (API :3316, web :5288)
 - Managed QA stack: `pnpm stack:start` / `pnpm stack:stop`

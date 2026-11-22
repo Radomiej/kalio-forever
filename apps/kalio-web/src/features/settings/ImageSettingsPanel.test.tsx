@@ -68,6 +68,38 @@ beforeEach(() => {
 });
 
 describe('ImageSettingsPanel', () => {
+  it('selects ChatGPT, hides API credentials, and saves the integration', async () => {
+    const saved: ImageConfigResponse = { provider: 'chatgpt', executionProfileId: 'native', model: '', baseUrl: '', source: 'db' };
+    const fetchMock = mockImageFetch(DEFAULT_CONFIG, saved);
+    const previous = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, opts) => url === '/api/runtime/profiles'
+      ? Promise.resolve(new Response(JSON.stringify([{ id: 'native', name: 'My ChatGPT', kind: 'codex-app-server', enabled: true, model: 'gpt-5.4' }]), { status: 200 }))
+      : previous(url, opts));
+    render(<ImageSettingsPanel />);
+    await screen.findByRole('heading', { name: 'Image Generation' });
+    expect(screen.queryByText(/recommended/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'chatgpt' } });
+    await screen.findByRole('option', { name: 'My ChatGPT — gpt-5.4' });
+    expect(screen.queryByPlaceholderText(/Enter API key/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'ChatGPT / Codex integration' }), { target: { value: 'native' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await screen.findByRole('button', { name: 'Saved!' });
+    const call = fetchMock.mock.calls.find(([url, opts]) => url === '/api/image/config' && opts?.method === 'PUT');
+    const body = JSON.parse(call?.[1]?.body as string) as Record<string, unknown>;
+    expect(body).toMatchObject({ provider: 'chatgpt', executionProfileId: 'native', model: '', baseUrl: '', editModel: '' });
+    expect(body).not.toHaveProperty('apiKey');
+  });
+
+  it('shows unsupported editing and blocks native save without an integration', async () => {
+    mockImageFetch(DEFAULT_CONFIG);
+    render(<ImageSettingsPanel />);
+    await screen.findByRole('heading', { name: 'Image Generation' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'replicate' } });
+    expect(screen.getByText(/Editing: not supported/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Provider' }), { target: { value: 'chatgpt' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await screen.findByText('Select a ChatGPT / Codex integration before saving.');
+  });
   it('loads image settings, shows the default warning, and saves provider and compression changes', async () => {
     const updatedConfig: ImageConfigResponse = {
       ...SAVED_CONFIG,
@@ -87,7 +119,7 @@ describe('ImageSettingsPanel', () => {
 
     const providerSelect = screen.getByRole('combobox');
     const apiKeyInput = screen.getByPlaceholderText(/Enter API key/i);
-    const baseUrlInput = screen.getByPlaceholderText(/https:\/\/api\.cometapi\.com\/v1/i);
+    const baseUrlInput = screen.getByPlaceholderText('Provider API base URL');
     const modelInput = screen.getByPlaceholderText('flux-schnell');
 
     expect(apiKeyInput).toHaveValue('');
@@ -98,7 +130,7 @@ describe('ImageSettingsPanel', () => {
     expect(baseUrlInput).toHaveValue('https://api.openai.com/v1');
     expect(modelInput).toHaveValue('dall-e-3');
 
-    fireEvent.click(screen.getByRole('button', { name: 'gpt-image-1 (recommended)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'gpt-image-1' }));
     expect(modelInput).toHaveValue('gpt-image-1');
 
     fireEvent.click(screen.getByRole('checkbox'));
@@ -134,6 +166,8 @@ describe('ImageSettingsPanel', () => {
       model: 'gpt-image-1',
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'sk-test',
+      executionProfileId: '',
+      editModel: '',
       compression: {
         enabled: true,
         maxDimension: 3072,

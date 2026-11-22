@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { NATIVE_IMAGE_GENERATOR } from '@kalio/types';
+import { CodexImageGenerationService } from './codex-image-generation.service';
 import { DatabaseModule } from '../../database/database.module';
 import { CLIAgentModule } from '../cli-agent/cli-agent.module';
 import { CredentialsModule } from '../credentials/credentials.module';
@@ -22,7 +24,7 @@ import { KalioMcpBridgeContextModule } from '../../common/kalio-mcp-bridge-conte
 @Module({
   imports: [DatabaseModule, CLIAgentModule, CredentialsModule, KalioMcpBridgeContextModule],
   controllers: [ExecutionProfileController, NativeCliIntegrationController, DevinIntegrationController, DevinCliIntegrationController],
-  providers: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
-  exports: [ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
+  providers: [CodexImageGenerationService, { provide: NATIVE_IMAGE_GENERATOR, useExisting: CodexImageGenerationService }, ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
+  exports: [NATIVE_IMAGE_GENERATOR, ExecutionProfileService, CodexAppServerHost, CodexAppServerLLMSource, ClaudeAgentSdkLLMSource, DevinApiClient, DevinApiLLMSource, DevinAcpHostRegistry, DevinCliAcpLLMSource, NativeApprovalService, CodexMcpPolicyService, DevinNativeToolsPolicyService],
 })
 export class AgentRuntimeModule {}

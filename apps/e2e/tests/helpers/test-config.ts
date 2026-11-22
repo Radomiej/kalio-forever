@@ -187,7 +187,7 @@ export async function selectSession(page: Page, sessionId: string, title: string
 	);
 }
 
-async function expectChatTransportReady(page: Page): Promise<void> {
+export async function expectChatTransportReady(page: Page): Promise<void> {
 	await expect
 		.poll(
 			async () => activeTransportStatusMessages(page),

@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { API_BASE, deleteSessionIfExists, sendMessageFromComposer } from './helpers/test-config';
+import {
+  API_BASE,
+  deleteSessionIfExists,
+  expectChatTransportReady,
+  sendMessageFromComposer,
+} from './helpers/test-config';
 
 const LAST_ACTIVE_SESSION_STORAGE_KEY = 'kalio:last-active-session-id';
 
@@ -31,6 +36,7 @@ test.describe('AC-21: Session auto-title', () => {
     try {
       await page.goto('/');
       await page.getByTestId('nav-talk').click();
+      await expectChatTransportReady(page);
 
       const newSessionButton = page.getByTestId('new-session-btn');
       await expect(newSessionButton).toBeVisible({ timeout: 5000 });
