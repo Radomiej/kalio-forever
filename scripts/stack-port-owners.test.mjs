@@ -141,7 +141,7 @@ test('actual stack start without lsof refuses an unrelated live service before b
   const root = await mkdtemp(join(tmpdir(), 'kalio-no-lsof-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'scripts'));
-  for (const name of ['stack-manager.mjs', 'stack-port-owners.mjs', 'stack-state.mjs', 'stack-status.mjs']) {
+  for (const name of ['stack-manager.mjs', 'stack-port-owners.mjs', 'stack-ownership.mjs', 'stack-state.mjs', 'stack-status.mjs', 'stack-qa-env.mjs']) {
     await copyFile(new URL(name, import.meta.url), join(root, 'scripts', name));
   }
   const server = createServer(socket => socket.end('unrelated healthy service'));
