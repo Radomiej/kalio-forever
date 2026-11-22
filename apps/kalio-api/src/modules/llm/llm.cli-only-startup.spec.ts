@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { LLMService } from './llm.service';
 import { CredentialsService } from '../credentials/credentials.service';
@@ -33,7 +33,15 @@ function mockCompletion() {
   return fetchMock;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  for (const name of ['LLM_PROVIDER', 'LLM_API_KEY', 'LLM_MODEL', 'LLM_BASE_URL', 'KALIO_FORCE_ENV_LLM']) {
+    vi.stubEnv(name, '');
+  }
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('CLI-only startup and deferred direct LLM configuration', () => {
   it('constructs and exposes settings without a key, mock, or network request', async () => {
