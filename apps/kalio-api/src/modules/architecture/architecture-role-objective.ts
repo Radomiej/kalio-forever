@@ -1,10 +1,44 @@
-import type { ArchitectureContextPolicy } from '@kalio/types';
+import type { ArchitectureContextPolicy, ArchitectureExecutionEvent } from '@kalio/types';
 import type { ArchitectureRoleExecutionInput } from './architecture-role-executor';
 import { ArchitectureRoleExecutionPolicy } from './architecture-role-execution-policy';
 import { FINAL_ARTIFACT_CONTRACT_INSTRUCTION } from './architecture-final-artifact-contract';
 import { summarizeArchitectureIncomingEvent, summarizeArchitectureIncomingHandoffPacket } from './architecture-incoming-event-summary';
 import { incomingEventEvidenceSummary } from './architecture-role-evidence.utils';
 import type { ArchitectureRoleSlot } from '@kalio/types';
+
+const CONTRIBUTION_EVENTS = new Set<ArchitectureExecutionEvent['type']>([
+  'participant_output', 'router_output', 'router_decision', 'artifact_created',
+]);
+
+function boundedIncomingLines(
+  entries: Array<{ event: ArchitectureExecutionEvent; line: string }>,
+  budget: number,
+): string[] {
+  if (entries.reduce((size, entry) => size + entry.line.length + 1, 0) <= budget) {
+    return entries.map(({ line }) => line);
+  }
+
+  const selected: typeof entries = [];
+  const sources = new Set<string>();
+  for (const entry of [...entries].sort((a, b) => (
+    Number(CONTRIBUTION_EVENTS.has(b.event.type)) - Number(CONTRIBUTION_EVENTS.has(a.event.type))
+    || b.event.sequence - a.event.sequence
+  ))) {
+    const { event, line } = entry;
+    const source = `${event.nodeId ?? event.roleSlotId ?? event.id}:${event.type}`;
+    if (sources.has(source)) continue;
+    sources.add(source);
+    const referenced = `${line} [event=${event.id}, seq=${event.sequence}]`;
+    if (referenced.length + 1 > budget) continue;
+    budget -= referenced.length + 1;
+    selected.push({ event, line: referenced });
+  }
+
+  return [
+    ...selected.sort((a, b) => a.event.sequence - b.event.sequence).map(({ line }) => line),
+    `- ${entries.length - selected.length} earlier or oversized entries omitted from this prompt; full events remain in the workflow trace.`,
+  ];
+}
 
 type EffectiveContextPolicy = Required<Pick<
   ArchitectureContextPolicy,
@@ -40,17 +74,20 @@ export class ArchitectureRoleObjective extends ArchitectureRoleExecutionPolicy {
     ].filter((line): line is string => typeof line === 'string');
     if (incomingEvents.length > 0) {
       lines.push('', 'Incoming graph outputs:');
-      for (const event of incomingEvents) {
-        lines.push(`- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType)}${incomingEventEvidenceSummary(event)}`);
-      }
-      const handoffPackets = incomingEvents
-        .map((event) => summarizeArchitectureIncomingHandoffPacket(event))
-        .filter((packet): packet is string => packet !== undefined);
+      const isGameFinalizer = input.slot.slotType === 'finalizer'
+        && /^game-development-2(?:-variant-\d+)?$/.test(input.schema.id);
+      const outputLines = incomingEvents.map((event) => {
+        const preserveConclusion = isGameFinalizer && (event.nodeId === 'input-qa' || event.nodeId === 'loop-qa');
+        const line = `- ${event.roleSlotId ?? event.nodeId ?? event.type}: ${summarizeArchitectureIncomingEvent(event, input.slot.slotType, preserveConclusion)}${incomingEventEvidenceSummary(event)}`;
+        return { event, line };
+      });
+      lines.push(...boundedIncomingLines(outputLines, 12_000));
+      const handoffPackets = incomingEvents.flatMap((event) => {
+        const packet = summarizeArchitectureIncomingHandoffPacket(event);
+        return packet === undefined ? [] : [{ event, line: `- ${packet}` }];
+      });
       if (handoffPackets.length > 0) {
-        lines.push('', 'Incoming handoff packets:');
-        for (const packet of handoffPackets) {
-          lines.push(`- ${packet}`);
-        }
+        lines.push('', 'Incoming handoff packets:', ...boundedIncomingLines(handoffPackets, 4_000));
       }
     }
     if (outgoingNodeIds.length > 0) {

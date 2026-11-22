@@ -1,10 +1,14 @@
 import { AlertTriangle, CheckCircle2, Circle, GitBranch, Loader2, Route, ShieldCheck, XCircle } from 'lucide-react';
-import { architectureSessionIdForRunSlot, type ArchitectureChatRunSummary, type ChatSession } from '@kalio/types';
+import { type ArchitectureChatRunSummary, type ChatSession } from '@kalio/types';
 import { architectureTraceActivitySummary, compactArchitectureTraceContent } from './architectureChatSummary';
 import {
   buildTimelineStages,
   graphStepCount,
   nodeLabel,
+  normalizeArchitectureKey,
+  resolveBranchSessionId,
+  routerSessionForStep,
+  sessionDisplayLabel,
   stageSegment,
   statusForStep,
   stepFocus,
@@ -12,7 +16,6 @@ import {
   type TraceStage,
   type TraceStep,
 } from './ArchitectureRunTimeline.stages';
-import { architectureContextStringField } from '../sessions/architectureSessionContext';
 
 function compact(step: TraceStep): string {
   return compactArchitectureTraceContent(step.content, step.speaker).replace(/\s+/g, ' ').trim();
@@ -60,92 +63,6 @@ function StatusBadge({ status }: { status: TimelineStatus | null }) {
       {status}
     </span>
   );
-}
-
-function stepSessionCandidates(runId: string, step: TraceStep): string[] {
-  const explicitSessionId = step.sessionId;
-  if (explicitSessionId) {
-    return [explicitSessionId];
-  }
-  const fromStream = step.stream?.branchSessionId;
-  if (fromStream) {
-    return [fromStream];
-  }
-  if (step.speaker !== 'participant' || !step.nodeId) {
-    return [];
-  }
-  const raw = step.nodeId;
-  const normalized = new Set([
-    raw,
-    raw.replace(/-/g, '_'),
-    raw.replace(/_/g, '-'),
-  ]);
-  return [...normalized]
-    .map((nodeId) => architectureSessionIdForRunSlot(runId, nodeId))
-    .filter((sessionId): sessionId is string => typeof sessionId === 'string');
-}
-
-function resolveBranchSessionId(
-  runId: string,
-  step: TraceStep,
-  canOpenBranchSession: (sessionId: string | undefined) => boolean,
-): string | undefined {
-  return stepSessionCandidates(runId, step).find((sessionId) => canOpenBranchSession(sessionId));
-}
-
-function normalizeArchitectureKey(value: string | undefined): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase().replace(/_/g, '-');
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function sessionDisplayLabel(session: ChatSession): string | undefined {
-  return architectureContextStringField(session, 'displayLabel')
-    ?? architectureContextStringField(session, 'roleLabel')
-    ?? session.title.split(':').at(-1)?.trim()
-    ?? undefined;
-}
-
-function routerSessionForStep(
-  step: TraceStep,
-  runSessions: ReadonlyArray<ChatSession> | undefined,
-): ChatSession | undefined {
-  if (!runSessions || step.speaker !== 'router') {
-    return undefined;
-  }
-  const routerSessions = runSessions.filter((session) => architectureContextStringField(session, 'roleSlotType') === 'router');
-  if (routerSessions.length === 0) {
-    return undefined;
-  }
-
-  const resolvedLabel = normalizeArchitectureKey(nodeLabel(step));
-  if (resolvedLabel) {
-    const matchingLabelSession = routerSessions.find((session) => normalizeArchitectureKey(sessionDisplayLabel(session)) === resolvedLabel);
-    if (matchingLabelSession) {
-      return matchingLabelSession;
-    }
-  }
-
-  const stepNodeId = normalizeArchitectureKey(step.nodeId);
-  if (stepNodeId && stepNodeId !== 'router') {
-    const matchingSlotSession = routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === stepNodeId);
-    if (matchingSlotSession) {
-      return matchingSlotSession;
-    }
-  }
-
-  const nextNodeId = normalizeArchitectureKey(step.nextNodeId);
-  if (nextNodeId === 'final-artifact') {
-    const mergeSession = routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) !== 'orchestrator');
-    if (mergeSession) {
-      return mergeSession;
-    }
-  }
-
-  return routerSessions.find((session) => normalizeArchitectureKey(session.runtimeContext?.architectureSlotId) === 'orchestrator')
-    ?? routerSessions[0];
 }
 
 function RouterStep({

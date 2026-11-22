@@ -49,7 +49,7 @@ function fixture() {
   const load = () => { const state = repo.load('run', 'root'); if (!state) throw new Error('fixture'); return state; };
   const http = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ answers: { goal_completion: { type: 'choice', choice: 'complete', confidence: .95 } } }));
   vi.stubGlobal('fetch', http);
-  const settings: DecisionSettingsPort = { resolve: vi.fn(async () => ({ endpoint: 'https://decisions.invalid', model: 'jev', apiKey: 'PRIVATE' })), getConfig: vi.fn(), updateConfig: vi.fn() };
+  const settings: DecisionSettingsPort = { resolve: vi.fn(async () => ({ protocol: 'jev-decisions' as const, endpoint: 'https://decisions.invalid', model: 'jev', apiKey: 'PRIVATE' })), getConfig: vi.fn(), updateConfig: vi.fn() };
   const completionHost = { readCurrent: async (_runId?: string, _signal?: AbortSignal) => {
     const state = load(); const inventory = state.evidenceInventory;
     if (inventory?.schemaVersion !== 2) throw new Error('fixture');

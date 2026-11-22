@@ -29,6 +29,7 @@ import { ActiveSessionRegistry } from './active-session-registry.service';
 import { PersonaService } from '../persona/persona.service';
 import { prepareSessionProfileUpdate } from './session-profile-update';
 import { SessionProfileAdmissionService } from './session-profile-admission.service';
+import { createArchitectureBranchSession, resolveSessionProfileId, type ArchitectureBranchSessionBinding } from './session-architecture-branch';
 import { ARCHITECTURE_RUNTIME_STOP, type ArchitectureRuntimeStopPort } from './architecture-runtime-stop.port';
 import {
   buildTitlePrompt as buildSessionTitlePrompt,
@@ -40,6 +41,7 @@ import {
 const MAX_SESSION_LIST_LIMIT = 500;
 interface SessionRuntimeScopeOptions {
   registerRuntimeProjectPath?: boolean;
+  architectureBranch?: ArchitectureBranchSessionBinding;
 }
 
 interface SessionListOptions {
@@ -87,6 +89,14 @@ export class SessionsService {
     dto: CreateSessionDto,
     options: SessionRuntimeScopeOptions = {},
   ): Promise<ChatSession> {
+    if (options.architectureBranch) return createArchitectureBranchSession(id, dto, options.architectureBranch, {
+      admission: this.profileAdmission, parent: id => this.get(id), profiles: this.executionProfiles,
+      personaProfile: async id => (await this.personas?.getSessionConfig(id))?.executionProfileId,
+      scope: dto => this.resolveProjectScope(dto),
+      register: scope => this.registerRuntimeProjectPathIfRequested(scope.runtimeContext ?? undefined, options),
+      persist: scope => { const session = insertSessionRecord(this.drizzle.db, id, dto, scope);
+        this.sessionEvents.emitSessionCreated(session); return session; },
+    });
     const scope = await this.resolveProjectScope(dto);
     await this.registerRuntimeProjectPathIfRequested(scope.runtimeContext ?? undefined, options);
     const session = insertSessionRecord(this.drizzle.db, id, dto, scope);
@@ -107,7 +117,9 @@ export class SessionsService {
     await this.assertExists(sessionId);
     return this.repo.loadHistory(sessionId);
   }
-
+  getArchitectureMessageCandidates(runId: string, boundSessionIds: string[]): Promise<ChatMessage[]> | undefined {
+    return this.repo.loadArchitectureMessageCandidates?.(runId, boundSessionIds);
+  }
   async getMessagePage(
     sessionId: string,
     options: { limit?: number; beforeMessageId?: string } = {},
@@ -292,6 +304,7 @@ export class SessionsService {
 
   async registerRuntimeProjectPathForSession(id: string): Promise<void> {
     const row = await this.getRow(id);
+    if (!row.projectId || row.projectId === SYSTEM_PROJECT_IDS.none) return;
     await this.registerRuntimeProjectPathIfRequested(row.runtimeContext ?? undefined, {
       registerRuntimeProjectPath: true,
     });
@@ -379,7 +392,7 @@ export class SessionsService {
       }
       return {
         projectId,
-        executionProfileId: this.resolveProfileId({
+        executionProfileId: resolveSessionProfileId(this.executionProfiles, {
           explicitProfileId: parentProfileId ?? explicitProfileId,
           personaProfileId: defaultProfileId ?? personaProfileId,
           projectProfileId: 'local-direct-default',
@@ -397,18 +410,13 @@ export class SessionsService {
     }
     return {
       projectId,
-      executionProfileId: this.resolveProfileId({
+      executionProfileId: resolveSessionProfileId(this.executionProfiles, {
         explicitProfileId: parentProfileId ?? explicitProfileId,
         personaProfileId: defaultProfileId ?? personaProfileId,
         projectProfileId: project.defaultExecutionProfileId,
       }),
       runtimeContext: this.applyProjectPath(dto.runtimeContext, path),
     };
-  }
-
-  private resolveProfileId(selection: Parameters<ExecutionProfileLookupPort['resolveId']>[0]): string {
-    if (!this.executionProfiles) throw new ConflictException('Execution profile selection is unavailable.');
-    return this.executionProfiles.resolveId(selection);
   }
 
   private applyProjectPath(

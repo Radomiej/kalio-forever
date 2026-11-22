@@ -7,6 +7,9 @@ import type { TurnState } from '../turn-state';
  */
 export type EmitFn = <K extends keyof SocketEvents>(event: K, data: SocketEvents[K]) => void;
 
+/** Host-only timing scope, never approval or executor authority. */
+export type BeginManualToolWait = (requestId: string) => () => void;
+
 /**
  * Per-turn execution context passed to every chunk handler and middleware.
  * All fields are readonly — context is created once per turn.
@@ -22,6 +25,7 @@ export interface StreamContext {
   readonly iteration?: number;
   readonly currentLimit?: number;
   readonly markWaitingForHuman?: () => Promise<void>;
+  readonly beginManualToolWait?: BeginManualToolWait;
   readonly markToolRunning?: () => Promise<void>;
   readonly registerToolResultCommit?: (commit: (result: ToolResult) => Promise<void>) => void;
   /** Host-only capabilities. Never copied into ToolCallRequest or serialized. */

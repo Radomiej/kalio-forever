@@ -74,4 +74,24 @@ describe('approved tool recovery context', () => {
       { role: 'tool', toolCallId: 'active', content: 'x'.repeat(5000) },
     ], 1000, [])).toThrow('committed tool evidence cannot be discarded');
   });
+
+  it('fits a long Devin ACP continuation without changing committed call links or recent results', () => {
+    const calls = Array.from({ length: 57 }, (_, index) => ({ id: `read-${index}`, name: 'fs_read', args: { path: `src/${index}.ts` } }));
+    const results = calls.map(call => ({ role: 'tool' as const, toolCallId: call.id,
+      content: JSON.stringify({ path: call.args.path, sha256: 'a'.repeat(64), lines: 100, content: 'x'.repeat(1500) }) }));
+    const messages = [
+      { role: 'system' as const, content: 's'.repeat(12000) },
+      { role: 'user' as const, content: 'Review the approved build.' },
+      { role: 'assistant' as const, content: 'Read the current code.', toolCalls: calls, reasoningContent: 'r'.repeat(66000) },
+      ...results,
+    ];
+    expect(() => compactLLMHistory(messages, 32768, [])).toThrow('committed tool evidence');
+    const projected = compactLLMHistory(messages, 32768, [], true);
+    expect(projected.map(message => message.toolCallId)).toEqual(messages.map(message => 'toolCallId' in message ? message.toolCallId : undefined));
+    expect(projected[2]?.toolCalls).toEqual(calls);
+    expect(projected.slice(-5)).toEqual(results.slice(-5));
+    expect(JSON.parse(String(projected[3]?.content))).toMatchObject({ path: 'src/0.ts', sha256: 'a'.repeat(64), lines: 100 });
+    expect(String(projected[3]?.content).length).toBeLessThan(results[0]!.content.length);
+    expect(JSON.parse(results[0]!.content).content).toHaveLength(1500);
+  });
 });

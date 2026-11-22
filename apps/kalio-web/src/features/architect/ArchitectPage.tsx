@@ -71,7 +71,7 @@ export function ArchitectPage() {
     personaOverrides, nodeKindOverrides,
     setPersonaOverrides, setPersonaOverride, selectNode,
     setNodeKindOverrides, setContextPolicyOverrides, setGraphDraft,
-    setNodeKindOverride, setNodeBehaviorOverride, setAutoRoutingOverride,
+    setNodeKindOverride, setNodeBehaviorOverride, setAutoRoutingOverride, setStatusRoutingOverride,
     setNodeMaxToolAttemptsOverride, setNodeToolOverride, setContextPolicyOverride,
     moveGraphNode, addGraphNode, toggleGraphEdge, setGraphEdgeSelection, autoLayoutGraph,
   } = useArchitectGraphDraft(selectedSchema, setSelectedNodeId, setSelectedSlotId);
@@ -470,6 +470,7 @@ export function ArchitectPage() {
           onNodeKindOverride={setNodeKindOverride}
           onNodeBehaviorOverride={setNodeBehaviorOverride}
           onAutoRoutingOverride={setAutoRoutingOverride}
+          onStatusRoutingOverride={setStatusRoutingOverride}
           onNodeMaxToolAttemptsOverride={setNodeMaxToolAttemptsOverride}
           onNodeToolOverride={setNodeToolOverride}
           onEdgeSelectionOverride={setGraphEdgeSelection}

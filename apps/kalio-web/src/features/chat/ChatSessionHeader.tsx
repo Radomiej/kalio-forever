@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Check, Copy } from 'lucide-react';
 import type { ChatMessage, ChatSession, LLMContextPreview, Project } from '@kalio/types';
 import type { TokenCount } from '../../services/tokenCounter';
@@ -29,6 +30,7 @@ interface ChatSessionHeaderProps {
   contextPreviewStatus: ContextPreviewStatus;
   vfsRefreshSignal: number;
   talkView?: TalkView;
+  sidebarExpand?: ReactNode;
   onTalkViewChange?: (view: TalkView) => void;
   projectId?: string;
   onProjectChange?: (project: Project) => void;
@@ -54,6 +56,7 @@ export function ChatSessionHeader({
   contextPreviewStatus,
   vfsRefreshSignal,
   talkView,
+  sidebarExpand,
   onTalkViewChange,
   projectId,
   onProjectChange,
@@ -64,10 +67,12 @@ export function ChatSessionHeader({
   const architectureLabel = resolveArchitectureLabel(activeSession, messages);
   const pendingHostSession = isPendingHostSession(activeSession);
   const runtimeLabel = [activeProvider, activeModel].filter(Boolean).join(' · ');
+  const attachmentCount = messages.reduce((count, message) => count + (message.attachments?.length ?? 0), 0);
 
   return (
     <div data-testid="chat-session-header" className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-2 sm:px-4 border-b border-base-300 shrink-0">
       <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
+        {sidebarExpand}
         <span className="min-w-0 truncate text-sm font-medium" data-testid="chat-session-title">{activeSession.title}</span>
         {architectureLabel && (
           <span
@@ -84,7 +89,7 @@ export function ChatSessionHeader({
           <ProjectPicker value={projectId} onChange={onProjectChange} disabled={projectPickerDisabled || pendingHostSession} testId="chat-project-picker" label="" />
         </div>
       )}
-      {!pendingHostSession && <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal} />}
+      {!pendingHostSession && <ConversationFilesBar sessionId={activeSessionId} refreshSignal={vfsRefreshSignal + attachmentCount} />}
       {messages.length > 0 && (
         <button
           className="btn btn-ghost btn-xs text-base-content/40 hover:text-base-content/70"

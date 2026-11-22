@@ -20,6 +20,16 @@ function rule(overrides: Partial<HitlHardRule>): HitlHardRule {
 }
 
 describe('matchingHitlHardRule', () => {
+  it.each(['deny', 'ask_user'] as const)('matches %s selectors against split shell arguments', decision => {
+    expect(matchingHitlHardRule({ ...request, args: { command: 'cmd', args: ['/c', 'del file.txt'] } },
+      [rule({ executable: 'del', decision })])).toHaveProperty('decision', decision);
+    expect(matchingHitlHardRule({ ...request, args: { command: 'powershell', args: ['-Command', 'Remove-Item', 'file.txt'] } },
+      [rule({ executable: 'Remove-Item', decision })])).toHaveProperty('decision', decision);
+  });
+  it('does not turn an executable mentioned in a normal program argument into an allow match', () => {
+    expect(matchingHitlHardRule({ ...request, args: { command: 'echo', args: ['del file.txt'] } },
+      [rule({ executable: 'del', decision: 'allow' })])).toBeUndefined();
+  });
   it('uses deny then ask_user then allow precedence, independent of row order', () => {
     const rules = [
       rule({ id: 'allow', decision: 'allow' }),

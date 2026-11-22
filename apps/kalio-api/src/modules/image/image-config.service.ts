@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { AppSettingsService } from '../../database/app-settings.service';
 import type { ImageProviderConfig, ImageConfigResponse, UpdateImageConfigDto } from '@kalio/types';
+import { IMAGE_PROVIDER_CAPABILITIES } from '@kalio/types';
 
 const SETTINGS_KEY = 'image_config';
 const CREDENTIALS_CIPHER_PREFIX = 'kalio-enc-v1';
@@ -34,6 +35,8 @@ export class ImageConfigService {
         provider: parsed.provider ?? DEFAULT_CONFIG.provider,
         baseUrl: parsed.baseUrl,
         model: parsed.model ?? DEFAULT_CONFIG.model,
+        executionProfileId: parsed.executionProfileId,
+        editModel: parsed.editModel,
         compression: parsed.compression,
         source: 'db',
       };
@@ -44,6 +47,15 @@ export class ImageConfigService {
   }
 
   async updateConfig(dto: UpdateImageConfigDto): Promise<ImageConfigResponse> {
+    if (dto.provider !== undefined && !Object.hasOwn(IMAGE_PROVIDER_CAPABILITIES, dto.provider)) {
+      throw new BadRequestException('Unsupported image provider.');
+    }
+    if (dto.executionProfileId !== undefined && typeof dto.executionProfileId !== 'string') {
+      throw new BadRequestException('executionProfileId must be a string.');
+    }
+    if (dto.editModel !== undefined && typeof dto.editModel !== 'string') {
+      throw new BadRequestException('editModel must be a string.');
+    }
     const existing = await this.settings.get(SETTINGS_KEY);
     let current: Record<string, unknown> = {};
     if (existing) {
@@ -64,6 +76,8 @@ export class ImageConfigService {
     }
     if (dto.baseUrl !== undefined) updated['baseUrl'] = dto.baseUrl;
     if (dto.model !== undefined) updated['model'] = dto.model;
+    if (dto.executionProfileId !== undefined) updated['executionProfileId'] = dto.executionProfileId;
+    if (dto.editModel !== undefined) updated['editModel'] = dto.editModel;
     if (dto.compression !== undefined) updated['compression'] = dto.compression;
 
     await this.settings.set(SETTINGS_KEY, JSON.stringify(updated));

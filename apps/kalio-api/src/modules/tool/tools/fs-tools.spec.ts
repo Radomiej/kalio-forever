@@ -7,6 +7,9 @@ import type { ToolCallRequest } from '@kalio/types';
 import { Reflector } from '@nestjs/core';
 import { TOOL_METADATA } from '../../../common/decorators/tool.decorator';
 import * as nodepath from 'node:path';
+import type { VFSService } from '../../vfs/vfs.service';
+
+const projectVfs = { resolveFilesystemPath: async (_sessionId: string, path: string) => ({ path: nodepath.resolve(path) }) } as VFSService;
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
@@ -36,7 +39,7 @@ describe('FsReadTool', () => {
     allowedPaths = {
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new FsReadTool(allowedPaths as AllowedPathsService);
+    tool = new FsReadTool(allowedPaths as AllowedPathsService, projectVfs);
   });
 
   describe('positive scenarios', () => {
@@ -198,7 +201,7 @@ describe('FsListTool', () => {
     allowedPaths = {
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new FsListTool(allowedPaths as AllowedPathsService);
+    tool = new FsListTool(allowedPaths as AllowedPathsService, projectVfs);
   });
 
   describe('positive scenarios', () => {
@@ -345,7 +348,7 @@ describe('FsWriteTool', () => {
     allowedPaths = {
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new FsWriteTool(allowedPaths as AllowedPathsService);
+    tool = new FsWriteTool(allowedPaths as AllowedPathsService, projectVfs);
     reflector = new Reflector();
   });
 

@@ -230,7 +230,7 @@ export function ModelSettingsSection({
         ) : (
           <div className="rounded-lg border border-base-300 bg-base-200/30 p-3 flex flex-col gap-3">
             <label className="flex flex-col gap-1 text-xs text-base-content/60">
-              Provider used for new turns
+              Effective runtime provider for new turns
               <select
                 className="select select-bordered select-sm w-full"
                 value={runtimeProviderValue}
@@ -267,6 +267,11 @@ export function ModelSettingsSection({
                 {activeRuntimeConfig.source === 'db' ? 'saved provider' : 'env fallback'}
               </span>
             </div>
+            {activeRuntimeConfig.source === 'env' && (
+              <p className="text-xs text-warning" role="status">
+                New turns use this environment fallback. Connected agent selection in LLM Settings is separate.
+              </p>
+            )}
             <div className="text-xs text-base-content/60 flex flex-col gap-1">
               <div>Current model: <span className="font-mono text-base-content/80">{activeRuntimeConfig.model || 'not set'}</span></div>
               {activeRuntimeConfig.baseUrl ? (

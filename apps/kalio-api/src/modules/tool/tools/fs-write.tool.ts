@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname, extname } from 'node:path';
+import { dirname, extname } from 'node:path';
+import { VFSService } from '../../vfs/vfs.service';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
 import { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
@@ -37,14 +38,15 @@ function getContentArg(args: ToolCallRequest['args']): string {
   requiresConfirmation: true,
 })
 export class FsWriteTool {
-  constructor(private readonly allowedPaths: AllowedPathsService) {}
+  constructor(private readonly allowedPaths: AllowedPathsService, private readonly vfs: VFSService) {}
 
   async execute(request: ToolCallRequest): Promise<{ path: string; bytesWritten: number }> {
     const rawPath = getPathArg(request.args);
     const content = getContentArg(request.args);
 
-    const absPath = resolve(rawPath);
-    const allowed = await this.allowedPaths.isAllowed(absPath, { allowMissingPath: true });
+    const scope = await this.vfs.resolveFilesystemPath(request.sessionId, rawPath);
+    const absPath = scope.path;
+    const allowed = scope.sandboxRoot !== undefined || await this.allowedPaths.isAllowed(absPath, { allowMissingPath: true });
     if (!allowed) {
       throw new Error(`ACCESS_DENIED: path is outside allowed roots`);
     }

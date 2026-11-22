@@ -61,11 +61,59 @@ describe('TerminalService', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.useRealTimers();
   });
 
   // ── spawn() ──────────────────────────────────────────────────────────────
+
+  it.runIf(process.platform === 'win32')('launches native Windows rg with literal regex and spaced arguments, matching audit and metadata', async () => {
+    const args = ['a|b', 'directory with spaces'];
+    const session = await service.spawn('rg', args, '/project');
+    expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+    expect(mockSpawnFn.mock.calls[0]?.slice(0, 2)).toEqual(['rg', args]);
+    expect(mockSpawnFn.mock.calls[0]?.[2].shell).toBe(false);
+    expect(session.executionDescriptor).toMatchObject({ executable: 'rg', argv: args, shell: false });
+    expect(cmdAudit.recordInvocation).toHaveBeenCalledWith(expect.objectContaining({ command: 'rg', shell: false }));
+    proc.emit('error', new Error('ENOENT'));
+    expect(mockSpawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it.runIf(process.platform === 'win32')('removes mixed-case NODE_ENV for native Windows launches independently of shell', async () => {
+    const backendEnv = process.env;
+    vi.spyOn(process, 'env', 'get').mockReturnValue({ PATH: backendEnv.PATH, NODE_ENV: 'production', Node_env: 'production' });
+    await service.spawn('node', ['app.js'], '/project');
+    const options = mockSpawnFn.mock.calls[0]?.[2];
+    expect(options.shell).toBe(false);
+    expect(Object.keys(options.env).filter((key) => key.toUpperCase() === 'NODE_ENV')).toEqual([]);
+    expect(process.env.Node_env).toBe('production');
+  });
+
+  it('does not expose unreadable interactive stdin to background commands', async () => {
+    await service.spawn('rg', ['-l', 'tradeConstruction'], '/project');
+    expect(mockSpawnFn.mock.calls[0]?.[2].stdio).toEqual(['ignore', 'pipe', 'pipe']);
+  });
+
+  it('preserves explicit EOF input for CLI callers that request closeStdin', async () => {
+    await service.spawn('node', ['worker.js'], '/project', true);
+    expect(mockSpawnFn.mock.calls[0]?.[2].stdio).toEqual(['pipe', 'pipe', 'pipe']);
+    expect(proc.stdin.end).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the backend NODE_ENV out of project commands without changing the backend environment', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      await service.spawn('npm', ['test'], '/project');
+      const options = mockSpawnFn.mock.calls[0]?.[2];
+      expect(options?.env).toBeDefined();
+      expect(options.env).not.toHaveProperty('NODE_ENV');
+      expect(options.env.PATH ?? options.env.Path).toBe(process.env.PATH ?? process.env.Path);
+      expect(process.env.NODE_ENV).toBe('production');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   describe('observeUntilExit()', () => {
     it('cancels the real terminal_output tool and releases its observer', async () => {
@@ -165,7 +213,7 @@ describe('TerminalService', () => {
       await service.spawn('npm', ['run', 'build'], '/project');
       expect(mockSpawnFn).toHaveBeenCalledExactlyOnceWith('npm', ['run', 'build'], expect.objectContaining({
         cwd: '/project', shell: process.platform === 'win32', windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe'],
       }));
     });
     it('audits the shell-backed terminal invocation with the originating tool IDs', async () => {

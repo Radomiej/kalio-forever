@@ -1,7 +1,16 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDevinCliConfig } from './devin-cli-config';
+import { createDevinCliConfig, createDevinCliMetadataConfig } from './devin-cli-config';
+
+const commands = vi.hoisted(() => ({ run: vi.fn() }));
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>();
+  const { promisify } = await import('node:util');
+  commands.run.mockImplementation(promisify(actual.execFile));
+  const execFile = vi.fn(); Object.defineProperty(execFile, promisify.custom, { value: commands.run });
+  return { ...actual, execFile };
+});
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
@@ -23,6 +32,78 @@ afterEach(async () => {
 });
 
 describe('Devin CLI ephemeral config', () => {
+  it('checks stale authority after mkdir before git init, cleans only its standalone directory', async () => {
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let release!: () => void; let current = true;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(mkdir).mockImplementationOnce(async (...args) => { await gate; return actual.mkdir(...args); });
+    const creation = createDevinCliConfig('exact-model', [], undefined, undefined, () => {
+      if (!current) throw new Error('private-staleness-sentinel');
+    });
+    const rejected = expect(creation).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
+    await vi.waitFor(() => expect(mkdir).toHaveBeenCalledTimes(1));
+    current = false; release(); await rejected;
+    expect(commands.run).not.toHaveBeenCalled(); expect(writeFile).not.toHaveBeenCalled();
+    const directory = await vi.mocked(mkdtemp).mock.results[0].value;
+    await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('rechecks abort after git wait before writing private configuration', async () => {
+    let release!: () => void; const controller = new AbortController();
+    commands.run.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    const creation = createDevinCliConfig('exact-model', [], undefined, undefined, () => {
+      if (controller.signal.aborted) throw new Error('private-abort-sentinel');
+    });
+    const rejected = expect(creation).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
+    await vi.waitFor(() => expect(commands.run).toHaveBeenCalledTimes(1));
+    controller.abort(); release(); await rejected;
+    expect(writeFile).not.toHaveBeenCalled();
+    const directory = await vi.mocked(mkdtemp).mock.results[0].value;
+    await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('retains adopting-host cleanup ownership on a stale mkdir boundary', async () => {
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let release!: () => void; let current = true;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const allocated = vi.fn();
+    vi.mocked(mkdir).mockImplementationOnce(async (...args) => { await gate; return actual.mkdir(...args); });
+    const creation = createDevinCliConfig('exact-model', [], undefined, allocated, () => {
+      if (!current) throw new Error('private');
+    });
+    const rejected = expect(creation).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
+    await vi.waitFor(() => expect(mkdir).toHaveBeenCalledTimes(1)); current = false; release(); await rejected;
+    expect(commands.run).not.toHaveBeenCalled(); expect(rm).not.toHaveBeenCalled();
+    const handle = allocated.mock.calls[0]?.[0] as { cleanup(): Promise<void> };
+    await handle.cleanup();
+    const directory = await vi.mocked(mkdtemp).mock.results[0].value;
+    await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it('rejects stale guard before allocation without relaxing the required model', async () => {
+    await expect(createDevinCliConfig('exact-model', [], undefined, undefined, () => { throw new Error('private'); }))
+      .rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
+    expect(mkdtemp).not.toHaveBeenCalled(); expect(commands.run).not.toHaveBeenCalled();
+    await expect(createDevinCliConfig('', [], undefined, undefined, () => undefined)).rejects.toThrow('explicit model');
+  });
+  it('omits model only for explicit isolated metadata intent and retains deny/suppression', async () => {
+    const config = await createDevinCliMetadataConfig();
+    try {
+      const initial = JSON.parse(await readFile(config.path, 'utf8')) as Record<string, unknown>;
+      expect(initial).not.toHaveProperty('agent.model');
+      expect(initial.mcpServers).toEqual({});
+      expect(initial.permissions).toEqual({ ask: [], deny: ['read', 'grep', 'glob', 'edit', 'write', 'exec', 'webfetch', 'web_search'] });
+      expect(initial.read_config_from).toEqual({ cursor: false, windsurf: false, claude: false, copilot: false, opencode: false, zed: false });
+      await config.suppressMcpServers(['foreign-server']);
+      const suppressed = JSON.parse(await readFile(config.path, 'utf8')) as Record<string, unknown>;
+      expect(suppressed).not.toHaveProperty('agent.model');
+      expect(suppressed).toHaveProperty('mcpServers.foreign-server.disabled', true);
+      expect(suppressed.permissions).toEqual(initial.permissions);
+    } finally { await config.cleanup(); }
+    await expect(stat(config.cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([undefined, null, '', '  '])('rejects runtime config without an explicit model: %j', async (model) => {
+    await expect(createDevinCliConfig(model as unknown as string, [])).rejects.toThrow('explicit model');
+    expect(mkdtemp).not.toHaveBeenCalled();
+  });
   it('retains the standalone cleanup handle when rollback itself fails', async () => {
     const failure = new Error('mkdir fixture failure');
     vi.mocked(mkdir).mockRejectedValueOnce(failure);

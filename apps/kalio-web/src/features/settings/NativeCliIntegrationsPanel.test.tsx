@@ -37,6 +37,98 @@ const DEVIN_SETTINGS = {
 };
 
 describe('NativeCliIntegrationsPanel', () => {
+  it('preserves a newer Recheck result while accepting another integration from an older poll', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(window, 'setInterval').mockImplementation((handler, timeout) => { if (timeout === 30_000) poll = handler as () => void; return 1 as unknown as ReturnType<typeof window.setInterval>; });
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
+    const original = vi.mocked(global.fetch).getMockImplementation()!;
+    const other = { ...STATUS, id: 'codex:second', authProfileId: 'second', models: ['other-model'] };
+    let hold = false; let finish!: (response: Response) => void;
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      if (String(input) === '/api/runtime/native-cli-integrations') return hold
+        ? new Promise<Response>((resolve) => { finish = resolve; })
+        : Promise.resolve(new Response(JSON.stringify([STATUS, other]), { status: 200 }));
+      if (String(input) === '/api/runtime/native-cli-integrations/chatgpt-default/check') return Promise.resolve(new Response(JSON.stringify({ ...STATUS, openSessionCount: 9 }), { status: 200 }));
+      return original(input, init);
+    });
+    render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex');
+    fireEvent.click(screen.getByText('Codex', { exact: true }).closest('summary')!);
+    const card = screen.getAllByText('gpt-5.4, gpt-5.6-luna', { exact: true })[0].closest('article')!;
+    hold = true; act(() => poll?.());
+    fireEvent.click(within(card).getByRole('button', { name: 'Recheck' }));
+    await within(card).findByText('9 open sessions');
+    await act(async () => { finish(new Response(JSON.stringify([
+      { ...STATUS, status: 'offline', connected: false, openSessionCount: 0 }, { ...other, openSessionCount: 7 },
+    ]), { status: 200 })); });
+    expect(within(card).getByText('9 open sessions')).toBeInTheDocument();
+    expect(screen.getByText('7 open sessions')).toBeInTheDocument();
+  });
+  it('does not let a cached Devin poll override an explicit in-flight Recheck', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(window, 'setInterval').mockImplementation((handler, timeout) => { if (timeout === 30_000) poll = handler as () => void; return 1 as unknown as ReturnType<typeof window.setInterval>; });
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
+    const original = vi.mocked(global.fetch).getMockImplementation()!;
+    let checking = false; let finishCheck!: (response: Response) => void;
+    let finishOld: ((response: Response) => void) | undefined;
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      if (String(input) === '/api/runtime/devin-cli/status?refresh=true') {
+        checking = true; return new Promise<Response>((resolve) => { finishCheck = resolve; });
+      }
+      if (String(input) === '/api/runtime/devin-cli/status' && checking) return new Promise<Response>((resolve) => { finishOld = resolve; });
+      return original(input, init);
+    });
+    render(<NativeCliIntegrationsPanel />);
+    const card = await screen.findByTestId('devin-cli-integration-card');
+    await waitFor(() => expect(within(card).getByRole('button', { name: 'Recheck' })).toBeEnabled());
+    fireEvent.click(within(card).getByRole('button', { name: 'Recheck' }));
+    act(() => poll?.());
+    await act(async () => { finishCheck(new Response(JSON.stringify({ ...DEVIN_STATUS, hostCount: 5 }), { status: 200 })); });
+    if (finishOld) await act(async () => { finishOld?.(new Response(JSON.stringify(DEVIN_STATUS), { status: 200 })); });
+    expect(within(card).getByText(/5 model hosts/)).toBeInTheDocument();
+  });
+  it('aborts outstanding status reads on unmount', async () => {
+    const signals: Array<AbortSignal | undefined> = [];
+    vi.mocked(global.fetch).mockImplementation((_input, init) => {
+      signals.push(init?.signal ?? undefined); return new Promise<Response>(() => undefined);
+    });
+    const { unmount } = render(<NativeCliIntegrationsPanel />);
+    unmount();
+    expect(signals).toHaveLength(3);
+    signals.forEach((signal) => expect(signal?.aborted).toBe(true));
+  });
+  it('does not launch a model check after an unmounted integration check returns late', async () => {
+    const original = vi.mocked(global.fetch).getMockImplementation()!;
+    let finish!: (response: Response) => void; let signal: AbortSignal | undefined;
+    vi.mocked(global.fetch).mockImplementation((input, init) => {
+      if (String(input) === '/api/runtime/native-cli-integrations/chatgpt-default/check') {
+        signal = init?.signal ?? undefined;
+        return new Promise<Response>((resolve) => { finish = resolve; });
+      }
+      return original(input, init);
+    });
+    const { unmount } = render(<NativeCliIntegrationsPanel />);
+    await screen.findByText('Codex'); fireEvent.click(screen.getByText('Codex', { exact: true }).closest('summary')!);
+    const card = screen.getAllByText('gpt-5.4, gpt-5.6-luna', { exact: true })[0].closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: 'Recheck' }));
+    unmount(); expect(signal?.aborted).toBe(true);
+    await act(async () => { finish(new Response(JSON.stringify(STATUS), { status: 200 })); });
+    expect(vi.mocked(global.fetch).mock.calls.some(([input]) => String(input).endsWith('/models/check'))).toBe(false);
+  });
+  it('refuses overlapping explicit Devin Rechecks while the first response is unresolved', async () => {
+    const original = vi.mocked(global.fetch).getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    vi.mocked(global.fetch).mockImplementation((input, init) => String(input) === '/api/runtime/devin-cli/status?refresh=true'
+      ? new Promise<Response>((resolve) => { finish = resolve; }) : original(input, init));
+    render(<NativeCliIntegrationsPanel />);
+    const card = await screen.findByTestId('devin-cli-integration-card');
+    const button = within(card).getByRole('button', { name: 'Recheck' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button); expect(button).toBeDisabled(); fireEvent.click(button);
+    expect(vi.mocked(global.fetch).mock.calls.filter(([input]) => String(input) === '/api/runtime/devin-cli/status?refresh=true')).toHaveLength(1);
+    await act(async () => { finish(new Response(JSON.stringify({ ...DEVIN_STATUS, hostCount: 4 }), { status: 200 })); });
+    expect(within(card).getByText(/4 model hosts/)).toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -147,7 +239,7 @@ describe('NativeCliIntegrationsPanel', () => {
 
     fireEvent.click(recheckButton);
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/runtime/devin-cli/status?refresh=true'));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/runtime/devin-cli/status?refresh=true', expect.objectContaining({ signal: expect.any(AbortSignal) })));
   });
 
   it('runs all integration checks only when Recheck all is pressed', async () => {
@@ -158,7 +250,7 @@ describe('NativeCliIntegrationsPanel', () => {
 
     fireEvent.click(recheckAllButton);
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/runtime/devin-cli/status?refresh=true'));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/runtime/devin-cli/status?refresh=true', expect.objectContaining({ signal: expect.any(AbortSignal) })));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
       '/api/runtime/native-cli-integrations/chatgpt-default/check',
       expect.objectContaining({ method: 'POST' }),

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GrepSearchTool, FileSearchTool } from './file-search.tools';
+import type { VFSService } from '../../vfs/vfs.service';
+
+const projectVfs = { resolveFilesystemPath: async (_sessionId: string, path: string) => ({ path }) } as VFSService;
 import type { AllowedPathsService } from '../../allowed-paths/allowed-paths.service';
 import type { DrizzleService } from '../../../database/drizzle.service';
 import type { ToolCallRequest } from '@kalio/types';
@@ -45,7 +48,7 @@ describe('GrepSearchTool', () => {
       getRoots: vi.fn(),
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new GrepSearchTool(allowedPaths as AllowedPathsService, makeDrizzleSessionLookup());
+    tool = new GrepSearchTool(allowedPaths as AllowedPathsService, makeDrizzleSessionLookup(), projectVfs);
   });
 
   describe('positive scenarios', () => {
@@ -167,6 +170,7 @@ describe('GrepSearchTool', () => {
         makeDrizzleSessionLookup({
           architectureContext: { projectPath: '/project' },
         }),
+        projectVfs,
       );
       vi.mocked(nodefs.existsSync).mockReturnValue(true);
       vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {
@@ -343,7 +347,7 @@ describe('FileSearchTool', () => {
       getRoots: vi.fn(),
       isAllowed: vi.fn().mockResolvedValue(true),
     };
-    tool = new FileSearchTool(allowedPaths as AllowedPathsService, makeDrizzleSessionLookup());
+    tool = new FileSearchTool(allowedPaths as AllowedPathsService, makeDrizzleSessionLookup(), projectVfs);
   });
 
   describe('positive scenarios', () => {
@@ -410,6 +414,7 @@ describe('FileSearchTool', () => {
         makeDrizzleSessionLookup({
           architectureContext: { executionCwd: '/project' },
         }),
+        projectVfs,
       );
       vi.mocked(nodefs.existsSync).mockReturnValue(true);
       vi.mocked(nodefs.readdirSync).mockImplementation((dir) => {

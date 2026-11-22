@@ -44,7 +44,7 @@ interface CliProjectionState {
   runtimeActivitySnapshots: Record<string, SocketEvents['session:runtime_snapshot']>;
 }
 
-function isStaleRuntimeSnapshot(
+export function isStaleRuntimeSnapshot(
   current: SocketEvents['session:runtime_snapshot'] | undefined,
   incoming: SocketEvents['session:runtime_snapshot'],
 ): boolean {

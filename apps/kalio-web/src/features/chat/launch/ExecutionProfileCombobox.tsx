@@ -54,7 +54,10 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
       model: profile.model,
       label: executionProfileLabel(profile),
       unavailable: !profile.enabled ? 'Profile disabled' : profile.kind === 'codex-app-server'
-        && !codex.catalogs[profile.authProfileId || profile.id]?.includes(profile.model) ? 'Model unavailable. Check the provider connection.' : '',
+        && !codex.catalogs[profile.authProfileId || profile.id]?.includes(profile.model)
+        ? codex.catalogs[profile.authProfileId || profile.id] == null
+          ? codex.error ?? 'Models not checked yet'
+          : 'Model unavailable. Check the provider connection.' : '',
       authProfileId: undefined as string | undefined,
     }));
     const discoveredOptions = discoveredModels
@@ -77,7 +80,7 @@ export function ExecutionProfileCombobox({ profiles, value, onChange, disabled =
     .sort((left, right) => searchRank(left) - searchRank(right)
       || profilePriority(left.profile) - profilePriority(right.profile)
       || left.label.localeCompare(right.label));
-  }, [availableProfiles, discoveredModels, query, providerFilter, codex.catalogs]);
+  }, [availableProfiles, discoveredModels, query, providerFilter, codex.catalogs, codex.error]);
 
   const selectOption = async (option: (typeof options)[number]) => {
     if (disabled || resolvingModel || option.unavailable) return;
@@ -229,5 +232,6 @@ export function executionProfileLabel(profile: ExecutionProfile): string {
         : profile.kind === 'claude-agent-sdk'
           ? 'Claude Code'
           : profile.provider ?? 'Direct LLM';
-  return `${runtime} · ${profile.model}`;
+  const effort = profile.kind === 'codex-app-server' && profile.reasoningEffort ? ` · ${profile.reasoningEffort}` : '';
+  return `${runtime} · ${profile.model}${effort}`;
 }

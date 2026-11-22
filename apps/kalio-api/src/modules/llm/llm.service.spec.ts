@@ -372,7 +372,7 @@ describe('LLMService - DB credential overrides env', () => {
       }
     });
 
-    it('REGRESSION: does not rebuild the fallback env provider on first use when the configured baseUrl is mock', async () => {
+    it('REGRESSION: lazily creates and reuses the fallback provider when the configured baseUrl is mock', async () => {
       const mockCreds = buildCredentialsMock();
       mockCreds.getActiveProviderConfig.mockResolvedValue(null);
 
@@ -395,7 +395,8 @@ describe('LLMService - DB credential overrides env', () => {
       }).compile();
 
       const mockBaseUrlService = moduleWithMockBaseUrl.get<LLMService>(LLMService);
-      const initialProviderKey = (mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey;
+      const state = mockBaseUrlService as unknown as { envProvider: unknown; envProviderKey: string };
+      expect(state.envProvider).toBeNull();
 
       await mockBaseUrlService.streamChat(
         [{ role: 'user', content: 'hello' }],
@@ -403,7 +404,13 @@ describe('LLMService - DB credential overrides env', () => {
         { sessionId: 'session-1', messageId: 'msg-1', onChunk: () => {} },
       );
 
-      expect((mockBaseUrlService as unknown as { envProviderKey: string }).envProviderKey).toBe(initialProviderKey);
+      const firstProvider = state.envProvider;
+      const firstKey = state.envProviderKey;
+      expect(firstProvider).not.toBeNull();
+      await mockBaseUrlService.streamChat([{ role: 'user', content: 'hello again' }], [],
+        { sessionId: 'session-1', messageId: 'msg-2', onChunk: () => {} });
+      expect(state.envProvider).toBe(firstProvider);
+      expect(state.envProviderKey).toBe(firstKey);
     });
   });
 

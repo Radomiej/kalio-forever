@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -19,6 +20,7 @@ import { nanoid } from 'nanoid';
 import type { Request, Response } from 'express';
 import type { ChatAttachment, VFSListResult, VFSReadResult } from '@kalio/types';
 import { VFSService } from './vfs.service';
+import { ProjectResourceReaderService } from './project-resource-reader.service';
 
 const ALLOWED_UPLOAD_MIMES: Record<string, string> = {
   'image/png': 'png',
@@ -73,7 +75,16 @@ function resolveServePath(path: string | undefined, request?: Pick<Request, 'ori
  */
 @Controller('sessions/:id/vfs')
 export class SessionVfsController {
-  constructor(private readonly vfs: VFSService) {}
+  constructor(private readonly vfs: VFSService, private readonly projectFiles: ProjectResourceReaderService) {}
+
+  @Get('project-preview')
+  async projectPreview(@Param('id') sessionId: string, @Query('path') path: string) {
+    try {
+      return { content: await this.projectFiles.previewSessionFile(sessionId, path) };
+    } catch {
+      throw new NotFoundException('Project file is unavailable for text preview.');
+    }
+  }
 
   private streamServedFile(sessionId: string, path: string, res: Response): StreamableFile {
     const { content, stream, mimeType } = this.vfs.serveFile(sessionId, path);

@@ -205,14 +205,22 @@ function sanitizeWebSearchPayload(payload: {
   });
 }
 
+export class ActiveTurnContextBudgetError extends Error {
+  constructor() {
+    super('Active turn exceeds safe context budget; committed tool evidence cannot be discarded.');
+  }
+}
+
 export function getSafeContextTarget(contextWindowSize: number): number {
   return Math.max(256, Math.floor(contextWindowSize * SAFE_CONTEXT_RATIO));
 }
 
-function totalHistoryTokens(messages: ContextManagedLLMMessage[], toolMetas: ToolMeta[]): number {
+function totalHistoryTokens(messages: ContextManagedLLMMessage[], toolMetas: ToolMeta[], devinAcp: boolean): number {
   let total = estimateToolTokens(toolMetas);
   for (const message of messages) {
-    total += estimateMessageTokens(message);
+    // ACP renders assistant text as plain text, without reasoning or function declarations.
+    total += devinAcp && message.role === 'assistant'
+      ? estimateContentTokens(message.content) : estimateMessageTokens(message);
   }
   return total;
 }
@@ -284,11 +292,12 @@ export function prepareHistoryForLLM(
   systemPrompt: string,
   contextWindowSize: number,
   toolMetas: ToolMeta[],
+  devinAcp = false,
 ): { history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean } {
   const unboundedHistory = systemPrompt
     ? [{ role: 'system', content: systemPrompt } satisfies ContextManagedLLMMessage, ...messages]
     : [...messages];
-  const history = compactLLMHistory(unboundedHistory, contextWindowSize, toolMetas);
+  const history = compactLLMHistory(unboundedHistory, contextWindowSize, toolMetas, devinAcp);
 
   return {
     history,
@@ -323,22 +332,45 @@ export function sanitizeToolResultContentForLLM(content: string): string {
   }
 }
 
+function compactEarlierDevinReads(messages: ContextManagedLLMMessage[]): ContextManagedLLMMessage[] {
+  const readIds = new Set(messages.flatMap(message => message.toolCalls ?? [])
+    .filter(call => call.name === 'fs_read').map(call => call.id));
+  const recentResults = new Set(messages.filter(message => message.role === 'tool').slice(-5));
+  return messages.map(message => {
+    if (message.role !== 'tool' || !message.toolCallId || !readIds.has(message.toolCallId)
+      || recentResults.has(message) || typeof message.content !== 'string'
+      || !message.content.startsWith('{')) return message;
+    try {
+      const result: unknown = JSON.parse(message.content);
+      if (!isRecord(result) || typeof result.path !== 'string' || typeof result.sha256 !== 'string'
+        || typeof result.content !== 'string' || result.content.length <= 320
+        || Object.keys(result).some(key => !['path', 'sha256', 'lines', 'content'].includes(key))) return message;
+      return { ...message, content: JSON.stringify({ ...result, content: truncateText(result.content, 320) }) };
+    } catch {
+      // Persisted tool text is not always JSON. Leave unrecognized evidence intact.
+      return message;
+    }
+  });
+}
+
 export function compactLLMHistory(
   messages: ContextManagedLLMMessage[],
   contextWindowSize: number,
   toolMetas: ToolMeta[],
+  devinAcp = false,
 ): ContextManagedLLMMessage[] {
   if (messages.length === 0 || contextWindowSize <= 0) {
     return messages;
   }
 
   const safeTarget = getSafeContextTarget(contextWindowSize);
-  if (totalHistoryTokens(messages, toolMetas) <= safeTarget) {
+  if (totalHistoryTokens(messages, toolMetas, devinAcp) <= safeTarget) {
     return messages;
   }
 
   const systemMessage = messages[0]?.role === 'system' ? messages[0] : null;
   let body = systemMessage ? messages.slice(1) : [...messages];
+  if (devinAcp) body = compactEarlierDevinReads(body);
   let activeStart = body.map((message) => message.role).lastIndexOf('user');
   activeStart = Math.max(0, activeStart);
   // A result may follow a user approval while its owning call precedes it.
@@ -353,7 +385,7 @@ export function compactLLMHistory(
     activeStart = owner;
   }
 
-  while (body.length > 0 && totalHistoryTokens(systemMessage ? [systemMessage, ...body] : body, toolMetas) > safeTarget) {
+  while (body.length > 0 && totalHistoryTokens(systemMessage ? [systemMessage, ...body] : body, toolMetas, devinAcp) > safeTarget) {
     const historical = body.slice(0, activeStart);
     const toolPair = findOldestToolPair(historical);
     if (toolPair) {
@@ -395,12 +427,13 @@ export function compactLLMHistory(
 
     const truncationIndex = findOldestIndex(body, (message) => message.role === 'assistant'
       && !message.toolCalls?.length && estimateMessageTokens(message) > 0
+      && (!devinAcp || typeof message.content !== 'string' || message.content.length > MAX_TOOL_RESULT_PREVIEW_CHARS)
       && JSON.stringify(truncateMessageContent(message)) !== JSON.stringify(message));
     if (truncationIndex >= 0) {
       body = body.map((message, index) => (index === truncationIndex ? truncateMessageContent(message) : message));
       continue;
     }
-    throw new Error('Active turn exceeds safe context budget; committed tool evidence cannot be discarded.');
+    throw new ActiveTurnContextBudgetError();
   }
 
   return systemMessage ? [systemMessage, ...body] : body;

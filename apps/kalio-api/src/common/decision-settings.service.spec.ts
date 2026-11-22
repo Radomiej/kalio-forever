@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettingsService } from '../database/app-settings.service';
 import type { CredentialsService } from '../modules/credentials/credentials.service';
 import { DecisionSettingsService } from './decision-settings.service';
@@ -15,6 +15,77 @@ function setup() {
 }
 
 describe('DecisionSettingsService', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const native = { provider: 'ollama' as const, model: 'fixture:1', credentialId: null, endpoint: 'http://127.0.0.1:11434/api/chat' };
+  it('isolates tools without rewriting the legacy goals record or resolving credentials', async () => {
+    vi.stubEnv('KALIO_DEV_LOCAL_DECISIONS', 'true');
+    const { service, values, settings, credentials } = setup();
+    const legacy = JSON.stringify({ provider: 'custom', model: 'goal-judge', credentialId: null, endpoint: 'http://127.0.0.1:9090/decide' });
+    values.set('decision.config', legacy);
+    expect(await service.getConfig('tools')).toEqual(await service.getConfig());
+    await service.updateConfig(native, 'tools');
+    expect(settings.set).toHaveBeenCalledTimes(1);
+    expect(settings.set).toHaveBeenCalledWith('decision.tools.config', JSON.stringify(native));
+    expect(values.get('decision.config')).toBe(legacy);
+    expect(await service.resolve()).toMatchObject({ protocol: 'jev-decisions', model: 'goal-judge' });
+    expect(await service.resolve('tools')).toMatchObject({ protocol: 'ollama-chat', model: 'fixture:1' });
+    expect(await service.resolve('tools')).not.toHaveProperty('apiKey');
+    expect(credentials.getProviderConfigForCredential).not.toHaveBeenCalled();
+  });
+  it('keeps an explicit tool model when the goal model is changed', async () => {
+    vi.stubEnv('KALIO_DEV_LOCAL_DECISIONS', 'true');
+    const { service } = setup();
+    await service.updateConfig(native, 'tools');
+    const before = await service.resolve('tools');
+    await service.updateConfig({ provider: 'custom', model: 'new-goal', endpoint: 'http://127.0.0.1:9090/decide', credentialId: null });
+    expect(await service.getConfig('tools')).toEqual(native);
+    expect(await service.resolve('tools')).toEqual(before);
+    expect(await service.getConfig()).toHaveProperty('model', 'new-goal');
+  });
+  it.each(['', 'null', '{invalid', '{}'])('does not inherit goals when a present tools override is invalid: %s', async value => {
+    const { service, values } = setup();
+    values.set('decision.tools.config', value);
+    values.set('decision.config', JSON.stringify({ provider: 'custom', model: 'goal', credentialId: null, endpoint: 'http://localhost:9090/decide' }));
+    await expect(service.getConfig('tools')).rejects.toThrow();
+  });
+  it('does not attach a new revision to an old config across delayed reads', async () => {
+    vi.stubEnv('KALIO_DEV_LOCAL_DECISIONS', 'true');
+    const { service, settings, values } = setup();
+    await service.updateConfig(native, 'tools');
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let reads = 0;
+    settings.get.mockImplementation(async key => {
+      const snapshot = values.get(key) ?? null;
+      if (key === 'decision.tools.config' && ++reads === 2) await held;
+      return snapshot;
+    });
+    const resolving = service.resolve('tools');
+    const rejection = expect(resolving).rejects.toThrow('changed during resolution');
+    await vi.waitFor(() => expect(reads).toBe(2));
+    await service.updateConfig({ ...native, model: 'changed:1' }, 'tools');
+    release();
+    await rejection;
+  });
+  it('rejects native goal configuration and disabled native saves without writes', async () => {
+    const { service, settings } = setup();
+    vi.stubEnv('KALIO_DEV_LOCAL_DECISIONS', 'false');
+    await expect(service.updateConfig(native, 'tools')).rejects.toThrow();
+    vi.stubEnv('KALIO_DEV_LOCAL_DECISIONS', 'true');
+    await expect(service.updateConfig(native)).rejects.toThrow();
+    expect(settings.set).not.toHaveBeenCalled();
+  });
+  it.each(['https://remote.example/api/chat', 'http://127.0.0.1:11434/api/generate', 'http://user:pass@localhost/api/chat', 'http://localhost/api/chat?x=1', 'http://localhost/api/chat#x'])('rejects unsafe/native incompatible endpoint %s', async endpoint => {
+    const { service, settings } = setup();
+    await expect(service.updateConfig({ ...native, endpoint }, 'tools')).rejects.toThrow();
+    expect(settings.set).not.toHaveBeenCalled();
+  });
+  it('rejects native credentials and invalid purposes before any write', async () => {
+    const { service, settings } = setup();
+    await expect(service.updateConfig({ ...native, credentialId: 'some-key' }, 'tools')).rejects.toThrow();
+    await expect(service.updateConfig(native, 'other' as never)).rejects.toThrow();
+    expect(settings.set).not.toHaveBeenCalled();
+  });
   it('automatically selects the first usable OpenRouter credential without exposing its key', async () => {
     const { service } = setup();
     expect(await service.getConfig()).toMatchObject({ provider: 'openrouter', model: 'typesafe/jev-1.13', credentialId: 'second' });

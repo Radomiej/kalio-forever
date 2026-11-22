@@ -15,14 +15,14 @@ export type {
   UpdateHitlConfigDto,
 } from '@kalio/types';
 
-export const HITL_MODES: readonly HitlMode[] = ['manual', 'auto', 'bypass', 'jev'];
+export const HITL_MODES: readonly HitlMode[] = ['manual', 'auto', 'bypass', 'jev', 'ollama'];
 export type ResolvedHitlConfig = SharedHitlConfig & Required<Pick<SharedHitlConfig,
   'jevInstructions' | 'jevApprovalThreshold' | 'jevFallbackToPersona' | 'rules'
 >>;
 export type HitlUnattendedFallback = SharedHitlConfig['unattendedFallback'];
 export type HitlNotificationChannel = SharedHitlConfig['notificationChannel'];
 export type HitlApprovalStatus = 'manual' | 'approved' | 'rejected';
-export type HitlApprovalSource = 'manual' | 'auto' | 'bypass' | 'representative' | 'jev' | 'rule';
+export type HitlApprovalSource = 'manual' | 'auto' | 'bypass' | 'representative' | 'jev' | 'rule' | 'ollama';
 
 export interface HitlApprovalRequest {
   kind: HitlApprovalKind;
@@ -33,12 +33,18 @@ export interface HitlApprovalRequest {
   agentRun?: AgentRunContext;
   displayLabel?: string;
   toolCallId?: string;
+  /** Server execution identity used to resolve explanatory review context. */
+  runId?: string;
+  turnId?: string;
+  promptMessageId?: string;
 }
 
 export interface HitlApprovalResolution {
   status: HitlApprovalStatus;
   source: HitlApprovalSource;
   reason?: string;
+  /** In-process, one-use recheck; never serialized as approval authority. */
+  validateBeforeExecution?: () => Promise<boolean>;
 }
 
 export interface HitlDecisionInput {

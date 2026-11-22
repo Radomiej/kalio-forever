@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, Loader2, Check, Save } from 'lucide-react';
 import type { ImageConfigResponse, UpdateImageConfigDto, ImageProviderType, ImageDetail } from '@kalio/types';
+import { IMAGE_PROVIDER_CAPABILITIES } from '@kalio/types';
+import { ImageIntegrationSelect } from './ImageIntegrationSelect';
 
 const PROVIDER_LABELS: Record<ImageProviderType, string> = {
-  auto:       'Auto (CometAPI)',
-  cometapi:   'CometAPI (recommended)',
+  auto:       IMAGE_PROVIDER_CAPABILITIES.auto.label,
+  cometapi:   IMAGE_PROVIDER_CAPABILITIES.cometapi.label,
+  chatgpt:    IMAGE_PROVIDER_CAPABILITIES.chatgpt.label,
   openai:     'OpenAI',
   openrouter: 'OpenRouter',
   replicate:  'Replicate (direct)',
 };
 
 const PROVIDER_BASE_URLS: Record<ImageProviderType, string> = {
+  chatgpt:    '',
   auto:       '',
   cometapi:   'https://api.cometapi.com/v1',
   openai:     'https://api.openai.com/v1',
@@ -19,6 +23,7 @@ const PROVIDER_BASE_URLS: Record<ImageProviderType, string> = {
 };
 
 const PROVIDER_DEFAULT_MODELS: Record<ImageProviderType, string> = {
+  chatgpt:    '',
   auto:       'flux-schnell',
   cometapi:   'flux-schnell',
   openai:     'dall-e-3',
@@ -28,11 +33,12 @@ const PROVIDER_DEFAULT_MODELS: Record<ImageProviderType, string> = {
 
 /** Models available per provider (shown as quick-select suggestions) */
 const PROVIDER_MODELS: Record<ImageProviderType, Array<{ value: string; label: string }>> = {
+  chatgpt: [],
   auto: [
     { value: 'mock-stock',       label: 'mock-stock (free placeholder)' },
     { value: 'flux-schnell',      label: 'flux-schnell (fast)' },
     { value: 'flux-dev',          label: 'flux-dev (quality)' },
-    { value: 'flux-1.1-pro',      label: 'flux-1.1-pro (best)' },
+    { value: 'flux-1.1-pro',      label: 'flux-1.1-pro' },
     { value: 'dall-e-3',          label: 'dall-e-3' },
     { value: 'gpt-image-1',       label: 'gpt-image-1' },
   ],
@@ -40,7 +46,7 @@ const PROVIDER_MODELS: Record<ImageProviderType, Array<{ value: string; label: s
     { value: 'mock-stock',       label: 'mock-stock (free placeholder)' },
     { value: 'flux-schnell',      label: 'flux-schnell (fast, cheap)' },
     { value: 'flux-dev',          label: 'flux-dev (quality)' },
-    { value: 'flux-1.1-pro',      label: 'flux-1.1-pro (best)' },
+    { value: 'flux-1.1-pro',      label: 'flux-1.1-pro' },
     { value: 'dall-e-3',          label: 'dall-e-3' },
     { value: 'gpt-image-1',       label: 'gpt-image-1 (vision+edit)' },
     { value: 'ideogram-v2',       label: 'ideogram-v2' },
@@ -48,7 +54,7 @@ const PROVIDER_MODELS: Record<ImageProviderType, Array<{ value: string; label: s
     { value: 'stable-diffusion-3-5-large', label: 'SD 3.5 large' },
   ],
   openai: [
-    { value: 'gpt-image-1',       label: 'gpt-image-1 (recommended)' },
+    { value: 'gpt-image-1',       label: 'gpt-image-1' },
     { value: 'dall-e-3',          label: 'dall-e-3' },
     { value: 'dall-e-2',          label: 'dall-e-2 (legacy)' },
   ],
@@ -81,6 +87,8 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 interface FormState {
+  executionProfileId: string;
+  editModel: string;
   provider: ImageProviderType;
   apiKey: string;
   baseUrl: string;
@@ -93,6 +101,8 @@ interface FormState {
 
 function configToForm(cfg: ImageConfigResponse): FormState {
   return {
+    executionProfileId: cfg.executionProfileId ?? '',
+    editModel: cfg.editModel ?? '',
     provider: cfg.provider,
     apiKey: '',
     baseUrl: cfg.baseUrl ?? PROVIDER_BASE_URLS[cfg.provider],
@@ -107,6 +117,7 @@ function configToForm(cfg: ImageConfigResponse): FormState {
 export function ImageSettingsPanel() {
   const [config, setConfig] = useState<ImageConfigResponse | null>(null);
   const [form, setForm] = useState<FormState>({
+    executionProfileId: '', editModel: '',
     provider: 'auto', apiKey: '', baseUrl: '', model: 'flux-schnell',
     compressionEnabled: false, maxDimension: 1024, maxKb: 512, detail: 'low',
   });
@@ -134,6 +145,8 @@ export function ImageSettingsPanel() {
     setForm((f) => ({
       ...f,
       provider,
+      apiKey: '',
+      editModel: '',
       baseUrl: PROVIDER_BASE_URLS[provider],
       model: PROVIDER_DEFAULT_MODELS[provider],
     }));
@@ -155,6 +168,16 @@ export function ImageSettingsPanel() {
           detail: form.detail,
         },
       };
+      if (form.provider === 'chatgpt') {
+        if (!form.executionProfileId) throw new Error('Select a ChatGPT / Codex integration before saving.');
+        dto.executionProfileId = form.executionProfileId;
+        dto.model = '';
+        dto.baseUrl = '';
+        dto.editModel = '';
+      } else {
+        dto.executionProfileId = '';
+        dto.editModel = form.editModel;
+      }
       if (form.apiKey.trim().length > 0) dto.apiKey = form.apiKey.trim();
 
       const updated = await apiFetch<ImageConfigResponse>('/image/config', {
@@ -186,8 +209,8 @@ export function ImageSettingsPanel() {
       <div>
         <h2 className="text-sm font-semibold text-base-content/80 mb-0.5">Image Generation</h2>
         <p className="text-xs text-base-content/40">
-          Configure the provider and API key used by <code className="font-mono">image_generate</code> and <code className="font-mono">image_edit</code> tools.
-          {config?.source === 'default' && (
+          Configure the provider used by <code className="font-mono">image_generate</code> and <code className="font-mono">image_edit</code> tools.
+          {config?.source === 'default' && form.provider !== 'chatgpt' && (
             <span className="ml-1 text-warning/80">No key saved yet — tools will fail until configured.</span>
           )}
         </p>
@@ -206,8 +229,9 @@ export function ImageSettingsPanel() {
 
         {/* Provider selector */}
         <div className="space-y-1">
-          <label className="text-xs text-base-content/50">Provider</label>
+          <label htmlFor="image-provider" className="text-xs text-base-content/50">Provider</label>
           <select
+            id="image-provider"
             className="select select-sm select-bordered w-full"
             value={form.provider}
             onChange={(e) => handleProviderChange(e.target.value as ImageProviderType)}
@@ -217,6 +241,9 @@ export function ImageSettingsPanel() {
             ))}
           </select>
         </div>
+
+        <p className="text-xs text-base-content/70">Generation: supported. Editing: {IMAGE_PROVIDER_CAPABILITIES[form.provider].edit ? `supported, up to ${IMAGE_PROVIDER_CAPABILITIES[form.provider].maxReferences} references` : 'not supported by this integration'}.</p>
+        {form.provider === 'chatgpt' ? <ImageIntegrationSelect value={form.executionProfileId} onChange={id => setForm(f => ({ ...f, executionProfileId: id }))} /> : <>
 
         {/* API key */}
         <div className="space-y-1">
@@ -239,7 +266,7 @@ export function ImageSettingsPanel() {
           <input
             type="text"
             className="input input-sm input-bordered w-full font-mono"
-            placeholder="https://api.cometapi.com/v1"
+            placeholder="Provider API base URL"
             value={form.baseUrl}
             onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
           />
@@ -256,7 +283,7 @@ export function ImageSettingsPanel() {
             onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
           />
           <div className="flex flex-wrap gap-1 mt-1">
-            {(PROVIDER_MODELS[form.provider] ?? PROVIDER_MODELS['cometapi']).map((m) => (
+            {PROVIDER_MODELS[form.provider].map((m) => (
               <button
                 key={m.value}
                 type="button"
@@ -268,6 +295,11 @@ export function ImageSettingsPanel() {
             ))}
           </div>
         </div>
+        {IMAGE_PROVIDER_CAPABILITIES[form.provider].edit && <div className="space-y-1">
+          <label htmlFor="image-edit-model" className="text-xs text-base-content/70">Editing model</label>
+          <input id="image-edit-model" className="input input-sm input-bordered w-full font-mono" value={form.editModel} placeholder={form.provider === 'openai' ? 'gpt-image-1' : 'gemini-3.1-flash-image-preview'} onChange={event => setForm(f => ({ ...f, editModel: event.target.value }))} />
+        </div>}
+        </>}
       </div>
 
       {/* Compression Card */}

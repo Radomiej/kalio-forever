@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConversationSettingsPanel } from './ConversationSettingsPanel';
 import { useSettingsStore } from './settingsStore';
@@ -31,6 +32,41 @@ describe('ConversationSettingsPanel', () => {
       },
     });
     apiPutMock.mockResolvedValue({ data: null });
+  });
+
+  it('keeps one Conversation section and labels the title controls clearly', async () => {
+    render(<ConversationSettingsPanel />);
+
+    const toggle = screen.getByRole('checkbox', { name: 'Automatic chat titles' });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(screen.getAllByRole('heading', { name: 'Conversation' })).toHaveLength(1);
+    expect(screen.getByLabelText('Automatic chat titles')).toBe(toggle);
+    expect(screen.getByRole('slider', { name: 'Update every' })).toHaveAccessibleName('Update every');
+    expect(screen.getByText('4 replies')).toBeInTheDocument();
+    expect(screen.queryByText('Active Change Conversation Title')).not.toBeInTheDocument();
+    expect(apiPutMock).not.toHaveBeenCalled();
+  });
+
+  it('toggles automatic titles from the visible label and keyboard without changing save semantics', async () => {
+    const user = userEvent.setup();
+    render(<ConversationSettingsPanel />);
+    const toggle = screen.getByRole('checkbox', { name: 'Automatic chat titles' });
+    const slider = screen.getByRole('slider', { name: 'Update every' });
+    await waitFor(() => expect(toggle).toBeEnabled());
+
+    await user.click(screen.getByText('Automatic chat titles'));
+    expect(toggle).not.toBeChecked();
+    expect(slider).toBeDisabled();
+    await waitFor(() => expect(apiPutMock).toHaveBeenLastCalledWith(
+      '/api/credentials/settings/conversation-title', { autoRenameEnabled: false },
+    ));
+    expect(toggle).toHaveFocus();
+    await user.keyboard(' ');
+    expect(toggle).toBeChecked();
+    expect(slider).toBeEnabled();
+    await waitFor(() => expect(apiPutMock).toHaveBeenLastCalledWith(
+      '/api/credentials/settings/conversation-title', { autoRenameEnabled: true },
+    ));
   });
 
   it('loads persisted settings and saves toggle and cadence changes', async () => {

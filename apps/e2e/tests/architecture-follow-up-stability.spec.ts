@@ -70,13 +70,17 @@ test.describe('Architecture workflow follow-up stability', () => {
       const hostTitle = (await page.getByTestId('chat-session-title').textContent())?.trim() ?? 'workflow host';
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(1, { timeout: 30_000 });
 
-      await selectArchitectureInComposer(page, 'strategic-decision-council');
-      await expect(page.getByTestId('chat-architecture-select')).toHaveValue('strategic-decision-council');
+      await expect(page.getByTestId('chat-architecture-select')).toHaveCount(0);
       await sendMessageFromComposer(page, 'Repeat the previous conclusion in one short sentence.');
 
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(2, { timeout: 30_000 });
       const secondBubble = page.getByTestId('agent-turn-bubble').nth(1);
       await expect(secondBubble.locator('[data-testid="architecture-run-timeline"]')).toBeVisible({ timeout: 30_000 });
+      await expect(secondBubble.locator('[data-testid="architecture-run-timeline"]')).toContainText('completed /', { timeout: 120_000 });
+      const secondBubbleFinalAnswer = normalizeFinalAnswerText(
+        await secondBubble.locator('[data-testid="architecture-final-answer"]').textContent(),
+      );
+      expect(secondBubbleFinalAnswer.length).toBeGreaterThan(24);
       await expect(firstBubble.locator('[data-testid="architecture-final-answer"]')).toContainText(
         firstBubbleFinalAnswer.slice(0, Math.min(firstBubbleFinalAnswer.length, 48)),
       );
@@ -85,6 +89,11 @@ test.describe('Architecture workflow follow-up stability', () => {
       await selectSession(page, sessionId, hostTitle);
       await expect(page.getByTestId('chat-session-title')).not.toHaveText('', { timeout: 30_000 });
       await expect(page.getByTestId('agent-turn-bubble')).toHaveCount(2, { timeout: 60_000 });
+      await expect(page.getByTestId('architecture-run-timeline')).toHaveCount(2, { timeout: 60_000 });
+      const rehydratedSecondAnswer = normalizeFinalAnswerText(
+        await page.getByTestId('agent-turn-bubble').nth(1).locator('[data-testid="architecture-final-answer"]').textContent(),
+      );
+      expect(rehydratedSecondAnswer).toContain(secondBubbleFinalAnswer.slice(0, Math.min(secondBubbleFinalAnswer.length, 48)));
       const rehydratedFirstAnswer = normalizeFinalAnswerText(
         await page.getByTestId('agent-turn-bubble').first().locator('[data-testid="architecture-final-answer"]').textContent(),
       );

@@ -35,6 +35,7 @@ export interface ArchitectNode {
   toolOverride?: ArchitectureSchemaNode['toolOverride'];
   behavior?: ArchitectureSchemaNode['behavior'];
   autoRouting?: ArchitectureSchemaNode['autoRouting'];
+  statusRouting?: ArchitectureSchemaNode['statusRouting'];
   personaId?: string;
   description?: string;
   x: number;

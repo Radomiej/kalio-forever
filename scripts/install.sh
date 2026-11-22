@@ -112,10 +112,7 @@ MEMORY_DB_PATH=$install_root/data/memory
 EMBEDDING_CACHE_DIR=$install_root/data/embeddings-cache
 CREDENTIALS_MASTER_KEY=$master_key
 CORS_ORIGIN=http://127.0.0.1:4016
-LLM_PROVIDER=mock
-LLM_API_KEY=mock
-LLM_BASE_URL=mock
-LLM_MODEL=mock
+# Configure a direct LLM provider in Settings if needed. CLI agents use their own login.
 EOF
   chmod 600 "$env_file"
 fi

@@ -258,7 +258,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     if (this.pruning) return;
     const dueByWrites = this.writeCount % policy.pruneEveryWrites === 0;
     const dueByTime = await this.isRetentionDue(policy);
-    if (!dueByWrites && !dueByTime) return;
+    if (this.pruning || (!dueByWrites && !dueByTime)) return;
     this.pruning = true;
     void this.enforceRetention(policy)
       .catch((err) => {
@@ -272,7 +272,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   private async runRetentionIfDue(): Promise<void> {
     if (this.pruning) return;
     const policy = await this.getRetentionPolicy();
-    if (!await this.isRetentionDue(policy)) return;
+    if (!await this.isRetentionDue(policy) || this.pruning) return;
     this.pruning = true;
     try {
       await this.enforceRetention(policy);

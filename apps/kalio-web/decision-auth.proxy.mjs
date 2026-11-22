@@ -1,4 +1,4 @@
-export const decisionProtectedRoute = '^/api/(?:decision/(?:auth|config)|hitl/config|runtime/default-profile|memory/project-context/settings|memory/project-resources/[^/]+/(?:status|index|search))/?(?:\\?.*)?$';
+export const decisionProtectedRoute = '^/api/(?:decision/ollama/(?:models|install(?:/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:/cancel)?)?)$|(?:decision/(?:auth|config)|hitl/config|runtime/default-profile|speech/(?:status|install(?:/cancel)?|transcriptions/[A-Za-z0-9_-]{1,80}(?:/cancel)?)|memory/project-context/settings|memory/project-resources/[^/]+/(?:status|index|search))/?(?:\\?.*)?$)';
 
 export function decisionProtectedProxy(target) {
   return {

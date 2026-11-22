@@ -253,9 +253,10 @@ export function SessionPanelSessionItem({
                 className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border ${sessionKind.iconClassName}`}
                 data-testid={`session-kind-icon-${session.id}`}
                 title={sessionKind.label}
+                role="img"
                 aria-label={sessionKind.label}
               >
-                <SessionKindIcon size={11} />
+                <SessionKindIcon size={11} aria-hidden="true" />
               </span>
               <span
                 className="min-w-0 flex-1 break-words text-xs font-medium leading-snug"

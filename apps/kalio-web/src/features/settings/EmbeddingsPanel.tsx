@@ -89,13 +89,27 @@ export function EmbeddingsPanel() {
   const [reindexResult, setReindexResult] = useState<string | null>(null);
 
   const refreshLocalAvailability = useCallback(async (config?: UpdateLocalEmbeddingConfigDto) => {
-    if (config) {
-      return apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability', {
+    const availability = config
+      ? await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability', {
         method: 'POST',
         body: JSON.stringify(config),
-      });
+      })
+      : await apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability');
+
+    if (config && (availability.model !== config.model
+      || availability.dimensions !== config.dimensions
+      || availability.backend !== config.backend)) {
+      return {
+        ...availability,
+        status: 'error' as const,
+        installed: false,
+        model: config.model,
+        dimensions: config.dimensions,
+        backend: config.backend,
+        message: 'Availability was reported for a different local model configuration. Refresh the settings and check again.',
+      };
     }
-    return apiFetch<LocalEmbeddingAvailability>('/memory/embedding-local/availability');
+    return availability;
   }, []);
 
   const load = useCallback(async () => {

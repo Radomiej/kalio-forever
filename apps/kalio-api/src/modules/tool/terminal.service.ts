@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, ForbiddenException, Optional } from '@nestjs/common';
 import { spawn, ChildProcess } from 'node:child_process';
 import { nanoid } from 'nanoid';
+import { terminalUsesShell } from '../../common/terminal-shell-policy';
 import { AllowedPathsService } from '../allowed-paths/allowed-paths.service';
 import { CmdInvocationAuditService } from '../chat/cmd-invocation-audit.service';
 
@@ -46,7 +47,7 @@ export class TerminalService implements OnModuleDestroy {
     const id = nanoid();
     const safeCwd = cwd ?? process.cwd();
     const capturedArgs = [...args];
-    const useShell = process.platform === 'win32';
+    const useShell = terminalUsesShell(command);
     const ownerIdentity = auditContext ? Object.freeze({
       sessionId: auditContext.sessionId, turnId: auditContext.turnId, callId: auditContext.callId,
     }) : null;
@@ -68,13 +69,20 @@ export class TerminalService implements OnModuleDestroy {
       ...ownerIdentity,
     });
 
-    // On Windows most CLI tools are .cmd shims and won't resolve without a shell.
-    // shell:true is acceptable here — terminal_spawn already requires user confirmation.
+    // Native executables keep argv literal; only Windows batch/shim commands use a shell.
+    const env = { ...process.env };
+    // Project commands choose their own runtime mode.
+    for (const key of Object.keys(env)) {
+      if ((process.platform === 'win32' ? key.toUpperCase() : key) === 'NODE_ENV') delete env[key];
+    }
     const proc = spawn(command, capturedArgs, {
       cwd: safeCwd,
+      env,
       shell: useShell,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      // Background terminals have no input writer. An open pipe makes tools
+      // such as rg wait for stdin instead of searching the working directory.
+      stdio: [closeStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
 
     if (closeStdin && proc.stdin) {

@@ -4,6 +4,8 @@ import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { readCodexModels } from './codex-model-catalog';
+import { latestPromptImages } from './latest-prompt-images';
+import { readToolImage } from '../../common/utils/tool-image-content';
 import {
   CodexAppServerHost,
   type CodexAppServerConnection,
@@ -23,6 +25,7 @@ export class CodexAppServerLLMSource implements ILLMSource {
   constructor(private readonly host: CodexAppServerHost) {}
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
+    if (params.toolsDisabled) throw new Error('LLM_TOOLS_DISABLED_UNSUPPORTED');
     const profile = params.executionProfile;
     if (!profile || profile.kind !== 'codex-app-server') {
       throw new Error('Codex App Server source requires a codex-app-server execution profile.');
@@ -204,7 +207,10 @@ export class CodexAppServerLLMSource implements ILLMSource {
     return {
       threadId,
       clientUserMessageId: params.messageId,
-      input: [{ type: 'text', text: inputText, text_elements: [] }],
+      input: [
+        { type: 'text', text: inputText, text_elements: [] },
+        ...latestPromptImages(params.messages).map(({ image_url }) => ({ type: 'image', url: image_url.url })),
+      ],
       ...(params.cwd ? { cwd: params.cwd } : {}),
       model: profile.model || params.model || null,
       effort: normalizeCodexReasoningEffort(profile.model ?? params.model ?? 'gpt-5.4', profile.reasoningEffort),
@@ -301,7 +307,7 @@ export class CodexAppServerLLMSource implements ILLMSource {
           resultStatus: result.status,
         },
       });
-      connection.respond(request.id, toDynamicToolResponse(result));
+      connection.respond(request.id, toDynamicToolResponse(result, toolName));
       return;
     }
 
@@ -391,12 +397,13 @@ function toDynamicTool(meta: ToolMeta): Record<string, unknown> {
   };
 }
 
-function toDynamicToolResponse(result: Partial<ToolResult>): Record<string, unknown> {
+function toDynamicToolResponse(result: Partial<ToolResult>, toolName = ''): Record<string, unknown> {
+  const image = result.status === 'success' ? readToolImage(toolName, result.data) : undefined;
   const text = result.status === 'success'
-    ? JSON.stringify(result.data ?? null)
+    ? image?.text ?? JSON.stringify(result.data ?? null)
     : result.errorMessage ?? result.errorCode ?? 'Tool execution failed.';
   return {
-    contentItems: [{ type: 'inputText', text }],
+    contentItems: [{ type: 'inputText', text }, ...(image?.image ? [{ type: 'inputImage', imageUrl: image.imageUrl }] : [])],
     success: result.status === 'success',
   };
 }

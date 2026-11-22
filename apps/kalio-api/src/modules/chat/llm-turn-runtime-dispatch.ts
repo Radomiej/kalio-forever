@@ -19,7 +19,9 @@ export function createRuntimeToolDispatcher(input: Omit<Parameters<typeof dispat
   resultHandler: () => Parameters<typeof dispatchRuntimeTool>[0]['resultHandler'];
 }) {
   const { request, lane, sessionManager } = input;
+  const toolsDisabled = request.toolsDisabled === true;
   return (call: LLMToolCall, options?: NativeToolExecutionOptions) => {
+    if (toolsDisabled) return Promise.reject(new Error('LLM_TOOLS_DISABLED'));
     const prior = lane.getExecution(call.id);
     if (prior) return prior;
     const raw = request.hostRuntimeReceiptObserver ? detachToolCall(call) : call;

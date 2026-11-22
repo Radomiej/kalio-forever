@@ -32,6 +32,28 @@ function makeMsg(overrides: TestChatMessageOverrides): ChatMessage {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('mergeFetchedMessages', () => {
+  it.each([
+    ['B\n', 'A\nB\n', 'A\nB\n'],
+    ['A\n', 'A\nB\n', 'A\nB\n'],
+    ['B\nC\n', 'A\nB\n', 'A\nB\n'],
+    ['ox', 'hello', 'hello'],
+    ['A\nB\nC\n', 'A\nB\n', 'A\nB\nC\n'],
+    ['A\nB\n', 'A\nB\n', 'A\nB\n'],
+    ['Old fragment', 'Canonical provider summary', 'Canonical provider summary'],
+    ['', 'Canonical provider summary', 'Canonical provider summary'],
+  ])('reconciles thinking snapshots %j / %j without duplication', (local, durable, expected) => {
+    const current = makeMsg({ id: 'a1', thinking: local, streaming: true, turnId: 'turn-1', promptMessageId: 'u1' });
+    const loaded = { ...current, thinking: durable, streaming: false };
+    const foreign = makeMsg({ id: 'a2', sessionId: 's2', thinking: 'Foreign summary' });
+    const merged = mergeFetchedMessages([current, foreign], [loaded]);
+    expect(merged.find((message) => message.id === 'a1')).toMatchObject({
+      thinking: expected, streaming: true, turnId: 'turn-1', promptMessageId: 'u1',
+    });
+    expect(mergeFetchedMessages(merged, [loaded])).toEqual(merged);
+    expect(merged.find((message) => message.id === 'a2')).toEqual(foreign);
+    expect(merged.map((message) => message.id).sort()).toEqual(['a1', 'a2']);
+  });
+
   it('retains tools added after approval when durable history catches up with the local assistant', () => {
     const beforeApproval = { id: 'call-read', name: 'fs_read', args: { path: 'package.json' } };
     const afterApproval = { id: 'call-build', name: 'terminal_spawn', args: { command: 'npm' } };

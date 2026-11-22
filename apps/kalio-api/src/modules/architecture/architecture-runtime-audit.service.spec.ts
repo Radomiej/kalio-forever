@@ -13,6 +13,29 @@ import {
 import type { ArchitectureVfsHydrationResult } from './architecture-vfs-hydration';
 
 describe('ArchitectureRuntimeAuditWriterService', () => {
+  it('persists browser result identity without storing raw tool data', () => {
+    const log = vi.fn().mockResolvedValue('row');
+    const writer = new ArchitectureRuntimeAuditWriterService({ log } as unknown as AuditService);
+    writer.logEvent({ id: 'game-development-2' } as ArchitectureSchema,
+      { id: 'run', rootSessionId: 'root' } as ArchitectureRun, {
+        id: 'browser-result', runId: 'run', nodeId: 'input-qa', sequence: 2,
+        type: 'tool_call', message: 'Browser click succeeded.', createdAt: 2,
+        data: { event: 'tool:result', toolName: 'browser-click', status: 'success', args: { private: 'fixture' } },
+      });
+    const record = log.mock.calls[0]?.[0]?.data;
+    expect(record).toMatchObject({ event: 'tool:result', toolName: 'browser-click', toolStatus: 'success' });
+    expect(record).not.toHaveProperty('args');
+  });
+  it('TASK59 preserves typed lifecycle and status in ordinary audit events', () => {
+    const log = vi.fn().mockResolvedValue('row');
+    const writer = new ArchitectureRuntimeAuditWriterService({ log } as unknown as AuditService);
+    writer.logEvent({ id: 'schema' } as ArchitectureSchema, { id: 'run', rootSessionId: 'root' } as ArchitectureRun,
+      { id: 'failed-event', runId: 'run', sequence: 2, type: 'router_decision', message: 'Display only', createdAt: 2,
+        status: 'failed', lifecycle: 'failed', errorCode: 'CONTRACT_VIOLATION' });
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      eventType: 'router_decision', status: 'failed', lifecycle: 'failed', errorCode: 'CONTRACT_VIOLATION',
+    }) }));
+  });
   it('persists pause lifecycle and reason in required route checkpoints', async () => {
     const logRequired = vi.fn(async () => undefined);
     const writer = new ArchitectureRuntimeAuditWriterService({ logRequired } as unknown as AuditService);

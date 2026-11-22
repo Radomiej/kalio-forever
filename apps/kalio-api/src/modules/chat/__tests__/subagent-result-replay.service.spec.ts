@@ -6,7 +6,7 @@ import type { RunJournalService } from '../run-journal.service';
 import { SubagentResultReplayService } from '../subagent-result-replay.service';
 
 describe('SubagentResultReplayService', () => {
-  it('replays completed child tool evidence from the exact persisted turn', async () => {
+  it.each(['valid', 'corrupt', 'missing'])('replays exact child evidence atomically (%s result)', async (resultState) => {
     const messages: ChatMessage[] = [
       {
         id: 'call-message',
@@ -22,7 +22,7 @@ describe('SubagentResultReplayService', () => {
         sessionId: 'child-session',
         turnId: 'child-turn',
         role: 'tool_result',
-        content: JSON.stringify({ path: 'proof.json', bytesWritten: 2 }),
+        content: resultState === 'corrupt' ? '{' : JSON.stringify({ path: 'proof.json', bytesWritten: 2 }),
         toolCallId: 'write-call',
         createdAt: 2,
       },
@@ -44,6 +44,7 @@ describe('SubagentResultReplayService', () => {
         createdAt: 4,
       },
     ];
+    if (resultState === 'missing') messages.splice(1, 1);
     const runs = {
       getCompletedTurn: vi.fn().mockResolvedValue({
         outcome: { finalText: 'Wrote proof.json.' },
@@ -68,7 +69,13 @@ describe('SubagentResultReplayService', () => {
     };
     const service = new SubagentResultReplayService(runs, repository);
 
-    const result = await service.replay(request, 'child-session', 'child-session', 20);
+    const replay = service.replay(request, 'child-session', 'child-session', 20);
+    if (resultState !== 'valid') {
+      await expect(replay).rejects.toThrow('Unable to replay tool result');
+      expect(emitted).toEqual([]);
+      return;
+    }
+    const result = await replay;
 
     expect(result).toMatchObject({ status: 'completed', result: 'Wrote proof.json.' });
     expect(repository.loadMessagesForTurn).toHaveBeenCalledWith('child-session', 'child-turn');

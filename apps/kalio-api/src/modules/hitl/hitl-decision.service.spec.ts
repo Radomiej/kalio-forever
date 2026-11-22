@@ -126,6 +126,23 @@ describe('HitlDecisionService', () => {
     expect(llmService.streamChat).not.toHaveBeenCalled();
   });
 
+  it('never substitutes the default provider for a persona bound to Devin', async () => {
+    personaService.getSessionConfig.mockResolvedValueOnce({
+      systemPrompt: 'Review approvals carefully.',
+      executionProfileId: 'devin-guard',
+      allowedTools: [],
+      skillIds: [],
+    });
+    executionProfiles.assertEnabled.mockResolvedValueOnce({ id: 'devin-guard', kind: 'devin-cli-acp' });
+
+    await expect(service.evaluateApproval({
+      personaId: 'reviewer-persona',
+      request: { kind: 'tool', sessionId: 's', name: 'fs_read', args: {} },
+    })).rejects.toThrow('does not support HITL evaluation');
+    expect(llmService.streamChat).not.toHaveBeenCalled();
+    expect(codexSource.stream).not.toHaveBeenCalled();
+  });
+
   it.each(['deny', 'ask_user'] as const)('does not let agree=true override an explicit %s', async (decision) => {
     llmService.streamChat.mockImplementationOnce(async (_messages, _tools, options) => {
       options.onChunk({ delta: JSON.stringify({ agree: true, decision, reason: 'Needs review.' }) });

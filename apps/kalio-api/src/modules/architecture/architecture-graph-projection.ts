@@ -15,6 +15,7 @@ import {
   architectureRunningActionSummaryForNodeKind,
 } from './architecture-action-summary';
 import { architectureSessionIdForRunSlot } from './architecture-session-ids';
+import { isToolTimeoutRecovery } from './architecture-graph-topology.utils';
 
 export function buildArchitectureGraphProjection(
   runId: string,
@@ -55,18 +56,19 @@ function toGraphNode(
     event.nodeId !== undefined
       ? event.nodeId === node.id
       : event.roleSlotId !== undefined && event.roleSlotId === node.roleSlotId);
-  const inferredFailureEvent = inferredRunFailureEventForNode(node, nodeEvents, runStatus, runFailureEvent);
+  let visitStart = nodeEvents.length - 1;
+  while (visitStart > 0 && nodeEvents[visitStart]?.type !== 'node_started') visitStart--;
+  const currentVisit = visitStart > 0 ? nodeEvents.slice(visitStart) : nodeEvents;
+  const inferredFailureEvent = inferredRunFailureEventForNode(node, currentVisit, runStatus, runFailureEvent);
   const inferredCancellationEvent = inferredFailureEvent
     ? undefined
-    : inferredUpstreamCancellationEventForNode(node, nodeEvents, runStatus, runFailureEvent, cancelledByUpstreamFailure);
-  const projectionEvents = inferredFailureEvent
-    ? [...nodeEvents, inferredFailureEvent]
-    : inferredCancellationEvent
-      ? [...nodeEvents, inferredCancellationEvent]
-      : nodeEvents;
-  const eventIds = projectionEvents.map((event) => event.id);
-  const toolEvidence = latestToolEvidence(nodeEvents);
-  const incompleteReason = latestIncompleteReason(nodeEvents);
+    : inferredUpstreamCancellationEventForNode(node, currentVisit, runStatus, runFailureEvent, cancelledByUpstreamFailure);
+  const inferredEvent = inferredFailureEvent ?? inferredCancellationEvent;
+  const projectionEvents = inferredEvent ? [...currentVisit, inferredEvent] : currentVisit;
+  const eventIds = nodeEvents.map((event) => event.id);
+  if (inferredEvent) eventIds.push(inferredEvent.id);
+  const toolEvidence = latestToolEvidence(currentVisit);
+  const incompleteReason = latestIncompleteReason(currentVisit);
   const status = nodeStatus(projectionEvents);
   const actionFields = latestActionFields(projectionEvents, node.kind, status);
   const failureFields = latestFailureFields(projectionEvents);
@@ -341,6 +343,7 @@ function hasNodeRuntimeEvidence(events: ArchitectureExecutionEvent[]): boolean {
 
 function latestNodeTerminalStatus(events: ArchitectureExecutionEvent[]): ArchitectureGraphNodeStatus | undefined {
   for (const event of [...events].reverse()) {
+    if (isToolTimeoutRecovery(event)) return 'failed';
     if (
       event.type === 'node_completed'
       || event.type === 'participant_output'

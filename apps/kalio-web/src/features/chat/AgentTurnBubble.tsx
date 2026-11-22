@@ -1,3 +1,4 @@
+import { finalAnswerForArchitectureRun } from './finalAnswerReport';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ThinkingBlock } from './ThinkingBlock';
 import { NativeToolAuditPanel } from './NativeToolAuditPanel';
@@ -5,6 +6,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAgentStore } from '../../store/agentStore';
 import { MarkdownViewer } from '../../components/markdown/MarkdownViewer';
+import { FinalAnswerCard } from './FinalAnswerCard';
+import { readWorkflowTrace, WorkflowTraceCard } from './WorkflowTraceCard';
 import type { AgentTurn } from '../../store/sessionStore';
 import type { ToolActivity } from '../../store/agentStore';
 import { ArchitectureRunTimeline } from './ArchitectureRunTimeline';
@@ -145,7 +148,7 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
       : { ...architectureRun, status: 'running' as const }
     : null;
   const architectureFinalAnswer = turnArchitectureRun
-    ? finalAnswerForArchitectureRun(turnArchitectureRun)
+    ? finalAnswerForArchitectureRun(turnArchitectureRun, workflowTurnProjection.turnMessages)
     : null;
   const visibleItems = deriveVisibleTurnItems(turn.items, turnMessages, streamingChunks, turn.done);
   const turnBranchSessionIds = workflowTurnProjection.branchSessionIds;
@@ -217,6 +220,20 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
       : []
   ), [sessions, turnArchitectureRun]);
 
+  // The conversation owns pending feedback; retain only material turn content here.
+  const hasContent = visibleItems.some((item) => {
+    if (item.kind === 'tool') return true;
+    const message = turnMessages.find((entry) => entry.id === item.messageId);
+    if (!message && item.kind === 'text') return false;
+    if (item.kind === 'thinking') return Boolean(thinkingChunks[item.messageId] || message?.thinking);
+    return Boolean(message && isMessageLiveStreaming(item.messageId, message, streamingChunks, turn.done)
+      ? streamingChunks[item.messageId] : message?.content);
+  });
+  if (!hasContent && !turnArchitectureRun && !turn.error && !toolArgProgress
+    && turnContinuationActions.length === 0 && pendingBudgetApprovalsForTurn.length === 0) {
+    return <NativeToolAuditPanel key={`${turn.sessionId}:${turn.id}`} sessionId={turn.sessionId} turnId={turn.id} />;
+  }
+
   return (
     <div data-testid="agent-turn-bubble" className="flex justify-start mb-2 w-full">
       <div className="min-w-0 w-full max-w-none">
@@ -243,16 +260,12 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                 }}
               />
               {architectureFinalAnswer && (
-                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 px-3 py-2" data-testid="architecture-final-answer">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">Final answer</p>
-                  <MarkdownViewer content={architectureFinalAnswer} />
-                </div>
+                <FinalAnswerCard content={architectureFinalAnswer} sessionId={turn.sessionId} />
               )}
             </>
           )}
           {/* Loading indicator while turn is active but no items have arrived yet */}
-          {!turn.done && turn.items.length === 0 && (
-            toolArgProgress ? (
+          {!turn.done && turn.items.length === 0 && toolArgProgress && (
               <span data-testid="turn-loading-indicator" className="text-xs text-base-content/60 font-mono tabular-nums">
                 {toolArgProgress.totalChars > 0 ? (
                   <>
@@ -265,9 +278,6 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
                   </>
                 )}
               </span>
-            ) : (
-              <span data-testid="turn-loading-indicator" className="loading loading-dots loading-xs" />
-            )
           )}
           {visibleItems.map((item, idx) => {
             if (item.kind === 'tool') {
@@ -355,12 +365,19 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
             
             const isStreaming = isMessageLiveStreaming(messageId, msg, streamingChunks, turn.done);
             const displayContent = isStreaming ? (streamingChunks[messageId] ?? '') : msg.content;
+            if (!displayContent) return null;
+            const trace = turnArchitectureRun ? readWorkflowTrace(displayContent) : null;
+            if (trace) {
+              if (trace.kind === 'finalizer' && architectureFinalAnswer
+                && (trace.body.trim() === architectureFinalAnswer.trim() || displayContent.trim() === architectureFinalAnswer.trim())) return null;
+              const routerOutput = turnArchitectureRun?.trace.find(step =>
+                step.eventId && messageId === `architecture:${turnArchitectureRun.runId}:text:${step.eventId}`)?.routerOutput;
+              return <WorkflowTraceCard key={messageId} trace={trace} output={routerOutput} />;
+            }
 
             return (
               <div key={`text-${messageId}`} className="flex flex-col gap-2">
-                {isStreaming && !displayContent ? (
-                  <span data-testid="streaming-indicator" className="loading loading-dots loading-xs" />
-                ) : displayContent ? (
+                {displayContent ? (
                   <div className="max-w-[78ch]">
                     <MarkdownViewer content={displayContent} />
                     {isStreaming && <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current" />}
@@ -452,16 +469,4 @@ export const AgentTurnBubble = memo(function AgentTurnBubble({ turn, toolActivit
 
 function isArchitectureTextOutput(_content: string, hasRunMetadata: boolean): boolean {
   return hasRunMetadata;
-}
-
-function finalAnswerForArchitectureRun(
-  run: NonNullable<ReturnType<typeof resolveWorkflowTurnProjection>['architectureRun']>,
-): string | null {
-  if (run.finalArtifact?.trim()) {
-    return run.finalArtifact;
-  }
-  const finalizer = [...run.trace]
-    .reverse()
-    .find((step) => step.speaker === 'finalizer' && (step.content ?? '').trim().length > 0);
-  return finalizer?.content?.trim() ?? null;
 }

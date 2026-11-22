@@ -45,6 +45,7 @@ export interface ArchitectureRoleExecutionInput {
   outgoingNodeIds?: string[];
   resumeChildTurnId?: string;
   emit?: SubagentEmit;
+  signal?: AbortSignal;
   /** Host-supplied only, never read from run.context or model tool arguments. */
   purpose?: { kind: 'goal_proposal'; packet: ArchitectureGoalPacketV1 };
   /** Host-only object capability; never derive from run context or DTOs. */
@@ -160,6 +161,7 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
         slotPolicy: slotPolicy ?? undefined,
         architectureContext: input.run.context,
         timeoutMs: this.timeoutMsForSlot(input),
+        ...(input.signal ? { parentSignal: input.signal } : {}),
         maxIterations,
         structuredOutput: goalContract?.structuredOutput ?? structuredOutputForArchitectureSlot(input.slot),
         vfsMode: 'shared',
@@ -170,9 +172,18 @@ export class ArchitectureRoleExecutorService implements ArchitectureRoleExecutor
     } catch (error) {
       if (input.hostRuntimeReceiptObserver) throw error;
       if (goalContract) throw createWorkflowError('CONTRACT_VIOLATION', 'Goal proposal worker failed.', { source: 'architecture-goal-worker' });
+      const routingRole = input.slot.slotType === 'router' || input.slot.slotType === 'judge' || input.node?.kind === 'router';
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+      if (routingRole && code === 'LLM_BAD_STRUCTURED_OUTPUT') throw error;
+      if (routingRole && code === 'LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID') {
+        throw createWorkflowError('CONTRACT_VIOLATION', error instanceof Error ? error.message : 'Invalid structured output schema.', {
+          source: 'architecture-role-executor', retryable: false, cause: error,
+        });
+      }
       const streamSnapshot = streamHook.snapshot();
       const toolEvidence = summarizeToolEvidence(streamSnapshot);
-      if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0) {
+      if (toolEvidence.toolCallCount === 0 && toolEvidence.toolResultCount === 0
+        && !(code === 'SUBAGENT_TIMEOUT' && input.slot.slotType === 'tool_executor')) {
         throw error;
       }
       const failure = workflowFailureFromError(error);

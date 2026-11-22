@@ -17,6 +17,8 @@ describe('reconstructDurableArchitectureGraph', () => {
           content: '[Architecture: strategic-decision-council]\nAssess the project architecture.',
           createdAt: 100,
         },
+      ],
+      [`${runId}-router`]: [
         {
           id: `architecture:${runId}:router`,
           sessionId: `${runId}-router`,
@@ -36,6 +38,8 @@ describe('reconstructDurableArchitectureGraph', () => {
           },
           createdAt: 101,
         },
+      ],
+      [`${runId}-finalizer`]: [
         {
           id: `architecture:${runId}:finalizer`,
           sessionId: `${runId}-finalizer`,
@@ -497,6 +501,7 @@ function createPersistedSessions(messagesBySession: Record<string, ChatMessage[]
       },
     }))),
     getMessages: vi.fn(async (sessionId: string) => messagesBySession[sessionId] ?? []),
+    getArchitectureMessageCandidates: vi.fn(async () => Object.values(messagesBySession).flat()),
   } as unknown as SessionsService;
 }
 

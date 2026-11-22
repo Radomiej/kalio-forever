@@ -8,6 +8,7 @@ import type { IMessageRepository } from '../interfaces/message-repository.interf
 import type { ChatMessage } from '@kalio/types';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { RunJournalService } from '../run-journal.service';
+import { VFSService } from '../../vfs/vfs.service';
 
 function makeRepo(messages: ChatMessage[] = []): IMessageRepository {
   return {
@@ -38,6 +39,7 @@ describe('SessionManagerService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         SessionManagerService,
+        { provide: VFSService, useValue: { prepareSessionSandbox: vi.fn().mockResolvedValue(undefined) } },
         { provide: MESSAGE_REPOSITORY, useValue: nextRepo },
         { provide: ImageHydratorService, useValue: hydrator },
         { provide: CredentialsService, useValue: credentialsService },

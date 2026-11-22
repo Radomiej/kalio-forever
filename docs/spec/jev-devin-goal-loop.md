@@ -4,6 +4,37 @@ Source: USER-20261004-03/05 in ../meetings/2026-10-04-user-notes.md. Status: par
 
 ## User outcome
 
+### Publication ownership — 2026-11-03
+
+`ArchitectureRegistryModule` owns the sole registry independently of chat/execution. `ArchitectureModule` imports and re-exports that leaf. `AgentFlowGoalLaunchSnapshotModule` composes the registry publication port, existing alias publisher and freshly read user policy; it imports no execution runtime. Initial `readForLaunch` and decision-time `readCurrent` share exact allowlist/publication validation. Neither snapshot grants approval, child allocation or launch authority. Production protected disclosure/decision/claim/reservation/pair wiring and the full worker/reviewer loop remain incomplete; these modules alone do not activate a goal workflow.
+
+### Coding-goal default — user decision, 2026-11-02
+
+Coding goals require a successful build and an independent reviewer. The host policy requires BUILD_RESULT and QUALITY_GATE for each active criterion; a kind label alone is never evidence. QUALITY_GATE must resolve to the actual independently completed reviewer and its durable result. Commit and publication are required only when explicitly requested. The coding policy factory implements these requirements, but production composition and evidence binding remain separate activation gates; it does not infer build commands or authorize tools.
+
+### Constrained reviewer adapter — local prerequisite, 2026-11-02
+
+The internal turn/source contract can only narrow execution with `toolsDisabled: true`. It is not a user/tool argument or a capability grant. The loop removes advertised tools and result channels through every retry/repair and rejects generated tool calls before persistence or dispatch. Devin ACP additionally uses a dedicated deny-all host scope, refuses thread reuse, avoids bridge-token/config/context activation, and declines native permissions. Constrained activity/error audits contain static metadata rather than provider-controlled tool titles or output. Other final adapters currently reject this mode before activation; ordinary execution is unchanged when the flag is absent.
+
+Focused tests cover these runtime/adapter mechanics and actual private configuration with mocked CLI processes. This prerequisite does not prove real CLI denial, reviewer dispatch, admission ownership, goal completion or target deployment. Runtime activation requires the separate trusted issuer/lifecycle, migration and browser acceptance gates below.
+
+### Unwired reviewer lifecycle foundations
+
+- A database-owned synchronous classifier identifies reserved reviewer child IDs. It verifies the digest of the original descriptor bytes and supported metadata/linkage; successful no-row lookup alone returns null. Missing schema, deleted reserved child or malformed data fails closed. Classification is not full fresh binding validation or launch authority.
+- The admission repository can assert that the original insertion winner's ID/hash is still started and current inside one read snapshot. It reconstructs every original binding, performs no writes/CAS and returns no capability.
+- The active-run registry supports an exclusive captured owner and one-time prompt binding. Ordinary registration cannot overwrite that owner. Completion settles its own barrier despite synchronous cleanup failure, records a static error and preserves the primary execution failure; settlement alone does not prove outstanding work drained.
+
+These foundations are not wired into the production runtime. Mandatory reader injection must not activate before migration0039 on the target. A trusted issuer, actual winner capability, immutable pins, prompt/profile/VFS validation and abort/drain integration remain required before reviewer execution or goal acceptance.
+
+### Durable reviewer admission — local storage boundary, 2026-11-02
+
+The additive `goal_reviewer_admissions` storage and migration0039 are implemented locally. This is not runtime/module wiring or proof of the complete goal loop. Promotion requires reviewed migration, runtime capability and real child-execution tests.
+
+- One attempt is reserved per logical goal/source/worker snapshot. Only the successful insert receives a one-use in-memory start capability after the child and admission transaction commits. Existing, cancelled or orphaned admissions never redispatch automatically; profile/policy changes reject rather than create another attempt.
+- Goal source version, goal state revision and admission CAS revision are separate values. Start rereads exact goal, worker, profile and policy bindings inside the transaction, then competes with cancellation through admitted0 → started1 or cancelled1. Cancelling an admitted row does not claim to stop an already-started process.
+- Immutable metadata stores references and hashes, not raw goal, worker, prompt or policy bodies. Normal chat deletion remains possible. A retained metadata tombstone prevents recreating or reassigning its reserved child ID; missing child/proof remains unavailable.
+- No completion receipt, semantic approval or execution proof is generated by this storage. Existing Jev/V2 authority checks remain required. Planned runtime integration must pin the effective profile/model and deny reviewer tools, propagate stop, produce the exact planned-turn journal and expose the real child in the UI.
+
 The first prompt establishes the goal and acceptance criteria. Later user messages can change scope. Devin executes; Jev judges whether the current goal is fulfilled from observed evidence, not solely Devin's claim. Incomplete work returns to Devin with specific next actions. Completed work terminates the loop and presents a final evidence-based report.
 
 ## Roles and context

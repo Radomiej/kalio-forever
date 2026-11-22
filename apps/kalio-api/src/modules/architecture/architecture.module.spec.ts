@@ -2,7 +2,7 @@ import { MODULE_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 import { ChatModule } from '../chat/chat.module';
 import { VFSModule } from '../vfs/vfs.module';
-import { ArchitectureRegistryService } from './architecture-registry.service';
+import { ArchitectureRegistryModule } from './architecture-registry.module';
 import { ARCHITECTURE_ROLE_EXECUTOR, ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
 import { ArchitectureModule } from './architecture.module';
@@ -53,7 +53,7 @@ describe('ArchitectureModule', () => {
     expect(Reflect.getMetadata(MODULE_METADATA.IMPORTS, ArchitectureModule)).toContain(ChatModule);
     expect(Reflect.getMetadata(MODULE_METADATA.IMPORTS, ArchitectureModule)).toContain(VFSModule);
     expect(Reflect.getMetadata(MODULE_METADATA.EXPORTS, ArchitectureModule)).toEqual([
-      ArchitectureRegistryService,
+      ArchitectureRegistryModule,
       ArchitectureRuntimeService,
       ARCHITECTURE_REMOTE_GRAPH_PORT,
     ]);

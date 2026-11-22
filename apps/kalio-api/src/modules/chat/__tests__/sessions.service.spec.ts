@@ -620,6 +620,7 @@ describe('SessionsService', () => {
     it('registers projectPath only for trusted runtime-context updates', async () => {
       rows.push({
         id: 's1',
+        projectId: 'project-1',
         personaId: 'p1',
         title: 'Old',
         runtimeContext: {
@@ -636,6 +637,19 @@ describe('SessionsService', () => {
       await service.registerRuntimeProjectPathForSession('s1');
 
       expect(allowedPaths.ensurePath).toHaveBeenCalledWith('C:\\Projekty\\kalio-forever');
+    });
+
+    it.each(['system:none', undefined])('never registers no-project cwd as a global allowed path (%s)', async projectId => {
+      rows.push({
+        id: 'no-project', personaId: 'p1', title: 'Chat', projectId,
+        runtimeContext: { runtimeKind: 'chat', architectureContext: {
+          projectPath: 'C:/Kalio/app/versions/1.0.5/server',
+          executionCwd: 'C:/Kalio/app/versions/1.0.5/server',
+        } },
+        createdAt: 0, updatedAt: 0,
+      });
+      await service.registerRuntimeProjectPathForSession('no-project');
+      expect(allowedPaths.ensurePath).not.toHaveBeenCalled();
     });
   });
 

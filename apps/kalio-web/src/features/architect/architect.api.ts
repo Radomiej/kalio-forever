@@ -18,6 +18,7 @@ import type {
 } from './architect.types';
 import type { LLMConfigWithSource } from '../settings/llm-panel.types';
 import { normalizeArchitectureSchemas } from './architect.schema';
+import { validateArchitectStatusRouting } from './architect.status-routing';
 import { validateArchitectAutoRouting } from './architect.auto-routing';
 import { toSchemaNodes } from './ArchitectPage.graph';
 import { notifyArchitectureRegistryChanged } from './architectureRegistryEvents';
@@ -53,6 +54,9 @@ export async function saveArchitectureVariant(
     nodes: dto.nodes.map((node) => ({ ...node, kind: dto.nodeKindOverrides?.[node.id] ?? node.kind })),
     edges: dto.edges,
   });
+  if (dto.nodes && dto.edges) validateArchitectStatusRouting({
+    nodes: dto.nodes.map((node) => ({ ...node, kind: dto.nodeKindOverrides?.[node.id] ?? node.kind })), edges: dto.edges,
+  });
   const { data } = await apiClient.post<unknown>(`/api/architecture-registry/schemas/${schemaId}/variants`, dto);
   if (!data) {
     throw new Error('Architecture variant response was empty');
@@ -87,6 +91,7 @@ export async function startArchitectureRun(
   };
   if (schema) {
     validateArchitectAutoRouting(schema);
+    validateArchitectStatusRouting(schema);
     dto.schema = {
       ...schema,
       nodes: toSchemaNodes(schema),

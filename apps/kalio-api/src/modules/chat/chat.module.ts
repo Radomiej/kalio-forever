@@ -185,7 +185,7 @@ import {
       useExisting: DrizzleMessageRepository,
     },
   ],
-  exports: [CHAT_REMOTE_SUPERVISION_PORT, AuditModule, ChatService, ChatGateway, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, PersistedGoalSourceReader, CHAT_DURABLE_EVIDENCE_READER, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
+  exports: [CHAT_REMOTE_SUPERVISION_PORT, AuditModule, ChatService, ChatGateway, SessionEventsService, ToolDispatchService, SessionManagerService, ContextAssemblyService, ContextPreviewService, LLMTurnRuntimeService, SessionsService, PersistedGoalSourceReader, CHAT_DURABLE_EVIDENCE_READER, ProjectsService, RunJournalService, RuntimeAuditLogger, SubagentRuntimeService, SessionRuntimeStopService, SUBAGENT_RUNTIME],
 })
 export class ChatModule implements OnModuleInit {
   constructor(

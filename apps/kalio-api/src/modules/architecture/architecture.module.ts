@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ARCHITECTURE_REMOTE_GRAPH_PORT } from '@kalio/types';
 import { ChatModule } from '../chat/chat.module';
+import { SessionEventsService } from '../chat/session-events.service';
+import { ARCHITECTURE_RUNTIME_EVENTS, type ArchitectureRuntimeEmit } from './architecture-runtime-events.port';
 import { CLIAgentModule } from '../cli-agent/cli-agent.module';
 import { VFSModule } from '../vfs/vfs.module';
 import { ArchitectureRegistryController } from './architecture-registry.controller';
-import { ArchitectureRegistryService } from './architecture-registry.service';
+import { ArchitectureRegistryModule } from './architecture-registry.module';
 import { ARCHITECTURE_ROLE_EXECUTOR, ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { ArchitectureRunsController } from './architecture-runs.controller';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
@@ -39,7 +41,7 @@ import { VFSService } from '../vfs/vfs.service';
 import { CHAT_DURABLE_EVIDENCE_READER, type ChatDurableEvidenceReaderPort } from '@kalio/types';
 
 @Module({
-  imports: [ChatModule, VFSModule, CLIAgentModule, ToolModule, AgentRuntimeModule],
+  imports: [ArchitectureRegistryModule, ChatModule, VFSModule, CLIAgentModule, ToolModule, AgentRuntimeModule],
   controllers: [ArchitectureRegistryController, ArchitectureRunsController],
   providers: [
     JevDecisionsClient,
@@ -101,7 +103,6 @@ import { CHAT_DURABLE_EVIDENCE_READER, type ChatDurableEvidenceReaderPort } from
       useFactory: (repository: ArchitectureGoalRepository, sources: PersistedGoalSourceReader) =>
         new ArchitectureGoalLifecycleService(repository, sources),
     },
-    ArchitectureRegistryService,
     ArchitectureRunPreparationService,
     ArchitectureRuntimeAuditWriterService,
     ArchitectureRuntimeAuditRecoveryService,
@@ -111,6 +112,11 @@ import { CHAT_DURABLE_EVIDENCE_READER, type ChatDurableEvidenceReaderPort } from
     { provide: ARCHITECTURE_REMOTE_GRAPH_PORT, inject: [ArchitectureRuntimeService],
       useFactory: (runtime: ArchitectureRuntimeService) => ({ getGraph: (runId: string) => runtime.getGraphDurable(runId) }) },
     {
+      provide: ARCHITECTURE_RUNTIME_EVENTS,
+      inject: [SessionEventsService],
+      useFactory: (events: SessionEventsService): ArchitectureRuntimeEmit => events.emitRuntimeEvent,
+    },
+    {
       provide: ARCHITECTURE_RUNTIME_STOP,
       useExisting: ArchitectureRuntimeService,
     },
@@ -119,6 +125,6 @@ import { CHAT_DURABLE_EVIDENCE_READER, type ChatDurableEvidenceReaderPort } from
       useClass: ArchitectureRoleExecutorService,
     },
   ],
-  exports: [ArchitectureRegistryService, ArchitectureRuntimeService, ARCHITECTURE_REMOTE_GRAPH_PORT],
+  exports: [ArchitectureRegistryModule, ArchitectureRuntimeService, ARCHITECTURE_REMOTE_GRAPH_PORT],
 })
 export class ArchitectureModule {}

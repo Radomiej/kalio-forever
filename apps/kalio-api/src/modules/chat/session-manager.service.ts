@@ -1,4 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
+import { VFSService } from '../vfs/vfs.service';
 import { nanoid } from 'nanoid';
 import type { ChatAttachment, ChatMessage, LLMContent, LLMTextPart, ToolMeta } from '@kalio/types';
 import type { IMessageRepository } from './interfaces/message-repository.interface';
@@ -21,6 +22,7 @@ export class SessionManagerService {
     private readonly imageHydrator: ImageHydratorService,
     private readonly credentialsService: CredentialsService,
     private readonly runJournal: RunJournalService,
+    @Optional() private readonly vfs?: VFSService,
   ) {}
 
   private buildTurnLink(
@@ -36,6 +38,8 @@ export class SessionManagerService {
   /** Upserts the session row so FK constraints are satisfied before message inserts. */
   async ensureSession(sessionId: string, personaId: string): Promise<void> {
     await this.repo.ensureSession(sessionId, personaId);
+    if (!this.vfs) throw new Error('VFSService is required for session execution scope');
+    await this.vfs.prepareSessionSandbox(sessionId);
   }
 
   async loadHistory(
@@ -77,7 +81,7 @@ export class SessionManagerService {
 
   async loadHistoryForLLM(
     sessionId: string,
-    options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string },
+    options: { systemPrompt: string; toolMetas: ToolMeta[]; historySessionId?: string; devinAcp?: boolean },
   ): Promise<{ history: ContextManagedLLMMessage[]; unboundedHistoryCount: number; compacted: boolean }> {
     const historySessionIds = options.historySessionId && options.historySessionId !== sessionId
       ? [options.historySessionId, sessionId]
@@ -93,6 +97,7 @@ export class SessionManagerService {
       options.systemPrompt,
       contextWindowSize,
       options.toolMetas,
+      options.devinAcp,
     );
     const unboundedHistory = options.systemPrompt
       ? [{ role: 'system', content: options.systemPrompt } satisfies ContextManagedLLMMessage, ...rawHistory]

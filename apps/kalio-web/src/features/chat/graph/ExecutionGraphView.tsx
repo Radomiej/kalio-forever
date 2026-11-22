@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Project } from '@kalio/types';
 import { useAgentStore } from '../../../store/agentStore';
 import { assignSessionProject } from '../../../services/apiClient';
 import { useSessionStore } from '../../../store/sessionStore';
 import { buildTurnsFromHistory } from '../chatUtils';
 import { hydrateActiveConversationSession } from '../activeConversationSession';
-import {
-  buildExecutionGraphModel,
-} from './executionGraphModel';
+import { buildExecutionGraphModel } from './executionGraphModel';
 import { ExecutionGraphBoard } from './ExecutionGraphBoard';
 import type { GraphCardDensity } from './ExecutionGraphBoard.types';
 import { ExecutionGraphHeader } from './ExecutionGraphHeader';
@@ -35,10 +33,11 @@ import {
 interface ExecutionGraphViewProps {
   onOpenSessionInConversation?: (sessionId: string) => void;
   talkView?: TalkView;
+  sidebarExpand?: ReactNode;
   onTalkViewChange?: (view: TalkView) => void;
 }
 
-export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'graph', onTalkViewChange = () => undefined }: ExecutionGraphViewProps = {}) {
+export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'graph', onTalkViewChange = () => undefined, sidebarExpand }: ExecutionGraphViewProps = {}) {
   const {
     activeSessionId,
     messages,
@@ -335,6 +334,7 @@ export function ExecutionGraphView({ onOpenSessionInConversation, talkView = 'gr
       zoom={zoom}
       talkView={talkView}
       onTalkViewChange={onTalkViewChange}
+      sidebarExpand={sidebarExpand}
       projectId={activeSession ? projectId : undefined}
       onProjectChange={activeSession ? handleProjectChange : undefined}
       projectPickerDisabled={isBusy}

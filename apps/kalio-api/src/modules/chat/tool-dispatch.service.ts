@@ -12,6 +12,7 @@ import { HitlPolicyService } from '../hitl/hitl-policy.service';
 import { RuntimeAuditLogger } from './runtime-audit-logger.service';
 import { detachHostReceiptArgs } from './llm-turn-runtime-dispatch';
 import { readHostConfirmationRequirement } from './tool-confirmation.persistence';
+import { toolArgumentValidationError } from './tool-argument-validation';
 
 const SUBAGENT_AUTO_APPROVE_TOOL_NAMES = new Set([
   'vfs_write',
@@ -112,12 +113,20 @@ export class ToolDispatchService {
       || !ctx.onResolvedToolDispatch || !ctx.registerToolResultReceiptCommit)) throw new Error('HOST_CONFIRMATION_DURABILITY_REQUIRED');
     if (observed && entry && canonicalName !== toolName) throw new Error('HOST_DISPATCH_REGISTRY_MISMATCH');
     if (observed) args = detachHostReceiptArgs(args);
+    if (entry) {
+      const invalid = this.invalidArguments(callId, toolName, entry.meta.parameters, args, ctx);
+      if (invalid) return invalid;
+    }
     let approvalProof: HostDispatchApproval = Object.freeze({ kind: 'non_durable', reason: requestConfirmation ? 'not_required' : 'explicit_bypass' });
+    let validateBeforeExecution: (() => Promise<boolean>) | undefined;
     if (!entry) {
       // Route MCP tools by their canonical mcp_{serverKey}_{toolName} names.
       if (this.mcpService) {
         const mcpRef = this.mcpService.resolveToolName(toolName);
         if (mcpRef) {
+          const canonical = this.mcpService.getToolByName(toolName);
+          const invalid = this.invalidArguments(callId, toolName, canonical?.parameters, args, ctx);
+          if (invalid) return invalid;
           const resolvedMcpTarget = observed
             ? Object.freeze({ serverKey: mcpRef.serverKey, originalName: mcpRef.originalName }) : mcpRef;
           // External MCP calls always require a human, regardless of global policy or tool metadata.
@@ -154,10 +163,12 @@ export class ToolDispatchService {
       }, toolName, ctx);
     }
 
+    const subagentAuto = isAutoApprovedSubagentTool(toolName, ctx)
+      && !await this.confirmations.reviewsSubagentAutoApprovals();
     if (
       requestConfirmation
       && (hostRequirement || (observed ? requiresConfirmation : entry.meta.requiresConfirmation))
-      && (hostRequirement || !isAutoApprovedSubagentTool(toolName, ctx))
+      && (hostRequirement || !subagentAuto)
     ) {
       const approval = await this.confirmations.approveOrRequestConfirmation(callId, toolName, args, ctx, Boolean(hostRequirement));
       if (!approval.approved) {
@@ -165,9 +176,10 @@ export class ToolDispatchService {
       }
       if (hostRequirement && !approval.execution) throw new Error('HOST_CONFIRMATION_DURABLE_CLAIM_REQUIRED');
       approvalProof = this.approvalProof(approval);
+      validateBeforeExecution = approval.validateBeforeExecution;
       this.registerLiveExecution(ctx, approval);
     }
-    else if (requestConfirmation && requiresConfirmation && isAutoApprovedSubagentTool(toolName, ctx)) {
+    else if (requestConfirmation && requiresConfirmation && subagentAuto) {
       approvalProof = Object.freeze({ kind: 'non_durable', reason: 'subagent_auto' });
     }
 
@@ -191,10 +203,29 @@ export class ToolDispatchService {
         _emit: ctx.emit as ToolCallRequest['_emit'],
         abortSignal: ctx.abortSignal,
     };
+    if (validateBeforeExecution) {
+      try {
+        if (!await validateBeforeExecution()) return this.cancelledResult(callId, toolName, ctx, 'Jev approval is stale; request a fresh decision.');
+      } catch (error) {
+        if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+        this.logger.error('Jev execution approval validation failed', error);
+        return this.withMeta({ callId, status: 'error', errorCode: 'APPROVAL_VALIDATION_FAILED',
+          errorMessage: 'Execution approval could not be verified. Request a fresh decision.' }, toolName, ctx);
+      }
+    }
+    if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
     if (observed) acknowledgeExecutorEntry(ctx);
     try {
       const data = observed ? await execute!.call(entry, req) : await entry.execute(req);
       if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
+      if (toolName === 'run_raapp' && data && typeof data === 'object' && 'status' in data && data.status === 'error') {
+        return this.withMeta({
+          callId,
+          status: 'error',
+          errorCode: 'code' in data && typeof data.code === 'string' ? data.code : 'TOOL_EXECUTION_FAILED',
+          errorMessage: 'message' in data && typeof data.message === 'string' ? data.message : 'RA-App execution failed.',
+        }, toolName, ctx);
+      }
       return this.withMeta({ callId, status: 'success', data }, toolName, ctx);
     } catch (err) {
       if (ctx.abortSignal.aborted) return this.cancelledResult(callId, toolName, ctx);
@@ -264,6 +295,12 @@ export class ToolDispatchService {
       callId, requestedName, canonicalName, args, target: Object.freeze(target), approval }));
   }
 
+  private invalidArguments(callId: string, toolName: string, schema: unknown, args: unknown, ctx: StreamContext): ToolResult | undefined {
+    const reason = toolArgumentValidationError(schema, args);
+    if (reason) return this.withMeta({ callId, status: 'error', errorCode: 'INVALID_ARGUMENT',
+      errorMessage: `Invalid arguments for ${toolName}: ${reason} Correct the arguments and submit a new call.` }, toolName, ctx);
+  }
+
   private withMeta(result: ToolResult, toolName: string, ctx: StreamContext): ToolResult {
     if (!ctx.agentRun) return result;
     return {
@@ -278,7 +315,7 @@ export class ToolDispatchService {
     return this.withMeta({
       callId,
       status: 'cancelled',
-      ...(rejectionMessage ? { errorMessage: `User rejected tool confirmation: ${rejectionMessage}` } : {}),
+      ...(rejectionMessage ? { errorMessage: rejectionMessage } : {}),
     }, toolName, ctx);
   }
 

@@ -16,8 +16,28 @@ env:
   ONNXRUNTIME_NODE_INSTALL: skip
 
 jobs:
+  platform-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify platform lifecycle contracts
+        run: node --test scripts/stack-state.test.mjs scripts/stack-port-owners.test.mjs scripts/stack-ownership.test.mjs scripts/corepack-path.test.mjs scripts/stack-qa-env.test.mjs
+      - name: Verify macOS source installer contracts
+        if: runner.os != 'Windows'
+        run: node --test scripts/macos-installer.test.mjs
+      - name: Verify Linux archive installer contracts
+        if: runner.os == 'Linux'
+        run: node --test scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs
+
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,6 +57,9 @@ jobs:
       - name: Build workspace packages
         run: pnpm --filter @kalio/types --filter @kalio/sdk build
 
+      - name: Install Chromium for browser storage tests
+        run: pnpm --filter kalio-web exec playwright install --with-deps chromium
+
       - name: Run workspace tests
         run: pnpm turbo run test --filter=!@kalio/e2e
 
@@ -44,7 +67,7 @@ jobs:
         run: pnpm --filter @kalio/e2e test
 
       - name: Linux installer, updater and local-model harness regressions
-        run: node --test scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs scripts/local-model-benchmark.test.mjs scripts/runtime-dependencies.test.mjs scripts/corepack-path.test.mjs
+        run: node --test scripts/macos-installer.test.mjs scripts/linux-installer.test.mjs scripts/linux-cli.test.mjs scripts/linux-updater.test.mjs scripts/local-model-benchmark.test.mjs scripts/runtime-dependencies.test.mjs scripts/corepack-path.test.mjs
 
   backend:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
@@ -83,7 +106,7 @@ jobs:
 
   frontend:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -103,8 +126,14 @@ jobs:
       - name: Frontend typecheck
         run: pnpm --filter kalio-web typecheck
 
+      - name: Install Chromium for browser storage tests
+        run: pnpm --filter kalio-web exec playwright install --with-deps chromium
+
       - name: Frontend coverage gate
         run: pnpm --filter kalio-web test:cov
+
+      - name: Frontend mutation gate
+        run: pnpm --filter kalio-web test:mutation
 
   audit:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
@@ -130,12 +159,14 @@ jobs:
 
   e2e:
     if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'mvp'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       CI: 'true'
       LLM_PROVIDER: mock
       CREDENTIALS_MASTER_KEY: ci-test-master-key-32-chars-minimum
       KALIO_E2E_PROJECT_PATH: ${{ github.workspace }}
+      KALIO_CONTROL_PLANE_AUTH: disabled
+      KALIO_HOST: 127.0.0.1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

@@ -97,6 +97,16 @@ export class MockLLMProvider implements ILLMProvider {
       });
       return [];
     }
+    // Explicit isolated fixture: exercise executor evidence without exposing host files.
+    if (lastMessage.includes('[[mock:architecture:evidence]]') && hasTool(tools, 'vfs_write')) {
+      if (hasPriorToolResult(messages, 'vfs_write', 'e2e/mock-tool-trigger.txt')) {
+        emitText(options, 'Completed isolated architecture fixture with VFS tool evidence.');
+        return [];
+      }
+      const toolCall = createVfsWriteToolCall();
+      emitMockToolArgProgress(options, toolCall);
+      return [toolCall];
+    }
     if (options.structuredOutput?.name === 'data_analyst_query_plan') {
       options.onStructuredOutput?.(createMockDataAnalystPlan(lastMessage));
       return [];

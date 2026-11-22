@@ -8,7 +8,7 @@ import { eventBus } from '../../services/eventBus';
 import { HomeHitlInbox } from './HomeHitlInbox';
 
 vi.mock('../../services/eventBus', () => ({
-  eventBus: { confirmTool: vi.fn(), cancelTool: vi.fn() },
+  eventBus: { identifySession: vi.fn(), confirmTool: vi.fn(), cancelTool: vi.fn() },
 }));
 
 const request: ToolConfirmationRequest = {
@@ -44,11 +44,16 @@ describe('Home approval preservation with the real runtime store', () => {
     expect(eventBus.confirmTool).toHaveBeenCalledWith({
       requestId: 'request-child', sessionId: 'child-session', message: 'Approved scope only.',
     });
+    expect(eventBus.identifySession).toHaveBeenCalledExactlyOnceWith('child-session');
+    expect(vi.mocked(eventBus.identifySession).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(eventBus.confirmTool).mock.invocationCallOrder[0]);
     expect(useAgentStore.getState().pendingConfirmations['child-session']).toEqual([request]);
     expect(useAgentStore.getState().settledConfirmationRequestIds['request-child']).toBeUndefined();
     expect(useAgentStore.getState().getToolActivitiesForSession('child-session')[0].status).toBe('awaiting_confirmation');
     expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
     expect(screen.getByTestId('home-hitl-note-request-child')).toHaveValue('  Approved scope only.  ');
+    expect(screen.getByRole('button', { name: 'Approve' }).closest('article'))
+      .toHaveClass('border-l-4', 'border-l-warning', 'shadow-sm');
   });
 
   it('removes the request when the authoritative pending projection is cleared', () => {
@@ -62,6 +67,9 @@ describe('Home approval preservation with the real runtime store', () => {
     render(<HomeHitlInbox onOpenSession={vi.fn()} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Reject' }));
     expect(eventBus.cancelTool).toHaveBeenCalledWith({ requestId: 'request-child', sessionId: 'child-session' });
+    expect(eventBus.identifySession).toHaveBeenCalledExactlyOnceWith('child-session');
+    expect(vi.mocked(eventBus.identifySession).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(eventBus.cancelTool).mock.invocationCallOrder[0]);
     expect(useAgentStore.getState().pendingConfirmations['child-session'] ?? []).toEqual([]);
     expect(useAgentStore.getState().getToolActivitiesForSession('child-session')[0].status).toBe('cancelled');
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();

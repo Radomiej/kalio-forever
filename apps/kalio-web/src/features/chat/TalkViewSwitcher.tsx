@@ -21,7 +21,7 @@ export function TalkViewSwitcher({ value, onChange, compact = false }: TalkViewS
           <button
             key={option.value}
             type="button"
-            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${value === option.value ? 'bg-primary/15 text-primary' : 'text-base-content/55 hover:text-base-content/85'}`}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${value === option.value ? 'bg-primary/15 text-base-content' : 'text-base-content/55 hover:text-base-content/85'}`}
             onClick={() => onChange(option.value)}
             aria-pressed={value === option.value}
             data-testid={`talk-${option.value}-switcher`}

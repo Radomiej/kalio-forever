@@ -100,6 +100,25 @@ describe('ModelSettingsSection', () => {
     await waitFor(() => expect(screen.getByTestId('model-selector')).toHaveValue('gpt-4o-mini'));
   });
 
+  it('labels the effective environment fallback without implying the connected agent changed', async () => {
+    mockFetch({
+      'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },
+      'GET /api/llm/active/models': { models: [] },
+    });
+    render(<ModelSettingsSection
+      activeRuntimeConfig={{ ...ACTIVE_RUNTIME_CONFIG, source: 'env', provider: 'mock', model: 'mock', displayName: 'mock' }}
+      providers={[CRED]}
+      envFallback={{ provider: 'mock', label: 'mock', model: 'mock' }}
+      onRuntimeConfigChange={vi.fn()}
+    />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'New turns use this environment fallback. Connected agent selection in LLM Settings is separate.',
+    );
+    expect(screen.getByRole('combobox', { name: 'Runtime provider' })).toHaveValue('__env__');
+    expect(screen.getByRole('option', { name: /My OpenAI/ })).toBeInTheDocument();
+  });
+
   it('populates model dropdown from GET /api/llm/active/models', async () => {
     mockFetch({
       'GET /api/credentials/settings/generation': { temperature: 0.7, maxTokens: 4096 },

@@ -19,6 +19,7 @@ export class DevinApiLLMSource implements ILLMSource {
   constructor(private readonly client: DevinApiClient) {}
 
   async *stream(params: LLMSourceParams): AsyncGenerator<InternalLLMChunk> {
+    if (params.toolsDisabled) throw new Error('LLM_TOOLS_DISABLED_UNSUPPORTED');
     const profile = params.executionProfile;
     if (!profile || profile.kind !== 'devin-api') {
       throw new Error('Devin API source requires a devin-api execution profile.');

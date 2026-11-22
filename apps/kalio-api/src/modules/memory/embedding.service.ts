@@ -12,6 +12,8 @@ import {
   DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
   DEFAULT_LOCAL_EMBEDDING_BACKEND,
   DEFAULT_LOCAL_EMBEDDING_MODEL,
+  GEMMA2_LOCAL_EMBEDDING_MODEL,
+  GEMMA2_LOCAL_EMBEDDING_DIMENSIONS,
   LOCAL_EMBEDDING_MODEL_PARAMETERS,
   LocalTransformersEmbeddingProvider,
   type LocalEmbeddingBackend,
@@ -86,18 +88,22 @@ function parseNumberOrDefault(value: string, fallback: number): number {
 export function buildDefaultLocalEmbeddingConfig(config: ConfigService): LocalEmbeddingConfig {
   const hasRemoteEmbeddingEnv = Boolean(config.get<string>('EMBEDDING_API_KEY', '') && config.get<string>('EMBEDDING_BASE_URL', ''));
   const legacyLocalModel = hasRemoteEmbeddingEnv
-    ? DEFAULT_LOCAL_EMBEDDING_MODEL
-    : config.get<string>('EMBEDDING_MODEL', DEFAULT_LOCAL_EMBEDDING_MODEL);
+    ? GEMMA2_LOCAL_EMBEDDING_MODEL
+    : config.get<string>('EMBEDDING_MODEL', GEMMA2_LOCAL_EMBEDDING_MODEL);
+  const model = config.get<string>('EMBEDDING_LOCAL_MODEL', legacyLocalModel);
+  // Selection defaults are separate from the pinned E5 adapter identity.
+  const modelDimensions = model === GEMMA2_LOCAL_EMBEDDING_MODEL
+    ? GEMMA2_LOCAL_EMBEDDING_DIMENSIONS : DEFAULT_LOCAL_EMBEDDING_DIMENSIONS;
   const legacyLocalDimensions = hasRemoteEmbeddingEnv
-    ? DEFAULT_LOCAL_EMBEDDING_DIMENSIONS
+    ? modelDimensions
     : parseNumberOrDefault(
-      config.get<string>('EMBEDDING_DIMENSIONS', String(DEFAULT_LOCAL_EMBEDDING_DIMENSIONS)),
-      DEFAULT_LOCAL_EMBEDDING_DIMENSIONS,
+      config.get<string>('EMBEDDING_DIMENSIONS', String(modelDimensions)),
+      modelDimensions,
     );
 
   return {
     enabled: readEnvBooleanFlag(config.get<boolean | string>('EMBEDDING_ENABLED'), true),
-    model: config.get<string>('EMBEDDING_LOCAL_MODEL', legacyLocalModel),
+    model,
     dimensions: parseNumberOrDefault(
       config.get<string>('EMBEDDING_LOCAL_DIMENSIONS', String(legacyLocalDimensions)),
       legacyLocalDimensions,

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Minimize2, ChevronDown } from 'lucide-react';
+import { X, Minimize2, ChevronDown, LoaderCircle } from 'lucide-react';
 import { formatTokenCount, type TokenCount } from '../../services/tokenCounter';
 import type { LLMContent, LLMContextPreview } from '@kalio/types';
 
@@ -210,16 +210,26 @@ export function ContextStats({ tokenCount, onCompactNow, onClose, systemPrompt, 
             onClick={() => setRawOpen((value) => !value)}
           >
             <span>LLM payload preview</span>
+            <span role="status" aria-live="off" className="inline-flex h-3 w-3 shrink-0 items-center text-base-content/60">
+              {contextPreviewStatus?.loading && (
+                <>
+                  <LoaderCircle size={12} aria-hidden="true" className="motion-safe:animate-spin" />
+                  <span className="sr-only">{contextPreview ? 'Refreshing context preview' : 'Loading context preview'}</span>
+                </>
+              )}
+            </span>
             <ChevronDown size={11} className={`ml-auto transition-transform duration-150 ${rawOpen ? 'rotate-180' : ''}`} />
           </button>
           {rawOpen && (
             <div
               data-testid="context-preview-panel"
+              aria-busy={contextPreviewStatus?.loading ?? false}
               className="mt-1.5 max-h-72 overflow-y-auto rounded bg-base-300/60 px-2 py-1.5 text-[10px] text-base-content/70"
             >
-              {contextPreviewStatus?.loading && !contextPreview && <p>Loading backend preview...</p>}
-              {contextPreviewStatus?.stale && <p className="text-warning">stale preview; refreshing...</p>}
-              {contextPreviewStatus?.error && <p className="text-error">{contextPreviewStatus.error}</p>}
+              <div data-testid="context-preview-status" className="min-h-4 text-base-content/60">
+                {contextPreviewStatus?.stale && <p>Stale preview</p>}
+                {contextPreviewStatus?.error && <p className="text-error">{contextPreviewStatus.error}</p>}
+              </div>
               {contextPreview && (
                 <div className="space-y-2">
                   <section>

@@ -22,7 +22,7 @@ export function ActiveEmbeddingModelCard({ status, localAvailability }: ActiveEm
     else if (!availability) label = 'Availability not checked';
     else if (availability.status === 'ready' && availability.installed) label = 'Installed · ready to use';
     else if (availability.status === 'installing') label = 'Installing…';
-    else if (availability.status === 'error') label = 'Installation failed';
+    else if (availability.status === 'error') label = 'Model unavailable · reinstall below';
     else label = 'Not installed · install below';
   }
   const provider = status?.source === 'local' || status?.source === 'disabled'

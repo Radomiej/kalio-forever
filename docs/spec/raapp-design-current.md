@@ -30,6 +30,15 @@ Najwazniejsze jest rozroznienie trzech rzeczy, ktore latwo pomylic:
 
 ## Co jest czym
 
+`run_raapp` sprawdza obiekt `inputs` według schematu z katalogu przed uruchomieniem efektów. Brakujące pola, niewłaściwe typy, błędy kompilacji i jawny błąd obliczenia wracają jako nieudane wywołanie narzędzia. Kafelek Visual Calculator przekazuje przykładowe `12 + 4`, gdy użytkownik otwiera kalkulator bez własnych danych. Graf pokazuje podgląd z tego samego wyniku co czat. Automatyczne dopasowanie kamery odbywa się przy pierwszym pokazaniu grafu oraz na żądanie.
+
+### Interactive Q&A: dane i widocznosc odpowiedzi
+
+- `run_raapp` wymaga jawnego, niepustego tekstowego `id`; brak lub zly typ zwraca wskazowke uzycia `list_raapps` przed lookupem. Nie ma aliasu `name`, domyslnej aplikacji ani konwersji typu.
+- Q&A wymaga niepustego pytania i 1–5 niepustych odpowiedzi. Odpowiedzi `no`, `false` i `0` sa poprawnymi tekstami, nie warunkami widocznosci.
+- Po walidacji FE projektuje tylko historyczne bindingi `visible="[output.option_i]"` przyciskow w `qa_panel` na jawna obecnosc odpowiedzi. Projekcja kopiuje GUI; zachowuje zapisany wynik, tekst odpowiedzi i globalne reguly DSL. Dotyczy tez historii odtworzonej po F5, bez migracji definicji aplikacji.
+- Klikniecie przekazuje oryginalny tekst odpowiedzi. Brakujace sloty pozostaja ukryte; inne aplikacje i niestandardowe warunki widocznosci pozostaja poza ta projekcja.
+
 | Powierzchnia | Owner | Gdzie zyje | Jak trafia do UI |
 | --- | --- | --- | --- |
 | Inline RA-App block | `ToolResult` / `tool_result` message | Historia czatu | `ToolCallBubble` -> `RAAppRenderer` |

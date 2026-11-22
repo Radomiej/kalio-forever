@@ -101,7 +101,7 @@ export function ToolCard({ activity }: { activity: ToolActivity }) {
         {getToolTargetLabel(activity.toolName, activity.args) && (
           <span
             data-testid="tool-call-target"
-            className="max-w-28 shrink truncate text-left font-mono text-[10px] text-base-content/40"
+            className="max-w-28 shrink truncate text-left font-mono text-[10px] text-base-content/60"
             title={getToolTargetLabel(activity.toolName, activity.args) ?? undefined}
           >
             {getToolTargetLabel(activity.toolName, activity.args)}

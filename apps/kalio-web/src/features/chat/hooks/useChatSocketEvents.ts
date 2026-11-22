@@ -8,6 +8,7 @@ import { canReleaseComposerAfterToolResult, createToolResultMessage, createToolA
 import { handleCliChildProgress, handleCliChildToolResult, isCliChildToolName, resolveCliToolName } from './useChatSocketEvents.cliChild';
 import { registerConnectionRecoveryHandlers, registerSessionLifecycleHandlers } from './useChatSocketEvents.lifecycle';
 import { projectSubAgentFlowArchitectureResult } from '../architectureAgentFlowProjection';
+import { registerAgentTurnLifecycle } from './useChatSocketEvents.turnLifecycle';
 
 export function useChatSocketEvents({
   hasPendingChunksForSession,
@@ -300,34 +301,10 @@ export function useChatSocketEvents({
       });
     });
 
-    const offAgentStart = eventBus.onAgentStart((payload) => {
-      clearToolArgProgressTracking(payload.sessionId);
-      addActiveAgentLoop(payload.sessionId, payload.turnId, payload.agentRun);
-      startAgentTurn(payload.turnId, payload.sessionId, payload.agentRun, payload.promptMessageId);
-      clearToolActivities(payload.sessionId);
-      setPendingConfirmation(payload.sessionId, null);
-      setPendingBudgetApproval?.(payload.sessionId, null);
-      setQueuedDepth(payload.sessionId, 0);
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setAwaitingFirstChunk(true);
-        setStreaming(true, undefined, payload.sessionId);
-      }
-    });
-
-    const offAgentDone = eventBus.onAgentDone((payload) => {
-      removeActiveAgentLoop(payload.sessionId, payload.agentRun);
-      clearToolBudgetProgress?.(payload.sessionId);
-      clearToolArgProgressTracking(payload.sessionId);
-      finalizeAgentTurn(payload.sessionId, payload.turnId);
-      if (hasPendingChunksForSession(payload.sessionId)) {
-        flushThinkingChunks(payload.sessionId);
-        flushStreamingChunks(payload.sessionId);
-      }
-      setStreaming(false, undefined, payload.sessionId);
-      if (payload.sessionId === useSessionStore.getState().activeSessionId) {
-        setAwaitingFirstChunk(false);
-      }
-      setPendingConfirmation(payload.sessionId, null);
+    const offAgentTurns = registerAgentTurnLifecycle({
+      clearToolArgProgressTracking, addActiveAgentLoop, startAgentTurn, clearToolActivities,
+      setPendingConfirmation, setPendingBudgetApproval, setQueuedDepth, setAwaitingFirstChunk,
+      setStreaming, removeActiveAgentLoop, clearToolBudgetProgress, finalizeAgentTurn,
     });
 
     const offContext = eventBus.onContext((payload) => {
@@ -466,8 +443,7 @@ export function useChatSocketEvents({
       offBudgetInvalidated?.();
       offToolStart();
       offToolArgProgress();
-      offAgentStart();
-      offAgentDone();
+      offAgentTurns();
       offContext();
       offToolResult();
       offCLIAgentProgress();

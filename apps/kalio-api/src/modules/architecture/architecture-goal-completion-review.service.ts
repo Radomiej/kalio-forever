@@ -108,6 +108,7 @@ export class ArchitectureGoalCompletionReviewService {
     try {
       const connection = await this.decisions.resolve();
       signal?.throwIfAborted();
+      if (connection.protocol !== 'jev-decisions') return pending('provider_error');
       if (!await stillCurrent()) return pending('stale_input');
       const questions = { goal_completion: { type: 'choice', criteria, instructions: INSTRUCTIONS } };
       const bytes = new TextEncoder().encode(JSON.stringify({ model: connection.model, questions, state: sanitized })).byteLength;

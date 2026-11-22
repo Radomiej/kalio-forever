@@ -1,8 +1,21 @@
 import type { ArchitectureExecutionEvent, ArchitectureSchema } from '@kalio/types';
 import { describe, expect, it } from 'vitest';
 import { buildArchitectureGraphProjection } from './architecture-graph-projection';
+import { CODING_REVIEW } from './architecture-seed-schemas.lab';
 
 describe('buildArchitectureGraphProjection', () => {
+  it('shows the current implementer visit as running after a correction route', () => {
+    const events: ArchitectureExecutionEvent[] = [
+      { id: 'start', runId: 'run-1', sequence: 1, type: 'node_started', nodeId: 'implementer', message: 'Started.', createdAt: 1 },
+      { id: 'done', runId: 'run-1', sequence: 2, type: 'node_completed', nodeId: 'implementer', message: 'Finished.', createdAt: 2 },
+      { id: 'restart', runId: 'run-1', sequence: 3, type: 'node_started', nodeId: 'implementer', message: 'Correcting.', createdAt: 3 },
+    ];
+    expect(buildArchitectureGraphProjection('run-1', CODING_REVIEW, events, 'running')
+      .nodes.find(node => node.id === 'implementer')).toMatchObject({
+      status: 'running', visitCount: 2, eventIds: ['start', 'done', 'restart'],
+    });
+  });
+
   it('carries terminal run status so failed runs do not look live in graph projections', () => {
     const schema: ArchitectureSchema = {
       id: 'test-schema',

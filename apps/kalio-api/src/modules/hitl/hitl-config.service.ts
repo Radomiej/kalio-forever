@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { DECISION_SETTINGS, type DecisionSettingsPort, type HitlHardRule } from '@kalio/types';
 import { AppSettingsService } from '../../database/app-settings.service';
 import { PersonaService } from '../persona/persona.service';
+import { HitlDecisionService } from './hitl-decision.service';
 import {
   isHitlMode,
   isHitlNotificationChannel,
@@ -24,8 +25,11 @@ const DEFAULT_HITL_CONFIG: ResolvedHitlConfig = {
   raAppApprovalTimeoutMs: 600_000,
   jevInstructions: '',
   jevApprovalThreshold: 0.95,
+  jevProductionApprovalThreshold: 0.95,
   jevFallbackToPersona: false,
   rules: [],
+  confirmationAuthority: 'human',
+  humanReviewTimeoutMs: 60_000,
 };
 
 const HITL_SETTING_KEYS = {
@@ -39,6 +43,7 @@ const HITL_SETTING_KEYS = {
   raAppApprovalTimeoutMs: 'hitl.raAppApprovalTimeoutMs',
   jevInstructions: 'hitl.jevInstructions',
   jevApprovalThreshold: 'hitl.jevApprovalThreshold',
+  jevProductionApprovalThreshold: 'hitl.jevProductionApprovalThreshold',
   jevFallbackToPersona: 'hitl.jevFallbackToPersona',
   rules: 'hitl.rules',
 } as const;
@@ -50,10 +55,15 @@ function normalizePersonaId(value: string | null | undefined): string | null {
 
 @Injectable()
 export class HitlConfigService {
+  private configRevision = 0;
+  private updates = 0;
+  get revision(): number { return this.configRevision; }
+  get changing(): boolean { return this.updates > 0; }
   constructor(
     private readonly appSettings: AppSettingsService,
     private readonly personaService: PersonaService,
     @Inject(DECISION_SETTINGS) private readonly decisions: DecisionSettingsPort,
+    private readonly approvalEvaluator: HitlDecisionService,
   ) {}
 
   async getConfig(): Promise<ResolvedHitlConfig> {
@@ -100,13 +110,18 @@ export class HitlConfigService {
       raAppApprovalTimeoutMs: this.parseStoredRaAppApprovalTimeout(storedRaAppApprovalTimeoutMs),
       jevInstructions: this.normalizeJevInstructions(storedJevInstructions ?? ''),
       jevApprovalThreshold: this.parseStoredJevApprovalThreshold(storedJevApprovalThreshold),
+      jevProductionApprovalThreshold: this.parseStoredJevApprovalThreshold(await this.appSettings.get(HITL_SETTING_KEYS.jevProductionApprovalThreshold)),
       jevFallbackToPersona: this.parseStoredJevFallback(storedJevFallbackToPersona),
       rules: this.parseStoredRules(storedRules),
+      confirmationAuthority: this.confirmationAuthority(await this.appSettings.get('hitl.confirmationAuthority')),
+      humanReviewTimeoutMs: this.humanReviewTimeout(await this.appSettings.get('hitl.humanReviewTimeoutMs')),
     };
   }
 
   async updateConfig(dto: UpdateHitlConfigDto): Promise<ResolvedHitlConfig> {
     const current = await this.getConfig();
+    const confirmationAuthority = this.confirmationAuthority(dto.confirmationAuthority ?? current.confirmationAuthority ?? null);
+    const humanReviewTimeoutMs = this.humanReviewTimeout(dto.humanReviewTimeoutMs ?? current.humanReviewTimeoutMs ?? null);
     const nextMode = this.normalizeMode(dto.mode);
     const nextAutoPersonaId = dto.autoPersonaId !== undefined
       ? normalizePersonaId(dto.autoPersonaId)
@@ -133,6 +148,9 @@ export class HitlConfigService {
     const nextJevApprovalThreshold = dto.jevApprovalThreshold !== undefined
       ? this.normalizeJevApprovalThreshold(dto.jevApprovalThreshold)
       : current.jevApprovalThreshold;
+    const nextJevProductionApprovalThreshold = dto.jevProductionApprovalThreshold !== undefined
+      ? this.normalizeJevApprovalThreshold(dto.jevProductionApprovalThreshold)
+      : current.jevProductionApprovalThreshold ?? 0.95;
     const nextRules = dto.rules !== undefined
       ? this.normalizeRules(dto.rules)
       : current.rules;
@@ -153,7 +171,12 @@ export class HitlConfigService {
       await this.ensurePersonaExists(nextAutoPersonaId);
     }
 
-    if (nextMode === 'jev') await this.decisions.resolve();
+    if (nextMode === 'jev' || nextMode === 'ollama') {
+      const connection = await this.decisions.resolve('tools');
+      if (connection.protocol !== (nextMode === 'ollama' ? 'ollama-chat' : 'jev-decisions')) {
+        throw new BadRequestException('HITL mode requires a compatible tool decision provider.');
+      }
+    }
 
     if (nextUnattendedFallback === 'representative' && nextRepresentativePersonaId === null) {
       throw new BadRequestException('Representative HITL fallback requires a configured persona.');
@@ -171,6 +194,9 @@ export class HitlConfigService {
       await this.ensurePersonaExists(nextExternalPolicyPersonaId);
     }
 
+    ++this.configRevision;
+    ++this.updates;
+    try {
     await this.appSettings.set(HITL_SETTING_KEYS.mode, nextMode);
 
     if (nextAutoPersonaId === null) {
@@ -199,8 +225,12 @@ export class HitlConfigService {
     await this.appSettings.set(HITL_SETTING_KEYS.raAppApprovalTimeoutMs, String(nextRaAppApprovalTimeoutMs));
     await this.appSettings.set(HITL_SETTING_KEYS.jevInstructions, nextJevInstructions);
     await this.appSettings.set(HITL_SETTING_KEYS.jevApprovalThreshold, String(nextJevApprovalThreshold));
+    await this.appSettings.set(HITL_SETTING_KEYS.jevProductionApprovalThreshold, String(nextJevProductionApprovalThreshold));
     await this.appSettings.set(HITL_SETTING_KEYS.jevFallbackToPersona, String(nextJevFallbackToPersona));
     await this.appSettings.set(HITL_SETTING_KEYS.rules, JSON.stringify(nextRules));
+    await this.appSettings.set('hitl.confirmationAuthority', confirmationAuthority);
+    await this.appSettings.set('hitl.humanReviewTimeoutMs', String(humanReviewTimeoutMs));
+    } finally { --this.updates; ++this.configRevision; }
 
     return {
       mode: nextMode,
@@ -213,8 +243,11 @@ export class HitlConfigService {
       raAppApprovalTimeoutMs: nextRaAppApprovalTimeoutMs,
       jevInstructions: nextJevInstructions,
       jevApprovalThreshold: nextJevApprovalThreshold,
+      jevProductionApprovalThreshold: nextJevProductionApprovalThreshold,
       jevFallbackToPersona: nextJevFallbackToPersona,
       rules: nextRules,
+      confirmationAuthority,
+      humanReviewTimeoutMs,
     };
   }
 
@@ -224,6 +257,21 @@ export class HitlConfigService {
     }
 
     throw new BadRequestException(`Unsupported HITL mode: ${mode}`);
+  }
+
+  private confirmationAuthority(value: unknown): 'human' | 'decision_model' | 'human_then_decision' {
+    if (value === null || value === 'human') return 'human';
+    if (value === 'decision_model' || value === 'human_then_decision') return value;
+    throw new BadRequestException('Approval authority must be human or decision model.');
+  }
+
+  private humanReviewTimeout(value: unknown): number {
+    if (value === null) return 60_000;
+    const milliseconds = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    if (typeof milliseconds !== 'number' || ![0, 60_000, 120_000, 300_000].includes(milliseconds)) {
+      throw new BadRequestException('Human review timeout must be off, 1, 2 or 5 minutes.');
+    }
+    return milliseconds;
   }
 
   private normalizeUnattendedFallback(value: string): HitlUnattendedFallback {
@@ -346,10 +394,14 @@ export class HitlConfigService {
   }
 
   private async ensurePersonaExists(personaId: string): Promise<void> {
-    try {
-      await this.personaService.findOne(personaId);
-    } catch {
+    const persona = await this.personaService.findOne(personaId).catch(() => {
       throw new BadRequestException(`Auto HITL persona "${personaId}" was not found.`);
+    });
+    if (!persona.executionProfileId) return;
+    try {
+      await this.approvalEvaluator.resolveEvaluationProfile(persona.executionProfileId);
+    } catch {
+      throw new BadRequestException(`HITL persona "${personaId}" requires an enabled Codex or direct LLM execution profile.`);
     }
   }
 }

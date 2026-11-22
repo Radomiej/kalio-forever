@@ -1,9 +1,10 @@
-import type { ArchitectureRouterOutput, ArchitectureSchema, ArchitectureSchemaNode } from '@kalio/types';
+import type { ArchitectureExecutionEvent, ArchitectureRouterOutput, ArchitectureSchema, ArchitectureSchemaNode } from '@kalio/types';
 import { describe, expect, it } from 'vitest';
 import {
   continuationOutgoingNodeId,
   defaultOutgoingNodeId,
   isRouterPauseAction,
+  gameReleaseReviewEvents,
   routeConvergeNodeId,
   routerActionTargetNodeId,
   routerOutputWithActionTarget,
@@ -177,5 +178,33 @@ describe('architecture graph routing helpers', () => {
       .toBe('Parallel started 2 outgoing paths.');
     expect(routingMessage({ ...schema.nodes[0], label: 'Router' }, 'Finalizer', 1))
       .toBe('Router selected Finalizer.');
+  });
+});
+
+describe('gameReleaseReviewEvents', () => {
+  const game = { ...schema, id: 'game-development-2-variant-5' };
+  const event = (sequence: number, nodeId: string, type: ArchitectureExecutionEvent['type']): ArchitectureExecutionEvent => ({
+    id: String(sequence), runId: 'run', sequence, nodeId, type, message: type, createdAt: sequence,
+  });
+  const visit = (sequence: number, id: string) => [
+    event(sequence, id, 'node_started'), event(sequence + 1, id, 'participant_output'),
+    event(sequence + 2, id, 'node_completed'),
+  ];
+
+  it('supplies bounded current evidence to release, including steps outside its direct inputs', () => {
+    const ids = ['core', 'ux', 'senior', 'input-qa', 'loop-qa'];
+    const events = [...ids.flatMap((id, i) => visit(i * 3, id)), ...visit(15, 'analyst')];
+    expect(gameReleaseReviewEvents(game, 'release', events)?.map(row => row.nodeId)).toEqual(ids);
+    expect(gameReleaseReviewEvents(game, 'orchestrator', events)).toBeUndefined();
+    expect(gameReleaseReviewEvents(schema, 'release', events)).toBeUndefined();
+  });
+
+  it('omits older evidence when the latest visit has failed or has yet to complete', () => {
+    const events = [
+      ...visit(0, 'core'), ...visit(3, 'ux'), ...visit(6, 'senior'),
+      ...visit(9, 'core'), event(12, 'ux', 'node_started'), event(13, 'ux', 'participant_output'),
+      event(14, 'ux', 'node_failed'), event(15, 'senior', 'node_started'),
+    ];
+    expect(gameReleaseReviewEvents(game, 'release', events)?.map(row => row.sequence)).toEqual([10]);
   });
 });

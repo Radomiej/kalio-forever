@@ -720,8 +720,10 @@ describe('ArchitectureRuntimeService', () => {
   it('keeps a stopped async run cancelled when a late role executor rejection arrives', async () => {
     const { service, executor } = createService();
     let rejectFirstBranch: ((error: Error) => void) | undefined;
-    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot }) => {
+    let branchSignal: AbortSignal | undefined;
+    vi.mocked(executor.execute).mockImplementation(({ branchSessionId, personaId, run, slot, signal }) => {
       if (slot.id === 'pragmatist') {
+        branchSignal = signal;
         return new Promise((_resolve, reject) => {
           rejectFirstBranch = reject;
         });
@@ -743,9 +745,10 @@ describe('ArchitectureRuntimeService', () => {
       schemaId: 'strategic-decision-council',
       prompt: 'Stop before late branch failure.',
     });
-    await waitUntil(() => service.getEvents(run.id).some((event) => event.type === 'agent_started'));
+    await waitUntil(() => rejectFirstBranch !== undefined);
 
     await service.stopRun(run.id);
+    expect(branchSignal?.aborted).toBe(true);
     rejectFirstBranch?.(new Error('late branch failure after stop'));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -5042,7 +5045,7 @@ describe('ArchitectureRuntimeService', () => {
     });
   });
 
-  it('REGRESSION: reconstructs a resumed run as running when newer audit activity exists after run_stopped', async () => {
+  it('REGRESSION: late neutral activity cannot override run_stopped without resume authority', async () => {
     const { service, audit } = createService();
     const runId = 'durable-resumed-run';
     const createdAt = 1_780_004_000_000;
@@ -5120,7 +5123,7 @@ describe('ArchitectureRuntimeService', () => {
 
     await expect(service.findRunDurable(runId)).resolves.toMatchObject({
       id: runId,
-      status: 'running',
+      status: 'cancelled',
       rootSessionId: `arch-${runId}-root`,
     });
   });

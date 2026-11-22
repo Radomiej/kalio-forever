@@ -83,6 +83,26 @@ const validSchema: ArchitectureSchema = {
 };
 
 describe('architecture runtime schema utils', () => {
+  it('validates and independently clones a status condition', () => {
+    const schema: ArchitectureSchema = {
+      ...validSchema,
+      nodes: [
+        { id: 'source', label: 'Source', kind: 'role', roleSlotId: 'router' },
+        { id: 'if', label: 'Status', kind: 'status_router', statusRouting: { sourceNodeId: 'source', expectedStatus: 'completed' } },
+        { id: 'yes', label: 'Yes', kind: 'parallel' }, { id: 'no', label: 'Else', kind: 'parallel' },
+      ],
+      edges: [
+        { id: 'in', fromNodeId: 'source', toNodeId: 'if' },
+        { id: 'yes', fromNodeId: 'if', toNodeId: 'yes', selection: 'choice' },
+        { id: 'no', fromNodeId: 'if', toNodeId: 'no', selection: 'default' },
+      ],
+    };
+    expect(isArchitectureRuntimeSchema(schema)).toBe(true);
+    const clone = cloneArchitectureRuntimeSchema(schema);
+    expect(clone.nodes[1]?.statusRouting).not.toBe(schema.nodes[1]?.statusRouting);
+    schema.nodes[1]!.statusRouting!.sourceNodeId = 'missing';
+    expect(isArchitectureRuntimeSchema(schema)).toBe(false);
+  });
   const autoSchema = (): ArchitectureSchema => ({
     ...validSchema,
     nodes: [

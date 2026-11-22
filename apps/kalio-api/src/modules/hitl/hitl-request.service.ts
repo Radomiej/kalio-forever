@@ -9,7 +9,7 @@ import { commitOrdinaryContinuationCancellationBatch, type OrdinaryCancellationB
   type OrdinaryCancellationResult } from '../../database/ordinary-continuation-cancellation';
 
 export type HitlRequestKind = 'tool_confirmation' | 'raapp_native' | 'tool_budget';
-export type HitlRequestResolution = 'approved' | 'denied' | 'cancelled';
+export type HitlRequestResolution = 'approved' | 'denied' | 'cancelled' | 'expired';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -86,7 +86,7 @@ export class HitlRequestService {
       if (request.kind !== 'tool_confirmation' || !request.toolCallId || !isRecord(request.payload)) {
         return [];
       }
-      const { toolName, args } = request.payload;
+      const { toolName, args, policyReason } = request.payload;
       if (typeof toolName !== 'string' || !isRecord(args)) {
         return [];
       }
@@ -100,11 +100,17 @@ export class HitlRequestService {
         toolName,
         args,
         timeoutMs: 0,
+        ...(typeof policyReason === 'string' && policyReason.length <= 2048 && policyReason.trim()
+          ? { policyReason } : {}),
       }];
     });
   }
 
   async resolve(id: string, revision: number, status: HitlRequestResolution, outcome?: Record<string, unknown>): Promise<boolean> {
+    if (status === 'expired') {
+      const row = await this.getById(id);
+      if (!row || row.kind !== 'tool_confirmation' || hasHostRequirement(row) || isProtectedGoalRequest(row)) return false;
+    }
     if (status === 'approved') {
       const row = await this.getById(id);
       if (row && hasHostRequirement(row)) return false;

@@ -42,6 +42,31 @@ describe('ProjectResourceReaderService registered project boundary', () => {
   it('does not interpret arbitrary paths as project IDs', async () => {
     await expect(service.readProject(root)).rejects.toThrow('PROJECT_NOT_REGISTERED');
   });
+  it('previews one text file within the persisted session project', async () => {
+    sql.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT); INSERT INTO sessions VALUES ('chat', 'approved')");
+    await mkdir(join(root, 'src'));
+    await writeFile(join(root, 'src', 'app.ts'), 'export const x = 1;');
+    await writeFile(join(root, '.env'), 'secret');
+    await writeFile(join(root, 'unrelated.png'), Buffer.alloc(1024 * 1024 + 1));
+    await expect(service.previewSessionFile('chat', 'src/app.ts')).resolves.toBe('export const x = 1;');
+    await expect(service.previewSessionFile('chat', '.env')).rejects.toThrow('PROJECT_PREVIEW_NOT_TEXT');
+    await expect(service.previewSessionFile('chat', '../src/app.ts')).rejects.toThrow('PROJECT_PREVIEW_PATH_INVALID');
+    await expect(service.previewSessionFile('chat', 'C:/src/app.ts')).rejects.toThrow('PROJECT_PREVIEW_PATH_INVALID');
+    await expect(service.previewSessionFile('unknown', 'src/app.ts')).rejects.toThrow('PROJECT_NOT_REGISTERED');
+  });
+  it.each(Array.from({ length: 32 }, (_, code) => code))('rejects control character %i in every preview path segment before session lookup', async code => {
+    const part = `a${String.fromCharCode(code)}b`;
+    for (const path of [`${part}/src/app.ts`, `src/${part}/app.ts`, `src/${part}.ts`]) {
+      await expect(service.previewSessionFile('unknown', path)).rejects.toThrow('PROJECT_PREVIEW_PATH_INVALID');
+    }
+  });
+  it.each(['', '/app.ts', 'src//app.ts', 'src/', '.', '..', './app.ts', '../app.ts', 'src/./app.ts', 'src/../app.ts', 'src/.', 'src/..', 'src/a:b.ts', 'src/a\\b.ts'])('rejects invalid preview path %j before session lookup', async path => {
+    await expect(service.previewSessionFile('unknown', path)).rejects.toThrow('PROJECT_PREVIEW_PATH_INVALID');
+  });
+  it.each(['src/app.ts', 'źródła/日本語/😀.ts', 'src/a b.ts', `src/a${String.fromCharCode(127)}b.ts`])('accepts preview path %j at the parsing boundary', async path => {
+    sql.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, project_id TEXT)');
+    await expect(service.previewSessionFile('unknown', path)).rejects.toThrow('PROJECT_NOT_REGISTERED');
+  });
   it.each(['mts', 'cts'])('includes .%s modules in the supported code snapshot', async extension => {
     const path = `module.${extension}`;
     await writeFile(join(root, path), 'export const moduleValue = 1;');

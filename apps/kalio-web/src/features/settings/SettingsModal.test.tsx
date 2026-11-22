@@ -48,6 +48,16 @@ function SettingsHarness({ onClose }: { onClose: () => void }) {
 }
 
 describe('SettingsModal', () => {
+  it('switches the same settings panel through the compact section selector', () => {
+    render(<SettingsModal onClose={() => undefined} initialTab="tools" />);
+    const selector = screen.getByRole('combobox', { name: 'Settings section' });
+    expect(selector).toHaveValue('tools');
+    fireEvent.change(selector, { target: { value: 'runtime' } });
+    expect(screen.getByText('Runtime panel')).toBeInTheDocument();
+    expect(screen.queryByText('Tools panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('settings-tab-llm'));
+    expect(selector).toHaveValue('llm');
+  });
   beforeEach(() => {
     useSettingsStore.setState({
       requestedSettingsTab: null,
@@ -92,6 +102,10 @@ describe('SettingsModal', () => {
     expect(screen.getByRole('button', { name: 'Panel action' })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
+    await user.tab();
+    // jsdom does not apply Tailwind breakpoints; both navigation variants exist.
+    // Real-browser checks verify only the appropriate variant is focusable.
+    expect(screen.getByRole('combobox', { name: 'Settings section' })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole('button', { name: /LLM Settings$/ })).toHaveFocus();
     await user.tab();

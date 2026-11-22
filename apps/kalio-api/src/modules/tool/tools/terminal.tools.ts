@@ -56,6 +56,8 @@ function getIdArg(args: ToolCallRequest['args']): string {
     properties: {
       command: {
         type: 'string',
+        minLength: 1,
+        pattern: '\\S',
         description:
           'Executable name only, no arguments (e.g. "node", "python", "npm"). ' +
           'Arguments go in the args array.',
@@ -67,6 +69,8 @@ function getIdArg(args: ToolCallRequest['args']): string {
       },
       cwd: {
         type: 'string',
+        minLength: 1,
+        pattern: '\\S',
         description:
           'Absolute path to the working directory. Must be inside an AllowedPaths root. ' +
           'Use fs_list first to confirm the path exists, or check allowed_paths.',

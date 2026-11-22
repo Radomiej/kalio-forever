@@ -1,12 +1,22 @@
 import { parseGoalLaunchHostRequirement, type GoalLaunchHostRequirement } from '@kalio/types';
 import { canonicalGoalLaunchJson, hashGoalLaunchJson } from './goal-launch-canonical';
 
+export const GOAL_LAUNCH_SCHEMA_PUBLICATION = Symbol('GOAL_LAUNCH_SCHEMA_PUBLICATION');
+export const GOAL_LAUNCH_SNAPSHOT_OWNERS = Symbol('GOAL_LAUNCH_SNAPSHOT_OWNERS');
+export const GOAL_LAUNCH_SNAPSHOT = Symbol('GOAL_LAUNCH_SNAPSHOT');
+export interface GoalLaunchSchemaPublicationPort {
+  readSchemaPublication(schemaId: string): unknown | null;
+}
+
 export type GoalLaunchCurrentSnapshot = { status: 'ineligible' } | {
   status: 'eligible'; flowDefinitionId: string; schemaId: string; policyId: string;
   flowDefinition: unknown; schemaDefinition: unknown; policy: unknown;
 };
 export interface GoalLaunchSnapshotPort {
   readCurrent(requirement: GoalLaunchHostRequirement, signal?: AbortSignal): Promise<GoalLaunchCurrentSnapshot>;
+}
+export interface GoalLaunchInitialSnapshotPort extends GoalLaunchSnapshotPort {
+  readForLaunch(selection: Pick<GoalLaunchHostRequirement['goalLaunch'], 'flowDefinitionId' | 'schemaId'>, signal?: AbortSignal): Promise<GoalLaunchCurrentSnapshot>;
 }
 export interface GoalLaunchSnapshotOwners {
   readSchemaPublication(schemaId: string): unknown | null;
@@ -74,6 +84,21 @@ export class GoalLaunchSnapshotAdapter implements GoalLaunchSnapshotPort {
     let captured: GoalLaunchHostRequirement;
     try { captured = parseGoalLaunchHostRequirement(detach(requirement)); } catch { return invalid(); }
     const binding = captured.goalLaunch;
+    const snapshot = await this.readForLaunch({ flowDefinitionId: binding.flowDefinitionId, schemaId: binding.schemaId }, signal);
+    abort(signal);
+    if (snapshot.status === 'ineligible') return snapshot;
+    if (snapshot.policyId !== binding.policyId || hashGoalLaunchJson(snapshot.flowDefinition) !== binding.flowDefinitionSha256
+      || hashGoalLaunchJson(snapshot.schemaDefinition) !== binding.schemaDefinitionSha256
+      || hashGoalLaunchJson(snapshot.policy) !== binding.policySha256) return { status: 'ineligible' };
+    return snapshot;
+  }
+
+  /** Initial owner snapshot only. It grants neither approval nor allocation. */
+  async readForLaunch(selection: Pick<GoalLaunchHostRequirement['goalLaunch'], 'flowDefinitionId' | 'schemaId'>,
+    signal?: AbortSignal): Promise<GoalLaunchCurrentSnapshot> {
+    abort(signal);
+    const selected = record(detach(selection)); exact(selected, ['flowDefinitionId', 'schemaId']);
+    const binding = { flowDefinitionId: id(selected.flowDefinitionId), schemaId: id(selected.schemaId) };
     let rawPolicy: unknown;
     try { rawPolicy = await this.owners.readUserPolicy(signal); }
     catch { abort(signal); throw new Error('GOAL_LAUNCH_SNAPSHOT_READ_FAILED'); }
@@ -100,13 +125,10 @@ export class GoalLaunchSnapshotAdapter implements GoalLaunchSnapshotPort {
       || id(flowDefinition.flowDefinitionId) !== binding.flowDefinitionId || id(flowDefinition.schemaId) !== binding.schemaId
       || hash(flowDefinition.schemaDefinitionSha256) !== schemaDefinitionSha256) return invalid();
     const flowDefinitionSha256 = hashGoalLaunchJson(flowDefinition);
-    const policySha256 = hashGoalLaunchJson(policy);
     const candidate: Binding = { flowDefinitionId: binding.flowDefinitionId, schemaId: binding.schemaId, flowDefinitionSha256, schemaDefinitionSha256 };
-    if (policy.policyId !== binding.policyId || flowDefinitionSha256 !== binding.flowDefinitionSha256
-      || schemaDefinitionSha256 !== binding.schemaDefinitionSha256 || policySha256 !== binding.policySha256
-      || !bindings.some(row => compare(row, candidate) === 0)) return { status: 'ineligible' };
+    if (!bindings.some(row => compare(row, candidate) === 0)) return { status: 'ineligible' };
     abort(signal);
-    return { status: 'eligible', flowDefinitionId: binding.flowDefinitionId, schemaId: binding.schemaId, policyId: binding.policyId,
+    return { status: 'eligible', flowDefinitionId: binding.flowDefinitionId, schemaId: binding.schemaId, policyId: id(policy.policyId),
       flowDefinition, schemaDefinition, policy };
   }
 }

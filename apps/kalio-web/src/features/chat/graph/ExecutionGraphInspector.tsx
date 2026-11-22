@@ -4,6 +4,8 @@ import type { CSSProperties } from 'react';
 import type { ToolConfirmationRequest } from '@kalio/types';
 import { ExecutionGraphPreviewPanel, extractGraphNodePreview } from './ExecutionGraphPreview';
 import { GraphInspectorActions } from './GraphInspectorActions';
+import { FinalAnswerCard, parseFinalAnswer } from '../FinalAnswerCard';
+import { WorkflowTraceCard } from '../WorkflowTraceCard';
 import type { ExecutionGraphNode, ExecutionGraphNodePayload } from './executionGraphModel';
 
 function prettyPrint(value: unknown): string {
@@ -353,10 +355,19 @@ export function ExecutionGraphInspector({
                 <InspectorRow label="Schema" value={selectedNode.payload.summary.schemaId} />
                 <InspectorRow label="Status" value={selectedNode.payload.summary.status} />
                 <InspectorRow label="Routes" value={`${selectedNode.payload.summary.routeHops.length} hop(s)`} />
-                <InspectorRow label="Artifact" value={selectedNode.payload.summary.finalArtifact} />
+                {selectedNode.payload.summary.finalArtifact && !selectedNode.payload.route && (
+                  <FinalAnswerCard content={selectedNode.payload.summary.finalArtifact} sessionId={selectedNode.sessionId ?? activeSessionId} />
+                )}
                 {selectedNode.payload.route ? (
                   <>
-                    <InspectorRow label="Flow" value={`${shortNodeLabel(selectedNode.payload.route.fromNodeId)} -> ${shortNodeLabel(selectedNode.payload.route.toNodeId)}`} />
+                    <WorkflowTraceCard trace={{
+                      kind: 'router',
+                      from: shortNodeLabel(selectedNode.payload.route.fromNodeId),
+                      to: shortNodeLabel(selectedNode.payload.route.toNodeId),
+                      body: '',
+                    }} output={selectedNode.payload.summary.trace.find(step =>
+                      selectedNode.payload.kind === 'architecture-run'
+                      && step.eventId === selectedNode.payload.route?.eventId)?.routerOutput} />
                     <InspectorRow label="Incomplete" value={selectedNode.payload.route.incompleteReason} />
                     <InspectorRow label="Tool proof" value={selectedNode.payload.route.toolEvidence ? toolEvidenceLabel(selectedNode.payload.route.toolEvidence) : undefined} />
                     <InspectorTextRow label="Preview" value={selectedNode.payload.route.contentPreview} />
@@ -390,7 +401,9 @@ export function ExecutionGraphInspector({
             )}
 
             {selectedNode.payload.kind === 'final-answer' && (
-              <InspectorTextRow label="Reply" value={selectedNode.payload.message?.content ?? 'Awaiting reply'} />
+              (selectedNode.payload.message?.content && parseFinalAnswer(selectedNode.payload.message.content)
+                ? <FinalAnswerCard content={selectedNode.payload.message.content} sessionId={selectedNode.sessionId ?? activeSessionId} />
+                : <InspectorTextRow label="Reply" value={selectedNode.payload.message?.content ?? 'Awaiting reply'} />)
             )}
           </section>
 

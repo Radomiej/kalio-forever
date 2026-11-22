@@ -59,6 +59,7 @@ describe('session profile update versus turn admission (SQLite integration)', ()
       const manager = Object.create(SessionManagerService.prototype) as SessionManagerService;
       Object.assign(manager, {
         repo: repository,
+        vfs: { prepareSessionSandbox: async () => undefined },
       });
       const sessions = Object.create(SessionsService.prototype) as SessionsService;
       Object.assign(sessions, {

@@ -1,3 +1,4 @@
+import { hasValidStatusRoutingTopology, isStatusRoutingConfig } from './architecture-status-routing.schema';
 import { BadRequestException } from '@nestjs/common';
 import type {
   ArchitectureExecutionMode,
@@ -62,7 +63,7 @@ export function cloneArchitectureRuntimeSchema(schema: ArchitectureSchema): Arch
   return {
     ...schema,
     roleSlots: schema.roleSlots.map((slot) => ({ ...slot })),
-    nodes: schema.nodes.map((node) => ({ ...node, autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined })),
+    nodes: schema.nodes.map((node) => ({ ...node, autoRouting: node.autoRouting ? { ...node.autoRouting } : undefined, statusRouting: node.statusRouting ? { ...node.statusRouting } : undefined })),
     edges: schema.edges.map((edge) => ({ ...edge })),
     routerPolicy: { ...schema.routerPolicy },
     contextPolicy: cloneArchitectureContextPolicy(schema.contextPolicy),
@@ -87,6 +88,7 @@ export function isArchitectureRuntimeSchema(value: unknown): value is Architectu
     && hasValidNodeBehaviorTopology(value.nodes)
     && hasValidGraphTopology(value.nodes, value.edges)
     && hasValidAutoRoutingTopology(value.nodes, value.edges)
+    && hasValidStatusRoutingTopology(value.nodes, value.edges)
     && isRouterPolicy(value.routerPolicy)
     && isArchitectureContextPolicy(value.contextPolicy)
     && isMemoryPolicy(value.memoryPolicy)
@@ -123,6 +125,8 @@ function isArchitectureSchemaNode(value: unknown): value is ArchitectureSchemaNo
     )
     && (value.toolOverride === undefined || isNodeToolOverride(value.toolOverride))
     && (value.behavior === undefined || isNodeBehavior(value.behavior))
+    && (value.statusRouting === undefined || isStatusRoutingConfig(value.statusRouting))
+    && (value.kind === 'status_router' ? isStatusRoutingConfig(value.statusRouting) && value.roleSlotId === undefined : value.statusRouting === undefined)
     && (value.autoRouting === undefined || isAutoRoutingConfig(value.autoRouting))
     && (value.kind === 'auto_router' ? value.roleSlotId === undefined : value.autoRouting === undefined)
     && (value.x === undefined || typeof value.x === 'number')
@@ -285,7 +289,7 @@ function isSlotType(value: unknown): value is ArchitectureRoleSlot['slotType'] {
 }
 
 function isNodeKind(value: unknown): value is ArchitectureSchemaNode['kind'] {
-  return value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router';
+  return value === 'parallel' || value === 'role' || value === 'router' || value === 'artifact' || value === 'auto_router' || value === 'status_router';
 }
 
 function isNodeBehaviorMode(value: unknown): value is NonNullable<ArchitectureSchemaNode['behavior']>['mode'] {

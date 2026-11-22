@@ -1,4 +1,5 @@
-import { Play } from 'lucide-react';
+import { imageInputBlockReason, useComposerImages } from '../composerImages';
+import { ChevronDown, Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ExecutionProfile, Persona, Project } from '@kalio/types';
 import type { ArchitectSchema } from '../../architect/architect.types';
@@ -6,6 +7,8 @@ import { PersonaCombobox } from './PersonaCombobox';
 import { ProjectPicker } from '../../projects/ProjectPicker';
 import { CodeIntelligenceQuickTrust } from './CodeIntelligenceQuickTrust';
 import { ExecutionProfileCombobox } from './ExecutionProfileCombobox';
+import { VoiceInputControl } from '../../voice/VoiceInputControl';
+import { getLaunchSpeechScope } from '../../voice/voiceApi';
 
 const WELCOME_PROMPTS = [
   'What can you do?',
@@ -24,6 +27,7 @@ export interface NewChatScreenProps {
   onPersonaChange: (personaId: string) => void;
   onProjectPathChange: (projectPath: string) => void;
   onProjectChange?: (project: Project) => void;
+  onRunImagePrompt?: (content: string, profileId: string, images: File[]) => Promise<boolean>;
   onRunPrompt: (content: string, executionProfileId?: string) => void;
   personas: Persona[];
   executionProfiles?: ExecutionProfile[];
@@ -63,13 +67,14 @@ export function NewChatScreen({
   architectures,
   heading,
   error,
-  isBusy,
+  isBusy: launchBusy,
   onArchitectureChange,
   onDraftChange,
   onPersonaChange,
   onProjectPathChange,
   onProjectChange,
   onRunPrompt,
+  onRunImagePrompt,
   personas,
   executionProfiles,
   selectedExecutionProfileId,
@@ -82,7 +87,8 @@ export function NewChatScreen({
   subtitle,
 }: NewChatScreenProps) {
   const [prompt, setPrompt] = useState('');
-  const [launchStep, setLaunchStep] = useState<'setup' | 'prompt'>('setup');
+  const [voiceScope] = useState(getLaunchSpeechScope);
+  const [configurationOpen, setConfigurationOpen] = useState(false);
   const [launchMode, setLaunchMode] = useState<LaunchMode>('chat');
   const [lastWorkflowId, setLastWorkflowId] = useState(() => (
     selectedArchitectureId === 'single-chat' ? architectures[0]?.id ?? '' : selectedArchitectureId
@@ -96,6 +102,12 @@ export function NewChatScreen({
   const activeArchitecture = workflowOptions.find((schema) => schema.id === activeWorkflowId) ?? null;
   const activePersona = personaOptions.find((persona) => persona.id === selectedPersonaId) ?? personaOptions[0] ?? null;
   const recommendedProfile = executionProfiles?.find((profile) => profile.id === activePersona?.executionProfileId);
+  const [sendingImages, setSendingImages] = useState(false);
+  const isBusy = launchBusy || sendingImages;
+  const blockReason = onRunImagePrompt
+    ? imageInputBlockReason(executionProfiles?.find((profile) => profile.id === selectedExecutionProfileId), launchMode === 'chat')
+    : 'Image attachments are unavailable from this launch screen.';
+  const imageDraft = useComposerImages(blockReason, isBusy);
   const canRun = executionProfiles === undefined || Boolean(selectedExecutionProfileId);
 
   useEffect(() => {
@@ -129,6 +141,14 @@ export function NewChatScreen({
     if (!trimmed || isBusy || !canRun) {
       return;
     }
+    if (imageDraft.images.length) {
+      if (blockReason || !onRunImagePrompt || !selectedExecutionProfileId) return;
+      setSendingImages(true);
+      void onRunImagePrompt(trimmed, selectedExecutionProfileId, imageDraft.images)
+        .then((sent) => { if (sent) imageDraft.clear(); })
+        .finally(() => setSendingImages(false));
+      return;
+    }
     onRunPrompt(trimmed, selectedExecutionProfileId);
   };
 
@@ -156,20 +176,27 @@ export function NewChatScreen({
   };
 
   return (
-    <section className="flex min-h-full w-full items-stretch justify-stretch px-4 py-4" data-testid={`${testIdPrefix}-screen`}>
-      <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col rounded-2xl bg-base-100/70 px-5 py-5 sm:px-7 lg:px-8">
+    <section className="flex min-h-full w-full items-stretch justify-stretch p-2 lg:p-4" data-testid={`${testIdPrefix}-screen`}>
+      <div className="mx-auto flex min-h-full w-full min-w-0 max-w-4xl flex-col rounded-2xl bg-base-100/70 p-3 sm:px-7 lg:px-8 lg:py-5">
         <p className="text-[11px] uppercase tracking-[0.2em] text-base-content/50">{heading}</p>
 
-        <div className="mt-4 flex flex-col items-center gap-1.5 text-center select-none">
-          <div className="text-primary font-black text-4xl drop-shadow-[0_0_10px_oklch(0.60_0.176_232.6/0.5)]">K</div>
-          <h2 className="text-base font-semibold text-base-content/80">KALIO</h2>
+        <div className="mt-2 flex flex-col items-center gap-1 text-center select-none lg:mt-4 lg:gap-1.5">
+          <div className="text-primary font-black text-2xl lg:text-4xl drop-shadow-[0_0_10px_oklch(0.60_0.176_232.6/0.5)]">K</div>
+          <h2 className="text-sm font-semibold text-base-content/80 lg:text-base">KALIO</h2>
           <p className="max-w-2xl text-sm leading-relaxed text-base-content/65">{subtitle}</p>
         </div>
 
-        <p className="mt-4 text-sm lg:hidden" role="status">
-          {launchStep === 'setup' ? '1 / 2 — Configure conversation' : '2 / 2 — Write your prompt'}
-        </p>
-        <div className={launchStep === 'setup' ? 'contents' : 'hidden lg:contents'}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm mt-2 min-h-10 self-start gap-2 lg:hidden"
+          aria-controls={`${testIdPrefix}-configuration`}
+          aria-expanded={configurationOpen}
+          onClick={() => setConfigurationOpen((open) => !open)}
+        >
+          Conversation settings
+          <ChevronDown size={14} aria-hidden="true" className={configurationOpen ? 'rotate-180' : undefined} />
+        </button>
+        <div id={`${testIdPrefix}-configuration`} className={configurationOpen ? undefined : 'hidden lg:block'}>
         <div className="mt-6">
           <p className="mb-1.5 pl-1 text-[11px] uppercase tracking-wider text-base-content/65">Mode</p>
           <div className="inline-grid w-full max-w-sm grid-cols-2 gap-1 rounded-xl bg-base-200/70 p-1 ring-1 ring-inset ring-base-300/65" data-testid={`${testIdPrefix}-mode-switcher`}>
@@ -290,14 +317,7 @@ export function NewChatScreen({
           </div>
         )}
 
-        <button type="button" className="btn btn-primary mt-4 lg:hidden" disabled={isBusy || !canRun} onClick={() => setLaunchStep('prompt')}>
-          Next — write prompt
-        </button>
         </div>
-        <div className={launchStep === 'prompt' ? 'contents' : 'hidden lg:contents'}>
-        <button type="button" className="btn btn-ghost mt-4 self-start lg:hidden" disabled={isBusy} onClick={() => setLaunchStep('setup')}>
-          Back — configuration
-        </button>
         <div className="mt-4 rounded-xl border border-base-300/70 bg-base-200/45 p-2.5">
           <label htmlFor={`${testIdPrefix}-prompt-input`} className="sr-only">
             Prompt
@@ -311,6 +331,7 @@ export function NewChatScreen({
               setPrompt(event.target.value);
               onDraftChange(event.target.value);
             }}
+            onPaste={imageDraft.onPaste}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
@@ -323,12 +344,18 @@ export function NewChatScreen({
             disabled={isBusy}
             data-testid={`${testIdPrefix}-prompt-input`}
           />
-          <div className="flex items-center justify-end gap-3 border-t border-base-300/70 px-1 pt-2">
+          {imageDraft.preview}
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-base-300/70 px-1 pt-2">
+            {imageDraft.picker}
+            <VoiceInputControl scope={voiceScope} draft={prompt} disabled={isBusy} onDraft={(text) => {
+              setPrompt(text); onDraftChange(text);
+            }} />
+            {!voiceScope && <p role="alert">Local voice draft storage is unavailable.</p>}
             <button
               type="button"
               className="btn btn-primary btn-sm gap-2"
               onClick={() => submitPrompt(prompt)}
-              disabled={isBusy || prompt.trim().length === 0 || !canRun}
+              disabled={isBusy || prompt.trim().length === 0 || !canRun || Boolean(blockReason && imageDraft.images.length)}
               data-testid={`${testIdPrefix}-run-prompt`}
             >
               <Play size={14} />
@@ -349,12 +376,11 @@ export function NewChatScreen({
               type="button"
               className="btn btn-sm btn-ghost border border-base-300/70 text-xs text-base-content/70 hover:border-primary/40 hover:text-primary"
               onClick={() => submitPrompt(quickPrompt)}
-              disabled={isBusy}
+              disabled={isBusy || imageDraft.images.length > 0}
             >
               {quickPrompt}
             </button>
           ))}
-        </div>
         </div>
         {error && (
           <p className="mt-4 rounded-md border border-error/30 bg-error/10 px-3 py-2 text-xs text-error-content" data-testid={`${testIdPrefix}-send-error`}>

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { TurnState } from './turn-state';
+import { captureExecutionCurrent } from '../agent-runtime/devin-cli-acp.execution-guard';
 import { StreamProcessorService } from './stream-processor.service';
 import { ToolDispatchService } from './tool-dispatch.service';
 import { SessionManagerService } from './session-manager.service';
@@ -39,6 +40,11 @@ export class LLMTurnRuntimeService {
   ) {}
 
   async runAgentLoop(request: LLMAgentLoopRequest): Promise<LLMAgentLoopResult> {
+    const toolsDisabled = request.toolsDisabled === true;
+    const check = captureExecutionCurrent(request.assertExecutionCurrent, request.abortSignal);
+    if (check && !toolsDisabled) throw new Error('EXECUTION_CURRENT_UNAVAILABLE');
+    check?.();
+    if (toolsDisabled) request = { ...request, toolsDisabled: true, toolMetas: [], providerToolNames: [], rawXmlToolNames: [], assertExecutionCurrent: check };
     if (request.hostRuntimeReceiptObserver && !request.hostDispatchReceiptRecorder && this.hostDispatchReceipts) {
       request = { ...request, hostDispatchReceiptRecorder: this.hostDispatchReceipts.recorder };
     }
@@ -78,6 +84,7 @@ export class LLMTurnRuntimeService {
         : nanoid();
       lastMessageId = messageId;
       await request.callbacks?.onBeforeIteration?.(iteration, messageId, currentLimit);
+      check?.();
 
       const lane = new TurnExecutionLane();
       const turnFailure = new AbortController();
@@ -93,6 +100,7 @@ export class LLMTurnRuntimeService {
         iteration,
         currentLimit,
         markWaitingForHuman: () => lane.write(async () => { await request.callbacks?.onWaitingForHuman?.(); }),
+        beginManualToolWait: request.callbacks?.beginManualToolWait,
         markToolRunning: () => lane.write(async () => { await request.callbacks?.onToolRunning?.(); }),
         messageId,
         abortSignal: request.abortSignal,
@@ -105,6 +113,7 @@ export class LLMTurnRuntimeService {
       const { history, unboundedHistoryCount } = await this.sessionManager.loadHistoryForLLM(request.sessionId, {
         systemPrompt: request.effectiveSystemPrompt,
         toolMetas: request.toolMetas,
+        ...(request.executionProfile?.kind === 'devin-cli-acp' ? { devinAcp: true } : {}),
         ...(request.historySessionId ? { historySessionId: request.historySessionId } : {}),
       });
 
@@ -163,7 +172,10 @@ export class LLMTurnRuntimeService {
       });
 
       const streamModel = async (messagesForAttempt: ContextManagedLLMMessage[]): Promise<void> => {
+        check?.();
         for await (const chunk of this.llmSource.stream({
+          ...(check ? { assertExecutionCurrent: check } : {}),
+          ...(toolsDisabled ? { toolsDisabled: true as const } : {}),
           messages: messagesForAttempt,
           tools: request.toolMetas,
            sessionId: request.sessionId,
@@ -174,18 +186,20 @@ export class LLMTurnRuntimeService {
           runId: request.runId,
           turnId: request.turnId,
           promptMessageId: request.promptMessageId,
-          dispatchNativeTool: dispatchToolCall,
+          dispatchNativeTool: toolsDisabled ? undefined : dispatchToolCall,
           externalThreadId: request.externalThreadId,
            cwd: request.cwd,
            onExternalThreadBound: request.onExternalThreadBound,
            onExternalRuntimeLost: request.onExternalRuntimeLost,
            onNativeApprovalRequested: request.onNativeApprovalRequested,
           onExternalAudit: request.onExternalAudit,
-          toolResultChannel,
+          toolResultChannel: toolsDisabled ? undefined : toolResultChannel,
           abortSignal: request.abortSignal,
           structuredOutput: request.structuredOutput,
         })) {
           if (request.abortSignal.aborted) break;
+          check?.();
+          if (toolsDisabled && chunk.type === 'tool_call') throw new Error('LLM_TOOLS_DISABLED');
           if (chunk.type === 'structured_output') {
             latestStructuredOutput = chunk.value;
             hasStructuredOutput = true;

@@ -1,17 +1,47 @@
 # Architecture Runtime Stack
 
+When Kalio reuses a branch in the same run and role, a reconstructed context that omits both execution paths preserves the saved project path and execution cwd. The copied values do not re-register an allowed path, and normal scope validation still applies.
+
 This document shows the current architecture orchestration layer and the stream boundary it must preserve.
 
 The important design rule: architecture runtime controls graph execution, but the LLM stream remains the normal Kalio chat stream.
 
 For the target nested-flow delegation model, see `sub-agentflow-target-architecture.md`.
 
+## Existing conversation mode
+
+Architecture selection belongs to new-chat setup. Follow-up sends derive the schema
+from the active session's persisted architecture context, not from the welcome
+screen's current selection. Older sessions may recover the schema from their
+persisted architecture messages. Switching sessions must not transfer a previous
+workflow's schema into a single chat. Reload and a second workflow prompt require
+browser verification; a completed first run alone does not prove this lifecycle.
+
+## Devin structured role responses
+
+The Devin ACP adapter prompts for one complete JSON value and validates the final
+post-tool answer against the requested schema with Ajv. This is host validation,
+not native ACP constrained decoding. Prose, fences, wrappers, invalid schemas,
+unresolved tool activity and answers over 65,536 UTF-16 code units fail closed.
+Any tool activity invalidates preceding candidate JSON. Cancellation or a stale
+execution check must prevent publication, including during completion auditing.
+A completed reply with invalid JSON or schema mismatch and no ACP tool activity
+does not invalidate the ACP host. The turn runtime can apply its existing
+one-shot format repair when no tool executed and the turn is still current.
+Only validated `structured_output` chunks feed typed router/finalizer contracts;
+chat prose must not supply graph routing authority. Adapter fixtures alone do not
+prove real model compliance, graph completion or the protected goal protocol.
+
+The explicit mock `[[mock:architecture:evidence]]` fixture requests an actual
+isolated VFS write only from slots advertising `vfs_write`. It exercises executor
+tool-evidence guards without host project writes; it is not project-quality proof.
+
 ## Current Stack
 
 ```mermaid
 flowchart TB
     subgraph Web["kalio-web"]
-        Composer["Chat composer\nprompt + architecture select"]
+        Composer["Chat composer\nprompt + persisted conversation mode"]
         Architect["Architect tab\nregistry + graph editor"]
         ChatProjection["Flat chat projection"]
         GraphProjection["Execution graph projection"]
@@ -145,6 +175,7 @@ Current behavior:
 - Parallel nodes can fan out into several normal chat branches.
 - A downstream router waits for all currently active incoming branches before it merges or chooses a route.
 - Cycles are bounded by runtime step and per-node visit limits.
+- A revisited graph node shows the status, action and tool evidence of its latest explicit visit. The projection retains cumulative event IDs and visit count for audit.
 - Branch output may contain `route_to(targetNodeId, response)` to force the next hop when that target is a valid outgoing node.
 
 ## Parallel Stream Shape
@@ -182,6 +213,30 @@ sequenceDiagram
 
 ## Compatibility Checklist
 
+REST create/createAsync explicitly pass the architecture-local runtime publisher to the existing engine. The singleton session event bus and gateway FIFO relay resolve full persisted ancestry before delivery, deduplicate subscribed recipients and fail closed for missing/cyclic ancestry. Relay delivery does not subscribe clients or confer child-session ownership. Gateway disposal cancels queued relay work; Home approval actions explicitly identify the request's child session before acting.
+
+Typed `LLM_BAD_STRUCTURED_OUTPUT` and `LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID` from router/judge roles bypass partial-evidence recovery: the role rejects, preserving the original bad-output error or wrapping an invalid schema as a contract violation with its cause. Successful reads never authorize a synthetic implementation route. Existing valid decisions, unrelated error recovery, goal/receipt guards and strict provider validation are unchanged.
+
+Cold history restoration unions run identities from existing summaries and raw `run_subagent` call metadata. Inference scopes calls/results to each exact run before fetching its typed projection, then merges envelopes with their durable prompt and turn identities. This includes a failed middle run between completed runs. Active-session changes fence stale writes; per-run projection failure cannot mix evidence from another run or fabricate a terminal status. Warm reload and a fresh browser context are separate verification gates.
+
+An early failure can have only a persisted parent-projection prompt and error text. Its exact prompt ID and matching workflow turn ID identify the run for an authoritative projection fetch even when the host history has no tool call for it.
+
+Loading older chat messages runs the same architecture projection restoration on the merged history window. Live messages that arrive while projections load are retained, and switching conversations fences the pending page.
+
+Architecture branch execution uses a monotonic inactivity deadline. Actual current-execution progress refreshes it: nonempty model text/thinking or CLI progress, growing streamed tool arguments, and distinct tool start/result events. Generic status/budget heartbeats and repeated tool events do not. A silent pending tool can still time out; starting a tool does not create an indefinite wait. Tracking also works without a connected frontend emitter.
+
+Only a verified, durably persisted manual tool request opens a host-owned wait token, before its announcement; every settlement path releases it. Overlapping waits exclude their union. Approval alone resumes the remaining allowance; real progress during a wait can refresh the allowance but never arm the timer until all waits settle. The existing explicit iteration grant retains its separate reset policy. Stop/dispose/stale ownership fence timer rearming and tool entry. Ordinary subagents keep their existing active-time budget; no durable restart accounting or scheduler policy change is implied.
+
+Architecture preparation passes a host-only branch binding (persisted root, run, schema, selected slot and resolved persona) to session creation. Admission locks the parent profile scope, derives the child's profile from the saved persona, validates enabled/nonmock status and rechecks persona/parent identity after asynchronous preparation before synchronous insertion. No public DTO flag enables this exception. A generic child still inherits its parent's profile. A mixed Goal receipt branch is rejected before execution rather than weakening receipt linkage; this does not claim transactionally atomic creation of the whole run. Provider execution resolves the persisted child profile, and a new child does not inherit its host's external provider thread.
+
+All context-assembled chat/subagent/architecture agents receive a short default style instruction before persona instructions. It requests concise results and bounded relevant reads while preserving errors, exact references and verification. Requested detail and structured-output contracts override brevity. A tool-free roster explicitly permits required structured output; it must not demand plain-language prose in conflict with a router schema. One Kalio iteration is distinct from a provider's internal agent loop; Codex's current constrained `toolsDisabled` path remains unsupported and fails closed.
+
+The graph passes its host-owned abort signal through the role executor to the active subagent. When the graph stops, the child controller aborts and its tool-confirmation waiter cancels the pending durable request.
+
+Before tool policy or confirmation, dispatch validates arguments against the canonical registered Kalio or MCP schema, without coercion, defaults or property removal. Invalid input settles as an `INVALID_ARGUMENT` tool error and does not create a confirmation request or executor-entry authority. Missing or invalid canonical schemas fail closed. Existing execution-time guards remain defense in depth; valid destructive operations still require confirmation.
+
+When a tool-execution role returns a subagent timeout, the graph retains its partial tool evidence. A role with a default successor and a single distinct continuation to a router sends the timeout only to that router. The failed attempt counts against the node visit limit and appears as failed in the graph. A successful attempt excludes that recovery edge. Without a configured recovery route, the timeout fails the run.
+
 Before extracting the stream into a standalone library, keep these checks true:
 
 - Normal `chat:send` still reaches `ChatService` without importing architecture modules.
@@ -189,6 +244,14 @@ Before extracting the stream into a standalone library, keep these checks true:
 - Architecture uses an observer around `SubagentEmit`; it does not require architecture fields in `LLMStreamChunk`.
 - Frontend architecture summaries are projections from `ArchitectureChatRunSummary`, not a replacement for `KalioSDK.onChunk`.
 - Tests cover both normal chat streaming and architecture runtime execution with a mock LLM.
+
+### Durable terminal status recovery
+
+Ordinary architecture audit events persist their existing typed lifecycle and status fields; recovery accepts only known enum values. Status reconstruction scans past neutral trailing events to the newest recognized terminal event. A later final artifact can supersede an earlier failure, while later cancellation remains cancellation. Participant output, a running node, prose or elapsed time cannot resurrect a terminal run. This repairs legacy failed-event histories without rewriting their audit rows. An authoritative durable active-resume epoch is not implemented by this projection fix.
+
+Auto-routing checkpoints use the required audit writer. Recovery discards a legacy lossy duplicate only when the same session, run, schema, event identity, sequence, node and route have a complete checkpoint. A malformed checkpoint without that match still fails validation.
+
+Game Development 2 finalization requires successful browser navigation, click, snapshot and repeat navigation through Kalio in both current QA visits, after the latest recorded write. Audit records preserve tool result names and statuses for this check after recovery. Provider-native activity and participant prose do not satisfy it. A router selecting an artifact without that evidence takes its configured non-artifact continuation when available. The finalizer still blocks when there is no such edge.
 
 ## Target Direction: Sub-AgentFlow
 
@@ -205,3 +268,55 @@ Target delegation kinds:
 `sub_agentflow` should reuse the existing session isolation model: history, VFS, KV, approvals, lineage, and graph evidence stay tied to sessions. The parent receives a summary/result while the user can open the child flow as chat or graph.
 
 The first product-critical flow is `goal_guard_delivery_loop`: a two-agent Dev/Implementer and Goal Guard loop. Five Minds-style debate flows remain useful for analysis, but they are not valid substitutes when the user asks to validate implementation/guard ping-pong behavior.
+
+Talk and the graph inspector share the structured final-answer presentation. A file preview resolves relative paths against the persisted session project and uses the bounded project resource reader. Plain-text legacy artifacts remain readable.
+The report selector prefers the complete durable finalizer assistant message when recovered metadata contains only a clipped preview. It parses supported report JSON once, including the historical Finalizer heading wrapper. Decoded report fields preserve newline layout; arbitrary text, Windows paths and code are not globally unescaped.
+
+Legacy audit projections capped at 800 characters show a labeled excerpt when the status and complete evidence entries can be recovered. The UI never reconstructs missing evidence.
+
+Router decisions and finalizer output are visually marked as Kalio workflow events, with explicit route transitions in Talk and the graph inspector.
+
+Router detail cards present confidence, input counts and available action/strategy as fields, preferring the typed event output. Final-answer evidence rows attach each file preview action to the evidence that references it.
+
+In Game Development 2 and its variants, Release Review receives the latest completed participant output from Core, UX, Senior and both QA nodes in the current run. A newer unfinished or failed visit suppresses that node’s older output. These summaries inform routing. Artifact publication still depends on runtime evidence guards.
+
+Game Development 2 finalization keeps a bounded head and conclusion of each browser QA report so the result and reload evidence near the end survives prompt compression. Reports remain supplemental to runtime evidence.
+
+## Deterministic status conditions
+
+A status_router node compares the execution outcome of its single source role with completed or failed. Its statusRouting field stores sourceNodeId and expectedStatus. Exactly one choice edge (Yes) and one default edge (Else) must have distinct targets. The node has no persona, tools or model call.
+
+The predicate reads the latest source node_started visit in the same run. A recovered runtime failure or exhausted subagent timeout counts as failed. A nested tool failure does not determine the whole role outcome. A new source visit without a terminal outcome blocks evaluation. Fatal contract errors and explicit Stop remain terminal.
+
+Decisions use the existing required route checkpoint, with source-start and terminal event IDs and the exact condition. Recovery validates that binding and the selected edge against the saved schema before resuming. Checkpoint persistence errors fail the node. Route selection does not supply implementation, build or semantic acceptance evidence.
+
+Downstream role context treats a status condition as a transparent control hop. Alongside the gate decision, the selected receiver gets the original source participant contribution from the exact source-start/terminal checkpoint interval, including recoverable failure and partial tool evidence. The latest source visit and selected receiver must match; missing, forged, cross-run or stale binding fails closed. Recovery reconstructs the same handoff from durable events. Forwarded partial evidence does not turn a failed source into completed work or acceptance. Ordinary direct inputs and judge/finalizer selectors retain their existing behavior.
+
+The role prompt renders incoming graph summaries and handoff packets with separate character budgets of 12,000 and 4,000. If either section exceeds its budget, it prioritizes contributions over lifecycle events and takes recent entries per source node and event type. Included entries carry event IDs and sequence numbers. This projection leaves routing inputs, tool receipts and the full workflow trace available to their existing consumers.
+
+### Non-interactive terminal input
+TerminalService background commands use ignored stdin, preserving stdout/stderr capture. Explicit closeStdin CLI callers retain a pipe closed immediately for EOF compatibility. This prevents rg without a path from waiting indefinitely for input. It does not change project boundaries, confirmation policy, or cancellation.
+
+### Delegated Jev confirmation authority
+The optional HITL confirmationAuthority is human by default; decision_model explicitly delegates ordinary registered-tool requests to Jev. RequiresConfirmation metadata stays enabled. Deny and ask-user hard rules take precedence; an allow rule cannot bypass Jev assessment in delegated mode. A confident approval carries an in-process one-use recheck, binding session/call/tool/args and current policy revision; ToolDispatch runs it immediately before executor entry after lifecycle awaits. Stop, mutation, stale config, incomplete/redacted evidence or evaluation failure prevents delegated entry. Host-required human confirmations (including protected Goal and external MCP) retain their separate mandatory path. This setting currently applies to Jev only, not native Ollama or legacy auto/bypass modes. General terminal execution is not OS-isolated; operators must not interpret model approval or command regexes as proof of filesystem/network confinement. The UI explicitly warns about system-account permissions. The human_then_decision authority waits for a human for the configured 0/60000/120000/300000 milliseconds (zero means infinite). Timeout requires a CAS from the exact pending revision to expired before publishing invalidation or invoking Jev. A human win or persistence error keeps the model fallback from running. Always-ask rules and protected host-human requests force an infinite wait. Only the timeout path may delegate human-first review, and it re-evaluates current rules, config and full operation evidence; expiry alone never authorizes execution. The expired state is a text-status addition, with no schema DDL required. Legacy auto/bypass and native Ollama semantics are unchanged.
+
+### Pending approval inspection
+HomeHitlInbox is shared by Home and the narrow Runs panel. Its tool cards remain single-column even on a wide viewport. The waiting identity comes from the persisted session and supplied agent run label. Terminal previews include command/argv/cwd; the keyboard-accessible details dialog displays the complete request arguments without preview truncation. Opening/closing inspection has no decision side effects; approval/rejection remain bound to the exact request/session and existing event transport. No extra frontend authority or durable state channel is introduced.
+
+### Provider summary continuity
+A restarted FE thinking buffer begins with the same message's accumulated summary before appending a new thinking_delta verbatim. Existing tool/text/finalization flushes therefore keep all exposed phases. History refresh reconciles only session-owned live buffers: a local snapshot containing the whole durable snapshot can preserve its live extension; otherwise the durable snapshot is authoritative. Arbitrary character-overlap concatenation is forbidden. Message/turn/prompt IDs and session isolation remain unchanged. ACP agent_thought_chunk forwarding and backend accumulation are unchanged; missing provider events are not invented.
+
+### Contextual multi-axis Jev review
+The database-owned TOOL_APPROVAL_CONTEXT reader uses read-only SQLite snapshots to bind the active chat run, exact prompt/turn, same-project parent chain and relevant manual-denial records. Root recorded inputs and delegated objectives retain source IDs and explicit non-authoritative origin labels. Ambiguous root-task association, overflow, broken lineage or stale execution falls back to human review. Five Noul answers are independently classified with the configured threshold: alignment/scope/evidence require a clear positive; destructive effects/export require a clear negative. No averages, products or inferred malicious intent determine permission. Delegated protocol failures cannot fall through to persona approval. The complete selection is re-read after inference and at the one-use executor guard; this does not provide OS filesystem/network isolation. Legacy nondelegated Jev and host-forced human paths retain their existing behavior. ToolConfirmationRequest.policyReason is optional, bounded request context propagated through the existing socket and durable pending payload; it cannot authorize execution or impersonate a human response.
+
+For an architecture child, contextual approval uses the parent workflow prompt matched to its host-recorded run creation and persisted conversation entry. Other workflow prompts in the same chat do not become authorization for this run. Missing or conflicting evidence leaves the operation in manual review.
+
+Kalio tool inspector: versioned internal catalog reuses restrictive hard-rule command parsing, emits rule ID/description with deny/manual only, and runs on normal plus unattended approval paths. User deny has priority, inspector precedes user allow/bypass/model. The host project path is supplied in contextual review; proposed read assessment must not demand successful execution. Production hints from untrusted text raise review requirements only. Static catalogs require code review/release; no arbitrary remote regex loading. Unknown/encoded/indirect actions need manual review; actual executor/VFS containment remains independent.
+Jev thresholds are persisted through guarded HITL GET/PUT: jevApprovalThreshold for DEV/QA, jevProductionApprovalThreshold as an editable production minimum (legacy missing field defaults .95). Both validate strictly within (0.5,1]. Production and unknown environment use max(local,production), including production-target hints during local execution. Changed config invalidates pending one-use authority. Settings draft changes only apply after Save.
+Terminal transport policy is shared from common/terminal-shell-policy: native programs use shell:false; Windows .cmd/.bat plus legacy bare package shims use shell:true. Same captured value enters spawn/audit/descriptor and Jev outer-launcher metadata. Explicit cmd.exe/pwsh/etc can still interpret their own argv and retain inspector manual review. No path lookup, shell fallback on failure or new execution authorization is added. Local real-Windows fixture verifies literal pipe/space/ampersand argv, rg regex alternation and npm.cmd --version; target-QA activation is a separate gate.
+Jev evidence_sufficient evaluates specification of the proposed operation and scope parameters, not proof of future success. Read-only searches do not require results or file contents before execution. Goal, scope, destructive effects and export remain separate mandatory axes; structural completeness cannot override a negative safety assessment.
+
+Codex profile availability labels use three states: unchecked catalog, checked missing model, and known available model. Unchecked/null catalogs keep the existing admission block and show 'Models not checked yet' or the probe error; only a successfully loaded catalog excluding the model reports it unavailable. Project preview paths continue to reject all U+0000–U+001F characters, backslashes, colons and empty/dot/dotdot segments; control detection uses character codes rather than a control-character regex.
+Devin ACP continuation budgets count the rendered assistant text. Over-budget history may shorten earlier fs_read text previews while preserving their path, digest, line count and call linkage, the five latest tool results, and the full persisted evidence.
+
+Contextual tool approval sends Jev the current operation, host environment and project scope, up to three recent user inputs and the bound delegated objective (2,000-character excerpts), up to five recent tool names and statuses from the current session, and tool names from prior denials. Prior tool arguments and results stay local. Freshness and production targeting still use the host-owned snapshot.

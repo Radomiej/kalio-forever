@@ -2,9 +2,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readVsCodeVersion } from './project-ide-runtime.helpers';
+import { isSupportedVersion, readVsCodeVersion } from './project-ide-runtime.helpers';
 
 const temporaryRoots: string[] = [];
+
+describe('bridge compatibility', () => {
+  it.each(['0.4.7', '0.4.9', '0.5.3'])('accepts verified compatible release %s', version => {
+    expect(isSupportedVersion(version)).toBe(true);
+  });
+  it.each(['0.4.6', '0.5.0', '0.5.4', '1.0.0', '0.5.3-beta', '0.5.3junk', '0.5', '0.4.7.1', '00.4.7', ' 0.5.3'])('rejects unverified or malformed release %s', version => {
+    expect(isSupportedVersion(version)).toBe(false);
+  });
+});
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });

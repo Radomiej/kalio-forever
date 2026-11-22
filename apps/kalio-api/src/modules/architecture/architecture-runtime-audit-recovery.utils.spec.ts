@@ -7,9 +7,45 @@ import {
   architectureAuditPromptFromRecords,
   statusFromArchitectureAuditEventSummary,
   statusFromArchitectureEvents,
+  architectureAuditLifecycleField,
+  architectureAuditStatusField,
 } from './architecture-runtime-audit-recovery.utils';
 
 describe('architecture runtime audit recovery utils', () => {
+  it.each(['queued', 'running', 'waiting_on_orchestrator', 'done', 'failed', 'cancelled', 'blocked'] as const)(
+    'TASK59 preserves recognized status %s', status => {
+      expect(architectureAuditStatusField({ status })).toBe(status);
+    },
+  );
+  it.each(['started', 'node_started', 'node_completed', 'edge_taken', 'guard_result', 'tool_called',
+    'return_to_orchestrator', 'waiting_on_orchestrator', 'resume_input', 'done', 'blocked', 'failed',
+    'cancelled', 'runtime_missing', 'runtime_stalled', 'copy_back'] as const)(
+    'TASK59 preserves recognized lifecycle %s', lifecycle => {
+      expect(architectureAuditLifecycleField({ lifecycle })).toBe(lifecycle);
+    },
+  );
+  it.each([undefined, null, 23, {}, 'future-state', 'completed'])(
+    'TASK59 omits unknown lifecycle/status %j', value => {
+      expect(architectureAuditStatusField({ status: value })).toBeUndefined();
+      expect(architectureAuditLifecycleField({ lifecycle: value })).toBeUndefined();
+    },
+  );
+  it.each([
+    { terminal: { type: 'node_failed' }, expected: 'failed' },
+    { terminal: { type: 'router_decision', status: 'failed' as const }, expected: 'failed' },
+    { terminal: { type: 'router_decision', status: 'blocked' as const }, expected: 'failed' },
+    { terminal: { type: 'router_decision', status: 'cancelled' as const }, expected: 'cancelled' },
+    { terminal: { type: 'run_stopped' }, expected: 'cancelled' },
+    { terminal: { type: 'router_decision', reasonCode: 'max_steps' as const }, expected: 'failed' },
+    { terminal: { type: 'router_decision', reasonCode: 'max_node_visits' as const }, expected: 'failed' },
+  ])('TASK59 keeps $expected through neutral progress after $terminal', ({ terminal, expected }) => {
+    expect(statusFromArchitectureAuditEventSummary([
+      terminal, { type: 'router_decision' }, { type: 'node_started', status: 'running' },
+    ])).toBe(expected);
+    expect(statusFromArchitectureAuditEventSummary([
+      terminal, { type: 'final_artifact' }, { type: 'router_decision' },
+    ])).toBe('completed');
+  });
   it.each([
     { type: 'run_stopped' as const },
     { type: 'node_started' as const, status: 'cancelled' as const },

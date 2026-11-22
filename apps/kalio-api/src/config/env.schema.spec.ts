@@ -2,6 +2,34 @@ import { describe, expect, it } from 'vitest';
 import { envSchema } from './env.schema';
 
 describe('envSchema', () => {
+  it.each(['development', 'test', 'production'])('boots CLI-only configuration in %s without direct LLM settings', mode => {
+    const { error, value } = envSchema.validate({
+      DATABASE_PATH: './data/app.sqlite', WORKSPACE_ROOT: './sessions', NODE_ENV: mode,
+      ...(mode === 'production' ? { CREDENTIALS_MASTER_KEY: 'production-master-key' } : {}),
+    });
+    expect(error).toBeUndefined();
+    expect(value.LLM_PROVIDER).toBeUndefined();
+    expect(value.LLM_API_KEY).toBeUndefined();
+    expect(value.LLM_BASE_URL).toBeUndefined();
+    expect(value.LLM_MODEL).toBeUndefined();
+  });
+
+  it('accepts empty direct-provider fields without converting them to mock', () => {
+    const { error, value } = envSchema.validate({ DATABASE_PATH: './data/app.sqlite', WORKSPACE_ROOT: './sessions',
+      LLM_PROVIDER: '', LLM_API_KEY: '', LLM_MODEL: '', LLM_BASE_URL: '' });
+    expect(error).toBeUndefined();
+    expect(value.LLM_PROVIDER).toBe('');
+  });
+
+  it('preserves explicit mock and legacy embedding configuration', () => {
+    const { error, value } = envSchema.validate({ DATABASE_PATH: './data/app.sqlite', WORKSPACE_ROOT: './sessions',
+      LLM_PROVIDER: 'mock', EMBEDDING_MODEL: 'Xenova/multilingual-e5-small', EMBEDDING_DIMENSIONS: 384 });
+    expect(error).toBeUndefined();
+    expect(value.LLM_PROVIDER).toBe('mock');
+    expect(value.EMBEDDING_MODEL).toBe('Xenova/multilingual-e5-small');
+    expect(value.EMBEDDING_DIMENSIONS).toBe(384);
+  });
+
   it('applies development defaults when required values are present', () => {
     const { error, value } = envSchema.validate({
       DATABASE_PATH: './data/app.sqlite',
@@ -16,13 +44,13 @@ describe('envSchema', () => {
     expect(value.NODE_ENV).toBe('development');
     expect(value.MEMORY_DB_PATH).toBe('./data/memory');
     expect(value.EMBEDDING_ENABLED).toBe(true);
-    expect(value.EMBEDDING_MODEL).toBe('Xenova/multilingual-e5-small');
-    expect(value.EMBEDDING_DIMENSIONS).toBe(384);
+    expect(value.EMBEDDING_MODEL).toBeUndefined();
+    expect(value.EMBEDDING_DIMENSIONS).toBeUndefined();
     expect(value.EMBEDDING_BACKEND).toBe('cpu');
     expect(value.KALIO_ENABLE_TEST_SUPPORT).toBe(false);
   });
 
-  it('fills mock LLM defaults in test mode', () => {
+  it('does not inject implicit mock LLM configuration in test mode', () => {
     const { error, value } = envSchema.validate({
       DATABASE_PATH: './data/test.sqlite',
       WORKSPACE_ROOT: './sessions/test',
@@ -30,9 +58,9 @@ describe('envSchema', () => {
     });
 
     expect(error).toBeUndefined();
-    expect(value.LLM_API_KEY).toBe('mock');
-    expect(value.LLM_BASE_URL).toBe('mock');
-    expect(value.LLM_MODEL).toBe('mock');
+    expect(value.LLM_API_KEY).toBeUndefined();
+    expect(value.LLM_BASE_URL).toBeUndefined();
+    expect(value.LLM_MODEL).toBeUndefined();
   });
 
   it('requires a credentials master key in production', () => {

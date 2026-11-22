@@ -162,7 +162,7 @@ describe('MemoryController — embedding credential routes', () => {
       const status = await controller.clearActiveEmbeddingCredential();
       expect(status.source).toBe('local');
       expect(status.configured).toBe(true);
-      expect(status.model).toBe('Xenova/multilingual-e5-small');
+      expect(status.model).toBe('onnx-community/embeddinggemma-2-ONNX');
     });
 
     it('is idempotent when nothing active', async () => {
@@ -210,7 +210,7 @@ describe('MemoryController — embedding credential routes', () => {
       const status = await controller.getEmbeddingStatus();
       expect(status.source).toBe('local');
       expect(status.configured).toBe(true);
-      expect(status.model).toBe('Xenova/multilingual-e5-small');
+      expect(status.model).toBe('onnx-community/embeddinggemma-2-ONNX');
     });
 
     it('returns db status after activating a credential', async () => {
@@ -223,6 +223,16 @@ describe('MemoryController — embedding credential routes', () => {
   });
 
   describe('local embedding config routes', () => {
+    it('returns Gemma2 CPU defaults to settings and installation for a new install', async () => {
+      expect(await controller.getLocalEmbeddingConfig()).toEqual({
+        enabled: true, model: 'onnx-community/embeddinggemma-2-ONNX', dimensions: 768, backend: 'cpu',
+      });
+      await controller.getLocalEmbeddingAvailability();
+      expect(localEmbeddingInstall.getAvailability).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'onnx-community/embeddinggemma-2-ONNX', dimensions: 768, backend: 'cpu',
+      }));
+    });
+
     it('returns the persisted local config separately from the active runtime status', async () => {
       await controller.updateLocalEmbeddingConfig({
         enabled: true,

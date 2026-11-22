@@ -18,7 +18,7 @@ function response(probabilities = [0.95, 0.95, 0.95]) {
   return Response.json({ answers: Object.fromEntries(ids.map((id, i) => [id, { type: 'noul', noul: probabilities[i] }])) });
 }
 function harness() {
-  const resolve = vi.fn(async () => ({ endpoint: 'https://decision.invalid/review', model: 'jev-test', apiKey: 'connection-private' }));
+  const resolve = vi.fn<DecisionSettingsPort['resolve']>(async () => ({ protocol: 'jev-decisions' as const, endpoint: 'https://decision.invalid/review', model: 'jev-test', apiKey: 'connection-private' }));
   const settings: DecisionSettingsPort = { resolve, getConfig: vi.fn(), updateConfig: vi.fn() };
   const http = vi.fn<typeof fetch>().mockImplementation(async () => response());
   vi.stubGlobal('fetch', http);
@@ -28,6 +28,34 @@ function harness() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('ArchitectureGoalReviewService', () => {
+
+  it.each(['ollama-chat', 'unknown', undefined])('requires user without Jev for protocol %s', async protocol => {
+    const { packet, prepared } = fixture();
+    const { service, client, http, resolve } = harness();
+    const call = vi.spyOn(client, 'decideNoulBatch');
+    resolve.mockResolvedValue({ protocol, endpoint: 'http://localhost:11434/api/chat', model: 'test' } as unknown as Awaited<ReturnType<DecisionSettingsPort['resolve']>>);
+    const result = await service.review(packet, prepared);
+    expect(result).toMatchObject({ status: 'needs_user', reason: 'provider_error' });
+    for (const key of ['binding', 'callerBinding', 'confidence', 'probabilities', 'candidate', 'criterionId']) expect(result).not.toHaveProperty(key);
+    expect(call).not.toHaveBeenCalled(); expect(http).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledWith();
+    call.mockRestore();
+  });
+
+  it.each(['ollama-chat', 'unknown', undefined])('propagates cancellation before protocol %s fallback', async protocol => {
+    const { packet, prepared } = fixture();
+    const { service, client, http, resolve } = harness();
+    const call = vi.spyOn(client, 'decideNoulBatch');
+    const controller = new AbortController();
+    resolve.mockImplementation(async () => {
+      controller.abort();
+      return { protocol, endpoint: 'http://localhost:11434/api/chat', model: 'test' } as unknown as Awaited<ReturnType<DecisionSettingsPort['resolve']>>;
+    });
+    await expect(service.review(packet, prepared, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(call).not.toHaveBeenCalled(); expect(http).not.toHaveBeenCalled();
+    call.mockRestore();
+  });
+
   it('binds only a parsed complete three-noul response at the inclusive .95 boundary', async () => {
     const { packet, prepared } = fixture();
     const { service, http, resolve } = harness();
@@ -153,13 +181,13 @@ describe('ArchitectureGoalReviewService', () => {
   });
   it('preflights the full serialized request byte budget', async () => {
     const { service, http, resolve } = harness(); const { packet, prepared } = fixture();
-    resolve.mockResolvedValue({ endpoint: 'https://decision.invalid', model: 'x'.repeat(65536), apiKey: '' });
+    resolve.mockResolvedValue({ protocol: 'jev-decisions' as const, endpoint: 'https://decision.invalid', model: 'x'.repeat(65536), apiKey: '' });
     expect(await service.review(packet, prepared)).toMatchObject({ reason: 'budget_limit' });
     expect(http).not.toHaveBeenCalled();
   });
   it('invalidates changes while resolving settings without sending a stale request', async () => {
     const { service, http, resolve } = harness(); const { packet, prepared } = fixture();
-    resolve.mockImplementation(async () => { packet.original.content = 'Changed'; return { endpoint: 'https://decision.invalid', model: 'jev', apiKey: '' }; });
+    resolve.mockImplementation(async () => { packet.original.content = 'Changed'; return { protocol: 'jev-decisions' as const, endpoint: 'https://decision.invalid', model: 'jev', apiKey: '' }; });
     expect(await service.review(packet, prepared)).toMatchObject({ reason: 'stale_input' }); expect(http).not.toHaveBeenCalled();
   });
   it('keeps the in-flight HTTP snapshot independent from input mutation', async () => {
@@ -213,7 +241,7 @@ describe('ArchitectureGoalReviewService', () => {
   it.each(['before', 'settings', 'http'])('propagates abort at %s', async (stage) => {
     const { service, http, resolve } = harness(); const { packet, prepared } = fixture(); const abort = new AbortController();
     if (stage === 'before') abort.abort();
-    if (stage === 'settings') resolve.mockImplementation(async () => { abort.abort(); return { endpoint: 'https://decision.invalid', model: 'jev', apiKey: '' }; });
+    if (stage === 'settings') resolve.mockImplementation(async () => { abort.abort(); return { protocol: 'jev-decisions' as const, endpoint: 'https://decision.invalid', model: 'jev', apiKey: '' }; });
     if (stage === 'http') http.mockImplementation(async () => { abort.abort(); return response(); });
     await expect(service.review(packet, prepared, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
   });

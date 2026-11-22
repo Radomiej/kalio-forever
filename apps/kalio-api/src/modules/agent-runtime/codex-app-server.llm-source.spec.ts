@@ -8,6 +8,16 @@ import type {
 } from './codex-app-server.host';
 import { CodexAppServerLLMSource } from './codex-app-server.llm-source';
 
+it('rejects toolsDisabled on generator advance before opening any Codex host', async () => {
+  const host = { get: vi.fn(), ensure: vi.fn(), onConnectionLost: vi.fn() };
+  const source = new CodexAppServerLLMSource(host as never);
+  const stream = source.stream({ toolsDisabled: true, messages: [], tools: [], sessionId: 'review', messageId: 'answer' });
+  expect(host.get).not.toHaveBeenCalled();
+  await expect(stream.next()).rejects.toThrow('LLM_TOOLS_DISABLED_UNSUPPORTED');
+  expect(host.get).not.toHaveBeenCalled(); expect(host.ensure).not.toHaveBeenCalled();
+  expect(host.onConnectionLost).not.toHaveBeenCalled();
+});
+
 // Lifecycle fixtures use a verified catalog; real admission is covered separately.
 vi.mock('./codex-model-catalog', () => ({
   readCodexModels: vi.fn().mockResolvedValue(['gpt-5.4', 'gpt-5.6-luna']),
@@ -106,6 +116,20 @@ describe('CodexAppServerLLMSource', () => {
 
     expect(connection.requests.map((request) => request.method)).toEqual(['thread/start', 'turn/start']);
     expect(chunks).toEqual([{ type: 'text_delta', delta: 'hello' }, { type: 'done' }]);
+  });
+
+  it('sends the latest attachment with the text as an App Server image input', async () => {
+    const connection = new FakeConnection();
+    const source = new CodexAppServerLLMSource({ getConnection: vi.fn().mockResolvedValue(connection) } as never);
+    const url = 'data:image/png;base64,aGVsbG8=';
+    const messages: LLMSourceParams['messages'] = [
+      { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,b2xk' } }] },
+      { role: 'user', content: [{ type: 'text', text: 'Describe this' }, { type: 'image_url', image_url: { url } }] },
+    ];
+    for await (const _chunk of source.stream(params(connection, { messages }))) { /* collect until completed */ }
+    expect(connection.requests.find((request) => request.method === 'turn/start')?.params).toMatchObject({
+      input: [{ type: 'text', text: 'Describe this', text_elements: [] }, { type: 'image', url }],
+    });
   });
 
   it('keeps max for GPT-5.6 and downgrades it for older Codex models', async () => {

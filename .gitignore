@@ -10,6 +10,8 @@ dist/
 .env.test
 data/
 coverage/
+.stryker-tmp/
+apps/kalio-web/reports/
 .turbo/
 *.db
 *.db-shm
@@ -58,3 +60,6 @@ tmp-*.json
 
 # local working notes (untracked)
 docs/todos/
+# Private user corrections and project/workflow decisions; never publish by default.
+docs/cto/
+docs/meetings/

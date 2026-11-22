@@ -92,6 +92,32 @@ function toolData(toolEvidence: Record<string, unknown>): Record<string, unknown
 }
 
 describe('architecture graph finalization helpers', () => {
+  it('requires browser actions recorded by Kalio in both current game QA visits', () => {
+    const actions = [
+      'browser_page_navig_181cd832', 'browser_click_e993a421',
+      'browser_snapshot_22722cdb', 'browser_page_navig_181cd832',
+    ];
+    const starts = ['input-qa', 'loop-qa'];
+    const visits = starts.flatMap((nodeId, index) => [
+      { ...event('node_started', nodeId, {}), nodeId, sequence: index * 10 + 1 },
+      ...actions.map((action, position) => ({
+        ...event('tool_call', nodeId, {
+          event: 'tool:result', status: 'success', toolName: `mcp_toml_mcp-playwright-orchestrator_${action}`,
+        }),
+        nodeId, sequence: index * 10 + position + 2,
+      })),
+    ]);
+    const input = { schema: { ...schema, id: 'game-development-2-variant-3' }, runContext: undefined };
+    expect(blockingFinalizationReason({ ...input, events: [event('participant_output', 'input-qa', {})] })).toContain('input-qa');
+    expect(blockingFinalizationReason({ ...input, events: visits })).toBeUndefined();
+    expect(blockingFinalizationReason({ ...input, events: [
+      ...visits, { ...event('node_started', 'loop-qa', {}), nodeId: 'loop-qa', sequence: 20 },
+    ] })).toContain('loop-qa');
+    expect(blockingFinalizationReason({ ...input, events: [
+      ...visits, { ...event('tool_call', 'core', { event: 'tool:result', status: 'success', toolName: 'fs_write' }), sequence: 21 },
+    ] })).toContain('input-qa');
+  });
+
   const goalContext = { requireGoalMasterLoopProof: true };
   function buildProof(status: 'passed' | 'failed', exitCode: number): ArchitectureExecutionEvent {
     return event('participant_output', 'implementer', toolData({

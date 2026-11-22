@@ -42,6 +42,7 @@ if (repoPreflight.code !== 0) {
 const scriptTests = await run(process.execPath, [
   '--test',
   './scripts/stack-state.test.mjs',
+  './scripts/stack-ownership.test.mjs',
   './scripts/corepack-path.test.mjs',
   './scripts/linux-installer.test.mjs',
   './scripts/linux-cli.test.mjs',

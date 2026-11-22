@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Inject, NotFoundException, Param, Post } from '@nestjs/common';
 import type {
   ArchitectureChatProjection,
   ArchitectureExecutionEvent,
@@ -7,19 +7,21 @@ import type {
   CreateArchitectureRunDto,
 } from '@kalio/types';
 import { ArchitectureRuntimeService } from './architecture-runtime.service';
+import { ARCHITECTURE_RUNTIME_EVENTS, type ArchitectureRuntimeEmit } from './architecture-runtime-events.port';
 
 @Controller('architecture-runs')
 export class ArchitectureRunsController {
-  constructor(private readonly runtime: ArchitectureRuntimeService) {}
+  constructor(private readonly runtime: ArchitectureRuntimeService,
+    @Inject(ARCHITECTURE_RUNTIME_EVENTS) private readonly publish: ArchitectureRuntimeEmit) {}
 
   @Post()
   create(@Body() dto: CreateArchitectureRunDto): Promise<ArchitectureRun> {
-    return this.runtime.createRun(dto);
+    return this.runtime.createRun(dto, this.publish);
   }
 
   @Post('async')
   createAsync(@Body() dto: CreateArchitectureRunDto): Promise<ArchitectureRun> {
-    return this.runtime.createRunAsync(dto);
+    return this.runtime.createRunAsync(dto, this.publish);
   }
 
   @Get(':id')

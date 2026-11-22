@@ -33,6 +33,8 @@ export interface RunSubagentRequest {
   slotPolicy?: ArchitectureSlotToolPolicy;
   architectureContext?: Record<string, unknown>;
   timeoutMs: number;
+  /** Host-owned cancellation for the parent execution. */
+  parentSignal?: AbortSignal;
   maxIterations?: number;
   vfsMode: VFSMode;
   copyOutputs: boolean;

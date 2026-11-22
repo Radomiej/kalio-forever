@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
 import type { ChatSession } from '@kalio/types';
+import type { EmitFn } from './interfaces/stream-context.interface';
 
 export interface SessionCreatedEvent {
   session: ChatSession;
@@ -13,6 +14,15 @@ export interface SessionUpdatedEvent {
 @Injectable()
 export class SessionEventsService {
   private readonly emitter = new EventEmitter();
+
+  onRuntimeEvent(listener: EmitFn): () => void {
+    this.emitter.on('runtime', listener);
+    return () => { this.emitter.off('runtime', listener); };
+  }
+
+  readonly emitRuntimeEvent: EmitFn = (event, data) => {
+    this.emitter.emit('runtime', event, data);
+  };
 
   onSessionCreated(listener: (event: SessionCreatedEvent) => void): () => void {
     this.emitter.on('session:created', listener);

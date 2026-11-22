@@ -89,6 +89,23 @@ describe('HitlNotificationService', () => {
       request: expect.objectContaining({ name: 'vfs_write', toolCallId: 'call-1' }),
     });
   });
+  it('annotates the one existing actual request audit and never reuses model context as human approval reason', async () => {
+    const policyReason = 'Local decision (fixture:1): ask_user. Human context required.';
+    await service.notifyApprovalRequested({ requestId: 'actual-request', timeoutMs: 0, policyReason,
+      request: { kind: 'tool', sessionId: 's', name: 'fs_read', args: {}, toolCallId: 'call' } });
+    const requested = await drizzleService.db.select().from(schema.auditLog);
+    expect(requested).toHaveLength(1);
+    expect(requested[0]!.data).toMatchObject({ eventType: 'hitl_approval_requested', requestId: 'actual-request',
+      approvalId: 'actual-request', policyReason });
+    expect(requested[0]!.data).not.toHaveProperty('reason');
+    await service.logApprovalLifecycle({ eventType: 'hitl_approval_confirmed', requestId: 'actual-request', source: 'manual',
+      request: { kind: 'tool', sessionId: 's', name: 'fs_read', args: {} } });
+    const rows = await drizzleService.db.select().from(schema.auditLog);
+    expect(rows).toHaveLength(2);
+    const approved = rows.find(row => (row.data as Record<string, unknown>)['eventType'] === 'hitl_approval_confirmed');
+    expect(approved?.data).not.toHaveProperty('reason'); expect(approved?.data).not.toHaveProperty('policyReason');
+    expect(relay.broadcast).not.toHaveBeenCalled();
+  });
 
   it('broadcasts a schema-based Telegram approval prompt when configured', async () => {
     config.getConfig.mockResolvedValue({

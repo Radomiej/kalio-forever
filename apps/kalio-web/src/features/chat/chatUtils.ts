@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@kalio/types';
 import type { AgentTurn } from '../../store/sessionStore';
+import { mergeThinkingSnapshots } from '../../store/sessionStore.chunks';
 
 export type ChatTimelineEntry =
   | { kind: 'user_message'; message: ChatMessage }
@@ -58,7 +59,7 @@ function mergeMessageCopies(currentMessage: ChatMessage, loadedMessage: ChatMess
     content: currentMessage.content || loadedMessage.content,
     turnId: currentMessage.turnId ?? loadedMessage.turnId,
     promptMessageId: currentMessage.promptMessageId ?? loadedMessage.promptMessageId,
-    thinking: currentMessage.thinking ?? loadedMessage.thinking,
+    thinking: mergeThinkingSnapshots(currentMessage.thinking, loadedMessage.thinking),
     // Calls are append-only across approval resumes; a local prefix must not hide durable calls.
     toolCalls: currentMessage.toolCalls && loadedMessage.toolCalls
       ? [...new Map([...currentMessage.toolCalls, ...loadedMessage.toolCalls]

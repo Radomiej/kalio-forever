@@ -1,8 +1,50 @@
 # Kalio Project Spec
 
-Last updated: 2026-10-18
+Last updated: 2026-11-02
 
 This file records durable product and architecture decisions that should guide agents across sessions. Session notes in `docs/sessions/` describe what changed; this file describes the boundaries that should remain true.
+
+## Local voice input (implementation in progress)
+
+- Speech input uses explicitly installed local CPU inference and a recoverable browser recording draft. Failed transcription must retain audio for Retry/Delete; explicit X discards the current recording and successful composer insertion deletes it. A new-chat draft must not create history before its first prompt is sent. The compact purple recorder sits beside Send; settings show model readiness and an explicit install action. No automatic send or silent cloud fallback. See `docs/spec/local-voice-input.md` for the contract and required proof; this section does not claim release readiness.
+
+## Runtime Feedback
+
+- New-chat setup selects the conversation mode. Subsequent prompts resolve the architecture from that session's persisted context (or legacy persisted workflow messages), never a different welcome draft. Single-chat sessions must remain single-chat after switching from a workflow. See `docs/spec/architecture-runtime-stack.md`.
+- Devin typed role responses use a prompted JSON contract with strict host validation of the final post-tool answer. This does not claim native ACP constrained decoding or real workflow acceptance; prose cannot authorize a graph route. See `docs/spec/architecture-runtime-stack.md`.
+- A completed Devin reply with malformed or schema-invalid JSON does not signal host loss when no ACP tool activity occurred. The turn may use its existing single format repair only when its execution lane also has no tool executions.
+
+- Registry publication and initial/current goal snapshots use acyclic leaf modules, without granting launch authority. The protected launch producer and full worker/reviewer composition are not yet activated. See `docs/spec/jev-devin-goal-loop.md`.
+- IDE compatibility admits the verified protocol-3 bridge release 0.5.3; runtime workspace/capability checks remain required. See `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+- Local tool supervision preserves the validated model explanation and verified model attribution for allow, deny and manual-review resolutions, after existing current-policy and one-use checks. Host fallback reasons remain distinct from model explanations; these annotations never authorize execution or replace structured provenance. Jev does not acquire an invented explanation field. See `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+
+- Terminal chat snapshots reconcile only their owned live chunks and preserve final reasoning/text as history even without `agent:done`; stale events cannot clear a newer turn. Runtime Recheck results take precedence over older polling responses. See `docs/spec/chat-turn-feedback.md` and `docs/spec/provider-runtime-selection-and-integrations-ux.md`.
+
+## Goal Reviewer Admission
+
+- Goal reviewer admission has a local, additive storage boundary: a committed one-use start capability, immutable metadata/hash tombstone and start/cancel CAS; it does not yet dispatch a reviewer or authorize goal completion. Normal session deletion remains allowed, but reserved reviewer IDs cannot be resurrected. Runtime wiring and deployment remain separate gates; see `docs/spec/jev-devin-goal-loop.md`.
+
+- Internal constrained reviewer execution narrows the turn and final Devin adapter to no tools, native permissions or MCP. Unsupported adapters reject before activation. This prerequisite is not reviewer authorization or proof of the complete goal workflow.
+
+- Unwired reviewer foundations distinguish reservation classification, read-only full binding validation and exclusive active-run ownership. They grant no start authority and must not activate before target migration and trusted issuer/lifecycle integration.
+
+- Coding goals require a successful build and an independently verified reviewer result by default. Commit and publication are required only when explicitly requested. The host policy uses BUILD_RESULT and QUALITY_GATE; labels alone never prove either condition.
+
+## Interactive Apps
+
+- Interactive Q&A preserves nonempty answer strings such as `no`, `false` and `0` as visible choices. A validated, immutable GUI projection handles legacy option-presence bindings in fresh and restored history without changing global DSL truthiness. `run_raapp` requires an explicit nonblank string ID before lookup; no app-ID fallback is allowed. See `docs/spec/raapp-design-current.md`.
+
+## Chat Accessibility
+
+- Session-kind icons expose a named image role; small metadata and selected-view labels retain readable foregrounds without global theme overrides. Verify actual rendered contrast and semantics; see `docs/spec/chat-accessibility.md`.
+
+## CLI-only Startup
+
+- Direct LLM env credentials are optional at boot, including production. CLI
+  adapters authenticate independently. No missing field implies mock; only
+  explicit `LLM_PROVIDER=mock` selects mock. Active DB credentials retain their
+  precedence. Direct inference reports missing remote credentials/model at use;
+  local no-auth endpoints remain supported. See `docs/spec/cli-only-startup.md`.
 
 ## Runtime Source Of Truth
 
@@ -10,6 +52,7 @@ This file records durable product and architecture decisions that should guide a
 - Frontend may render projections, but it must not infer runtime routing, terminal state, retryability, or approvals from prose, prompt text, message ids, tool-call id prefixes, or UI-local timers.
 - Runtime decisions use typed status, reason code, error code, evidence, structured output, and durable event history.
 - Display text can explain a decision, but changing display text must not change system behavior.
+- The conversation owns one pending/waiting status indicator. Empty assistant turns must not add duplicate dots or blank bubbles; material text, reasoning, tool progress, errors, approvals and native audit remain visible. See `docs/spec/chat-turn-feedback.md`.
 
 ## Canonical Runtime Contract
 
@@ -89,6 +132,7 @@ flowchart TD
 - Router, judge, and finalizer control flow must prefer provider-native structured output/schema.
 - If a model must return a decision, use structured output. Do not parse `message.includes`, prose JSON blocks, or status words from assistant text.
 - Router/parent nodes pass downstream context as typed handoff packets derived from `ArchitectureRouterOutput`: target, action, confidence, accepted inputs, rejected inputs, conflicts, risks, and response.
+- Role prompts bound accumulated graph summaries and handoff packets. When the projection exceeds its budget, it prioritizes recent contributions per source and event type and includes durable event references. The workflow trace retains the complete evidence.
 - `routerOutput.nextAction` is the control contract. Only `route_to` may become a downstream route call; `ask_human` and other pause actions may keep `targetNodeId` as context, but must not emit route hops or selected downstream nodes.
 - A visible handoff bubble is display-only. The actual route is selected from typed `routerOutput` and graph edges.
 
@@ -162,6 +206,13 @@ classDiagram
 
 ## HITL And Budgets
 
+- Tool arguments are checked against canonical host registry schemas before policy evaluation or HITL. Invalid input returns `INVALID_ARGUMENT`, never a user-denial result, and does not enter the executor. Validation does not coerce input, add defaults or remove fields; executor guards remain in place. Caller-provided metadata cannot weaken the canonical schema.
+
+- A tool denied by the user or an approval policy returns a cancelled result to the calling agent with the decision source and any supplied reason. A denial without a reason says so explicitly. An expired approval is reported separately and does not imply a user decision.
+- Stopping an architecture run propagates cancellation to its active role executions. A child waiting for tool approval cancels that wait through the durable HITL path.
+- A tool-executor timeout carries partial evidence to its configured continuation router, or fails the run when that route is unavailable. Only a later successful attempt can take the normal success edge.
+- Project terminal commands do not inherit the backend's `NODE_ENV`.
+
 - Manual HITL waits are durable and do not expire by timeout. They end only by approve, deny, explicit user/system stop, or workflow cancellation.
 - Tool confirmation state and its typed continuation cursor must survive backend process restart. Approval uses CAS before dispatch, commits one durable tool result, and resumes the same turn and iteration budget; denial uses CAS and cannot leave an orphaned pending request.
 - Chat and subagent continuations share the typed cursor contract, but a chat journal `runId` must not be fabricated for subagent runtime. Runtime-specific journal behavior is selected from `runtimeKind`.
@@ -212,6 +263,9 @@ classDiagram
 - `devin-cli-acp` is a separate host-local profile family. Kalio discovers currently available model slugs and IDs through the authenticated Devin CLI model catalogue, exposes them as a runtime configuration choice, and resolves the selected model into a strict execution profile. It launches `devin --model <selected-model> acp`, keeps one ACP process per model lane, and persists the opaque ACP `sessionId` through the existing `externalThreadId` binding. There is no static model allowlist; stale saved profiles remain visible rather than silently changing model. It is not `CLIAgentService`, `spawn_cli_agent`, or a Claude runtime.
 - Devin ACP sessions receive Kalio's authenticated Streamable HTTP MCP server when the provider advertises HTTP MCP support. When the handshake does not advertise HTTP (the installed Devin CLI `3000.2.17` reports `mcpCapabilities.http=false`), Kalio passes a stdio MCP proxy compiled from `kalio-mcp-bridge-stdio.ts`; the proxy forwards only to the same authenticated bridge, so persona allow-lists, session/VFS scope, turn context, and HITL policy remain server-side. The stable session config carries the persona-filtered tool names and the serialized per-turn context registry supplies turn/message IDs without changing ACP session policy. The bridge token is resolved from the desktop Settings override first and `KALIO_MCP_BRIDGE_TOKEN` second, so local dev remains fail-closed when neither source is configured.
 - Devin provider-native filesystem, web, and terminal tools are controlled by the persisted `/api/runtime/devin-cli/settings` policy. All three categories default to blocked; enabling a category only permits its ACP permission request to reach Kalio HITL for `kalio_strict` profiles. Tool activity and thought chunks remain streamed through the existing ACP audit/chunk path.
+- Devin model discovery reads ACP model-selector metadata directly without a seed model or CLI `models list` prerequisite. Its isolated metadata configuration has no `agent.model`, no admitted MCP tools and default-denied native tools; conversation configuration still requires an explicit nonblank model. Cache/error/stale admission rules remain unchanged.
+- Devin's private MCP overlay accepts the verified CLI catalog formats for `3000.11.1` and `3000.11.234`. Unrecognized versions or ambiguous catalog rows block ACP startup before a prompt is sent.
+- Devin ACP advertises the host project as an additional directory only when native filesystem or terminal access is enabled. Bridge-only sessions reach project files through Kalio's scoped tools.
 - Devin Cloud is not the legacy `CLIAgentService`/`spawn_cli_agent` family. Its remote `session_id` is an external binding and status/messages are polled; `waiting_for_approval` remains an approval boundary inside Devin.
 - Kalio owns the durable `ChatSession`, run journal, tool policy, HITL, scheduler, and audit record. A Codex thread is an external runtime binding, not a second source of truth.
 - The API keeps one long-lived Codex App Server process per auth/trust profile. Sandbox and approval settings are sent at thread/turn scope; permission modes must not create one process per agent.
@@ -221,6 +275,15 @@ classDiagram
 - Active execution is bounded by the shared runtime scheduler, defaulting to five leases across foreground, control, and child agents. Child agents are not an unbounded second process class.
 - External security/auto-check evaluation is a no-tools model call selected by the configured evaluator persona/profile. Its typed result preserves `allow`, `deny`, and `ask_user`; critical-risk actions always retain the human gate.
 - Codex `thread/resume` currently cannot replace dynamic tool definitions. Until fingerprint mismatch handling is implemented, changing a session's effective toolset requires an explicit fresh thread/rebinding decision.
+
+## Image Generation and Editing Boundary
+
+- Image settings select a provider without recommending a service. The shared `IMAGE_PROVIDER_CAPABILITIES` table owns generation/editing availability, reference limits, credential requirements, and editing transport for Settings and backend dispatch.
+- `image_edit` loads references through VFS, preserves role/number ordering, and writes a new versioned PNG. `ImageEditingService` owns provider dispatch: ChatGPT/Codex native image inputs, OpenAI multipart edits, and the existing Gemini-compatible CometAPI transport. Unsupported editing providers fail explicitly without switching services.
+- ChatGPT uses an enabled OpenAI Codex execution profile and its ChatGPT login, not an OpenAI API key. The adapter reuses the auth-profile App Server, creates an ephemeral image thread, accepts native `imageGeneration` result bytes, and removes scoped listeners/thread registration after success, cancellation, disconnect, or error. It does not close the shared process.
+- Shell/edit/browser features are disabled for the image thread and approval requests are declined. Image threads have no Kalio dynamic tools; the host's inherited MCP policy remains a separate boundary.
+- Account/model image availability and limits are checked by Codex at execution; a selectable integration does not guarantee image entitlement. API billing remains separate from ChatGPT subscriptions. Output dimensions are decoded from the returned image rather than assumed from the requested size.
+- Legacy `auto` settings retain historical CometAPI routing and are labelled accordingly. `editModel` is independent from the generation model; ChatGPT uses the execution profile model.
 
 ## Native MCP Interoperability Boundary
 
@@ -236,7 +299,8 @@ classDiagram
 - Without an explicit `x-kalio-tool-names` allow-list, only native tools that
   do not require confirmation are exposed. Explicitly listed confirmation-gated
   tools still pass through Kalio's normal HITL policy. Child/CLI/subagent tools
-  and connected external MCP tools are never re-exported through this bridge.
+  are excluded. Connected external MCP tools require an explicit managed Devin
+  allow-list and a live turn dispatcher. Their calls use the same Kalio HITL path.
 - An explicit empty `x-kalio-tool-names` value exposes no tools; Devin always
   sends this header so a persona with no allowed Kalio tools cannot fall back to
   the bridge's read-only defaults.
@@ -270,6 +334,12 @@ classDiagram
 - Embedding identity is SHA256-bound to provider/scope/endpoint/model/revision,
   dimensions/backend and transform versions. Mutable/unresolved revisions are not
   immutable producer proof; model updates require explicit reindex.
+- New installations default to Google EmbeddingGemma 2 text embeddings via
+  `onnx-community/embeddinggemma-2-ONNX`, 768 dimensions, CPU. Saved local model
+  selections and explicit embedding environment overrides retain precedence;
+  E5-small remains available with its original pinned revision/tokenizer identity.
+  Changing defaults does not migrate saved selections or existing vector spaces.
+  This is text-only inference, not multimodal retrieval.
 - Persona memory, conversations and web results are partitioned by current space
   and resource kind; old databases remain read-only reembed sources.
 - Project assets are explicitly indexed through VFS-scoped bounded snapshots and
@@ -283,14 +353,18 @@ classDiagram
   the model; backend derives identity without manual digest/scope fields.
   Loopback Ollama metadata is resolved automatically, but mutable-tag inference
   is not immutable proof; project indexing remains blocked until a trusted
-  inference binding exists. The catalog-pinned local E5-small CPU/q8 adapter has
-  a trusted inference binding; other unresolved local/remote models stay blocked.
+  inference binding exists. The catalog-pinned local E5-small CPU/q8 and Gemma2
+  CPU/q4 adapters have trusted inference bindings; other unresolved local/remote
+  models stay blocked.
   Selected model and installation readiness are visible at the top of Embeddings.
   Confirmed refresh/search
   tools resolve the project from the durable calling session, not agent arguments.
   No automatic crawler or implicit prompt-context injection is enabled.
 - Added, modified, removed or newly excluded sources cause refresh before search;
   unchanged sources reuse the published index without document inference.
+  During refresh, exact unchanged chunks reuse their vectors only within the
+  same embedding space and current chunking version. Changed chunks require
+  inference; removed chunks are omitted from the atomic replacement.
   Concurrent refresh requests coalesce, but consent remains per caller.
   TS/JS chunking prefers declarations/class members; other languages use bounded
   line windows. Full path/line labels and optional syntax context count toward
@@ -303,15 +377,107 @@ classDiagram
 
 ## Local Model Evaluation And Context Budgets
 
+- REST-started architecture runs publish typed runtime events through the existing session event bus. Delivery follows persisted child ancestry to subscribed sockets, never grants socket ownership, and stops on gateway disposal. Home approval actions identify the actual child session before confirming or cancelling.
+- Invalid structured router/judge output fails at that decision stage, even after successful reads. Partial tool evidence cannot manufacture a route to implementation. Strict JSON validation and existing tool-replay guards remain enabled; no format-only retry after tools is implied.
+- Cold conversation hydration discovers all architecture runs from persisted summaries and typed raw tool-call metadata, with per-run call/result and prompt identities. A previously loaded summary must not hide later runs; missing projections remain scoped fallback evidence rather than an invented terminal outcome.
+- Cold hydration also recognizes a durable parent-projection prompt with a matching workflow turn ID, so failures before the first tool call can recover their authoritative graph and status.
+- Older history pages use the same graph projection restoration as the initial window and preserve concurrent live messages.
+- Chat architecture labels prefer the step's bound session or named node. Generic router heuristics are limited to legacy steps without that identity.
+- A graph node revisited during a correction uses the current visit for status and evidence, while retaining historical event IDs and visit count.
+- Frontend session status and its replay buffer update atomically for each socket status event.
+- Project group expansion is preserved across equivalent session updates and does not schedule redundant state updates during socket replay.
+- Architecture child execution expires after communication inactivity, rather than total productive work. Nonempty model text/thinking, CLI progress, growing tool arguments and distinct tool start/result events refresh the deadline; status heartbeats do not. Verified durable manual-tool approval waits exclude their union, and approval alone resumes the remaining allowance. Ordinary subagents retain their existing active-time budget. Stop, expired owners and settled approval tokens cannot restart the clock; this accounting is in-process, not a persisted restart budget.
+- Ordinary architecture role branches resolve their saved persona's enabled execution profile through an internal, run/schema/slot-bound creation path. This supports a Codex orchestrator with Devin workers while preserving the host project. A missing persona override inherits the host; an invalid explicit override fails. Public/generic child creation and later child-profile mutation retain host-profile restrictions. Goal receipt branches do not support mixed profiles and reject a mismatch before worker execution; reserved reviewer admission remains unchanged.
+- Chat, subagent and architecture-branch context assembly includes a concise default response style. User-requested detail and required structured schemas take precedence; errors and verification evidence must not be omitted. Persona skills remain visible, explicit configuration. A one-iteration, zero-Kalio-tool decision persona is not a guarantee of one internal provider generation or native-tool suppression; providers must support a verified constrained mode before that stronger claim is made.
+
+- The Windows DEV launcher uses explicit IPv4 loopback for API readiness before starting the frontend; `localhost` resolution is not a readiness dependency. See `docs/spec/local-dev-guide.md`.
+
 - The versioned [Ollama benchmark](benchmarks/ollama-2026-10-19/README.md) and its [evaluation specification](benchmarks/ollama-2026-10-19/SPEC.md) record measured model behavior, hardware, grading and limits. Model rankings must retain their workload and inference conditions.
 - Kalio's history budget and the provider's actual context capacity are separate limits. A larger history setting must not be presented as enlarging the provider window.
 - The benchmark's proposed tool discovery separates the authorized catalog from schemas currently advertised to a model. Discovery must not broaden persona/MCP permissions or bypass execution validation and HITL.
 - Static profiles, dynamic discovery and semantic compaction remain distinct implementation choices; benchmark proposals must not be described as shipped behavior. Preserve durable source material and measure correctness plus retrieval/recovery cost before adopting lossy compression.
 
+Architecture audit recovery retains known typed lifecycle/status fields and scans neutral suffix events before deriving terminal status. Neutral output cannot resurrect a failed or cancelled run; later final artifacts and cancellation retain event-order precedence. Legacy rows require no rewrite. This projection repair does not implement a durable active-resume epoch (see docs/spec/architecture-runtime-stack.md).
+
+Stored RA-Apps validate catalog input schemas before effects and expose malformed inputs or runtime failures as tool errors. The graph opens the same RA-App result as chat and fits its camera on entry or explicit reset. Compact New Chat keeps the prompt on screen, with conversation settings in a disclosure and the conversation sidebar control in the active header.
+
+Single Chat sends pasted or selected images via multipart upload to the session VFS and references them from its durable user message. Native adapter routes preserve the image as typed input or report unsupported input. Devin ACP checks the initialized host's image-input capability. Provider-native generated output import and project-local publication are separate contracts.
+
+Background child turn activity resets preserve the visible conversation's tool argument progress. Visible-session lifecycle and connection resets still clear it.
+
+The empty-chat form dispatches the selected workflow for the first prompt, including when the empty session already exists. The conversation composer hides the runtime selector after the chat starts.
+
+Workflow final answers display the structured outcome, evidence and optional blocking reason in Talk and the graph inspector. Referenced project files can be previewed as text through the persisted session project.
+After history hydration, both surfaces prefer the complete durable finalizer message over a clipped audit preview. Valid report JSON is parsed once; decoded newlines render as line breaks without globally unescaping plain text, code or file paths.
+
+Workflow routing and final responses are visually distinct from ordinary agent messages.
+
+Game Development 2 is a built-in workflow preset for game design, core and UX implementation, Jev readiness routing, independent input/visual and core-loop QA, and orchestrator-led rework. Its requested mixed-model deployment and acceptance checks are documented in docs/spec/game-development-2.md.
+
+Game Development 2 Release Review consumes the latest completed outputs of its implementation, independent review, and both QA nodes. A newer failed or unfinished visit suppresses the prior output for that node. Runtime evidence guards remain authoritative for finalization.
+
+Game Development 2 finalization retains the conclusion of both browser QA reports within a bounded prompt budget, so end-of-match and restored-career observations reach the finalizer.
+
+Architecture graphs support a deterministic status_router node with one source role and Yes/Else branches. The predicate checks completed/failed for the current source execution. It does not call a model or establish task acceptance. Current source evidence and a required durable decision checkpoint are mandatory. Editor, registry snapshots and recovery preserve the condition and its source-visit binding. Selected downstream roles also receive the original source contribution bound to that checkpoint visit, preserving failure and partial tool evidence across the control hop and durable recovery; stale, invalid or cross-run bindings cannot supply context.
+
+Background terminal execution is non-interactive: stdin is ignored unless an internal CLI caller explicitly requests immediate EOF. No input pipe may remain open without a writer. Existing confirmation and AllowedPaths enforcement remain required.
+
+Jev tool confirmation authority is configurable: human (default) or decision_model. In delegated mode Jev can satisfy ordinary registered-tool confirmation; deny and ask-user hard rules still win and allow rules cannot skip Jev. Unknown/failed/uncertain or incomplete evidence stays manual. Host-enforced human-only Goal and external-MCP gates remain human. The final executor rechecks one-use session/call/tool/arguments and policy binding before entry. Delegation does not create an operating-system sandbox: terminal commands retain the Kalio account's permissions, and cwd validation does not constrain arbitrary script arguments. Human-first review supports an explicit no-timeout wait or 1/2/5-minute wait followed by fresh Jev evaluation. Durable expiry must win CAS before delegation; late human replies cannot approve the expired request. Always-ask rules and host-forced human gates remain indefinite. External deterministic-defense adapters remain research, not installed.
+
+For an architecture child, contextual approval uses the parent workflow prompt matched to its host-recorded run creation and persisted conversation entry. Other workflow prompts in the same chat do not become authorization for this run. Missing or conflicting evidence leaves the operation in manual review.
+
+Pending tool approvals in Home and Runs use a single-column inbox independent of viewport width. Each tool card identifies the waiting agent/session and provides a full argument inspection dialog; terminal summaries include command, argv and cwd. Expanding details is read-only and does not approve or reject an operation. Decision notes and existing per-request confirmation events remain unchanged.
+
+Provider-exposed reasoning summaries accumulate across tool and text phases for the same assistant message. History hydration reconciles cumulative summaries without replaying deltas; when snapshots disagree without a proven extension, the durable backend summary wins. Kalio displays only summary content actually exposed by the provider, not inferred internal reasoning.
+
+Delegated Jev tool review evaluates goal alignment, configured scope, destructive effects, unauthorized export and evidence sufficiency independently in one batch. No average can override a failed axis or hard rule. A server-resolved, bounded session/run/prompt-linked context supplies recorded host inputs and delegated objectives as explanatory evidence, never new permissions. Missing, ambiguous, altered or oversized context keeps review manual. Context freshness joins the existing one-use executor guard. The existing confirmation payload may include a bounded policyReason for inspection; that annotation never becomes the human decision or comment.
+
+Tool approval safety floor: the versioned Kalio inspector catalog applies deny/manual restrictions before allow/bypass/Jev and human-timeout delegation. Catalog descriptions explain the hazard; no match never grants execution. Host KALIO_INSTALL_PROFILE identifies dev/qa/prod separately from NODE_ENV. Settings persist independently editable jevApprovalThreshold (DEV/QA) and jevProductionApprovalThreshold (production minimum, default .95); production targets and unknown host identity use the greater of these thresholds. The operator-selected QA values are .80/.95. Production hints in persisted goals or operation arguments can only raise scrutiny, never downgrade it. External targets/deploys remain restricted even from local DEV. These controls are not OS filesystem/network isolation.
+
+Windows terminal transport: native executables receive literal argv without an outer shell. Batch .cmd/.bat and legacy bare package-manager shims retain shell transport; no ENOENT shell fallback is permitted. A shared pure transport policy drives spawn, audit, execution descriptors and Jev host metadata. Literal transport does not make an invoked interpreter safe. Production-target hints match whole prod/production words, not filenames beginning with producer.
+Approval evidence axis: complete parameters and assigned scope are evaluated separately from harmful effects. A proposed read must not need successful output before it can run; all remaining risk axes, configured thresholds and hard controls remain mandatory.
+
+Codex launch selection distinguishes an unchecked model catalog from a successfully checked catalog that excludes the model. Unknown catalogs show 'Models not checked yet' (or the existing probe error), while selection remains blocked until the existing model admission succeeds. This is a display correction, not an availability or authorization bypass.
+Devin ACP continuation budgets count the rendered assistant text. Over-budget history may shorten earlier fs_read text previews while preserving their path, digest, line count and call linkage, the five latest tool results, and the full persisted evidence.
+
+Contextual tool approval sends Jev the current operation, host environment and project scope, up to three recent user inputs and the bound delegated objective (2,000-character excerpts), up to five recent tool names and statuses from the current session, and tool names from prior denials. Prior tool arguments and results stay local. Freshness and production targeting still use the host-owned snapshot.
+
+Reusing an architecture branch within the same run and role preserves its existing project execution paths if reconstructed context omits both. Explicit paths and the normal scope checks retain their existing behavior.
 
 ## Remote supervision boundary (2026-11-08)
 
 The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.
 
 Remote session-detail snapshots and approval results are confined to the requesting paired device and excluded from relay replay history.
+
+The Remote client presents readable approval arguments and existing tool results, with an edge-to-edge conversation and step list on narrow screens. Forgetting an instance removes the local device pairing after durable device storage confirms the update.
 On reconnect, the relay hydrates devices from a fresh host overview and keeps overview snapshots out of event replay. Each authenticated device has at most one active session watch. Replaced watch replies are discarded, and correlated relay rejections clear the matching pending decision without indicating settlement.
+
+## macOS source installation
+
+The macOS source installer builds the existing Node.js runtime and exposes
+start, stop, status, open and update through a local kalio CLI. Installation
+keeps source and user data in separate directories. Updates follow the tracked
+Git branch and preserve the credential encryption key and database. See
+[macOS installation](docs/macos-installation.md).
+
+## Release integration boundaries (2026-11-22)
+
+Managed source stacks record the listener PID only after readiness confirms a
+process launched by this invocation or its verified descendant. Status never
+adopts a process found on a saved port. Stop/restart validates both recorded
+listeners before terminating either; mismatched or unknown ownership fails
+closed and preserves state for inspection. Unix source stacks require `lsof`.
+
+After Stop, a late Jev checkpoint may remain in immutable event history, but
+`createRun` returns the recorded cancelled run rather than an obsolete running
+object. Accepted-goal activation remains disabled until trusted adapter,
+durable visit, worker-attempt and terminal callbacks are composed and proven.
+
+Native ChatGPT image generation rejects execution profiles that inherit MCP
+servers before opening a provider connection. Image generation must not gain
+the profile's unrelated MCP capabilities.
+
+The 1.1.0 release workflow builds Windows/Linux artifacts and separately builds
+and smoke-tests the macOS source runtime. macOS remains an experimental source
+distribution, without a native DMG or notarization claim.

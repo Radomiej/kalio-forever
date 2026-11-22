@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Activity, ArrowLeft, Check, CircleHelp, GitBranch, Layers, Link2, Menu, Moon, Pencil, RefreshCw, Search, ShieldAlert, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { Activity, ArrowLeft, CircleHelp, Layers, Link2, Menu, Moon, Pencil, RefreshCw, Search, ShieldAlert, SlidersHorizontal, Sun, Trash2, X } from 'lucide-react';
 import { Approval, SessionSnapshot, Snapshot } from '../protocol';
+import { formatSessionActivity } from './sessionActivity';
+import { SessionPanel } from './SessionPanel';
+import { ApprovalCard, GraphPanel as GraphSteps } from './RunDetails';
 import { pairRelay, RelayClient } from '../client/RelayClient';
 import { canSaveHosts, readSavedHosts, saveHosts, type SavedHost } from '../client/deviceVault';
 
@@ -29,7 +32,9 @@ export function App() {
  useEffect(() => () => { subscriptions.current.forEach(unsubscribe => unsubscribe()); subscriptions.current.clear(); clients.current.forEach(client => client.disconnect()); clients.current.clear(); }, []);
  const [selected, setSelected] = useState<string>('');
  const [view, setView] = useState<View>('sessions');
- const [sheet, setSheet] = useState<'instances'|'pair'|'filters'|'rename'|null>(null);
+ const [sheet, setSheet] = useState<'instances'|'pair'|'filters'|'rename'|'forget'|null>(null);
+ const [forgetting, setForgetting] = useState(false);
+ const [forgetError, setForgetError] = useState('');
  const [aliasDraft, setAliasDraft] = useState('');
  const [selectedSessionId, setSelectedSessionId] = useState('');
  const [session, setSession] = useState<SessionSnapshot | null>(null);
@@ -46,17 +51,30 @@ export function App() {
  const [restoring, setRestoring] = useState(canSaveHosts);
  const [preview, setPreview] = useState(false);
  const [{ pending, results }, setDecisions] = useState<{ pending: Record<string, string>; results: Record<string, string> }>({ pending: {}, results: {} });
+ const [, refreshActivity] = useState(0);
+ useEffect(() => {
+  const ticker = window.setInterval(() => refreshActivity(tick => tick + 1), 30_000);
+  return () => window.clearInterval(ticker);
+ }, []);
+ const activityNow = Date.now();
  const [theme, setTheme] = useState<'dark'|'light'>('dark');
  const persistHosts = useCallback(() => {
-  const records = [...savedHosts.current.values()];
-  writeQueue.current = writeQueue.current.then(() => saveHosts(records)).catch(() => {
+  writeQueue.current = writeQueue.current.then(() => saveHosts([...savedHosts.current.values()])).catch(() => {
    setNotice('Nie udało się zapisać parowania na tym urządzeniu.');
   });
  }, []);
  const active = connections.find(c => c.id === selected);
  latest.current.selected = selected;
  const data = preview ? fixture : active?.snapshot ?? null;
- const canDecide = !preview && active?.status === 'online' && active.client.canDecide();
+ const [approvalSnapshotFresh, setApprovalSnapshotFresh] = useState(false);
+ useEffect(() => {
+  const refresh = () => setApprovalSnapshotFresh(active?.status === 'online' && active.client.canDecide());
+  refresh();
+  if (!active?.snapshot?.approvals.length || active.status !== 'online') return;
+  const timer = window.setInterval(refresh, 1000);
+  return () => window.clearInterval(timer);
+ }, [active]);
+ const canDecide = !preview && active?.status === 'online' && approvalSnapshotFresh && active.client.canDecide();
  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
  const sessions = data?.sessions ?? [];
  const projects = useMemo(()=>Array.from(new Set(sessions.flatMap(s=>s.project?[s.project]:[]))),[data]);
@@ -160,6 +178,32 @@ export function App() {
   setConnections(items => items.map(item => item.id === active.id ? { ...item, alias } : item));
   setSheet(null);
  }
+ function forgetActiveHost() {
+  if (!active || forgetting) return;
+  const id = active.id;
+  setForgetting(true);
+  setForgetError('');
+  writeQueue.current = writeQueue.current.then(async () => {
+   try {
+    await saveHosts([...savedHosts.current].filter(([key]) => key !== id).map(([, host]) => host));
+   } catch {
+    setForgetError('Nie udało się zapisać zmiany. Instancja nadal jest zapisana.');
+    return;
+   }
+   savedHosts.current.delete(id);
+   subscriptions.current.get(id)?.();
+   subscriptions.current.delete(id);
+   clients.current.get(id)?.disconnect();
+   clients.current.delete(id);
+   setConnections(items => items.filter(item => item.id !== id));
+   setDecisions(({ pending, results }) => ({
+    pending: Object.fromEntries(Object.entries(pending).filter(([key]) => !key.startsWith(id+'|'))),
+    results: Object.fromEntries(Object.entries(results).filter(([key]) => !key.startsWith(id+'|'))),
+   }));
+   selectInstance(clients.current.keys().next().value ?? '');
+   setNotice('Usunięto instancję z tego urządzenia.');
+  }).finally(() => setForgetting(false));
+ }
  function refreshHosts() {
   setConnections(items => items.map(item => ({ ...item, status: 'connecting' })));
   setDecisions(state => ({ ...state, pending: {} }));
@@ -222,7 +266,8 @@ export function App() {
   }
  }
  const activeCount = sessions.filter(item => item.active).length;
- const approvalCount = data?.approvals.length ?? 0;
+ const approvals = canDecide ? (data?.approvals ?? []).filter(approval => results[active.id+'|'+approval.id] !== 'Rozstrzygnięto') : [];
+ const approvalCount = approvals.length;
  const connectionLabel = preview ? 'Demo' : active ? connectionLabels[active.status] : restoring ? 'Wczytywanie…' : 'Niepołączono';
  const watchNotice = view !== 'approvals' && !sessionError?.dismissed ? sessionError?.message : undefined;
  const detailError = sessionError?.message ?? (active?.status === 'offline' ? 'Instancja niedostępna.' : undefined);
@@ -235,7 +280,7 @@ export function App() {
     <button className="icon-button" aria-label="Menu Remote" aria-haspopup="dialog" onClick={()=>setSheet('instances')}><Menu size={22}/></button>
    </div>
   </header>
-  <section className="content" aria-label="Aktywność Kalio">
+  <section className={`content${view === 'graph' || (view === 'sessions' && selectedSessionId) ? ' content-focused' : ''}`} aria-label="Aktywność Kalio">
    {visibleNotice&&<div className="notice" role="status"><ShieldAlert size={16}/>{visibleNotice}<button aria-label="Zamknij komunikat" onClick={()=>{
     if (watchNotice && sessionError) setSessionError({ ...sessionError, dismissed: true });
     else setNotice('');
@@ -255,14 +300,28 @@ export function App() {
      </div>
      <div className={'split'+(selectedSessionId?' has-session':'')}>
       <div className="session-list">
-       {filtered.map(s=><button key={s.id} className={'session-row '+(selectedSessionId===s.id?'chosen':'')} onClick={()=>watchSession(s.id)}><span className={s.active?'active-mark':'idle-mark'}/><span className="session-copy"><strong>{s.parentSessionId?'↳ ':''}{s.title}</strong><small>{s.project??'Bez projektu'} · {s.persona??'Domyślna persona'}</small></span><span className="row-status">{s.active?'W toku':'Zakończona'}</span></button>)}
+       {filtered.map(s => {
+        const activity = formatSessionActivity(s.updatedAt, activityNow);
+        return <button key={s.id} className={'session-row '+(selectedSessionId===s.id?'chosen':'')} onClick={()=>watchSession(s.id)}>
+         <span className={s.active?'active-mark':'idle-mark'}/>
+         <span className="session-copy">
+          <strong>{s.parentSessionId?'↳ ':''}{s.title}</strong>
+          <small>{s.project??'Bez projektu'} · {s.persona??'Domyślna persona'}</small>
+          <small className="session-activity">
+           {activity ? <><time dateTime={activity.dateTime}>{activity.absolute}</time><span>{activity.elapsed}</span></>
+            : <span>Brak danych o aktywności</span>}
+          </small>
+         </span>
+         <span className="row-status">{s.active?'W toku':'Zakończona'}</span>
+        </button>;
+       })}
        {filtered.length===0&&<div className="empty-list">{sessions.length?'Brak wyników dla wybranych filtrów.':'Nie ma jeszcze sesji.'}</div>}
       </div>
       {selectedSessionId&&<div className="session-detail"><button className="subtle-button back-button" onClick={resetSession}><ArrowLeft size={16}/> Wróć do sesji</button><SessionPanel session={session} error={detailError} onGraph={()=>setView('graph')}/></div>}
      </div>
     </>}
-    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{(data?.approvals??[]).map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
-    {view==='graph'&&<><button className="subtle-button back-button" onClick={()=>setView('sessions')}><ArrowLeft size={16}/> Wróć do rozmowy</button><GraphPanel session={session} error={detailError}/></>}
+    {view==='approvals'&&<><div className="page-heading"><div><h1>Zgody</h1><p>{approvalCount ? 'Oczekujące: '+approvalCount : 'Nic nie czeka na Twoją decyzję'}</p></div></div><div className="approval-list">{approvals.map(a=><ApprovalCard key={a.id} approval={a} disabled={!canDecide||a.decisionAvailable!==true||Boolean(pending[active?.id+'|'+a.id])} pending={pending[active?.id+'|'+a.id]} result={results[active?.id+'|'+a.id]} onDecide={choice=>decide(a,choice)}/>)}</div></>}
+    {view==='graph'&&<><button className="subtle-button back-button" onClick={()=>setView('sessions')}><ArrowLeft size={16}/> Wróć do rozmowy</button><div className="remote-graph-desktop"><GraphPanel session={session} error={detailError}/></div><div className="remote-graph-mobile"><GraphSteps session={session} error={detailError}/></div></>}
    </>}
   </section>
   <nav className="tabs bottom-tabs" aria-label="Widoki Remote">
@@ -273,6 +332,7 @@ export function App() {
    {connections.length>0&&<div className="instance-menu"><h3>Instancje</h3>{connections.map(c=><button key={c.id} className={'instance '+(!preview&&selected===c.id?'selected':'')} aria-pressed={!preview&&selected===c.id} onClick={()=>selectInstance(c.id)}><span className={c.status==='online'?'live-dot':'offline-dot'}/>{c.alias ?? c.name}<small>{connectionLabels[c.status]}</small></button>)}</div>}
    {connections.length>0&&<button className="menu-action" onClick={()=>{refreshHosts();setSheet(null)}}><RefreshCw size={18}/> Odśwież połączenia</button>}
    {active&&!preview&&<button className="menu-action" onClick={()=>{setAliasDraft(active.alias??'');setSheet('rename')}}><Pencil size={18}/> Zmień nazwę instancji</button>}
+   {active&&!preview&&<button className="menu-action" onClick={()=>{setForgetError('');setSheet('forget')}}><Trash2 size={18}/> Zapomnij instancję</button>}
    <button className="menu-action" disabled={restoring} onClick={()=>{setPairError('');setSheet('pair')}}><Link2 size={18}/> Połącz instancję</button>
    <button className="menu-action" onClick={enterPreview}><CircleHelp size={18}/> Podgląd demo</button>
    <button className="menu-action" onClick={()=>{setTheme(theme==='dark'?'light':'dark');setSheet(null)}}>{theme==='dark'?<Sun size={18}/>:<Moon size={18}/>} {theme==='dark'?'Jasny motyw':'Ciemny motyw'}</button>
@@ -282,6 +342,17 @@ export function App() {
     <label>Nazwa w tej aplikacji<input maxLength={80} value={aliasDraft} placeholder={active?.name} onChange={event=>setAliasDraft(event.target.value)}/></label>
     <button className="primary-button" type="submit">Zapisz nazwę</button>
    </form>
+  </RemoteSheet>}
+  {sheet==='forget'&&active&&<RemoteSheet key="forget" title="Zapomnij instancję" onClose={()=>{if(!forgetting)setSheet('instances')}}>
+   <div className="pair-form">
+    <p>Usunąć <strong>{active.alias ?? active.name}</strong> z tego urządzenia?</p>
+    <p>Połączenie zostanie zamknięte, a ponowne połączenie będzie wymagało parowania. Ta operacja nie cofa uprawnień po stronie Relay.</p>
+    {forgetError&&<p className="form-error" role="alert">{forgetError}</p>}
+    <div className="decision-actions">
+     <button type="button" className="subtle-button" autoFocus disabled={forgetting} onClick={()=>setSheet('instances')}>Anuluj</button>
+     <button type="button" className="deny-button" disabled={forgetting} onClick={forgetActiveHost}>{forgetting?'Usuwanie…':'Usuń z urządzenia'}</button>
+    </div>
+   </div>
   </RemoteSheet>}
   {sheet==='pair'&&<RemoteSheet title="Połącz instancję" onClose={()=>setSheet(null)}>
    <form className="pair-form" onSubmit={event=>{event.preventDefault();void doPair()}}>
@@ -310,8 +381,6 @@ function RemoteSheet({title,children,onClose}:{title:string;children:ReactNode;o
   {children}
  </dialog>;
 }
-function SessionPanel({session,error,onGraph}:{session:SessionSnapshot|null;error?:string;onGraph:()=>void}) { return <section className="detail-panel"><div className="panel-title"><div><h2>{session?.title ?? (error ? 'Sesja niedostępna' : 'Wczytywanie sesji…')}</h2></div>{session&&<button className="subtle-button" onClick={onGraph}><GitBranch size={15}/> Graf</button>}</div>{!session?<div className="detail-empty">{error ?? 'Czekam na dane sesji.'}</div>:<div className="messages">{session.messages.map(m=><article key={m.id} className={'message '+(m.role==='user'?'from-user':'')}><span className="message-role">{m.role==='user'?'TY':'KALIO'}</span><p>{m.content}</p>{m.createdAt&&<time>{new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time>}</article>)}</div>}</section>; }
-function ApprovalCard({approval,disabled,pending,result,onDecide}:{approval:Approval;disabled:boolean;pending?:string;result?:string;onDecide:(choice:'approve'|'deny')=>void}) { return <article className="approval-card"><div className="approval-head"><div><span className="eyebrow">ZATWIERDZENIE NARZĘDZIA</span><h2>{approval.toolName}</h2></div><span className="pending-pill">{result??(pending?'Oczekiwanie na hosta':'Oczekuje')}</span></div><dl><div><dt>Session</dt><dd>{approval.sessionId}</dd></div><div><dt>Wersja</dt><dd>{approval.revision}</dd></div><div><dt>Suma SHA-256 argumentów</dt><dd className="digest">{approval.argsSha256}</dd></div><div><dt>Wysłano</dt><dd>{approval.requestedAt?new Date(approval.requestedAt).toLocaleString():'Brak informacji o czasie'}</dd></div></dl><div className="args-box"><div className="args-label">ARGUMENTY · DANE POUFNE ZAMASKOWANE</div><pre>{JSON.stringify(approval.args,null,2)}</pre></div>{pending&&<p className="decision-wait">Wysłano decyzję. Oczekiwanie na odpowiedź hosta.</p>}{result&&<p className="decision-result">{result}</p>}<div className="decision-actions"><button className="deny-button" disabled={disabled} onClick={()=>onDecide('deny')}><X size={16}/> Odrzuć raz</button><button className="approve-button" disabled={disabled} onClick={()=>onDecide('approve')}><Check size={16}/> Zatwierdź raz</button></div>{disabled&&<small className="disabled-reason">Wymaga aktywnego połączenia i aktualnych danych.</small>}</article>; }
 function GraphPanel({session,error}:{session:SessionSnapshot|null;error?:string}) {
  const [zoom,setZoom]=useState(1);
  const graph=session?.graph;

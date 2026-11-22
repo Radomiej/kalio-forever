@@ -29,7 +29,13 @@ function hasExecutable(
   expected: string,
   decision: HitlHardRule['decision'],
 ): boolean {
-  return commandValues(args).some((command) => hasExecutableInCommand(command, expected, decision, 0));
+  const commands = commandValues(args);
+  if (commands.some(command => hasExecutableInCommand(command, expected, decision, 0))) return true;
+  // Restrictive selectors inspect the actual split invocation too. Never expand
+  // allow matching from arbitrary argument text into new execution authority.
+  const argv = args['args'];
+  return decision !== 'allow' && Array.isArray(argv) && argv.every(value => typeof value === 'string')
+    && commands.some(command => hasExecutableInCommand(`${command} ${argv.join(' ')}`, expected, decision, 0));
 }
 
 function commandValues(args: Record<string, unknown>): string[] {

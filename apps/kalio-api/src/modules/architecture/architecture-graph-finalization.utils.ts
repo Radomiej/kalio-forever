@@ -28,6 +28,8 @@ type IncompleteToolExecutorReasonInput = {
 };
 
 export function blockingFinalizationReason(input: ArchitectureGraphFinalizationInput): string | undefined {
+  const browserBlocker = blockingGameBrowserEvidence(input);
+  if (browserBlocker) return browserBlocker;
   const externalBlocker = blockingExternalQualityGateReason(input.runContext);
   if (externalBlocker) {
     return externalBlocker;
@@ -47,6 +49,28 @@ export function blockingFinalizationReason(input: ArchitectureGraphFinalizationI
     return undefined;
   }
   return blockingIncompleteMaterializationReason(input);
+}
+
+export function blockingGameBrowserEvidence(input: ArchitectureGraphFinalizationInput): string | undefined {
+  if (!/^game-development-2(?:-variant-\d+)?$/.test(input.schema.id)) return undefined;
+  const isSuccessfulTool = (event: ArchitectureExecutionEvent) => event.type === 'tool_call'
+    && event.data?.event === 'tool:result' && (event.data.status ?? event.data.toolStatus) === 'success';
+  const lastWrite = [...input.events].reverse().find(event => isSuccessfulTool(event)
+    && ['fs_write', 'vfs_write'].some(name => event.data?.toolName === name));
+  for (const nodeId of ['input-qa', 'loop-qa']) {
+    const events = input.events.filter(event => event.nodeId === nodeId);
+    const start = events.map(event => event.type).lastIndexOf('node_started');
+    const successfulTools = events.slice(start + 1)
+      .filter(isSuccessfulTool)
+      .map(event => event.data?.toolName);
+    if (start < 0 || (events[start]?.sequence ?? 0) <= (lastWrite?.sequence ?? -1)
+      || !successfulTools.includes('mcp_toml_mcp-playwright-orchestrator_browser_click_e993a421')
+      || successfulTools.filter(name => name === 'mcp_toml_mcp-playwright-orchestrator_browser_page_navig_181cd832').length < 2
+      || !successfulTools.includes('mcp_toml_mcp-playwright-orchestrator_browser_snapshot_22722cdb')) {
+      return `Game QA requires current Kalio browser evidence from ${nodeId} (navigation, click, reload and snapshot).`;
+    }
+  }
+  return undefined;
 }
 
 export function externalQualityGateAcceptanceReason(input: Pick<ArchitectureGraphFinalizationInput, 'runContext'>): string | undefined {

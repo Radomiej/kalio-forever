@@ -41,6 +41,12 @@ const baseParams = {
 };
 
 describe('LLMServiceAdapter', () => {
+  it('rejects toolsDisabled on generator advance before LLM streaming', async () => {
+    const llm = makeLLM({ chunks: [], toolCalls: [] });
+    await expect(new LLMServiceAdapter(llm).stream({ ...baseParams, toolsDisabled: true }).next())
+      .rejects.toThrow('LLM_TOOLS_DISABLED_UNSUPPORTED');
+    expect(llm.streamChat).not.toHaveBeenCalled();
+  });
   it('emits text_delta for non-thinking chunks then done', async () => {
     const adapter = new LLMServiceAdapter(makeLLM({
       chunks: [

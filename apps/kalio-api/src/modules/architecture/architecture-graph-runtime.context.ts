@@ -1,3 +1,4 @@
+import { statusRoutingInputEvents } from './architecture-status-routing-inputs';
 import type {
   ArchitectureExecutionEvent,
   ArchitectureRoleSlot,
@@ -15,7 +16,7 @@ import { architectureActionFieldsForEvent, architectureActionSummaryForEvent } f
 import { externalQualityGateAcceptanceReason, type ArchitectureGraphFinalizationInput } from './architecture-graph-finalization.utils';
 import { architectureBranchStreamProjection } from './architecture-graph-branch-events.utils';
 import { continuationOutgoingNodeId } from './architecture-graph-routing.utils';
-import { incomingNodeIdsFor, isNodeReady, markActiveIncoming, selectedNodeIdsFromEvent } from './architecture-graph-topology.utils';
+import { incomingNodeIdsFor, isNodeReady, isToolTimeoutRecovery, markActiveIncoming, selectedNodeIdsFromEvent } from './architecture-graph-topology.utils';
 import { createArchitectureRouterOutput } from './architecture-router-output';
 import { isWorkflowError } from '../../common/utils/workflow-error.util';
 import type { GoalBatchDirective, GraphGoalProtocolAdapter } from './architecture-graph-goal-nodes';
@@ -95,7 +96,7 @@ export class ArchitectureGraphContext {
       const event = this.events[index];
       if (event?.nodeId !== nodeId) continue;
       if (event.type === 'node_started') lastStarted = index;
-      if (event.type === 'node_completed') lastCompleted = index;
+      if (event.type === 'node_completed' || isToolTimeoutRecovery(event)) lastCompleted = index;
     }
     return lastStarted >= 0 && lastCompleted < lastStarted;
   }
@@ -105,7 +106,7 @@ export class ArchitectureGraphContext {
     this.events.push(...priorEvents);
     this.sequence = Math.max(...priorEvents.map((event) => event.sequence), 0);
     for (const event of priorEvents) {
-      if (event.type === 'node_completed' && event.nodeId) {
+      if ((event.type === 'node_completed' || isToolTimeoutRecovery(event)) && event.nodeId) {
         this.nodeVisitCounts.set(event.nodeId, this.visitCount(event.nodeId) + 1);
       }
       if (event.nodeId) {
@@ -188,9 +189,9 @@ export class ArchitectureGraphContext {
     };
   }
 
-  incomingEventsForSlot(slot: ArchitectureRoleSlot, incomingNodeIds: string[]): ArchitectureExecutionEvent[] {
+  incomingEventsForSlot(slot: ArchitectureRoleSlot, incomingNodeIds: string[], receiverNodeId?: string): ArchitectureExecutionEvent[] {
     if (slot.slotType !== 'judge' && slot.slotType !== 'finalizer') {
-      return this.eventsForNodeIds(incomingNodeIds);
+      return statusRoutingInputEvents(this.options.schema, this.events, this.options.run.id, incomingNodeIds, receiverNodeId);
     }
     return this.events.filter((event) => (
       event.type === 'participant_output'

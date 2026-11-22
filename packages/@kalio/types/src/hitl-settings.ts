@@ -1,4 +1,4 @@
-export type HitlMode = 'manual' | 'auto' | 'bypass' | 'jev';
+export type HitlMode = 'manual' | 'auto' | 'bypass' | 'jev' | 'ollama';
 export type HitlApprovalKind = 'tool' | 'raapp_native' | 'external_security';
 export type HitlRuleDecision = 'allow' | 'deny' | 'ask_user';
 
@@ -23,9 +23,14 @@ export interface HitlConfig {
   externalPolicyPersonaId: string | null;
   raAppApprovalTimeoutMs: number;
   jevApprovalThreshold?: number;
+  /** Minimum for production targets and unknown host environments. */
+  jevProductionApprovalThreshold?: number;
   jevInstructions?: string;
   jevFallbackToPersona?: boolean;
   rules?: HitlHardRule[];
+  /** Jev only: delegate ordinary tool confirmation; never host-enforced human gates. */
+  confirmationAuthority?: 'human' | 'decision_model' | 'human_then_decision';
+  humanReviewTimeoutMs?: number;
 }
 
 export interface UpdateHitlConfigDto extends Omit<Partial<HitlConfig>, 'mode' | 'rules'> {

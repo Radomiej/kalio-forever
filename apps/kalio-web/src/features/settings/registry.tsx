@@ -1,5 +1,5 @@
 import type { ReactNode, ComponentType } from 'react';
-import { Bot, Gauge, MessageSquareText, Plug, Folder, Database, Search, Wrench, Image, Send, ShieldAlert, DatabaseZap, ServerCog, Code2 } from 'lucide-react';
+import { Bot, Gauge, MessageSquareText, Mic, Plug, Folder, Database, Search, Wrench, Image, Send, ShieldAlert, DatabaseZap, ServerCog, Code2 } from 'lucide-react';
 import { LLMPanel } from './LLMPanel';
 import { MCPSettingsPanel } from './MCPSettingsPanel';
 import { AllowedPathsPanel } from './AllowedPathsPanel';
@@ -14,6 +14,7 @@ import { AuditRetentionSettingsPanel } from './AuditRetentionSettingsPanel';
 import { ConversationSettingsPanel } from './ConversationSettingsPanel';
 import { IntegrationsPanel } from './IntegrationsPanel';
 import { CodeIntelligencePanel } from './CodeIntelligencePanel';
+import { VoiceSettingsPanel } from '../voice/VoiceSettingsPanel';
 
 export interface SettingsBlock {
   id: string;
@@ -26,6 +27,7 @@ export const SETTINGS_BLOCKS: SettingsBlock[] = [
   { id: 'llm',          label: 'LLM Settings',     icon: <Bot size={16} />,      component: () => <LLMPanel mode="providers" /> },
   { id: 'runtime',      label: 'Runtime Settings', icon: <Gauge size={16} />,    component: () => <LLMPanel mode="runtime" /> },
   { id: 'conversation', label: 'Conversation',     icon: <MessageSquareText size={16} />, component: ConversationSettingsPanel },
+  { id: 'voice', label: 'Voice input', icon: <Mic size={16} />, component: VoiceSettingsPanel },
   { id: 'hitl',         label: 'HITL Approvals',   icon: <ShieldAlert size={16} />, component: HITLSettingsPanel },
   { id: 'decision',     label: 'Decision Settings', icon: <ShieldAlert size={16} />, component: DecisionSettingsPanel },
   { id: 'audit-retention', label: 'Audit Retention', icon: <DatabaseZap size={16} />, component: AuditRetentionSettingsPanel },

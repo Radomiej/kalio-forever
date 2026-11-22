@@ -9,6 +9,8 @@ import type { HitlConfig } from './hitl-settings.types';
 
 const DEFAULT_CONFIG: HitlConfig = {
   mode: 'manual',
+  confirmationAuthority: 'human',
+  humanReviewTimeoutMs: 60_000,
   autoPersonaId: null,
   unattendedFallback: 'pause',
   representativePersonaId: null,
@@ -17,6 +19,7 @@ const DEFAULT_CONFIG: HitlConfig = {
   externalPolicyPersonaId: null,
   raAppApprovalTimeoutMs: 600_000,
   jevApprovalThreshold: 0.95,
+  jevProductionApprovalThreshold: 0.95,
   jevInstructions: '',
   jevFallbackToPersona: false,
   rules: [],
@@ -64,6 +67,9 @@ export function HITLSettingsPanel() {
       ]);
       setConfig({
         mode: loadedConfig.mode,
+        // TODO: legacy fallback — older HITL configs require manual terminal approval.
+        confirmationAuthority: loadedConfig.confirmationAuthority ?? 'human',
+        humanReviewTimeoutMs: loadedConfig.humanReviewTimeoutMs ?? 60_000,
         autoPersonaId: loadedConfig.autoPersonaId ?? null,
         unattendedFallback: loadedConfig.unattendedFallback ?? 'pause',
         representativePersonaId: loadedConfig.representativePersonaId ?? null,
@@ -73,6 +79,8 @@ export function HITLSettingsPanel() {
         raAppApprovalTimeoutMs: loadedConfig.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
         // TODO: legacy fallback — older persisted HITL configs predate Jev and rules.
         jevApprovalThreshold: loadedConfig.jevApprovalThreshold ?? 0.95,
+        // TODO: legacy fallback — older HITL configs predate the production minimum.
+        jevProductionApprovalThreshold: loadedConfig.jevProductionApprovalThreshold ?? 0.95,
         jevInstructions: loadedConfig.jevInstructions ?? '',
         jevFallbackToPersona: loadedConfig.jevFallbackToPersona ?? false,
         rules: loadedConfig.rules ?? [],
@@ -101,8 +109,11 @@ export function HITLSettingsPanel() {
     : null;
   const timeoutMinutes = Math.round(config.raAppApprovalTimeoutMs / 60_000);
   const jevThreshold = config.jevApprovalThreshold ?? 0.95;
-  const jevValidationMessage = !Number.isFinite(jevThreshold) || jevThreshold <= 0.5 || jevThreshold > 1
+  const jevProductionThreshold = config.jevProductionApprovalThreshold ?? 0.95;
+  const jevValidationMessage = config.mode === 'ollama' ? null : !Number.isFinite(jevThreshold) || jevThreshold <= 0.5 || jevThreshold > 1
     ? 'Jev approval threshold must be greater than 0.5 and at most 1.'
+    : !Number.isFinite(jevProductionThreshold) || jevProductionThreshold <= 0.5 || jevProductionThreshold > 1
+      ? 'Jev production approval threshold must be greater than 0.5 and at most 1.'
     : (config.jevInstructions?.length ?? 0) > 2000
       ? 'Jev instructions must be at most 2000 characters.'
       : null;
@@ -130,15 +141,16 @@ export function HITLSettingsPanel() {
     try {
       const payload: UpdateHitlConfigDto = {
         mode: config.mode,
+        confirmationAuthority: config.confirmationAuthority ?? 'human',
+        humanReviewTimeoutMs: config.humanReviewTimeoutMs ?? 60_000,
         unattendedFallback: config.unattendedFallback,
         representativePersonaId: config.representativePersonaId,
         notificationChannel: config.notificationChannel,
         externalPolicyEnabled: config.externalPolicyEnabled,
         externalPolicyPersonaId: config.externalPolicyPersonaId,
         raAppApprovalTimeoutMs: config.raAppApprovalTimeoutMs,
-        jevApprovalThreshold: jevThreshold,
-        jevInstructions: config.jevInstructions,
-        jevFallbackToPersona: config.jevFallbackToPersona,
+        ...(config.mode !== 'ollama' ? { jevApprovalThreshold: jevThreshold, jevProductionApprovalThreshold: jevProductionThreshold, jevInstructions: config.jevInstructions } : {}),
+        jevFallbackToPersona: config.mode === 'ollama' ? false : config.jevFallbackToPersona,
         rules: config.rules ?? [],
       };
       if (config.mode === 'auto') {
@@ -150,6 +162,9 @@ export function HITLSettingsPanel() {
       });
       setConfig({
         mode: updated.mode,
+        // TODO: legacy fallback — older HITL responses omit terminal approval settings.
+        confirmationAuthority: updated.confirmationAuthority ?? 'human',
+        humanReviewTimeoutMs: updated.humanReviewTimeoutMs ?? 60_000,
         autoPersonaId: updated.autoPersonaId ?? null,
         unattendedFallback: updated.unattendedFallback ?? 'pause',
         representativePersonaId: updated.representativePersonaId ?? null,
@@ -158,6 +173,8 @@ export function HITLSettingsPanel() {
         externalPolicyPersonaId: updated.externalPolicyPersonaId ?? null,
         raAppApprovalTimeoutMs: updated.raAppApprovalTimeoutMs ?? DEFAULT_CONFIG.raAppApprovalTimeoutMs,
         jevApprovalThreshold: updated.jevApprovalThreshold ?? 0.95,
+        // TODO: legacy fallback — older HITL responses omit the production minimum.
+        jevProductionApprovalThreshold: updated.jevProductionApprovalThreshold ?? 0.95,
         jevInstructions: updated.jevInstructions ?? '',
         jevFallbackToPersona: updated.jevFallbackToPersona ?? false,
         rules: updated.rules ?? [],
@@ -208,6 +225,15 @@ export function HITLSettingsPanel() {
       <fieldset disabled={saving || !loaded} className="space-y-5">
       <div className="space-y-3 rounded-lg border border-base-300/50 bg-base-200/30 p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-base-content/60">Approval mode</h3>
+        <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
+          <input aria-label="Ollama local verdicts" type="radio" name="hitl-mode" className="radio radio-sm mt-0.5"
+            checked={config.mode === 'ollama'} onChange={() => {
+              setConfig((current) => ({ ...current, mode: 'ollama', jevFallbackToPersona: false })); setError(null); setSaved(false);
+            }} />
+          <span><span className="block text-sm font-medium">Ollama local verdicts</span>
+            <span className="block text-xs text-base-content/60">Only eligible read-only operations use local verdicts. Protected operations and errors require manual approval. No persona fallback or probability threshold. Configure the native model in Decision Settings / Tool approvals. Save to apply this mode.</span></span>
+        </label>
+
         <label className="flex items-start gap-3 rounded-lg border border-base-300/50 bg-base-100/50 p-3 cursor-pointer">
           <input aria-label="Jev typed decisions" type="radio" name="hitl-mode" className="radio radio-sm mt-0.5"
             checked={config.mode === 'jev'} onChange={() => {

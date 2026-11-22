@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { createSqliteDatabase } from '../../database/sqlite-runtime';
+import { createSqliteDatabase, loadSqliteVec } from '../../database/sqlite-runtime';
 import type { EmbeddingSpace } from '@kalio/types';
 import { buildEmbeddingSpace } from './embedding-identity';
 import { ProjectResourceIndexStore, type IndexedResourceChunk } from './project-resource-index.store';
@@ -24,6 +24,34 @@ function chunk(id: string, resourceType: IndexedResourceChunk['resourceType'] = 
 }
 afterEach(() => { for (const s of stores.splice(0)) s.close(); for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
 describe('project resource partitioned SQLite index', () => {
+  it('reuses only exact persisted chunk descriptors in the same space and chunking version', () => {
+    const { store, dir } = open(); const original = chunk('cached');
+    store.replace([original], 1);
+    expect(store.reusableEmbeddings([original]).get(original.id)).toEqual([1, 0]);
+    for (const patch of [{ id: 'other' }, { path: 'other.ts' }, { resourceType: 'text' as const },
+      { representation: 'metadata' as const }, { content: 'different' }, { contentHash: 'different' }]) {
+      expect(store.reusableEmbeddings([{ ...original, ...patch }]).size).toBe(0);
+    }
+    const other = open('one', buildEmbeddingSpace({ ...space, baseUrl: 'mock', model: 'b' }), dir).store;
+    expect(other.reusableEmbeddings([original]).size).toBe(0);
+    const raw = createSqliteDatabase(new ProjectResourceIndexStorage(dir).prepare('one', space.id)).client;
+    try { raw.exec("UPDATE resource_manifest SET chunking_version='old'"); } finally { raw.close(); }
+    expect(store.reusableEmbeddings([original]).size).toBe(0);
+  });
+  it('recomputes missing vectors and rejects nonfinite cached vectors', () => {
+    const { store, dir } = open(); const original = chunk('cached');
+    store.replace([original], 1);
+    const raw = createSqliteDatabase(new ProjectResourceIndexStorage(dir).prepare('one', space.id)).client;
+    try { loadSqliteVec(raw); raw.exec("DELETE FROM resource_vec_code WHERE id='cached'"); } finally { raw.close(); }
+    expect(store.reusableEmbeddings([original]).size).toBe(0);
+    store.replace([original], 2);
+    const corrupt = createSqliteDatabase(new ProjectResourceIndexStorage(dir).prepare('one', space.id)).client;
+    try {
+      loadSqliteVec(corrupt);
+      corrupt.prepare("UPDATE resource_vec_code SET embedding=? WHERE id='cached'").run(new Float32Array([Infinity, 0]));
+    } finally { corrupt.close(); }
+    expect(() => store.reusableEmbeddings([original])).toThrow('INVALID_EMBEDDING_VECTOR');
+  });
   it('validates embedding identity before asking storage to prepare a database', () => {
     const storage = { exists: vi.fn(() => false), prepare: vi.fn(() => { throw new Error('PREPARE_CALLED'); }) };
     expect(() => new ProjectResourceIndexStore(storage, 'one', { ...space, model: 'tampered' })).toThrow('INVALID_EMBEDDING_SPACE');

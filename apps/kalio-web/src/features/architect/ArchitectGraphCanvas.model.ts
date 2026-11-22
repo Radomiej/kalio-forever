@@ -39,7 +39,7 @@ export function edgeKind(sourceNode: ArchitectNode): EdgeKind {
   if (sourceNode.kind === 'parallel' || sourceNode.behavior?.mode === 'fan_out_all') {
     return 'parallel';
   }
-  if (sourceNode.kind === 'router' || sourceNode.behavior?.mode === 'choose_one' || sourceNode.behavior?.mode === 'rank_then_merge') {
+  if (sourceNode.kind === 'router' || sourceNode.kind === 'status_router' || sourceNode.behavior?.mode === 'choose_one' || sourceNode.behavior?.mode === 'rank_then_merge') {
     return 'routing';
   }
   return 'forced';

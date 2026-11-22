@@ -30,6 +30,14 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 describe('ProjectPicker', () => {
+  it.each([
+    { value: 'system:none', path: 'Sandbox VFS' },
+    { value: 'project-1', path: 'C:\\Work\\kalio-forever' },
+  ])('keeps the selected project path readable: $value', ({ value, path }) => {
+    render(<ProjectPicker value={value} onChange={vi.fn()} />);
+    expect(screen.getByText(path)).toHaveClass('text-base-content/60');
+    expect(screen.getByTestId('project-picker-trigger')).toHaveAttribute('aria-expanded', 'false');
+  });
   beforeEach(() => {
     projectState.projects = [
       makeProject(),

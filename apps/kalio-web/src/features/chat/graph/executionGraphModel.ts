@@ -753,6 +753,10 @@ export function buildExecutionGraphModel({
       });
       maxRow = Math.max(maxRow, architectureProjection.maxRow);
 
+      const outcome = workflowTurnProjection.architectureRun;
+      const finalArtifact = outcome?.finalArtifact
+        ?? outcome?.trace.slice().reverse().find(step => step.speaker === 'finalizer' && step.content?.trim())?.content;
+      const finalReply = finalMessage ?? finalRenderableMessage;
       const finalNode = addNode({
         id: `final:${turn.id}`,
         kind: 'final-answer',
@@ -765,7 +769,7 @@ export function buildExecutionGraphModel({
         turnId: turn.id,
         payload: {
           kind: 'final-answer',
-          message: finalMessage ?? finalRenderableMessage,
+          message: finalArtifact ? { ...finalReply, content: finalArtifact } : finalReply,
           turn,
         },
       });

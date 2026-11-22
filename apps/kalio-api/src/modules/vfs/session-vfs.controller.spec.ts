@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
-import { BadRequestException, UnsupportedMediaTypeException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { SessionVfsController } from './session-vfs.controller';
 import { VFSService } from './vfs.service';
+import { ProjectResourceReaderService } from './project-resource-reader.service';
 import { StreamableFile } from '@nestjs/common';
 import type { VFSListResult, VFSReadResult } from '@kalio/types';
 import { Readable } from 'node:stream';
@@ -19,15 +20,36 @@ describe('SessionVfsController', () => {
     writeBinary: vi.fn(),
     archiveSession: vi.fn(),
   };
+  const mockProjectFiles = { previewSessionFile: vi.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SessionVfsController],
-      providers: [{ provide: VFSService, useValue: mockVfs }],
+      providers: [
+        { provide: VFSService, useValue: mockVfs },
+        { provide: ProjectResourceReaderService, useValue: mockProjectFiles },
+      ],
     }).compile();
 
     controller = module.get(SessionVfsController);
     vi.clearAllMocks();
+    mockProjectFiles.previewSessionFile.mockReset();
+  });
+
+  describe('projectPreview()', () => {
+    it('delegates text preview to the session-scoped project reader', async () => {
+      mockProjectFiles.previewSessionFile.mockResolvedValue('project source');
+      await expect(controller.projectPreview('sess-1', 'src/main.ts')).resolves.toEqual({ content: 'project source' });
+      expect(mockProjectFiles.previewSessionFile).toHaveBeenCalledWith('sess-1', 'src/main.ts');
+      expect(mockVfs.readFile).not.toHaveBeenCalled();
+    });
+
+    it('keeps denied project paths unavailable without exposing private reader errors', async () => {
+      mockProjectFiles.previewSessionFile.mockRejectedValue(new Error('PROJECT_RESOURCE_ESCAPE: private/path'));
+      await expect(controller.projectPreview('sess-1', '../private')).rejects.toThrow(NotFoundException);
+      await expect(controller.projectPreview('sess-1', '../private')).rejects.toThrow('Project file is unavailable for text preview.');
+      expect(mockVfs.readFile).not.toHaveBeenCalled();
+    });
   });
 
   describe('list()', () => {

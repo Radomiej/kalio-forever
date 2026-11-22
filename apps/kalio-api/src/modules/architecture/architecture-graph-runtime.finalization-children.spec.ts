@@ -54,6 +54,96 @@ function fixture(statuses: Array<string | undefined>, gate: 'passed' | 'failed' 
 }
 
 describe('runtime finalizer refuses unresolved implementation children', () => {
+  it('routes a timed-out attempt to the orchestrator and sends only the successful retry to QA', async () => {
+    const graph: ArchitectureSchema = {
+      ...schema,
+      roleSlots: [
+        ...schema.roleSlots,
+        { ...schema.roleSlots[0]!, id: 'router', slotType: 'router' },
+        { ...schema.roleSlots[0]!, id: 'qa', slotType: 'participant' },
+      ],
+      nodes: [
+        { id: 'work', label: 'Implementation', kind: 'role', roleSlotId: 'implementer' },
+        { id: 'router', label: 'Orchestrator', kind: 'router', roleSlotId: 'router' },
+        { id: 'qa', label: 'QA', kind: 'role', roleSlotId: 'qa' },
+      ],
+      edges: [
+        { id: 'work-qa', fromNodeId: 'work', toNodeId: 'qa', selection: 'default' },
+        { id: 'work-router', fromNodeId: 'work', toNodeId: 'router', selection: 'continuation' },
+        { id: 'router-work', fromNodeId: 'router', toNodeId: 'work' },
+      ],
+    };
+    let firstAttempt = true;
+    const calls: string[] = [];
+    const events = await createArchitectureGraphEvents({
+      schema: graph,
+      run: { id: 'recover', schemaId: graph.id, prompt: 'Fix game', executionMode: 'subagent_execution',
+        status: 'running', branchSessionIds: { implementer: 'work-session', router: 'router-session', qa: 'qa-session' },
+        createdAt: 1, updatedAt: 1 },
+      now: 1,
+      personaForSlot: slot => slot.id,
+      roleExecutor: { async execute({ slot, incomingEvents }) {
+        calls.push(slot.id);
+        if (slot.id === 'implementer' && firstAttempt) {
+          firstAttempt = false;
+          return { message: 'Timed out after reading the engine', data: {
+            errorCode: 'SUBAGENT_TIMEOUT',
+            failure: { code: 'SUBAGENT_TIMEOUT', message: 'Sub-agent timed out', retryable: true },
+            toolEvidence: { toolResultCount: 1, successfulToolNames: ['fs_read'], targetPaths: ['src/engine.ts'] },
+          } };
+        }
+        if (slot.id === 'router') {
+          expect(incomingEvents).toContainEqual(expect.objectContaining({
+            nodeId: 'work', errorCode: 'SUBAGENT_TIMEOUT',
+            data: expect.objectContaining({ toolEvidence: expect.objectContaining({ targetPaths: ['src/engine.ts'] }) }),
+          }));
+        }
+        return { message: 'Verified', data: {
+          toolEvidence: { toolCallCount: 1, toolResultCount: 1, successfulToolNames: ['fs_write'], targetPaths: ['src/engine.ts'] },
+        } };
+      } },
+    });
+    expect(calls).toEqual(['implementer', 'router', 'implementer', 'qa']);
+    expect(events.filter(event => event.type === 'node_completed' && event.nodeId === 'work')).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'participant_output', nodeId: 'work', errorCode: 'SUBAGENT_TIMEOUT',
+      route: expect.objectContaining({ selectedNodeIds: ['router'], rejectedNodeIds: ['qa'] }),
+    }));
+  });
+
+  it('keeps partial tool evidence but never advances or completes a timed-out implementation', async () => {
+    const graph: ArchitectureSchema = {
+      ...schema,
+      nodes: [{ id: 'work', label: 'Implementation', kind: 'role', roleSlotId: 'implementer' }, ...schema.nodes],
+      edges: [{ id: 'work-final', fromNodeId: 'work', toNodeId: 'final' }],
+    };
+    const events: ArchitectureExecutionEvent[] = [];
+    const execute = vi.fn(async () => ({
+      message: 'Timed out after a successful read',
+      data: {
+        errorCode: 'SUBAGENT_TIMEOUT',
+        failure: { code: 'SUBAGENT_TIMEOUT', message: 'Sub-agent timed out', retryable: true },
+        toolEvidence: { toolResultCount: 1, successfulToolNames: ['fs_read'], targetPaths: ['src/main.ts'] },
+      },
+    }));
+    await expect(createArchitectureGraphEvents({
+      schema: graph,
+      run: { id: 'timed-out', schemaId: graph.id, prompt: 'Fix game', executionMode: 'subagent_execution',
+        status: 'running', branchSessionIds: { implementer: 'work-session', finalizer: 'final-session' },
+        createdAt: 1, updatedAt: 1 },
+      now: 1,
+      personaForSlot: slot => slot.id,
+      roleExecutor: { execute },
+      onEvent: event => { events.push(event); },
+    })).rejects.toMatchObject({ code: 'SUBAGENT_TIMEOUT' });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'participant_output', nodeId: 'work',
+      data: expect.objectContaining({ toolEvidence: expect.objectContaining({ targetPaths: ['src/main.ts'] }) }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'node_failed', nodeId: 'work' }));
+    expect(events.some(event => event.type === 'node_completed' || event.nodeId === 'final')).toBe(false);
+  });
+
   it.each(['running', 'cancelled', 'failed', undefined])('blocks %s despite passed QA and successful read/build', async status => {
     const test = fixture([status]);
     await expect(test.start()).rejects.toThrow(`child status is ${status ?? 'unknown'}`);

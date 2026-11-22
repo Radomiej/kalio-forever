@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 
 const DEFAULT_ZOOM = 0.82;
 const clampZoom = (value: number) => Math.max(0.58, Math.min(1.6, Number(value.toFixed(2))));
 
 export function useExecutionGraphViewport() {
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [zoom, updateZoom] = useState(DEFAULT_ZOOM);
+  const zoomRef = useRef(DEFAULT_ZOOM);
+  const setZoom = useCallback((value: number) => {
+    zoomRef.current = value;
+    updateZoom(value);
+  }, []);
   const [inspectorWidth, setInspectorWidth] = useState(280);
   const [resetViewportToken, setResetViewportToken] = useState(0);
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -22,11 +27,11 @@ export function useExecutionGraphViewport() {
   return {
     zoom, setZoom, inspectorWidth, resetViewportToken, resetZoom, fitAll: resetZoom,
     collapseTools: zoom <= 0.85,
-    decreaseZoom: () => setZoom((value) => clampZoom(value - 0.15)),
-    increaseZoom: () => setZoom((value) => clampZoom(value + 0.15)),
+    decreaseZoom: () => setZoom(clampZoom(zoomRef.current - 0.15)),
+    increaseZoom: () => setZoom(clampZoom(zoomRef.current + 0.15)),
     handleWheelZoom: (deltaY: number) => {
-      if (deltaY === 0) return zoom;
-      const next = clampZoom(zoom + (deltaY < 0 ? 0.15 : -0.15));
+      if (deltaY === 0) return zoomRef.current;
+      const next = clampZoom(zoomRef.current + (deltaY < 0 ? 0.15 : -0.15));
       setZoom(next);
       return next;
     },

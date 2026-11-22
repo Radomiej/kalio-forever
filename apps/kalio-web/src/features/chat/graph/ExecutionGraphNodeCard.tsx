@@ -121,6 +121,7 @@ export function ExecutionGraphNodeCard({
       <span
         className="absolute right-2 top-2 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/12 bg-black/40"
         data-testid={`graph-node-status-${node.id}`}
+        role="img"
         title={`Status: ${statusLabel(node.status)}`}
         aria-label={`Status: ${statusLabel(node.status)}`}
       >
@@ -183,6 +184,7 @@ export function ExecutionGraphNodeCard({
               <span
                 className="tooltip tooltip-left inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 bg-black/28 text-white/45"
                 data-tip={supporting}
+                role="img"
                 aria-label={`Node detail: ${supporting}`}
               >
                 <HelpCircle size={11} />

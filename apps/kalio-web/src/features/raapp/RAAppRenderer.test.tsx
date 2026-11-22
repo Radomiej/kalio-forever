@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { RAAppRenderer } from './RAAppRenderer';
 import type { GuiDslPayload } from '@kalio/types';
+import { projectInteractiveQAOptionVisibility } from './qaInteractiveValidation';
 
 vi.mock('./HtmlIframeRenderer', () => ({
   HtmlIframeRenderer: ({ html, mode }: { html: string; mode?: string }) => (
@@ -153,6 +154,86 @@ describe('RAAppRenderer', () => {
     render(<RAAppRenderer block={{ type: 'gui', mode: 'interactive', content: JSON.stringify(payload) }} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Ask the agent to generate');
     expect(screen.queryByTestId('raapp-gui-action')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { options: ['yes', 'no'] }, { options: ['no'] }, { options: ['false'] },
+    { options: ['0'] }, { options: ['No'] },
+  ])('keeps each nonempty persisted Q&A answer visible and sends the original text: $options', ({ options }) => {
+    rendererState.realGui = true;
+    const output: Record<string, unknown> = { question: 'Proceed?', options };
+    for (let i = 0; i < 5; i++) output[`option_${i}`] = options[i] ?? '';
+    const payload: GuiDslPayload = { nodes: [{ kind: 'element', tag: 'window',
+      props: { id: { kind: 'identifier', value: 'qa_panel' } }, children: [
+        { kind: 'element', tag: 'label', props: { text: { kind: 'string', value: '[output.question]' } }, children: [] },
+        ...Array.from({ length: 5 }, (_, index) => ({ kind: 'element' as const, tag: 'button', props: {
+          text: { kind: 'string' as const, value: `[output.option_${index}]` },
+          visible: { kind: 'string' as const, value: `[output.option_${index}]` },
+          onclick: { kind: 'string' as const, value: `I choose: [output.option_${index}]` },
+        }, children: [] })),
+      ] }], data: { output } };
+    const serialized = JSON.stringify(payload);
+    const block = { type: 'gui' as const, mode: 'interactive' as const, content: serialized };
+    const first = render(<RAAppRenderer block={block} sessionId="session-1" />);
+    expect(screen.getAllByRole('button')).toHaveLength(options.length);
+    first.unmount();
+    render(<RAAppRenderer block={JSON.parse(JSON.stringify(block))} sessionId="session-1" />);
+    expect(screen.getAllByRole('button')).toHaveLength(options.length);
+    expect(screen.getByText('Proceed?')).toBeInTheDocument();
+    for (const option of options) {
+      fireEvent.click(screen.getByRole('button', { name: option }));
+      expect(sendMessage).toHaveBeenLastCalledWith({ sessionId: 'session-1', content: `I choose: ${option}`, personaId: 'persona-1' });
+    }
+    expect(JSON.stringify(payload)).toBe(serialized);
+    expect(block.content).toBe(serialized);
+  });
+
+  it('preserves custom Q&A visibility expressions and non-Q&A false semantics', () => {
+    rendererState.realGui = true;
+    const payload: GuiDslPayload = { nodes: [
+      { kind: 'element', tag: 'window', props: { id: { kind: 'string', value: 'qa_panel' } }, children: [
+        { kind: 'element', tag: 'button', props: { text: { kind: 'string', value: 'Custom hidden' },
+          visible: { kind: 'string', value: '[output.custom_visible]' } }, children: [] },
+      ] },
+      { kind: 'element', tag: 'button', props: { text: { kind: 'string', value: 'Outside Q&A' },
+        visible: { kind: 'string', value: '[output.option_0]' } }, children: [] },
+    ], data: { output: { question: 'Proceed?', options: ['no'], option_0: 'no', custom_visible: false } } };
+    const serialized = JSON.stringify(payload);
+    render(<RAAppRenderer block={{ type: 'gui', mode: 'interactive', content: serialized }} sessionId="session-1" />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(JSON.stringify(payload)).toBe(serialized);
+  });
+
+  it('validates malformed Q&A before projecting option presence', () => {
+    rendererState.realGui = true;
+    const payload: GuiDslPayload = { nodes: [{ kind: 'element', tag: 'window',
+      props: { id: { kind: 'identifier', value: 'qa_panel' } }, children: [
+        { kind: 'element', tag: 'button', props: { text: { kind: 'string', value: '[output.option_0]' },
+          visible: { kind: 'string', value: '[output.option_0]' } }, children: [] },
+      ] }], data: { output: { question: ' ', options: ['no'], option_0: 'no' } } };
+    render(<RAAppRenderer block={{ type: 'gui', mode: 'interactive', content: JSON.stringify(payload) }} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Ask the agent to generate');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('clones legacy GUI nodes without mutating the original payload or answer strings', () => {
+    const payload: GuiDslPayload = { nodes: [{ kind: 'element', tag: 'window',
+      props: { id: { kind: 'identifier', value: 'qa_panel' } }, children: [
+        { kind: 'element', tag: 'button', props: { text: { kind: 'string', value: '[output.option_0]' },
+          visible: { kind: 'string', value: '[output.option_0]' },
+          onclick: { kind: 'string', value: 'I choose: [output.option_0]' } }, children: [] },
+      ] }], data: { output: { question: 'Proceed?', options: ['no'], option_0: 'no' } } };
+    const original = JSON.stringify(payload);
+    const projected = projectInteractiveQAOptionVisibility(payload);
+    expect(projected).not.toBe(payload);
+    expect(projected.nodes).not.toBe(payload.nodes);
+    expect(projected.nodes[0]).not.toBe(payload.nodes[0]);
+    expect(projected.data).toBe(payload.data);
+    expect(projected.nodes[0]).toMatchObject({ children: [{ props: {
+      visible: { kind: 'boolean', value: true }, text: { kind: 'string', value: '[output.option_0]' },
+      onclick: { kind: 'string', value: 'I choose: [output.option_0]' },
+    } }] });
+    expect(JSON.stringify(payload)).toBe(original);
   });
 
   it('does not send an answer from another session preview into the active conversation', () => {

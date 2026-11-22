@@ -77,7 +77,7 @@ export function extractGraphNodePreview(node: ExecutionGraphNode): GraphNodePrev
       kind: 'raapp',
       block: raapp,
       sessionId: node.sessionId,
-      summary: previewSummary(raapp.content || raapp.vfsPath || node.title),
+      summary: raapp.type === 'gui' ? 'Open app preview' : previewSummary(raapp.content || raapp.vfsPath || node.title),
     };
   }
 

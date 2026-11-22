@@ -11,7 +11,7 @@ import { useAgentStore } from '../../store/agentStore';
 import { eventBus } from '../../services/eventBus';
 import { resolveLiveTurnState } from '../chat/liveTurnState';
 import { selectQueuedDepth } from '../../store/agentRuntimeSelectors';
-import { validateInteractiveQA } from './qaInteractiveValidation';
+import { projectInteractiveQAOptionVisibility, validateInteractiveQA } from './qaInteractiveValidation';
 
 interface RAAppRendererProps {
   block: RAAppBlock;
@@ -191,7 +191,7 @@ export function RAAppRenderer({ block, result, sessionId }: RAAppRendererProps) 
       }
       return (
         <>
-          <GuiDslRenderer payload={parsed as GuiDslPayload} onAction={handleGuiAction} />
+          <GuiDslRenderer payload={projectInteractiveQAOptionVisibility(parsed as GuiDslPayload)} onAction={handleGuiAction} />
           {nativeResultsPanel}
           {hitlOverlay}
         </>

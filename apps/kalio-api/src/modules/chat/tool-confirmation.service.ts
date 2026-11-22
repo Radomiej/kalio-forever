@@ -18,6 +18,7 @@ export interface ToolApprovalOutcome {
   rejectionMessage?: string;
   execution?: { requestId: string; revision: number };
   nonDurableReason?: 'policy' | 'representative' | 'legacy_confirmation';
+  validateBeforeExecution?: () => Promise<boolean>;
 }
 export type PendingMutationStatus = 'removed' | 'not_found' | 'session_mismatch';
 
@@ -108,7 +109,9 @@ export class ToolConfirmationService {
     this.emitConfirmationInvalidated(pending, 'cancelled');
     this.logConfirmationLifecycle(pending, 'hitl_approval_cancelled', 'manual', message);
     void this.logRuntimeConfirmation(pending, 'tool.confirmation.denied', 'cancelled', message);
-    pending.reject(message);
+    pending.reject(message?.trim()
+      ? `User rejected tool confirmation: ${message.trim()}`
+      : 'User rejected tool confirmation. No reason was provided. Do not retry the same operation or bypass the decision with another tool. Change approach or ask for clarification.');
     return 'rejected';
   }
 
@@ -151,6 +154,7 @@ export class ToolConfirmationService {
       humanOnly = true;
       if (!this.hitlRequests || !ctx.onResolvedToolDispatch || !ctx.registerToolResultReceiptCommit) throw new Error('HOST_CONFIRMATION_DURABILITY_REQUIRED');
     }
+    let policyReason: string | undefined;
     if (this.hitlPolicy && !humanOnly) {
       try {
         const resolution = await this.hitlPolicy.resolveApproval({
@@ -161,11 +165,15 @@ export class ToolConfirmationService {
           abortSignal: ctx.abortSignal,
           agentRun: ctx.agentRun,
           toolCallId: callId,
+          runId: ctx.runId,
+          turnId: ctx.turnId,
+          promptMessageId: ctx.promptMessageId,
         });
 
         if (resolution.status === 'approved') {
           this.logPolicyLifecycle('hitl_approval_confirmed', resolution.source, callId, toolName, args, ctx, resolution.reason);
-          return ctx.onResolvedToolDispatch ? { approved: true, nonDurableReason: 'policy' } : { approved: true };
+          return { approved: true, ...(ctx.onResolvedToolDispatch ? { nonDurableReason: 'policy' as const } : {}),
+            ...(resolution.validateBeforeExecution ? { validateBeforeExecution: resolution.validateBeforeExecution } : {}) };
         }
 
         if (resolution.status === 'rejected') {
@@ -173,8 +181,9 @@ export class ToolConfirmationService {
             `Global HITL policy rejected tool [${toolName}] for session ${ctx.sessionId}${resolution.reason ? `: ${resolution.reason}` : ''}`,
           );
           this.logPolicyLifecycle('hitl_approval_cancelled', resolution.source, callId, toolName, args, ctx, resolution.reason);
-          return { approved: false };
+          return this.policyRejection(resolution.source, resolution.reason);
         }
+        if (resolution.status === 'manual') policyReason = resolution.reason;
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         this.logger.error(
@@ -184,7 +193,16 @@ export class ToolConfirmationService {
       }
     }
 
-    const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx);
+    let manualReviewTimeoutMs: number | undefined = humanOnly ? 0 : undefined;
+    if (!humanOnly && this.hitlPolicy?.getManualReviewTimeoutMs) {
+      manualReviewTimeoutMs = await this.hitlPolicy.getManualReviewTimeoutMs({
+        kind: 'tool', sessionId: ctx.sessionId, name: toolName, args, toolCallId: callId, abortSignal: ctx.abortSignal,
+      });
+    }
+    const waitResult = await this.awaitConfirmation(callId, toolName, args, ctx, policyReason, manualReviewTimeoutMs);
+    const rejectionMessage = waitResult.message ?? (waitResult.status === 'timeout'
+      ? 'Tool confirmation expired before a decision. The operation did not run. Request a new confirmation if it is still needed.'
+      : undefined);
     if (waitResult.status === 'approved') {
       if (this.hitlRequests) {
         const approved = await this.hitlRequests.getById(waitResult.requestId);
@@ -202,7 +220,7 @@ export class ToolConfirmationService {
     if (waitResult.status === 'rejected' || humanOnly || !this.hitlPolicy) {
       return {
         approved: false,
-        ...(waitResult.message ? { rejectionMessage: waitResult.message } : {}),
+        ...(rejectionMessage ? { rejectionMessage } : {}),
       };
     }
 
@@ -210,6 +228,9 @@ export class ToolConfirmationService {
       const resolution = await this.hitlPolicy.resolveUnattendedApproval({
         kind: 'tool',
         sessionId: ctx.sessionId,
+        runId: ctx.runId,
+        turnId: ctx.turnId,
+        promptMessageId: ctx.promptMessageId,
         name: toolName,
         args,
         abortSignal: ctx.abortSignal,
@@ -218,8 +239,10 @@ export class ToolConfirmationService {
       });
 
       if (resolution.status === 'approved') {
-        this.logUnattendedLifecycle('hitl_approval_representative_approved', waitResult.requestId, callId, toolName, args, ctx, resolution.reason);
-        return ctx.onResolvedToolDispatch ? { approved: true, nonDurableReason: 'representative' } : { approved: true };
+        if (resolution.source === 'jev') this.logPolicyLifecycle('hitl_approval_confirmed', 'jev', callId, toolName, args, ctx, resolution.reason);
+        else this.logUnattendedLifecycle('hitl_approval_representative_approved', waitResult.requestId, callId, toolName, args, ctx, resolution.reason);
+        return { approved: true, ...(ctx.onResolvedToolDispatch ? { nonDurableReason: resolution.source === 'jev' ? 'policy' as const : 'representative' as const } : {}),
+          ...(resolution.validateBeforeExecution ? { validateBeforeExecution: resolution.validateBeforeExecution } : {}) };
       }
 
       if (resolution.status === 'rejected') {
@@ -227,6 +250,7 @@ export class ToolConfirmationService {
         this.logger.log(
           `Representative HITL fallback rejected tool [${toolName}] for session ${ctx.sessionId}${resolution.reason ? `: ${resolution.reason}` : ''}`,
         );
+        return this.policyRejection(resolution.source, resolution.reason);
       } else {
         this.logUnattendedLifecycle('hitl_approval_representative_manual', waitResult.requestId, callId, toolName, args, ctx, resolution.reason);
       }
@@ -240,7 +264,22 @@ export class ToolConfirmationService {
 
     return {
       approved: false,
-      ...(waitResult.message ? { rejectionMessage: waitResult.message } : {}),
+      ...(rejectionMessage ? { rejectionMessage } : {}),
+    };
+  }
+
+  async reviewsSubagentAutoApprovals(): Promise<boolean> {
+    if (!this.hitlPolicy?.reviewsSubagentAutoApprovals) return false;
+    try { return await this.hitlPolicy.reviewsSubagentAutoApprovals(); }
+    catch (error) { this.logger.error('Unable to resolve subagent approval policy', error); return true; }
+  }
+
+  private policyRejection(source: string, reason?: string): ToolApprovalOutcome {
+    const label = source === 'jev' ? 'Jev' : source;
+    const explanation = reason?.trim() || 'No reason was provided.';
+    return {
+      approved: false,
+      rejectionMessage: `HITL policy rejected tool confirmation (${label}): ${explanation} Do not retry or bypass this decision. Change approach or ask for clarification.`,
     };
   }
 
@@ -249,9 +288,13 @@ export class ToolConfirmationService {
     toolName: string,
     args: Record<string, unknown>,
     ctx: StreamContext,
+    policyReason?: string,
+    manualReviewTimeoutMs?: number,
   ): Promise<ConfirmationWaitResult> {
     return awaitToolConfirmation({
       callId, toolName, args, ctx, pending: this.pending,
+      ...(policyReason !== undefined ? { policyReason } : {}),
+      ...(manualReviewTimeoutMs !== undefined ? { manualReviewTimeoutMs } : {}),
       hitlRequests: this.hitlRequests, hitlNotifications: this.hitlNotifications,
       runtimeAudit: this.runtimeAudit, logger: this.logger,
       emitConfirmationInvalidated: (pending, reason, message) => this.emitConfirmationInvalidated(pending, reason, message),

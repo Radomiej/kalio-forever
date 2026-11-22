@@ -129,7 +129,11 @@ export function findBridgeExtension(): { version: string } | undefined {
 }
 function compareVersions(a: string, b: string): number { return a.localeCompare(b, undefined, { numeric: true }); }
 export function isSupportedVersion(version: string): boolean {
-  const parts = version.split('.').map((value) => Number.parseInt(value, 10) || 0);
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) return false;
+  // 0.5.3 retains descriptor/health protocol 3 and the required read-only MCP
+  // tools. Keep other unverified 0.5 releases outside the compatibility gate.
+  if (version === '0.5.3') return true;
+  const parts = version.split('.').map(Number);
   return compareVersionParts(parts, SUPPORTED_BRIDGE_MIN) >= 0 && compareVersionParts(parts, SUPPORTED_BRIDGE_MAX) < 0;
 }
 function compareVersionParts(a: number[], b: number[]): number {

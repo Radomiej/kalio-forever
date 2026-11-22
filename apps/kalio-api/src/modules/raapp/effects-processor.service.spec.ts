@@ -85,6 +85,12 @@ systems:
       expect(output['result']).toBeUndefined();
     });
 
+    it('stops a stored app on a malformed expression', async () => {
+      const yaml = 'systems:\n  - effects:\n      - assign: { target: output.result, expression: "input.a +" }';
+      await expect(service.processSystemsYaml(yaml, { a: 5 }, ctx, undefined, true))
+        .rejects.toThrow('RA-App system expression failed');
+    });
+
     it('uses VM timeout from config', async () => {
       const timedFixture = await createEffectsProcessorFixture(7);
       const runSpy = vi.spyOn(vm, 'runInContext');

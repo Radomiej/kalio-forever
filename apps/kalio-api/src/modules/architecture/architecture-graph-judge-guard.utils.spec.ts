@@ -117,6 +117,25 @@ function guard(input: {
 }
 
 describe('judge architecture continuation guard', () => {
+  it('returns a game release decision to its rework edge when current Kalio browser proof is absent', () => {
+    const gameSchema = { ...schema, id: 'game-development-2-variant-3' };
+    const result = judgeArchitectureContinuationGuard({
+      slot: { ...judgeSlot, slotType: 'router' },
+      node: judgeNode,
+      schema: gameSchema,
+      requireGoalMasterLoopProof: false,
+      incomingNodeIds: [],
+      selectedNodeIds: ['final-node'],
+      outgoingNodeIds: ['continue-node', 'final-node'],
+      finalizationInput: { schema: gameSchema, runContext: undefined, events: [] },
+      events: [],
+    });
+    expect(result).toMatchObject({
+      selectedNodeIds: ['continue-node'], applied: true,
+      reason: expect.stringContaining('current Kalio browser evidence from input-qa'),
+    });
+  });
+
   async function runGoalGraph(withProof: boolean, buildExitCodes: number[] = [0]) {
     const goalSchema: ArchitectureSchema = {
       ...schema,

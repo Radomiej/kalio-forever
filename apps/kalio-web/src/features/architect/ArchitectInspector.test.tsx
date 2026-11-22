@@ -75,6 +75,9 @@ describe('ArchitectInspector', () => {
 
     await user.click(screen.getByTestId('architect-node-properties-open'));
 
+    expect(screen.getByRole('textbox', { name: 'Allowed tools' })).toHaveAccessibleDescription(
+      'Leave blank to inherit the runtime, persona, and slot policy. Enter tool names to replace the allowed tools for this node.',
+    );
     fireEvent.change(screen.getByTestId('architect-node-tool-override'), { target: { value: 'run_subagent, fs_read fs_list' } });
     expect(onNodeToolOverride).toHaveBeenLastCalledWith('pragmatist', {
       allowedToolNames: ['run_subagent', 'fs_read', 'fs_list'],

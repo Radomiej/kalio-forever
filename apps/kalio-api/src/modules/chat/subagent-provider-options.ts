@@ -23,11 +23,13 @@ export function buildSubagentProviderOptions(input: {
   abortSignal: AbortSignal;
   onExternalRuntimeLost?: LLMAgentLoopRequest['onExternalRuntimeLost'];
   trackingEmit?: EmitFn;
+  onActivity?: (event: string, data: unknown) => void;
   sessions: SessionsService;
   runJournal?: RunJournalService;
   nativeApprovals?: NativeApprovalService;
   audit?: AuditService;
 }): ProviderOptions {
+  const audit = input.audit ? createExternalAuditCallback(input.audit, input.sessionId) : undefined;
   return {
     executionProfile: input.executionProfile,
     externalThreadId: input.externalThreadId,
@@ -48,6 +50,9 @@ export function buildSubagentProviderOptions(input: {
       emit: input.trackingEmit ?? (() => undefined),
       abortSignal: input.abortSignal,
     }),
-    onExternalAudit: input.audit ? createExternalAuditCallback(input.audit, input.sessionId) : undefined,
+    onExternalAudit: input.onActivity ? (event) => {
+      input.onActivity?.(event.eventName, event.data);
+      return audit?.(event);
+    } : audit,
   };
 }

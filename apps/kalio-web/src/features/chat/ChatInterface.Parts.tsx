@@ -200,7 +200,7 @@ export function ChatStatusBanners({
         </div>
       )}
       {error && (
-        <div data-testid="chat-error" className="alert alert-error m-2 py-2 text-sm">
+        <div role="alert" data-testid="chat-error" className="alert alert-error m-2 py-2 text-sm">
           {error}
           <button className="btn btn-ghost btn-xs ml-auto" onClick={onCloseError}>x</button>
         </div>
@@ -230,6 +230,7 @@ interface ChatWelcomeScreenProps {
   onProjectPathChange: (projectPath: string) => void;
   onProjectChange?: (project: Project) => void;
   onSend: (content: string, personaId: string, executionProfileId?: string) => void;
+  onSendImages?: (content: string, personaId: string, profileId: string, images: File[]) => Promise<boolean>;
   personas: Persona[];
   executionProfiles?: ExecutionProfile[];
   selectedExecutionProfileId?: string;
@@ -252,6 +253,7 @@ export function ChatWelcomeScreen({
   onProjectPathChange,
   onProjectChange,
   onSend,
+  onSendImages,
   personas,
   executionProfiles,
   selectedExecutionProfileId,
@@ -278,6 +280,7 @@ export function ChatWelcomeScreen({
       onPersonaChange={onPersonaChange}
       onProjectPathChange={onProjectPathChange}
       onProjectChange={onProjectChange}
+      onRunImagePrompt={onSendImages && ((content, profileId, images) => onSendImages(content, selectedPersonaId, profileId, images))}
       onRunPrompt={(content, executionProfileId) => {
         if (selectedArchitectureId === 'single-chat') {
           if (executionProfileId === undefined) onSend(content, selectedPersonaId);

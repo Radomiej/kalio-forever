@@ -25,6 +25,30 @@ function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 }
 
 describe('needsWorkflowEnvelopeRecovery', () => {
+  it.each([
+    { projectPath: '/synthetic/project', executionCwd: '/synthetic/project' },
+    { executionCwd: '/synthetic/project' },
+  ])('does not recover an ordinary completed project chat with context %j', (architectureContext) => {
+    expect(needsWorkflowEnvelopeRecovery({
+      session: makeSession({ runtimeContext: { runtimeKind: 'chat', architectureContext } }),
+      messages: [makeMessage({ role: 'user' }), makeMessage({ id: 'answer', content: 'Completed' })],
+    })).toBe(false);
+  });
+
+  it('recovers a prompt-only run identity without requiring a schema label', () => {
+    expect(needsWorkflowEnvelopeRecovery({
+      session: makeSession({ runtimeContext: { runtimeKind: 'chat', architectureContext: { architectureRunId: 'run-1' } } }),
+      messages: [makeMessage({ role: 'user' })],
+    })).toBe(true);
+  });
+
+  it('preserves descendant-backed recovery while the host has only project context', () => {
+    expect(needsWorkflowEnvelopeRecovery({
+      session: makeSession({ runtimeContext: { runtimeKind: 'chat', architectureContext: { executionCwd: '/synthetic' } } }),
+      messages: [], visibleDescendantCount: 1,
+    })).toBe(true);
+  });
+
   it('keeps polling when an architecture host only has the user prompt after reload', () => {
     const session = makeSession({
       updatedAt: 20,

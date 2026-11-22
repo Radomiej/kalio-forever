@@ -129,6 +129,7 @@ interface EffectRunContext {
   pendingApprovals: PendingApproval[];
   sessionCtx: NativeSessionContext;
   entityStore?: EntityStore;
+  strictExpressions: boolean;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -179,8 +180,12 @@ export class EffectsProcessorService {
     inputs: Record<string, unknown>,
     sessionCtx: NativeSessionContext,
     entityStore?: EntityStore,
+    strictExpressions = false,
   ): Promise<EffectsProcessorResult> {
     const parsed = yaml.load(systemsContent) as { systems?: ParsedSystem[] } | null;
+    if (strictExpressions && !Array.isArray(parsed?.systems)) {
+      throw new Error('Invalid RA-App systems definition. Expected a systems array.');
+    }
     const systems = parsed?.systems ?? [];
 
     const output: Record<string, unknown> = {};
@@ -189,7 +194,7 @@ export class EffectsProcessorService {
     for (const system of systems) {
       // Evaluate optional system condition
       if (system.condition) {
-        const condResult = this.evalExpression(system.condition, inputs, output);
+        const condResult = this.evalExpression(system.condition, inputs, output, strictExpressions);
         if (!condResult) continue;
       }
 
@@ -202,13 +207,13 @@ export class EffectsProcessorService {
         for (const entity of entities) {
           const entityInput = { ...inputs, entity_id: entity.id, entity: entity.components };
           for (const effect of system.effects ?? []) {
-            await this.processEffect(effect, { input: entityInput, output, pendingApprovals, sessionCtx, entityStore });
+          await this.processEffect(effect, { input: entityInput, output, pendingApprovals, sessionCtx, entityStore, strictExpressions });
           }
         }
       } else {
         // Global execution — no entity context
         for (const effect of system.effects ?? []) {
-          await this.processEffect(effect, { input: inputs, output, pendingApprovals, sessionCtx, entityStore });
+          await this.processEffect(effect, { input: inputs, output, pendingApprovals, sessionCtx, entityStore, strictExpressions });
         }
       }
     }
@@ -224,7 +229,7 @@ export class EffectsProcessorService {
     // assign: { target, expression }
     if ('assign' in effect) {
       const { target, expression } = (effect as AssignEffect).assign;
-      const value = this.evalExpression(expression, input, output);
+      const value = this.evalExpression(expression, input, output, ctx.strictExpressions);
       this.setPath(output, target.replace(/^output\./, ''), value);
       return;
     }
@@ -239,7 +244,7 @@ export class EffectsProcessorService {
     // if: { condition, then, else? }
     if ('if' in effect) {
       const { condition, then: thenBranch, else: elseBranch } = (effect as IfEffect).if;
-      const condResult = this.evalExpression(condition, input, output);
+      const condResult = this.evalExpression(condition, input, output, ctx.strictExpressions);
       const branch = condResult ? thenBranch : (elseBranch ?? []);
       for (const e of branch) {
         await this.processEffect(e, ctx);
@@ -272,7 +277,7 @@ export class EffectsProcessorService {
         }
         for (const [field, rawValue] of Object.entries(fields as Record<string, unknown>)) {
           const value = typeof rawValue === 'string'
-            ? this.evalExpression(rawValue, input, output)
+            ? this.evalExpression(rawValue, input, output, ctx.strictExpressions)
             : rawValue;
           entityStore.setComponentField(id, component, field, value);
         }
@@ -302,7 +307,7 @@ export class EffectsProcessorService {
         ? String(this.evalExpression(rawEntityId, input, output) ?? rawEntityId)
         : String(rawEntityId);
       const value = typeof rawValue === 'string'
-        ? this.evalExpression(rawValue, input, output)
+        ? this.evalExpression(rawValue, input, output, ctx.strictExpressions)
         : rawValue;
       try {
         entityStore.setComponentField(entity_id, component, field, value);
@@ -326,7 +331,7 @@ export class EffectsProcessorService {
     const resolvedArgs: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rawArgs)) {
       resolvedArgs[k] =
-        typeof v === 'string' ? this.evalExpression(v, input, output) : v;
+        typeof v === 'string' ? this.evalExpression(v, input, output, ctx.strictExpressions) : v;
     }
 
     let executeResult: { result: unknown; approval_required: boolean };
@@ -395,12 +400,13 @@ export class EffectsProcessorService {
    * - Math helpers: `floor`, `ceil`, `round`, `abs`, `min`, `max`, `sqrt`,
    *   `pow`, `random(min?, max?)`, `lerp(a, b, t)`, `Math`
    *
-   * Returns `undefined` on error rather than throwing to keep pipelines running.
+   * Stored app runs stop on a failed expression. Preview callers may inspect partial output.
    */
   private evalExpression(
     expression: string,
     input: Record<string, unknown>,
     output: Record<string, unknown>,
+    strict = false,
   ): unknown {
     try {
       const ctx = vm.createContext({
@@ -418,6 +424,7 @@ export class EffectsProcessorService {
       vm.runInContext(`__result = (${expression})`, ctx, { timeout: this.expressionTimeoutMs });
       return ctx['__result'];
     } catch (err) {
+      if (strict) throw new Error('RA-App system expression failed. Check the app definition and inputs.', { cause: err });
       this.logger.warn(
         `Expression eval failed: "${expression}" — ${err instanceof Error ? err.message : String(err)}`,
       );

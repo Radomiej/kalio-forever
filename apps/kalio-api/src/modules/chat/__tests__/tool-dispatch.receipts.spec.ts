@@ -45,7 +45,10 @@ describe('resolved host dispatch receipts', () => {
   it('keeps an MCP target distinct from a Kalio registry executor and uses its captured target', async () => {
     const target = { serverKey: 'external', originalName: 'build' };
     const calls: unknown[][] = [];
-    const mcp = { resolveToolName: () => target, callTool: async (...args: unknown[]) => { calls.push(args); return 'external'; } };
+    const mcp = { resolveToolName: () => target,
+      getToolByName: () => ({ name: 'mcp_external_build', serverKey: 'external', description: 'Build', requiresConfirmation: true,
+        parameters: { type: 'object', required: ['command'], properties: { command: { type: 'string' } } } }),
+      callTool: async (...args: unknown[]) => { calls.push(args); return 'external'; } };
     const confirmations = new ToolConfirmationService(null, null);
     vi.spyOn(confirmations, 'approveOrRequestConfirmation').mockImplementation(async () => {
       target.serverKey = 'replacement'; return { approved: true };

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
 import type { ChatAttachment, ChatSession, LLMContextPreview } from '@kalio/types';
 import type { TokenCount } from '../../../services/tokenCounter';
 import { apiClient } from '../../../services/apiClient';
@@ -111,7 +112,11 @@ export function useContextPreview({
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           if (requestSeqRef.current !== requestSeq) return;
-          setError(err instanceof Error ? err.message : 'Context preview failed');
+          const budgetExceeded = isAxiosError<{ code?: string }>(err)
+            && err.response?.status === 422
+            && err.response.data?.code === 'ACTIVE_TURN_CONTEXT_BUDGET_EXCEEDED';
+          setError(budgetExceeded ? 'This turn exceeds the context budget. Its tool results are still saved.'
+            : err instanceof Error ? err.message : 'Context preview failed');
           setLoading(false);
           setStale(previewRef.current !== null);
         });

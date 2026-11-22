@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { AgentFlowRunSnapshot, ChatSession, RuntimeWatchReason, RuntimeWatchTarget } from '@kalio/types';
 import { AGENT_FLOW_RUNTIME, type AgentFlowRuntimePort } from '../agent-flow/agent-flow-runtime.port';
@@ -9,6 +10,8 @@ import { ToolDispatchService } from './tool-dispatch.service';
 
 @Injectable()
 export class SessionRuntimeWatchlistService {
+  private pendingList?: Promise<RuntimeWatchTarget[]>;
+
   constructor(
     private readonly sessions: SessionsService,
     private readonly pipeline: SessionPipelineService,
@@ -17,7 +20,14 @@ export class SessionRuntimeWatchlistService {
     @Optional() @Inject(AGENT_FLOW_RUNTIME) private readonly agentFlowRuntime?: AgentFlowRuntimePort | null,
   ) {}
 
-  async list(): Promise<RuntimeWatchTarget[]> {
+  list(): Promise<RuntimeWatchTarget[]> {
+    // Let queued HTTP requests join before synchronous SQLite work starts.
+    return this.pendingList ??= setImmediate().then(() => this.readList()).finally(() => {
+      this.pendingList = undefined;
+    });
+  }
+
+  private async readList(): Promise<RuntimeWatchTarget[]> {
     const sessions = await this.sessions.list();
     const sessionById = new Map(sessions.map((session) => [session.id, session]));
     const reasonsByRoot = new Map<string, Set<RuntimeWatchReason>>();

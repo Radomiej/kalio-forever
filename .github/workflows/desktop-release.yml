@@ -7,6 +7,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: 'Attach artifacts from a successful Desktop release run on this branch to its existing draft; leave empty to build'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -18,6 +23,7 @@ concurrency:
 jobs:
   build-windows:
     runs-on: windows-latest
+    if: inputs.artifact_run_id == ''
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -181,6 +187,7 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-24.04
+    if: inputs.artifact_run_id == ''
     env:
       ONNXRUNTIME_NODE_INSTALL: skip
     steps:
@@ -388,9 +395,88 @@ jobs:
           if-no-files-found: ignore
           path: src-tauri/target/release/bundle/appimage/*.sig
 
+  build-macos-source:
+    runs-on: macos-latest
+    if: inputs.artifact_run_id == ''
+    timeout-minutes: 20
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Verify release and installer regressions
+        run: |
+          node scripts/bump-version.mjs --check
+          bash -n scripts/install-macos.sh scripts/macos-cli.sh
+          node --test scripts/macos-installer.test.mjs scripts/corepack-path.test.mjs scripts/stack-qa-env.test.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @kalio/types --filter @kalio/sdk build
+      - name: Build and smoke test native macOS source runtime
+        run: node scripts/source-runtime-smoke.mjs
+      - name: Package experimental macOS source distribution
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release
+          git archive --format=tar.gz --prefix="kalio-$version/" -o "release/kalio-source-$version.tar.gz" HEAD
+          cp docs/macos-installation.md release/MACOS_INSTALLATION.md
+          (cd release && shasum -a 256 "kalio-source-$version.tar.gz" MACOS_INSTALLATION.md) > release/SHA256SUMS-macos-source.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kalio-macos-source
+          retention-days: 3
+          if-no-files-found: error
+          path: release/*
+
+  stage-existing-draft:
+    if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.artifact_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate artifact source and draft version
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          node scripts/bump-version.mjs --check
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > source-run.json
+          node -e "const r=require('./source-run.json');if(r.conclusion!=='success'||r.path!=='.github/workflows/desktop-release.yml'||r.head_branch!==process.env.GITHUB_REF_NAME)throw Error('Expected a successful Desktop release run from this branch');"
+          tag="v$(node -p "require('./package.json').version")"
+          test "$(gh release view "$tag" --json isDraft --jq '.isDraft')" = true
+          echo "DRAFT_TAG=$tag" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id }}
+          pattern: kalio-*
+          path: release-assets
+          merge-multiple: true
+      - name: Prepare draft metadata and current source archive
+        run: |
+          version=$(node -p "require('./package.json').version")
+          git archive --format=tar.gz --prefix="kalio-$version/" -o "release-assets/kalio-source-$version.tar.gz" HEAD
+          (cd release-assets && sha256sum "kalio-source-$version.tar.gz" MACOS_INSTALLATION.md) > release-assets/SHA256SUMS-macos-source.txt
+          node -e "const fs=require('fs');const r=require('./source-run.json');fs.writeFileSync('release-assets/SOURCE_REVISIONS.txt','Native artifacts: '+r.head_sha+'\\nSource archive: '+process.env.GITHUB_SHA+'\\n');"
+          node --input-type=module -e "import { createRuntimeManifest } from './scripts/generate-runtime-release-manifest.mjs'; import { writeFile } from 'node:fs/promises'; const manifest=await createRuntimeManifest('release-assets',process.env.DRAFT_TAG); await writeFile('release-assets/kalio-runtime-manifest.json',JSON.stringify(manifest,null,2)+'\\n');"
+      - name: Attach artifacts without publishing or creating a tag
+        run: |
+          while IFS= read -r -d '' asset; do
+            case "$asset" in
+              *.exe|*.zip|*.tar.gz|*.AppImage|*.deb|*.md|*.txt|*.json|*.sig)
+                gh release upload "$DRAFT_TAG" "$asset" --clobber ;;
+            esac
+          done < <(find release-assets -type f -print0)
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-macos-source]
     runs-on: windows-latest
     permissions:
       contents: write

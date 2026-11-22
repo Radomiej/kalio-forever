@@ -120,6 +120,35 @@ describe('EmbeddingsPanel', () => {
     });
   });
 
+  it('checks the exact saved local model and rejects availability returned for a stale model', async () => {
+    const selectedModel = 'onnx-community/embeddinggemma-2-ONNX';
+    const savedConfig = { enabled: true, model: selectedModel, dimensions: 768, backend: 'cpu' as const };
+    const fetchMock = installFetchQueue({
+      'GET /api/memory/embedding-credentials': [[]],
+      'GET /api/memory/status/embedding': [{ ...LOCAL_STATUS, model: selectedModel, dimensions: 768 }],
+      'GET /api/memory/embedding-local': [savedConfig],
+      'POST /api/memory/embedding-local/availability': [{
+        status: 'ready', installed: true, model: 'Xenova/multilingual-e5-small',
+        dimensions: 384, backend: 'cpu', message: 'Stale E5 availability',
+      }],
+    });
+
+    render(<EmbeddingsPanel />);
+
+    const availability = await screen.findByTestId('embedding-local-availability-message');
+    expect(availability).toHaveTextContent(
+      'Availability was reported for a different local model configuration. Refresh the settings and check again.',
+    );
+    expect(availability).not.toHaveTextContent('Stale E5 availability');
+    expect(screen.getByTestId('embedding-local-model')).toHaveValue(selectedModel);
+    expect(screen.getByTestId('embedding-local-test-btn')).toBeDisabled();
+
+    const availabilityCall = fetchMock.mock.calls.find(([url, init]) =>
+      url === '/api/memory/embedding-local/availability' && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(availabilityCall?.[1]?.body))).toEqual(savedConfig);
+  });
+
   it('renders an explicit mock embedding status without presenting it as local', async () => {
     installFetchQueue({
       'GET /api/memory/embedding-credentials': [[]],

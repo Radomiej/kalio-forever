@@ -137,6 +137,7 @@ function routerRiskList(value: unknown): string | undefined {
 export function summarizeArchitectureIncomingEvent(
   event: ArchitectureExecutionEvent,
   slotType: SummarySlotType,
+  preservePlaytestConclusion = false,
 ): string {
   const maxLength = slotType === 'finalizer'
     ? FINALIZER_MAX_MESSAGE_LENGTH
@@ -146,7 +147,14 @@ export function summarizeArchitectureIncomingEvent(
     return truncate(routerSummary, maxLength);
   }
 
-  return truncate(compactRecursivePromptEcho(event.message), maxLength);
+  const message = compactRecursivePromptEcho(event.message);
+  if (preservePlaytestConclusion && event.type === 'participant_output') {
+    const normalized = normalizeWhitespace(message);
+    return normalized.length <= 3600
+      ? normalized
+      : `${normalized.slice(0, 900)} ... ${normalized.slice(-2695)}`;
+  }
+  return truncate(message, maxLength);
 }
 
 export function summarizeArchitectureIncomingHandoffPacket(

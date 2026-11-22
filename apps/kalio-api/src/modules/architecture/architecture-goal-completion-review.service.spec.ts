@@ -19,7 +19,7 @@ function fixture(content = 'Build settings.', sourceSessionId = 'root') {
 }
 function answer(choice = 'complete', confidence = 0.95) { return Response.json({ answers: { goal_completion: { type: 'choice', choice, confidence } } }); }
 function harness(snapshot: GoalCompletionReviewSnapshot) {
-  const resolve = vi.fn(async () => ({ apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' }));
+  const resolve = vi.fn<DecisionSettingsPort['resolve']>(async () => ({ protocol: 'jev-decisions' as const, apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' }));
   const settings: DecisionSettingsPort = { resolve, getConfig: vi.fn(), updateConfig: vi.fn() };
   const readCurrent = vi.fn(async (_runId: string, _signal?: AbortSignal) => structuredClone(snapshot));
   const http = vi.fn<typeof fetch>().mockImplementation(async () => answer()); vi.stubGlobal('fetch', http);
@@ -41,6 +41,32 @@ function v2() {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('completion semantic choice service', () => {
+
+  it.each(['ollama-chat', 'unknown', undefined])('requires user without Jev for protocol %s', async protocol => {
+    const { service, http, resolve } = harness(fixture().snapshot);
+    const call = vi.spyOn(JevDecisionsClient.prototype, 'decideChoice');
+    resolve.mockResolvedValue({ protocol, endpoint: 'http://localhost:11434/api/chat', model: 'test' } as unknown as Awaited<ReturnType<DecisionSettingsPort['resolve']>>);
+    const result = await service.select('run', 'root', 1);
+    expect(result).toMatchObject({ status: 'needs_user', reason: 'provider_error' });
+    for (const key of ['binding', 'callerBinding', 'confidence', 'probabilities', 'candidate', 'criterionId']) expect(result).not.toHaveProperty(key);
+    expect(call).not.toHaveBeenCalled(); expect(http).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledWith();
+    call.mockRestore();
+  });
+
+  it.each(['ollama-chat', 'unknown', undefined])('propagates cancellation before protocol %s fallback', async protocol => {
+    const { service, http, resolve } = harness(fixture().snapshot);
+    const call = vi.spyOn(JevDecisionsClient.prototype, 'decideChoice');
+    const controller = new AbortController();
+    resolve.mockImplementation(async () => {
+      controller.abort();
+      return { protocol, endpoint: 'http://localhost:11434/api/chat', model: 'test' } as unknown as Awaited<ReturnType<DecisionSettingsPort['resolve']>>;
+    });
+    await expect(service.select('run', 'root', 1, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(call).not.toHaveBeenCalled(); expect(http).not.toHaveBeenCalled();
+    call.mockRestore();
+  });
+
   it('forwards the same signal to every initial and current host verification', async () => {
     const { service, readCurrent } = harness(fixture().snapshot); const controller = new AbortController();
     expect(await service.select('run', 'root', 1, controller.signal)).toHaveProperty('status', 'complete');
@@ -102,7 +128,7 @@ describe('completion semantic choice service', () => {
       const malicious = Object.defineProperty(snapshot, 'provenance', { enumerable: true, get() { accessed = true; throw new Error('SECRET'); } });
       readCurrent.mockImplementation(async () => stage === 'initial' ? malicious : fixture().snapshot);
       if (stage === 'after-resolve') resolve.mockImplementation(async () => {
-        readCurrent.mockImplementation(async () => malicious); return { apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' };
+        readCurrent.mockImplementation(async () => malicious); return { protocol: 'jev-decisions' as const, apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' };
       });
       expect(await service.select('run', 'root', 1)).toHaveProperty('status', 'needs_user');
       expect(accessed).toBe(false); expect(http).not.toHaveBeenCalled();
@@ -113,7 +139,7 @@ describe('completion semantic choice service', () => {
     const { service, resolve, http } = harness(snapshot);
     resolve.mockImplementation(async () => {
       Reflect.set(provenance.buildExpectation!, 'canonicalCwd', 'C:/changed');
-      return { apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' };
+      return { protocol: 'jev-decisions' as const, apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' };
     });
     expect(await service.select('run', 'root', 1)).toMatchObject({ status: 'needs_user', reason: 'stale_input' }); expect(http).not.toHaveBeenCalled();
   });
@@ -164,7 +190,7 @@ describe('completion semantic choice service', () => {
       if (change === 'refs') snapshot.criterionEvidenceIds = { [id]: [] };
       if (change === 'inventory') snapshot.host.evidenceById.build!.data = { exitCode: 0, changed: true };
       if (change === 'source') snapshot.packet.original.content = 'Changed';
-      return { apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' };
+      return { protocol: 'jev-decisions' as const, apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' };
     });
     expect(await service.select('run', 'root', 1)).toMatchObject({ status: 'needs_user', reason: 'stale_input' }); expect(http).not.toHaveBeenCalled();
   });
@@ -224,7 +250,7 @@ describe('completion semantic choice service', () => {
   });
   it('propagates abort after resolve before HTTP', async () => {
     const { service, resolve, http } = harness(fixture().snapshot); const controller = new AbortController();
-    resolve.mockImplementation(async () => { controller.abort(); return { apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' }; });
+    resolve.mockImplementation(async () => { controller.abort(); return { protocol: 'jev-decisions' as const, apiKey: 'PRIVATE', endpoint: 'https://decision.invalid', model: 'test' }; });
     await expect(service.select('run', 'root', 1, controller.signal)).rejects.toMatchObject({ name: 'AbortError' }); expect(http).not.toHaveBeenCalled();
   });
 });

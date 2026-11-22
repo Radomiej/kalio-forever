@@ -1,4 +1,5 @@
 import type {
+  ArchitectureExecutionEvent,
   ArchitectureNodeBehaviorMode,
   ArchitectureRouterOutput,
   ArchitectureSchema,
@@ -6,6 +7,25 @@ import type {
   ArchitectureSchemaNode,
 } from '@kalio/types';
 import { structuredRouteToCall } from './architecture-structured-output';
+
+export function gameReleaseReviewEvents(
+  schema: ArchitectureSchema,
+  nodeId: string,
+  events: ArchitectureExecutionEvent[],
+): ArchitectureExecutionEvent[] | undefined {
+  if (nodeId !== 'release' || !/^game-development-2(?:-variant-\d+)?$/.test(schema.id)) {
+    return undefined;
+  }
+  return ['core', 'ux', 'senior', 'input-qa', 'loop-qa'].flatMap((id) => {
+    const nodeEvents = events.filter(event => event.nodeId === id).reverse();
+    const start = nodeEvents.findIndex(event => event.type === 'node_started');
+    if (start < 0) return [];
+    const visit = nodeEvents.slice(0, start);
+    const terminal = visit.find(event => event.type === 'node_completed' || event.type === 'node_failed');
+    const report = visit.find(event => event.type === 'participant_output');
+    return terminal?.type === 'node_completed' && report && report.sequence < terminal.sequence ? [report] : [];
+  });
+}
 
 export type AgentRouteRequest = {
   targetNodeId: string;
