@@ -464,7 +464,7 @@ jobs:
           git archive --format=tar.gz --prefix="kalio-$version/" -o "release-assets/kalio-source-$version.tar.gz" HEAD
           (cd release-assets && sha256sum "kalio-source-$version.tar.gz" MACOS_INSTALLATION.md) > release-assets/SHA256SUMS-macos-source.txt
           node -e "const fs=require('fs');const r=require('./source-run.json');fs.writeFileSync('release-assets/SOURCE_REVISIONS.txt','Native artifacts: '+r.head_sha+'\\nSource archive: '+process.env.GITHUB_SHA+'\\n');"
-          node scripts/generate-runtime-release-manifest.mjs release-assets release-assets/kalio-runtime-manifest.json
+          node --input-type=module -e "import { createRuntimeManifest } from './scripts/generate-runtime-release-manifest.mjs'; import { writeFile } from 'node:fs/promises'; const manifest=await createRuntimeManifest('release-assets',process.env.DRAFT_TAG); await writeFile('release-assets/kalio-runtime-manifest.json',JSON.stringify(manifest,null,2)+'\\n');"
       - name: Attach artifacts without publishing or creating a tag
         run: |
           for asset in release-assets/*; do
