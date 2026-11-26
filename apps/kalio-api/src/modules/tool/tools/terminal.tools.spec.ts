@@ -66,7 +66,7 @@ describe('TerminalSpawnTool', () => {
       expect(terminals.spawn).toHaveBeenCalledWith('node', ['app.js'], '/app', false, {
         sessionId: 'sess-term', turnId: undefined, callId: 'call-1',
       });
-      expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command });
+      expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command, next: expect.stringContaining('terminal_output') });
     });
 
     it('passes cwd to terminal.spawn when provided', async () => {

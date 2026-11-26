@@ -93,6 +93,8 @@ export class TerminalSpawnTool {
     });
     return {
       id: session.id, pid: session.pid, command: session.command,
+      // Agents (notably Devin over the MCP bridge) otherwise tend to stop after spawn and never read the result.
+      next: `The process runs in the background. Call terminal_output with {"id":"${session.id}","waitMs":30000} to wait for it and read its output; repeat while it is still running.`,
       ...(session.executionDescriptor ? { executionDescriptor: structuredClone(session.executionDescriptor) } : {}),
     };
   }

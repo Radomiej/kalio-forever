@@ -11,7 +11,7 @@ import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-toke
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 import { buildDevinStdioMcpBridgeConfig, DEVIN_KALIO_MCP_SERVER_NAME } from './devin-cli-mcp-bridge';
 import { summarizeDevinToolOutput } from './devin-tool-output-summary';
-import { captureExecutionCurrent, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
+import { captureExecutionCurrent, DevinAcpIdleTimeoutError, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 import { DevinStructuredOutput, DevinStructuredOutputError } from './devin-structured-output';
 import { latestPromptImages, toAcpPromptImages } from './latest-prompt-images';
 
@@ -213,7 +213,9 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           reason: normalized.message.slice(0, 240),
         },
       });
-      if (!(normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || params.abortSignal?.aborted) {
+      // An idle timeout cancels only the turn; the Devin host is still alive, so it must surface as LLM_TIMEOUT, not as a lost runtime.
+      const hostStillAlive = (normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || normalized instanceof DevinAcpIdleTimeoutError;
+      if (!hostStillAlive || params.abortSignal?.aborted) {
         params.onExternalRuntimeLost?.({
           authProfileId: profile.authProfileId?.trim() || profile.id,
           processEpoch: session?.processEpoch ?? 'devin-cli:unbound',
