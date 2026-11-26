@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HitlDecisionService } from './hitl-decision.service';
 import { HitlPolicyService } from './hitl-policy.service';
 import type { HitlJevService } from './hitl-jev.service';
@@ -34,6 +34,8 @@ describe('HitlPolicyService', () => {
   let localService: { evaluateApproval: ReturnType<typeof vi.fn>; consume: ReturnType<typeof vi.fn>; discard: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
+    // An unset install profile is treated as production (>= .95 floor); the configured .9 threshold needs a non-prod host.
+    vi.stubEnv('KALIO_INSTALL_PROFILE', 'dev');
     configService = {
       getConfig: vi.fn().mockResolvedValue(makeConfig()),
     };
@@ -52,6 +54,8 @@ describe('HitlPolicyService', () => {
       localService as unknown as HitlLocalDecisionService,
     );
   });
+
+  afterEach(() => { vi.unstubAllEnvs(); });
 
   it.each([['allow', 'approved'], ['deny', 'rejected'], ['ask_user', 'manual']])('resolves native %s as %s without persona', async (verdict, status) => {
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama', jevFallbackToPersona: true, autoPersonaId: 'old-persona' }));
@@ -301,6 +305,13 @@ describe('HitlPolicyService', () => {
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevApprovalThreshold }));
     jevService.evaluateApproval.mockResolvedValue({ probability: jevApprovalThreshold });
     await expect(service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).resolves.toMatchObject({ status: 'approved' });
+  });
+
+  it('keeps the production .95 floor when the install profile is unknown, even with a lower configured threshold', async () => {
+    vi.stubEnv('KALIO_INSTALL_PROFILE', '');
+    configService.getConfig.mockResolvedValue(makeConfig({ mode: 'jev', jevApprovalThreshold: 0.9 }));
+    jevService.evaluateApproval.mockResolvedValue({ probability: 0.9 });
+    await expect(service.resolveApproval({ kind: 'tool', sessionId: 's', name: 'fs_read', args: {} })).resolves.toMatchObject({ status: 'manual' });
   });
 
   it('defaults missing legacy Jev fields to .95 and manual fallback', async () => {
