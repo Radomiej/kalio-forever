@@ -129,7 +129,7 @@ describe('ContextPreviewService', () => {
         { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
         { provide: MESSAGE_REPOSITORY, useValue: repo },
         { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
-        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(1) } },
+        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(600) } },
         {
           provide: PersonaService,
           useValue: {
@@ -161,6 +161,52 @@ describe('ContextPreviewService', () => {
     expect(preview.messages.some((message) => message.source === 'history' && message.role === 'user')).toBe(false);
   });
 
+  it('rejects with a 422 when the system prompt and draft alone exceed the safe context budget', async () => {
+    const repo = makeRepo([
+      { id: 'u1', sessionId: 'sid', role: 'user', content: 'older persisted question', createdAt: 1 },
+    ]);
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ContextPreviewService,
+        {
+          provide: ContextAssemblyService,
+          useFactory: (personaService: PersonaService, skillsService: SkillsService, toolDispatch: ToolDispatchService) =>
+            makeContextAssembly(personaService, toolDispatch, skillsService),
+          inject: [PersonaService, SkillsService, ToolDispatchService],
+        },
+        SessionManagerService,
+        { provide: RunJournalService, useValue: { getNonReplayableTurnIds: vi.fn().mockResolvedValue(new Set()) } },
+        { provide: SessionsService, useValue: { get: vi.fn().mockResolvedValue({ id: 'sid', personaId: 'persona-1', title: 't', createdAt: 1, updatedAt: 1 }) } },
+        { provide: MESSAGE_REPOSITORY, useValue: repo },
+        { provide: ImageHydratorService, useValue: { hydrate: vi.fn().mockResolvedValue([]) } },
+        // The safe target never drops below 256 tokens, so a 1-token window cannot fit the active turn.
+        { provide: CredentialsService, useValue: { getContextWindowSize: vi.fn().mockResolvedValue(1) } },
+        {
+          provide: PersonaService,
+          useValue: {
+            getSessionConfig: vi.fn().mockResolvedValue({
+              systemPrompt: 'Persona base prompt.',
+              model: 'mimo-v2.5',
+              skillIds: [],
+              allowedTools: [],
+              mcpPolicy: 'allow_all',
+              kv: {},
+            }),
+          },
+        },
+        { provide: SkillsService, useValue: { findByIds: vi.fn().mockResolvedValue([]) } },
+        { provide: ToolDispatchService, useValue: { getToolMetas: vi.fn().mockReturnValue([]) } },
+      ],
+    }).compile();
+
+    const service = moduleRef.get(ContextPreviewService);
+    await expect(service.buildPreview('sid', {
+      target: 'session',
+      sessionId: 'sid',
+      personaId: 'persona-1',
+      draftUserMessage: 'draft that cannot be discarded ' + 'z'.repeat(2_000),
+    })).rejects.toMatchObject({ response: { code: 'ACTIVE_TURN_CONTEXT_BUDGET_EXCEEDED' } });
+  });
   it('marks compaction as applied when fallback truncation edits a message in place', async () => {
     const repo = makeRepo([
       { id: 'u1', sessionId: 'sid', role: 'user', content: 'kept user question', createdAt: 1 },
