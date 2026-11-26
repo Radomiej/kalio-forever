@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { BadRequestException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { SessionVfsController } from './session-vfs.controller';
 import { VFSService } from './vfs.service';
+import { ProjectResourceReaderService } from './project-resource-reader.service';
 import { StreamableFile } from '@nestjs/common';
 import type { VFSListResult, VFSReadResult } from '@kalio/types';
 import { Readable } from 'node:stream';
@@ -23,7 +24,10 @@ describe('SessionVfsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SessionVfsController],
-      providers: [{ provide: VFSService, useValue: mockVfs }],
+      providers: [
+        { provide: VFSService, useValue: mockVfs },
+        { provide: ProjectResourceReaderService, useValue: {} },
+      ],
     }).compile();
 
     controller = module.get(SessionVfsController);
