@@ -76,6 +76,8 @@ interface SessionState {
   mcpServers: McpServer[];
   tail: Promise<void>;
   active?: ActiveDevinTurn;
+  /** The old session/prompt never settled after session/cancel; this ACP session must not be reused. */
+  poisoned?: boolean;
 }
 
 interface DevinSessionWorkspace {
@@ -122,6 +124,11 @@ export class DevinAcpHost {
     const sessionWorkspace = this.buildSessionWorkspace(normalizedCwd);
     if (externalThreadId) {
       const existing = this.sessions.get(externalThreadId);
+      if (existing?.poisoned) {
+        this.logger.warn(`Devin ACP session ${externalThreadId} did not answer session/cancel; starting a fresh ACP session.`);
+        this.sessions.delete(externalThreadId);
+        return this.ensureSession(cwd, undefined, mcpServers, assertExecutionCurrent);
+      }
       if (existing) {
         if (existing.cwd !== normalizedCwd) throw new Error('Devin ACP session cannot change its working directory.');
         if (JSON.stringify(existing.mcpServers) !== JSON.stringify(normalizedMcpServers)) {

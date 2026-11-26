@@ -1,16 +1,16 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { methods, type ClientConnection } from '@agentclientprotocol/sdk';
 import { DevinAcpIdleTimeoutError, resolveDevinAcpIdleLimits, runGuardedDevinPrompt, type ActiveDevinTurn } from './devin-cli-acp.execution-guard';
 import type { DevinAcpPromptInput } from './devin-cli-acp.host';
 
-const limits = { idleMs: 1000, toolMs: 5000 };
+const limits = { idleMs: 1000, toolMs: 5000, cancelSettleMs: 200 };
 
 function setup() {
   let resolvePrompt!: (value: { stopReason: 'end_turn' }) => void;
   const request = vi.fn(() => new Promise<{ stopReason: 'end_turn' }>((resolve) => { resolvePrompt = resolve; }));
   const notify = vi.fn(async () => undefined);
   const connection = { agent: { request, notify } } as unknown as ClientConnection;
-  const session: { active?: ActiveDevinTurn } = {};
+  const session: { active?: ActiveDevinTurn; poisoned?: boolean } = {};
   const onPermission = vi.fn<DevinAcpPromptInput['onPermission']>(async () => 'accept');
   const input: DevinAcpPromptInput = { onText: vi.fn(), onThought: vi.fn(), onToolActivity: vi.fn(), onPermission };
   const turn = runGuardedDevinPrompt(connection, session, 'sid', 'prompt', input, undefined, limits);
@@ -24,9 +24,10 @@ describe('Devin ACP idle watchdog', () => {
 
   it('fails a silent turn with LLM_TIMEOUT, cancels the session and clears the active turn', async () => {
     const f = setup();
-    await vi.advanceTimersByTimeAsync(1001);
+    await vi.advanceTimersByTimeAsync(1001 + 300);
     const error = await f.settled;
     expect(error).toBeInstanceOf(DevinAcpIdleTimeoutError);
+    expect(f.session.poisoned).toBe(true);
     expect((error as DevinAcpIdleTimeoutError).code).toBe('LLM_TIMEOUT');
     expect((error as Error).message).toContain('DEVIN_ACP_IDLE_TIMEOUT');
     expect(f.notify).toHaveBeenCalledWith(methods.agent.session.cancel, { sessionId: 'sid' });
@@ -51,7 +52,7 @@ describe('Devin ACP idle watchdog', () => {
     await vi.advanceTimersByTimeAsync(4000);
     expect(f.session.active).toBeDefined();
     f.session.active!.onToolActivity!({ toolCallId: 't1', status: 'completed' });
-    await vi.advanceTimersByTimeAsync(1001);
+    await vi.advanceTimersByTimeAsync(1001 + 300);
     const error = await f.settled;
     expect(error).toBeInstanceOf(DevinAcpIdleTimeoutError);
     expect((error as DevinAcpIdleTimeoutError).toolInProgress).toBe(false);
@@ -66,11 +67,11 @@ describe('Devin ACP idle watchdog', () => {
     expect(f.session.active).toBeDefined();
     decide('accept');
     await expect(answer).resolves.toBe('accept');
-    await vi.advanceTimersByTimeAsync(1001);
+    await vi.advanceTimersByTimeAsync(1001 + 300);
     expect(await f.settled).toBeInstanceOf(DevinAcpIdleTimeoutError);
   });
   it('can be disabled with 0 and reads limits from the environment', async () => {
-    expect(resolveDevinAcpIdleLimits({ DEVIN_ACP_IDLE_TIMEOUT_MS: '0', DEVIN_ACP_TOOL_IDLE_TIMEOUT_MS: '42' })).toEqual({ idleMs: 0, toolMs: 42 });
-    expect(resolveDevinAcpIdleLimits({ DEVIN_ACP_IDLE_TIMEOUT_MS: 'bad' })).toEqual({ idleMs: 300_000, toolMs: 1_800_000 });
+    expect(resolveDevinAcpIdleLimits({ DEVIN_ACP_IDLE_TIMEOUT_MS: '0', DEVIN_ACP_TOOL_IDLE_TIMEOUT_MS: '42' })).toEqual({ idleMs: 0, toolMs: 42, cancelSettleMs: 10_000 });
+    expect(resolveDevinAcpIdleLimits({ DEVIN_ACP_IDLE_TIMEOUT_MS: 'bad' })).toEqual({ idleMs: 300_000, toolMs: 1_800_000, cancelSettleMs: 10_000 });
   });
 });

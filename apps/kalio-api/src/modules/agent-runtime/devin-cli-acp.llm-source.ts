@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ExecutionProfile } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
@@ -105,7 +105,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       session = await host.ensureSession(cwd, params.externalThreadId, mcpServers, ...guardArgs);
       check?.();
       if (toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
-      if (!params.externalThreadId) {
+      if (session.sessionId !== params.externalThreadId) {
         await params.onExternalThreadBound?.(session.sessionId, { processEpoch: session.processEpoch });
         check?.();
       }
@@ -256,7 +256,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       });
       let stopReason = await promptOnce(buildPrompt(
         params.messages,
-        Boolean(params.externalThreadId),
+        session.sessionId === params.externalThreadId,
         nativeToolsPolicy,
         DEVIN_KALIO_MCP_SERVER_NAME,
         mcpBridgeEnabled,
