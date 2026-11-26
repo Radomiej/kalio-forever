@@ -43,11 +43,7 @@ describe('CodexAppServerProtocolRouter', () => {
         '/d',
         '/s',
         '/c',
-        '"C:\\Program Files\\Codex\\codex.cmd"',
-        'app-server',
-        '--stdio',
-        '-c',
-        '"mcp_servers.\\"tools\\"={command=\\"node\\",enabled=false}"',
+        '""C:\\Program Files\\Codex\\codex.cmd" app-server --stdio -c "mcp_servers.\\"tools\\"={command=\\"node\\",enabled=false}""',
       ],
       windowsVerbatimArguments: true,
     });

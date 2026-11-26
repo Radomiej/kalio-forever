@@ -32,11 +32,11 @@ export function buildCodexSpawnSpec(
     return { command, args };
   }
 
+  // /s strips the first and last quote of the /c string, so wrap the whole line; otherwise a quoted
+  // command path (spaces) followed by a quoted last argument loses its quoting.
   return {
     command: comSpec,
-    args: ['/d', '/s', '/c', command, ...args].map((argument, index) => (
-      index < 3 ? argument : quoteWindowsCmdArgument(argument)
-    )),
+    args: ['/d', '/s', '/c', `"${[command, ...args].map(quoteWindowsCmdArgument).join(' ')}"`],
     windowsVerbatimArguments: true,
   };
 }
@@ -168,8 +168,12 @@ function readNonEmptyString(value: unknown): string | undefined {
 }
 
 function quoteWindowsCmdArgument(value: string): string {
+  const needsQuotes = /[\s"&|<>^()]/.test(value);
   const escaped = value
-    .replace(/%/g, '%%')
-    .replace(/"/g, '\\"');
-  return /[\s"&|<>^()]/.test(value) ? `"${escaped}"` : escaped;
+    // On the cmd /c command line %% is not an escape; %%cd:~,% yields a literal % followed by an empty expansion.
+    .replace(/%/g, '%%cd:~,%')
+    // MSVCRT argv rules: backslashes are literal except before a quote, so double those (and trailing ones).
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\*)$/, needsQuotes ? '$1$1' : '$1');
+  return needsQuotes ? `"${escaped}"` : escaped;
 }
