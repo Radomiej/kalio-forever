@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolRequest, type CallToolResult, type ServerNotification, type ServerRequest, type Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
+import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import type { ToolMeta, ToolResult } from '@kalio/types';
 import { ToolDispatchService } from '../chat/tool-dispatch.service';
 import { ChatGateway } from '../chat/chat.gateway';
@@ -178,6 +179,30 @@ export class KalioMcpBridgeService {
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       const toolName = request.params.name;
+      const startedAt = performance.now();
+      const label = `tool=${toolName} session=${connection.context.sessionId} request=${String(extra.requestId)}`;
+      this.logger.log(`MCP tool call start ${label}`);
+      try {
+        const result = await this.runToolCall(connection, request, extra);
+        const chars = result.content.reduce((sum, part) => sum + (part.type === 'text' ? part.text.length : 0), 0);
+        this.logger.log(`MCP tool call finish ${label} isError=${result.isError === true} chars=${chars} durationMs=${Math.round(performance.now() - startedAt)}`);
+        return result;
+      } catch (error) {
+        this.logger.warn(`MCP tool call failed ${label} durationMs=${Math.round(performance.now() - startedAt)}: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+      }
+    });
+
+    return server;
+  }
+
+  private async runToolCall(
+    connection: BridgeConnection,
+    request: CallToolRequest,
+    extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  ): Promise<CallToolResult> {
+    {
+      const toolName = request.params.name;
       const visible = this.visibleTools(connection);
       if (!visible.some((tool) => tool.name === toolName)) {
         return toolError(`Tool ${toolName} is not available in this Kalio bridge scope.`);
@@ -268,9 +293,7 @@ export class KalioMcpBridgeService {
         stopHeartbeat();
         abortSignal.removeEventListener('abort', stopHeartbeat);
       }
-    });
-
-    return server;
+    }
   }
 
   private visibleTools(connection: BridgeConnection): ToolMeta[] {
