@@ -33,8 +33,8 @@ function getCwdArg(args: ToolCallRequest['args']): string {
   return rawCwd.trim();
 }
 
-/** Measured cap; many MCP clients time out a request near 60-120 s. */
-export const SPAWN_MAX_WAIT_MS = 120_000;
+/** Measured 2026-11-26: Devin's MCP client drops a tool request after ~60 s, so stay well below it. */
+export const SPAWN_MAX_WAIT_MS = 50_000;
 const INLINE_OUTPUT_MAX_CHARS = 20_000;
 
 function getSpawnWaitArg(args: ToolCallRequest['args']): number {
