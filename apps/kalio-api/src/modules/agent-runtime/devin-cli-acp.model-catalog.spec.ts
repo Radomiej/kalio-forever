@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readDevinAcpModelCatalog } from './devin-cli-acp.model-catalog';
 
@@ -34,6 +34,9 @@ vi.mock('node:child_process', async importOriginal => {
           result = { protocolVersion: 1, agentCapabilities: {} };
         } else if (request.method === 'session/new' && initialized && request.params.mcpServers.length === 0) {
           result = { sessionId: 'catalog-fixture', configOptions };
+        } else if (request.method === 'session/set_config_option' && initialized) {
+          const levels = request.params.value === 'swe-2-high' ? ['medium', 'high', 'max'] : ['low'];
+          result = { configOptions: [...configOptions, { id: 'thought_level', name: 'T', category: 'thought_level', type: 'select', currentValue: 'medium', options: levels.map(value => ({ value, name: value })) }] };
         } else { process.exit(9); }
         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
       });
@@ -61,7 +64,7 @@ describe('Devin ACP catalog metadata transport', () => {
       ],
     }];
     await expect(readDevinAcpModelCatalog('devin.exe')).resolves.toEqual([
-      'glm-5-2', 'swe-2-high', 'fusion-sidekick-swe-2-medium',
+      'glm-5-2', 'swe-2-high', 'fusion-sidekick-swe-2-medium', 'swe-2-medium', 'swe-2-max',
     ]);
     expect(fixture.cleanup).toHaveBeenCalledOnce();
   });

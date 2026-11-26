@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import type { ExecutionProfile } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
@@ -14,6 +14,9 @@ import { summarizeDevinToolOutput } from './devin-tool-output-summary';
 import { captureExecutionCurrent, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 import { DevinStructuredOutput, DevinStructuredOutputError } from './devin-structured-output';
 import { latestPromptImages, toAcpPromptImages } from './latest-prompt-images';
+
+const EMPTY_TURN_FOLLOW_UP = 'Your previous turn ended without a written reply. Do not call any tools now. Reply with a concise written summary of what you did, what you found, and the final result.';
+const EMPTY_TURN_NOTICE = 'Devin finished its tool work but returned no written answer, even after asking for a summary. The runtime is still running; review the tool activity above and send a follow-up message if more is needed.';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
@@ -54,6 +57,11 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       serverName: DEVIN_KALIO_MCP_SERVER_NAME,
     };
     const bridgeConfig = toolsDisabled ? null : buildKalioMcpBridgeHttpConfig(bridgeContext, bridgeToken);
+    if (!toolsDisabled && !bridgeConfig && params.tools.length > 0
+      && !nativeToolsPolicy.filesystem && !nativeToolsPolicy.terminal && !nativeToolsPolicy.web) {
+      // Devin would run with every native tool denied and no Kalio bridge: fail visibly instead of answering without tools.
+      throw new Error('DEVIN_TOOLS_UNAVAILABLE: this Devin session has no tools. Generate the Kalio MCP bridge token or enable native filesystem/terminal tools in Settings > Devin CLI, then retry.');
+    }
     if ((params.providerToolNames?.length ?? 0) > 0 || params.toolResultChannel) {
       await this.audit(params, {
         eventName: 'devin-cli-acp.tools.omitted',
@@ -231,29 +239,35 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       const structured = params.structuredOutput ? new DevinStructuredOutput(params.structuredOutput) : undefined;
       const check = captureExecutionCurrent(promptInput.assertExecutionCurrent, params.abortSignal); check?.();
       if (params.toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
-      const stopReason = await host.prompt(session.sessionId, buildPrompt(
+      const promptOnce = (text: string, input: DevinAcpPromptInput) => host.prompt(session.sessionId, text, {
+        ...input,
+        onText: (chunk) => {
+          hasAnswer ||= Boolean(chunk.trim());
+          structured?.onText(chunk);
+          input.onText(chunk);
+        },
+        onToolActivity: (activity) => {
+          structured?.onTool(activity);
+          input.onToolActivity?.(activity);
+        },
+      });
+      let stopReason = await promptOnce(buildPrompt(
         params.messages,
         Boolean(params.externalThreadId),
         nativeToolsPolicy,
         DEVIN_KALIO_MCP_SERVER_NAME,
         mcpBridgeEnabled,
-      ) + (structured ? `\n\n${structured.instruction}` : ''), {
-        ...promptInput,
-        onText: (text) => {
-          hasAnswer ||= Boolean(text.trim());
-          structured?.onText(text);
-          promptInput.onText(text);
-        },
-        onToolActivity: (activity) => {
-          structured?.onTool(activity);
-          promptInput.onToolActivity?.(activity);
-        },
-      });
+      ) + (structured ? `\n\n${structured.instruction}` : ''), promptInput);
+      if (stopReason === 'end_turn' && !hasAnswer && !structured && !params.abortSignal?.aborted) {
+        // Devin finished its tool work without writing a reply (the process is healthy). Ask once for the written summary in the same session.
+        stopReason = await promptOnce(EMPTY_TURN_FOLLOW_UP, { ...promptInput, images: undefined });
+      }
       if (stopReason !== 'cancelled' && stopReason !== 'end_turn') {
         throw new Error('Devin did not complete the turn (limit reached or request refused).');
       }
       if (stopReason === 'end_turn' && !hasAnswer && !structured) {
-        throw new Error('Devin ended the turn without a user-visible answer. The task is not confirmed complete; please continue or retry.');
+        // Not a runtime failure: surface a notice and complete the run instead of reporting a lost runtime.
+        promptInput.onText(EMPTY_TURN_NOTICE);
       }
       if (structured && stopReason === 'end_turn') structured.result();
       await this.audit(params, {

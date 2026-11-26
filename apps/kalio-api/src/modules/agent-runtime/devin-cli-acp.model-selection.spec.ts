@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+﻿import { describe, expect, it, vi } from 'vitest';
 import { resolve } from 'node:path';
 import { methods, type ClientConnection, type SessionConfigOption, type SessionNotification } from '@agentclientprotocol/sdk';
 import { DevinAcpHost } from './devin-cli-acp.host';
-import { bindDevinSessionModel, devinAcpChildEnv, readDevinSelectableModels } from './devin-cli-acp.model-selection';
+import { assertDevinSessionModel, bindDevinSessionModel, devinAcpChildEnv, expandDevinModelVariants, readDevinSelectableModels } from './devin-cli-acp.model-selection';
 
 const options = (currentValue = 'swe-2'): SessionConfigOption[] => [{
   id: 'model', name: 'Model', category: 'model', type: 'select', currentValue,
@@ -49,7 +49,8 @@ describe('Devin exact session model binding', () => {
     const test = setup(metadata, undefined, 'swe-2-medium');
     await expect(test.ensure()).rejects.toThrow('"exactMatches":0');
     await expect(test.prompt()).rejects.toThrow();
-    expect(test.request.mock.calls.map(([method]) => method)).toEqual([methods.agent.session.new]);
+    // A level id is only bindable via the family's thought_level option; with none offered, nothing is ever prompted.
+    expect(test.request.mock.calls.map(([method]) => method)).not.toContain(methods.agent.session.prompt);
   });
 
   it('rejects duplicate ACP catalog IDs instead of advertising an unbindable model', () => {
@@ -261,3 +262,42 @@ describe('Devin exact session model binding', () => {
     expect(close).toHaveBeenCalledOnce();
   });
 });
+
+describe('Devin reasoning-level model variants', () => {
+  const select = (id: string, category: string, currentValue: string, values: string[]): SessionConfigOption => ({
+    id, name: id, category, type: 'select', currentValue, options: values.map(value => ({ value, name: value })),
+  });
+  const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const acp = (model: string, level?: string): SessionConfigOption[] => [
+    select('model', 'model', model, ['glm-5-2', 'swe-2-1-medium', 'swe-2-1-medium-lightning', 'fusion-x-sidekick-swe-2-1-medium']),
+    ...(model === 'swe-2-1-medium' ? [select('thought_level', 'thought_level', level ?? 'medium', levels)] : []),
+  ];
+
+  it('expands every SWE-2.1 level from the single ACP entry, without lightning or fusion variants', () => {
+    const models = readDevinSelectableModels(acp('glm-5-2'));
+    const expanded = expandDevinModelVariants(models, new Map([['swe-2-1-medium', levels]]));
+    expect(expanded).toEqual(expect.arrayContaining(['swe-2-1-low', 'swe-2-1-medium', 'swe-2-1-high', 'swe-2-1-xhigh', 'swe-2-1-max']));
+    expect(expanded.filter(model => model.includes('lightning'))).toEqual(['swe-2-1-medium-lightning']);
+    expect(expanded.filter(model => model.startsWith('fusion-'))).toEqual(['fusion-x-sidekick-swe-2-1-medium']);
+    expect(new Set(expanded).size).toBe(expanded.length);
+  });
+
+  it('binds swe-2-1-high as swe-2-1-medium plus thought_level=high and asserts both', async () => {
+    const request = vi.fn().mockImplementation(async (_method: string, params: { configId: string; value: string }) =>
+      ({ configOptions: params.configId === 'model' ? acp(params.value) : acp('swe-2-1-medium', params.value) }));
+    const connection = { signal: new AbortController().signal, agent: { request } } as unknown as ClientConnection;
+    const bound = await bindDevinSessionModel(connection, 'thread', 'swe-2-1-high', acp('glm-5-2'));
+    expect(request.mock.calls.map(([, params]) => [params.configId, params.value])).toEqual([
+      ['model', 'swe-2-1-medium'], ['thought_level', 'high'],
+    ]);
+    expect(() => assertDevinSessionModel('swe-2-1-high', bound)).not.toThrow();
+    expect(() => assertDevinSessionModel('swe-2-1-max', bound)).toThrow('differs');
+    expect(() => assertDevinSessionModel('swe-2-1-high', acp('swe-2-1-medium', 'medium'))).toThrow('differs');
+  });
+
+  it('keeps unknown and lightning variants unavailable', async () => {
+    const connection = { signal: new AbortController().signal, agent: { request: vi.fn() } } as unknown as ClientConnection;
+    await expect(bindDevinSessionModel(connection, 'thread', 'swe-2-1-high-lightning', acp('glm-5-2'))).rejects.toThrow('unavailable');
+    await expect(bindDevinSessionModel(connection, 'thread', 'nonexistent-high', acp('glm-5-2'))).rejects.toThrow('unavailable');
+  });
+});

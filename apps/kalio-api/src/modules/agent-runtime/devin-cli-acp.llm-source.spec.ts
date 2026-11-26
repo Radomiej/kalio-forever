@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+﻿import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionProfile } from '@kalio/types';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { LLMSourceParams } from '../chat/interfaces/llm-source.interface';
@@ -192,7 +192,7 @@ describe('DevinCliAcpLLMSource', () => {
     );
     const profile: ExecutionProfile = {
       id: 'devin-local-glm-5-2',
-      name: 'Devin · GLM-5.2',
+      name: 'Devin Â· GLM-5.2',
       kind: 'devin-cli-acp',
       model: 'glm-5-2',
       approvalMode: 'kalio_strict',
@@ -244,7 +244,7 @@ describe('DevinCliAcpLLMSource', () => {
       { set: vi.fn(), clear: vi.fn() } as never,
     );
     const profile: ExecutionProfile = {
-      id: 'devin-local-swe-1-7', name: 'Devin · SWE-1.7', kind: 'devin-cli-acp', model: 'swe-1-7',
+      id: 'devin-local-swe-1-7', name: 'Devin Â· SWE-1.7', kind: 'devin-cli-acp', model: 'swe-1-7',
       approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
     };
     await collect(source.stream({
@@ -261,7 +261,7 @@ describe('DevinCliAcpLLMSource', () => {
     expect(receivedPrompt).not.toContain('obsolete result');
   });
 
-  it('does not advertise or accept a Kalio MCP bridge when its token is missing', async () => {
+  it('fails visibly instead of running toolless when the bridge token is missing and native tools are off', async () => {
     let receivedPrompt = '';
     let decision: string | undefined;
     const audits: AuditEvent[] = [];
@@ -290,7 +290,7 @@ describe('DevinCliAcpLLMSource', () => {
       { set: vi.fn(), clear: vi.fn() } as never,
     );
 
-    await collect(source.stream({
+    await expect(collect(source.stream({
       messages: [{ role: 'user', content: 'Create a site.' }],
       tools: [{ name: 'fs_list', description: 'list files', parameters: { type: 'object' }, requiresConfirmation: false }],
       sessionId: 'session-no-bridge', messageId: 'message-no-bridge',
@@ -301,23 +301,15 @@ describe('DevinCliAcpLLMSource', () => {
         approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
       },
       cwd: 'C:\\fixture',
-    } as unknown as LLMSourceParams));
-
-    expect(receivedPrompt).toContain('Kalio MCP bridge is disabled');
-    expect(receivedPrompt).not.toContain('server `kalio-runtime`');
-    expect(decision).toBe('decline');
-    const approval = audits.find((event) => event.eventName === 'devin-cli-acp.native_approval');
-    expect(approval?.data).toMatchObject({
-      turnId: 'turn-no-bridge', promptMessageId: 'prompt-no-bridge', runId: 'run-no-bridge',
-      kalioSessionId: 'session-no-bridge', decisionSource: 'policy', categoryEnabled: false,
-    });
+    } as unknown as LLMSourceParams))).rejects.toThrow('DEVIN_TOOLS_UNAVAILABLE');
+    expect(host.ensureSession).not.toHaveBeenCalled();
   });
 
   it('accepts the Kalio MCP wrapper without enabling native tools', async () => {
     let decision: string | undefined;
     const audits: AuditEvent[] = [];
     const profile: ExecutionProfile = {
-      id: 'devin-local-glm-5-2', name: 'Devin · GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
+      id: 'devin-local-glm-5-2', name: 'Devin Â· GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
       approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
     };
     const host = {
@@ -413,7 +405,7 @@ describe('DevinCliAcpLLMSource', () => {
       sessionId: 'kalio-session-3',
       messageId: 'message-3',
       executionProfile: {
-        id: 'devin-local-glm-5-2', name: 'Devin · GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
+        id: 'devin-local-glm-5-2', name: 'Devin Â· GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
         approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
       },
       cwd: 'C:\\fixture',
@@ -455,7 +447,7 @@ describe('DevinCliAcpLLMSource', () => {
       sessionId: 'kalio-session-4',
       messageId: 'message-4',
       executionProfile: {
-        id: 'devin-local-glm-5-2', name: 'Devin · GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
+        id: 'devin-local-glm-5-2', name: 'Devin Â· GLM-5.2', kind: 'devin-cli-acp', model: 'glm-5-2',
         approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0,
       },
       cwd: 'C:\\fixture',
