@@ -39,6 +39,7 @@ export function buildSubagentProviderOptions(input: {
   onNativeApprovalUnavailable?: (error: Error) => void;
 }): ProviderOptions {
   const audit = input.audit ? createExternalAuditCallback(input.audit, input.sessionId) : undefined;
+  const nativeToolsSeen = new Set<string>();
   return {
     executionProfile: input.executionProfile,
     externalThreadId: input.externalThreadId,
@@ -53,8 +54,9 @@ export function buildSubagentProviderOptions(input: {
     }),
     onExternalRuntimeLost: input.onExternalRuntimeLost,
     onNativeApprovalRequested: buildNativeApprovalCallback(input),
-    onExternalAudit: input.onActivity ? (event) => {
+    onExternalAudit: input.onActivity || input.trackingEmit ? (event) => {
       input.onActivity?.(event.eventName, event.data);
+      emitNativeToolEvidence(input, nativeToolsSeen, event);
       return audit?.(event);
     } : audit,
   };
@@ -86,4 +88,38 @@ function buildNativeApprovalCallback(input: Parameters<typeof buildSubagentProvi
     const release = input.beginManualToolWait?.(`native-approval:${nanoid()}`);
     try { return await inner(request); } finally { release?.(); }
   };
+}
+/**
+ * Devin native tools run inside Devin and never pass through Kalio's tool dispatcher, so mirror each
+ * real native execution (filesystem/web/terminal) as tool:start / tool:result for the branch session.
+ * Kalio MCP wrapper calls carry no nativeCategory and already emit their own events.
+ */
+function emitNativeToolEvidence(
+  input: Pick<Parameters<typeof buildSubagentProviderOptions>[0], 'sessionId' | 'turnId' | 'trackingEmit'>,
+  seen: Set<string>,
+  event: { eventName: string; data?: Record<string, unknown> },
+): void {
+  const data = event.data;
+  if (event.eventName !== 'devin-cli-acp.tool' || !input.trackingEmit || !data || typeof data.nativeCategory !== 'string') return;
+  const id = data.toolCallId;
+  const status = data.toolStatus;
+  if (typeof id !== 'string' || !id || typeof status !== 'string') return;
+  const callId = `devin-native:${id}`;
+  const toolName = `devin_native:${[data.name, data.kind, data.nativeCategory].find((v): v is string => typeof v === 'string' && v.length > 0)}`;
+  const terminal = status === 'completed' || status === 'failed';
+  if (!seen.has(`start:${id}`)) {
+    seen.add(`start:${id}`);
+    input.trackingEmit('tool:start', {
+      callId, toolName, sessionId: input.sessionId, ...(input.turnId ? { turnId: input.turnId } : {}),
+      args: typeof data.toolPath === 'string' ? { path: data.toolPath } : {},
+    });
+  }
+  if (terminal && !seen.has(`result:${id}`)) {
+    seen.add(`result:${id}`);
+    input.trackingEmit('tool:result', {
+      callId, toolName, sessionId: input.sessionId,
+      status: status === 'completed' ? 'success' : 'error',
+      ...(status === 'failed' ? { errorMessage: 'Devin native tool failed.' } : {}),
+    });
+  }
 }

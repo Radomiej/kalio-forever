@@ -173,6 +173,9 @@ export class DevinCliAcpLLMSource implements ILLMSource {
               name: activity.name,
               title: activity.title,
               toolStatus: activity.status,
+              // Lets sub-agent runtimes count real native executions as tool evidence; MCP wrapper calls are not native.
+              nativeCategory: classifyDevinNativeTool(activity) ?? null,
+              ...(typeof activity.rawInput === 'object' && activity.rawInput !== null && typeof (activity.rawInput as { path?: unknown }).path === 'string' ? { toolPath: (activity.rawInput as { path: string }).path } : {}),
               ...summarizeDevinToolOutput(activity.status, activity.rawOutput, activity.content),
             },
           });

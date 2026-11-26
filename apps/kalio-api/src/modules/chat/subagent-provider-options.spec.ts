@@ -96,3 +96,34 @@ describe('buildSubagentProviderOptions native approvals', () => {
     expect(onUnavailable).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('buildSubagentProviderOptions native tool evidence', () => {
+  const activity = (toolStatus: string, nativeCategory: string | null = 'filesystem') => ({
+    eventName: 'devin-cli-acp.tool',
+    data: { toolCallId: 'c1', name: 'write', kind: 'edit', toolStatus, nativeCategory, toolPath: 'E:/x/hello.txt' },
+  });
+
+  it('mirrors a real native execution as tool:start and tool:result exactly once', async () => {
+    const { emit, options } = build();
+    await options.onExternalAudit!(activity('in_progress'));
+    await options.onExternalAudit!(activity('completed'));
+    await options.onExternalAudit!(activity('completed'));
+    const names = emit.mock.calls.map(([event]) => event);
+    expect(names).toEqual(['tool:start', 'tool:result']);
+    expect(emit.mock.calls[0]![1]).toMatchObject({ callId: 'devin-native:c1', toolName: 'devin_native:write', sessionId: 'arch-run-1-a', args: { path: 'E:/x/hello.txt' } });
+    expect(emit.mock.calls[1]![1]).toMatchObject({ callId: 'devin-native:c1', status: 'success' });
+  });
+
+  it('reports a failed native tool as an error result, not success', async () => {
+    const { emit, options } = build();
+    await options.onExternalAudit!(activity('failed'));
+    expect(emit.mock.calls.map(([event]) => event)).toEqual(['tool:start', 'tool:result']);
+    expect(emit.mock.calls[1]![1]).toMatchObject({ status: 'error' });
+  });
+
+  it('does not duplicate Kalio MCP wrapper calls (no native category)', async () => {
+    const { emit, options } = build();
+    await options.onExternalAudit!(activity('completed', null));
+    expect(emit).not.toHaveBeenCalled();
+  });
+});
