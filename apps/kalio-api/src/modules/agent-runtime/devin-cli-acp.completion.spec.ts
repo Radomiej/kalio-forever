@@ -1,9 +1,10 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import { DevinCliAcpLLMSource } from './devin-cli-acp.llm-source';
 import type { DevinAcpPromptInput } from './devin-cli-acp.host';
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 import { DevinAcpIdleTimeoutError } from './devin-cli-acp.execution-guard';
+import { DevinModelBindingError } from './devin-cli-acp.model-selection';
 
 describe('Devin ACP completion boundary', () => {
   async function execute(stopReason: 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal', text = '', followUpText = '', lost: string[] = []) {
@@ -102,4 +103,42 @@ describe('Devin ACP completion boundary', () => {
     await expect(run()).rejects.toThrow('DEVIN_TOOLS_UNAVAILABLE');
     expect(lost).toEqual([]);
   });
-});
+});
+describe('Devin ACP lost-runtime reporting', () => {
+  async function run(getStatus: (() => { status: string; processEpoch?: string }) | undefined, abort = false) {
+    const lost: string[] = [];
+    const controller = new AbortController();
+    const host = {
+      ensureSession: async () => ({ sessionId: 'acp', cwd: process.cwd(), processEpoch: 'epoch', resumed: false }),
+      prompt: async () => { if (abort) controller.abort(); throw new DevinModelBindingError('Devin ACP session model differs from the requested exact ID', true); },
+      ...(getStatus ? { getStatus } : {}),
+    };
+    const source = new DevinCliAcpLLMSource(
+      { get: async () => host } as never,
+      { get: async () => ({ filesystem: false, web: false, terminal: false, source: 'default' }) } as never,
+      { getToken: async () => null } as never,
+      new KalioMcpBridgeContextRegistry(),
+    );
+    const stream = async () => { for await (const _chunk of source.stream({
+      messages: [{ role: 'user', content: 'hi' }], tools: [], sessionId: 'chat', messageId: 'answer', abortSignal: controller.signal,
+      onExternalRuntimeLost: () => lost.push('lost'),
+      executionProfile: { id: 'devin', name: 'Devin', kind: 'devin-cli-acp', model: 'swe-2-1-high', approvalMode: 'kalio_strict', enabled: true, capabilitiesVersion: '1', createdAt: 0, updatedAt: 0 },
+    } satisfies LLMSourceParams)) void _chunk; };
+    await expect(stream()).rejects.toBeInstanceOf(DevinModelBindingError);
+    return lost;
+  }
+
+  it('does not report a lost runtime for a binding error on an online host with the same epoch', async () => {
+    expect(await run(() => ({ status: 'online', processEpoch: 'epoch' }))).toEqual([]);
+  });
+  it('reports a lost runtime when the host epoch changed or the host is not online', async () => {
+    expect(await run(() => ({ status: 'online', processEpoch: 'other' }))).toEqual(['lost']);
+    expect(await run(() => ({ status: 'error', processEpoch: 'epoch' }))).toEqual(['lost']);
+  });
+  it('reports a lost runtime when the abort signal fired', async () => {
+    expect(await run(() => ({ status: 'online', processEpoch: 'epoch' }), true)).toEqual(['lost']);
+  });
+  it('stays conservative when the host cannot report its status', async () => {
+    expect(await run(undefined)).toEqual(['lost']);
+  });
+});

@@ -1,8 +1,8 @@
-﻿import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolve } from 'node:path';
 import { methods, type ClientConnection, type SessionConfigOption, type SessionNotification } from '@agentclientprotocol/sdk';
 import { DevinAcpHost } from './devin-cli-acp.host';
-import { assertDevinSessionModel, bindDevinSessionModel, devinAcpChildEnv, expandDevinModelVariants, readDevinSelectableModels } from './devin-cli-acp.model-selection';
+import { assertDevinSessionModel, bindDevinSessionModel, DevinModelBindingError, devinAcpChildEnv, expandDevinModelVariants, readDevinSelectableModels } from './devin-cli-acp.model-selection';
 
 const options = (currentValue = 'swe-2'): SessionConfigOption[] => [{
   id: 'model', name: 'Model', category: 'model', type: 'select', currentValue,
@@ -78,12 +78,9 @@ describe('Devin exact session model binding', () => {
         }
         return { stopReason: 'end_turn' };
       });
-      if (duringSetter) {
-        await expect(test.ensure()).rejects.toThrow(/model/i);
-        await expect(test.prompt()).rejects.toThrow();
-      } else {
-        await expect(test.ensure()).resolves.toMatchObject({ sessionId: 'thread' });
-      }
+      // A disagreeing notification is healed by exactly one rebind; the fresh setter response is authoritative.
+      await expect(test.ensure()).resolves.toMatchObject({ sessionId: 'thread' });
+      expect(test.request.mock.calls.filter(([method]) => method === methods.agent.session.setConfigOption)).toHaveLength(duringSetter ? 2 : 1);
       expect(test.request.mock.calls.some(([method]) => method === methods.agent.session.prompt)).toBe(false);
     });
   }
@@ -189,13 +186,14 @@ describe('Devin exact session model binding', () => {
       await expect(test.prompt()).resolves.toBe('end_turn');
     });
   }
-  it('blocks cached drift observed outside an active turn', async () => {
+  it('blocks cached drift observed outside an active turn when the rebind is not confirmed', async () => {
     const test = setup(options());
     await test.ensure();
     test.internals.handleSessionUpdate({ sessionId: 'thread', update: {
       sessionUpdate: 'config_option_update', configOptions: options('swe-2-high'),
     } });
-    await expect(test.host.ensureSession(resolve('model-workspace'), 'thread')).rejects.toThrow(/model/i);
+    test.request.mockImplementation(async () => ({ sessionId: 'thread', configOptions: options('swe-2-high') }));
+    await expect(test.host.ensureSession(resolve('model-workspace'), 'thread')).rejects.toBeInstanceOf(DevinModelBindingError);
     await expect(test.prompt()).rejects.toThrow(/model/i);
     expect(test.request.mock.calls.some(([method]) => method === methods.agent.session.prompt)).toBe(false);
   });
@@ -215,14 +213,18 @@ describe('Devin exact session model binding', () => {
     await rejected;
     expect(notify).toHaveBeenCalledWith(methods.agent.session.cancel, { sessionId: 'thread' });
     await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    // The real close() clears the sessions; with close mocked, a later prompt may only rebind and must still fail on a mismatched setter response.
+    test.request.mockImplementation(async () => ({ configOptions: options('swe-2-high') }));
     await expect(test.prompt()).rejects.toThrow(/model/i);
   });
-  it('blocks early drift instead of overwriting it with an older new-session response', async () => {
+  it('blocks early drift when the rebind setter response still disagrees', async () => {
     const test = setup(options());
     test.internals.handleSessionUpdate({ sessionId: 'thread', update: {
       sessionUpdate: 'config_option_update', configOptions: options('swe-2-high'),
     } });
-    await expect(test.ensure()).rejects.toThrow(/model/i);
+    test.request.mockImplementation(async (method: string) => method === methods.agent.session.setConfigOption
+      ? { configOptions: options('swe-2-high') } : { sessionId: 'thread', configOptions: options() });
+    await expect(test.ensure()).rejects.toBeInstanceOf(DevinModelBindingError);
     await expect(test.prompt()).rejects.toThrow();
     expect(test.request.mock.calls.some(([method]) => method === methods.agent.session.prompt)).toBe(false);
   });
@@ -300,4 +302,102 @@ describe('Devin reasoning-level model variants', () => {
     await expect(bindDevinSessionModel(connection, 'thread', 'swe-2-1-high-lightning', acp('glm-5-2'))).rejects.toThrow('unavailable');
     await expect(bindDevinSessionModel(connection, 'thread', 'nonexistent-high', acp('glm-5-2'))).rejects.toThrow('unavailable');
   });
-});
+});
+describe('Devin model rebind after a stale config_option_update', () => {
+  const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const select = (id: string, category: string, currentValue: string, values: string[]): SessionConfigOption => ({
+    id, name: id, category, type: 'select', currentValue, options: values.map(value => ({ value, name: value })),
+  });
+  const view = (model: string, level: string): SessionConfigOption[] => [
+    select('model', 'model', model, ['glm-5-2', 'swe-2-1-medium']),
+    ...(model === 'swe-2-1-medium' ? [select('thought_level', 'thought_level', level, levels)] : []),
+  ];
+
+  /** `stale` decides, per set call, whether a stale (base model, medium level) notification is delivered right after the setter answered. */
+  function variantSetup(stale: (configId: string, sessionNo: number, thoughtCalls: number) => boolean, lastThoughtStaysMedium = false) {
+    const state = { model: 'glm-5-2', level: 'medium' };
+    let sessions = 0;
+    const thoughtCalls: Record<string, number> = {};
+    const host = new DevinAcpHost('swe-2-1-high');
+    const internals = host as unknown as {
+      connection: ClientConnection; processEpoch: string; capabilities: object;
+      handleSessionUpdate(params: SessionNotification): void;
+    };
+    const request = vi.fn().mockImplementation(async (method: string, params: { sessionId: string; configId: string; value: string }) => {
+      if (method === methods.agent.session.prompt) return { stopReason: 'end_turn' };
+      if (method === methods.agent.session.new) { sessions += 1; state.model = 'glm-5-2'; state.level = 'medium'; return { sessionId: `thread-${sessions}`, configOptions: view(state.model, state.level) }; }
+      const sessionNo = Number(params.sessionId.split('-')[1]);
+      if (params.configId === 'model') state.model = params.value; else {
+        thoughtCalls[params.sessionId] = (thoughtCalls[params.sessionId] ?? 0) + 1;
+        state.level = lastThoughtStaysMedium && thoughtCalls[params.sessionId] > 1 ? 'medium' : params.value;
+      }
+      const response = view(state.model, state.level);
+      if (stale(params.configId, sessionNo, thoughtCalls[params.sessionId] ?? 0)) {
+        internals.handleSessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: 'config_option_update', configOptions: view('swe-2-1-medium', 'medium') } });
+      }
+      return { configOptions: response };
+    });
+    internals.connection = { signal: new AbortController().signal, agent: { request, notify: vi.fn().mockResolvedValue(undefined) } } as unknown as ClientConnection;
+    internals.processEpoch = 'epoch';
+    internals.capabilities = {};
+    const sets = () => request.mock.calls.filter(([method]) => method === methods.agent.session.setConfigOption).map(([, params]) => `${params.configId}=${params.value}`);
+    const prompt = (id: string) => host.prompt(id, 'test', { onText: vi.fn(), onThought: vi.fn(), onPermission: async () => 'decline' });
+    return { host, internals, request, sets, prompt, ensure: () => host.ensureSession(resolve('model-workspace')) };
+  }
+
+  it('rebinds exactly once when a stale early update lands after the correct setter response', async () => {
+    const test = variantSetup((configId, _no, thoughtCalls) => configId === 'thought_level' && thoughtCalls === 1);
+    const session = await test.ensure();
+    expect(session.sessionId).toBe('thread-1');
+    expect(test.sets()).toEqual(['model=swe-2-1-medium', 'thought_level=high', 'thought_level=high']);
+    await expect(test.prompt('thread-1')).resolves.toBe('end_turn');
+    expect(test.sets()).toHaveLength(3);
+  });
+
+  it('fails with DevinModelBindingError after exactly one extra set sequence when the rebind is still mismatched', async () => {
+    const test = variantSetup((configId, _no, thoughtCalls) => configId === 'thought_level' && thoughtCalls === 1, true);
+    await expect(test.ensure()).rejects.toBeInstanceOf(DevinModelBindingError);
+    expect(test.sets()).toEqual(['model=swe-2-1-medium', 'thought_level=high', 'thought_level=high']);
+    expect(test.request.mock.calls.some(([method]) => method === methods.agent.session.prompt)).toBe(false);
+  });
+
+  it('rebinds once in promptNow when a stale update hit a registered idle session', async () => {
+    const test = variantSetup(() => false);
+    await test.ensure();
+    expect(test.sets()).toHaveLength(2);
+    test.internals.handleSessionUpdate({ sessionId: 'thread-1', update: { sessionUpdate: 'config_option_update', configOptions: view('swe-2-1-medium', 'medium') } });
+    await expect(test.prompt('thread-1')).resolves.toBe('end_turn');
+    expect(test.sets()).toEqual(['model=swe-2-1-medium', 'thought_level=high', 'thought_level=high']);
+    await expect(test.prompt('thread-1')).resolves.toBe('end_turn');
+    expect(test.sets()).toHaveLength(3);
+  });
+
+  it('still cancels the turn and closes the host on drift during an active prompt (no rebind)', async () => {
+    const test = variantSetup(() => false);
+    const close = vi.spyOn(test.host, 'close').mockResolvedValue(undefined);
+    await test.ensure();
+    test.request.mockImplementation(() => new Promise(() => undefined));
+    const rejected = expect(test.prompt('thread-1')).rejects.toBeInstanceOf(DevinModelBindingError);
+    await vi.waitFor(() => expect(test.request).toHaveBeenCalledWith(methods.agent.session.prompt, expect.anything(), undefined));
+    test.internals.handleSessionUpdate({ sessionId: 'thread-1', update: { sessionUpdate: 'config_option_update', configOptions: view('swe-2-1-medium', 'medium') } });
+    await rejected;
+    expect(test.internals.connection.agent.notify).toHaveBeenCalledWith(methods.agent.session.cancel, { sessionId: 'thread-1' });
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it('survives the live bug: second session on a reused host with the model-set update delivered after the thought response', async () => {
+    const test = variantSetup((configId, sessionNo, thoughtCalls) => sessionNo === 2 && configId === 'thought_level' && thoughtCalls === 1);
+    await test.ensure();
+    const second = await test.ensure();
+    expect(second.sessionId).toBe('thread-2');
+    await expect(test.prompt('thread-2')).resolves.toBe('end_turn');
+    expect(test.sets()).toEqual([
+      'model=swe-2-1-medium', 'thought_level=high',
+      'model=swe-2-1-medium', 'thought_level=high', 'thought_level=high',
+    ]);
+  });
+
+  it('includes the current thought level in the mismatch diagnostic', () => {
+    expect(() => assertDevinSessionModel('swe-2-1-high', view('swe-2-1-medium', 'medium'))).toThrow('"thoughtLevel":"medium"');
+  });
+});

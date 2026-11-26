@@ -1,14 +1,23 @@
-﻿import { methods, type ClientConnection, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { methods, type ClientConnection, type SessionConfigOption } from '@agentclientprotocol/sdk';
 import { captureExecutionCurrent, guardedAcpRequest, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 
 type ConfigOptions = SessionConfigOption[] | null | undefined;
 
-function modelDiagnostic(model: string, selector: SessionConfigOption & { type: 'select' }, source: string): string {
+/** Binding/verification failure of the requested exact model. `retryable` marks a plain current-state mismatch that one rebind may heal. */
+export class DevinModelBindingError extends Error {
+  constructor(message: string, readonly retryable = false) {
+    super(message);
+    this.name = 'DevinModelBindingError';
+  }
+}
+
+function modelDiagnostic(model: string, selector: SessionConfigOption & { type: 'select' }, source: string, options?: ConfigOptions): string {
   const values = selector.options.flatMap(option => 'group' in option ? option.options : [option]);
   const clean = (value: string) => value.replace(/[^\p{L}\p{N} ._:/+()-]/gu, '').slice(0, 100);
   const candidates = values.filter(option => /swe|glm/i.test(`${option.value} ${option.name}`)).slice(0, 12)
     .map(option => ({ value: clean(option.value), name: clean(option.name) }));
   return JSON.stringify({ source, requested: clean(model), selector: clean(selector.id), current: clean(selector.currentValue),
+    thoughtLevel: clean(String(thoughtSelector(options)?.currentValue ?? '')),
     optionCount: values.length, exactMatches: values.filter(option => option.value === model).length, candidates });
 }
 
@@ -74,7 +83,7 @@ function modelSelector(model: string, options: ConfigOptions) {
   const selector = getModelSelector(options);
   const target = resolveModelTarget(model, selector);
   if (!target) {
-    throw new Error(`Devin ACP exact model ID is unavailable or ambiguous; prompt blocked. Model selection: ${modelDiagnostic(model, selector, 'selector_validation')}`);
+    throw new Error(`Devin ACP exact model ID is unavailable or ambiguous; prompt blocked. Model selection: ${modelDiagnostic(model, selector, 'selector_validation', options)}`);
   }
   return { selector, target };
 }
@@ -82,7 +91,7 @@ function modelSelector(model: string, options: ConfigOptions) {
 export function assertDevinSessionModel(model: string, options: ConfigOptions, source = 'cached_or_update'): void {
   const { selector, target } = modelSelector(model, options);
   if (selector.currentValue !== target.value || (target.level && thoughtSelector(options)?.currentValue !== target.level)) {
-    throw new Error(`Devin ACP session model differs from the requested exact ID; prompt blocked. Model selection: ${modelDiagnostic(model, selector, source)}`);
+    throw new DevinModelBindingError(`Devin ACP session model differs from the requested exact ID; prompt blocked. Model selection: ${modelDiagnostic(model, selector, source, options)}`, true);
   }
 }
 
@@ -103,13 +112,13 @@ export async function bindDevinSessionModel(
   if (selector.currentValue !== target.value) {
     current = await set(selector.id, target.value);
     if (modelSelector(model, current).selector.id !== selector.id) {
-      throw new Error('Devin ACP model selector changed during confirmation; prompt blocked.');
+      throw new DevinModelBindingError('Devin ACP model selector changed during confirmation; prompt blocked.');
     }
   }
   if (target.level && thoughtSelector(current)?.currentValue !== target.level) {
     const thought = thoughtSelector(current);
     if (!thought || !flatValues(thought).some(option => option.value === target.level)) {
-      throw new Error(`Devin ACP model ${target.value} does not offer thought level ${target.level}; prompt blocked.`);
+      throw new DevinModelBindingError(`Devin ACP model ${target.value} does not offer thought level ${target.level}; prompt blocked.`);
     }
     current = await set(thought.id, target.level);
   }

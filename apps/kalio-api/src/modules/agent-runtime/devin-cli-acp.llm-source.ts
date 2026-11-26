@@ -213,8 +213,9 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           reason: normalized.message.slice(0, 240),
         },
       });
-      // An idle timeout cancels only the turn; the Devin host is still alive, so it must surface as LLM_TIMEOUT, not as a lost runtime.
-      const hostStillAlive = (normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || normalized instanceof DevinAcpIdleTimeoutError;
+      // An idle timeout, or any error on a host that is still online on the session's process epoch, is an ordinary error, not a lost runtime.
+      const hostStillAlive = (normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || normalized instanceof DevinAcpIdleTimeoutError
+        || isHostOnline(host, session);
       if (!hostStillAlive || params.abortSignal?.aborted) {
         params.onExternalRuntimeLost?.({
           authProfileId: profile.authProfileId?.trim() || profile.id,
@@ -376,6 +377,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       this.logger.warn(params.toolsDisabled ? 'Devin ACP constrained audit callback failed.' : `Devin ACP audit callback failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+}
+
+/** True only when the host reports itself online on the same process epoch as the session. A host without getStatus is treated as possibly gone. */
+function isHostOnline(host: DevinAcpHost | undefined, session: DevinAcpSession | undefined): boolean {
+  if (typeof host?.getStatus !== 'function') return false;
+  const { status, processEpoch } = host.getStatus();
+  return status === 'online' && (!session || processEpoch === session.processEpoch);
 }
 
 function buildPrompt(
