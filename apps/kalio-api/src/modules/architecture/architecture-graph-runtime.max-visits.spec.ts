@@ -2,6 +2,7 @@ import type { ArchitectureRoleExecutor } from './architecture-role-executor';
 import type { ArchitectureRouterOutput, ArchitectureRun, ArchitectureSchema } from '@kalio/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createArchitectureGraphEvents } from './architecture-graph-runtime';
+import { ArchitectureRoleExecutorService } from './architecture-role-executor';
 import { CODING_REVIEW } from './architecture-seed-schemas.lab';
 
 describe('createArchitectureGraphEvents max visit guards', () => {
@@ -121,6 +122,31 @@ describe('createArchitectureGraphEvents max visit guards', () => {
         retryable: false,
       }),
     }));
+  });
+
+  it('never calls the subagent runtime in session_branches mode and names the mode in the contract failure', async () => {
+    const runSubagent = vi.fn();
+    const executor = new ArchitectureRoleExecutorService({ runSubagent } as never);
+    const schema: ArchitectureSchema = {
+      id: 'branches-mode', name: 'Branches Mode', description: 'x', version: '0.1.0',
+      roleSlots: [{ id: 'implementer', label: 'Implementer', description: 'x', slotType: 'tool_executor',
+        defaultPersonaId: 'agent-implementer', allowedPersonaTags: [], required: true, canOverrideAtRunStart: true }],
+      nodes: [{ id: 'implementer', label: 'Implementer', kind: 'role', roleSlotId: 'implementer' }],
+      edges: [],
+      routerPolicy: { mode: 'evidence_first', mustAddressCriticFindings: true, canReturnNeedsMoreResearch: true },
+      contextPolicy: { includeUserTask: true, includeProjectMemory: false, includeBrowserSession: false, includePriorDecisions: false },
+      memoryPolicy: { persistFinalArtifact: true, persistRouterDecision: true },
+      outputArtifactSchema: 'runtime-test',
+    };
+    const run: ArchitectureRun = {
+      id: 'run-branches-mode', schemaId: schema.id, prompt: 'Do work.', executionMode: 'session_branches',
+      context: {}, rootSessionId: 'root', branchSessionIds: { implementer: 'branch-implementer' },
+      status: 'running', createdAt: 100, updatedAt: 100,
+    };
+    await expect(createArchitectureGraphEvents({
+      schema, run, now: 100, roleExecutor: executor, personaForSlot: () => 'devin-persona',
+    })).rejects.toThrow(/executionMode is "session_branches".*subagent_execution/);
+    expect(runSubagent).not.toHaveBeenCalled();
   });
 
   it('emits typed node_failed before unrecoverable branch errors reject the graph run', async () => {
