@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ToolCallRequest } from '@kalio/types';
 import { Tool } from '../../../common/decorators/tool.decorator';
-import { TerminalService } from '../terminal.service';
+import { TerminalService, type TerminalSession } from '../terminal.service';
 
 function getCommandArg(args: ToolCallRequest['args']): string {
   const rawCommand = args['command'];
@@ -31,6 +31,24 @@ function getCwdArg(args: ToolCallRequest['args']): string {
     throw new Error('INVALID_CWD: cwd must be a non-empty string');
   }
   return rawCwd.trim();
+}
+
+/** Measured cap; many MCP clients time out a request near 60-120 s. */
+export const SPAWN_MAX_WAIT_MS = 120_000;
+const INLINE_OUTPUT_MAX_CHARS = 20_000;
+
+function getSpawnWaitArg(args: ToolCallRequest['args']): number {
+  const waitMs = args['waitMs'] === undefined ? 0 : args['waitMs'];
+  if (typeof waitMs !== 'number' || !Number.isInteger(waitMs) || waitMs < 0 || waitMs > SPAWN_MAX_WAIT_MS) {
+    throw new Error(`INVALID_WAIT: waitMs must be an integer between 0 and ${SPAWN_MAX_WAIT_MS}`);
+  }
+  return waitMs;
+}
+
+function truncateTail(output: string): string {
+  if (output.length <= INLINE_OUTPUT_MAX_CHARS) return output;
+  return `[... ${output.length - INLINE_OUTPUT_MAX_CHARS} earlier characters omitted; use terminal_output for the full buffer]\n`
+    + output.slice(-INLINE_OUTPUT_MAX_CHARS);
 }
 
 function getIdArg(args: ToolCallRequest['args']): string {
@@ -75,6 +93,14 @@ function getIdArg(args: ToolCallRequest['args']): string {
           'Absolute path to the working directory. Must be inside an AllowedPaths root. ' +
           'Use fs_list first to confirm the path exists, or check allowed_paths.',
       },
+      waitMs: {
+        type: 'integer',
+        minimum: 0,
+        maximum: SPAWN_MAX_WAIT_MS,
+        description:
+          'Optional. Wait up to this many milliseconds for the process to exit and return its status, exitCode and output in this same result. ' +
+          'Use it for builds, tests and scripts. Default 0 returns immediately. A timeout never kills the process.',
+      },
     },
   },
   requiresConfirmation: true,
@@ -86,16 +112,32 @@ export class TerminalSpawnTool {
     const command = getCommandArg(request.args);
     const args = getArgsArg(request.args);
     const cwd = getCwdArg(request.args);
+    const waitMs = getSpawnWaitArg(request.args);
     const session = await this.terminals.spawn(command, args, cwd, false, {
       sessionId: request.sessionId,
       turnId: request.turnId,
       callId: request.callId,
     });
-    return {
+    const base = {
       id: session.id, pid: session.pid, command: session.command,
-      // Agents (notably Devin over the MCP bridge) otherwise tend to stop after spawn and never read the result.
-      next: `The process runs in the background. Call terminal_output with {"id":"${session.id}","waitMs":30000} to wait for it and read its output; repeat while it is still running.`,
       ...(session.executionDescriptor ? { executionDescriptor: structuredClone(session.executionDescriptor) } : {}),
+    };
+    // Agents (notably Devin over the MCP bridge) otherwise tend to stop after spawn and never read the result.
+    const next = `The process runs in the background. Call terminal_output with {"id":"${session.id}","waitMs":30000} to wait for it and read its output; repeat while it is still running.`;
+    if (waitMs === 0) return { ...base, next };
+    let observed: TerminalSession | null;
+    try {
+      observed = await this.terminals.observeUntilExit(session.id, waitMs, request.abortSignal);
+    } catch {
+      return { ...base, status: 'running', next };
+    }
+    const status = observed?.status ?? 'running';
+    return {
+      ...base,
+      status,
+      exitCode: observed?.exitCode ?? null,
+      output: truncateTail(observed?.output ?? ''),
+      ...(status === 'running' ? { next } : {}),
     };
   }
 }
