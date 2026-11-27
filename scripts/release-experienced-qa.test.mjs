@@ -75,7 +75,8 @@ test('tagged desktop release is version-gated and unsigned Windows signing is ex
 
   assert.match(workflow, /tags:\r?\n\s+- "v\*"/);
   assert.match(workflow, /release:\r?\n\s+if: startsWith\(github\.ref, 'refs\/tags\/'\)/);
-  assert.match(workflow, /needs: \[build-windows, build-linux\]/);
+  assert.match(workflow, /needs: \[build-windows, build-linux, build-macos-source\]/);
+  assert.match(workflow, /run: node scripts\/source-runtime-smoke\.mjs/);
   assert.match(workflow, /contents: write/);
   assert.match(workflow, /\$tagVersion = \$env:GITHUB_REF_NAME\.TrimStart\('v'\)/);
   assert.match(workflow, /Release version mismatch/);

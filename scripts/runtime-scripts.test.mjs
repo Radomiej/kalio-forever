@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createWorkflowGateDataRoot } from './workflow-gate-storage.mjs';
+import { resolveQaEnvValues } from './stack-qa-env.mjs';
 
 const stackManagerSource = readFileSync(new URL('./stack-manager.mjs', import.meta.url), 'utf8');
 const stackStatusSource = readFileSync(new URL('./stack-status.mjs', import.meta.url), 'utf8');
@@ -163,9 +164,19 @@ test('Windows docs make CMD primary, autostart default, and Tauri optional', () 
 
 test('fixed QA mock mode forces env LLM so stale DB credentials cannot override mock', () => {
   assert.match(stackManagerSource, /--force-env-llm/);
-  assert.match(stackManagerSource, /KALIO_FORCE_ENV_LLM: forceEnvLlm \? '1'/);
+  assert.match(stackManagerSource, /import \{ resolveQaEnvValues \} from '\.\/stack-qa-env\.mjs'/);
+  const mockEnv = resolveQaEnvValues({
+    fileEnv: { LLM_PROVIDER: 'openai', LLM_MODEL: 'saved-model' },
+    processEnv: { KALIO_FORCE_ENV_LLM: '0', KALIO_MOCK_LLM_FAST: '0' },
+    useEnvLlm: false,
+    forceEnvLlm: true,
+    provider: 'mock',
+  });
+  assert.equal(mockEnv.LLM_PROVIDER, 'mock');
+  assert.equal(mockEnv.LLM_MODEL, 'mock');
+  assert.equal(mockEnv.KALIO_FORCE_ENV_LLM, '1');
+  assert.equal(mockEnv.KALIO_MOCK_LLM_FAST, '1');
   assert.match(stackManagerSource, /forceEnvLlm: backendEnv\.KALIO_FORCE_ENV_LLM === '1'/);
-  assert.match(stackManagerSource, /KALIO_MOCK_LLM_FAST: getArgValue\(args, '--provider'/);
   assert.match(stackManagerSource, /fastMockLlm: backendEnv\.KALIO_MOCK_LLM_FAST === '1'/);
   assert.match(
     readFileSync(new URL('../start-qa.ps1', import.meta.url), 'utf8'),
@@ -217,15 +228,16 @@ test('desktop build contract keeps the bundled backend and AppData paths aligned
   assert.match(backendSource, /http:\/\/tauri\.localhost/);
 });
 
-test('stack manager refreshes managed PIDs from live port owners and refuses unmanaged port reuse', () => {
+test('stack manager records startup ownership and validates every stop before terminating children', () => {
   assert.match(stackManagerSource, /import \{ ensureRequestedPortsAreFree, resolveListeningPids \} from '\.\/stack-port-owners\.mjs'/);
-  assert.match(stackManagerSource, /async function refreshStatePortOwners\(state\)/);
+  assert.match(stackManagerSource, /import \{ preflightStackStop, recordStartupListeners \} from '\.\/stack-ownership\.mjs'/);
+  assert.match(stackManagerSource, /writeState\(await recordStartupListeners\(readState\(\)\)\)/);
+  assert.doesNotMatch(stackManagerSource, /refreshStatePortOwners/);
   const portOwnersSource = readFileSync(new URL('./stack-port-owners.mjs', import.meta.url), 'utf8');
   assert.match(portOwnersSource, /export async function ensureRequestedPortsAreFree\(ports, options\)/);
   assert.match(stackManagerSource, /await ensureRequestedPortsAreFree\(\[backendPort, frontendPort\]\);/);
-  assert.match(stackManagerSource, /await refreshStatePortOwners\(readState\(\)\);/);
-  assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\)\);/);
-  assert.match(stackManagerSource, /const state = await refreshStatePortOwners\(readState\(\) \?\? readLastState\(\)\);/);
+  assert.match(stackManagerSource, /const pids = await preflightStackStop\(state, isProcessAlive\);\s+const jobs = pids\.map\(\(pid\) => killProcessTree\(pid\)\)/);
+  assert.match(stackManagerSource, /async function forceRestartStack\(\) \{\s+await clearIfRunning\(\);[\s\S]*?await ensureRequestedPortsAreFree\(portsToFree\);\s+\}/);
   assert.match(portOwnersSource, /requested ports already in use by unmanaged listeners/);
   assert.match(stackManagerSource, /async function detectKnownManagedPortConflicts\(\)/);
   assert.match(stackManagerSource, /buildStackStatusReport\(\{ status: 'unmanaged listeners'/);

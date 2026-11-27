@@ -1,10 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { methods, type ClientConnection, type SessionConfigOption } from '@agentclientprotocol/sdk';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { captureExecutionCurrent, guardedAcpRequest, runGuardedDevinPrompt } from './devin-cli-acp.execution-guard';
 import { DevinAcpHost, type DevinAcpPromptInput } from './devin-cli-acp.host';
 import { bindDevinSessionModel } from './devin-cli-acp.model-selection';
 
 const io = vi.hoisted(() => ({ config: vi.fn(), exec: vi.fn(), spawn: vi.fn() }));
+const fixtureCwd = resolve(tmpdir(), 'kalio-devin-execution-guard');
+const privateCwd = resolve(tmpdir(), 'kalio-devin-private');
 vi.mock('./devin-cli-config', () => ({ createDevinCliConfig: io.config }));
 vi.mock('node:child_process', async original => {
   const actual = await original<typeof import('node:child_process')>();
@@ -32,7 +36,7 @@ function authority() {
 function readyHost(request = vi.fn(async () => ({ stopReason: 'end_turn' as const }))) {
   const host = new DevinAcpHost('exact-model');
   const connection = { agent: { request, notify: vi.fn(async () => undefined) } } as unknown as ClientConnection;
-  const session = { configOptions: options(), cwd: 'C:/fixture', processEpoch: 'epoch', mcpServers: [], tail: Promise.resolve() };
+  const session = { configOptions: options(), cwd: fixtureCwd, processEpoch: 'epoch', mcpServers: [], tail: Promise.resolve() };
   const internals = host as unknown as { ensureConnection: () => Promise<ClientConnection>;
     processEpoch: string; sessions: Map<string, typeof session> };
   internals.ensureConnection = vi.fn(async () => connection); internals.processEpoch = 'epoch';
@@ -95,7 +99,7 @@ describe('host setup and session boundaries', () => {
     'Configured MCP servers:\n  ✗ inherited  (disabled)\n    Command: private-command\n',
   ];
   function setup() {
-    const config = { path: 'C:/private/config', cwd: 'C:/private', suppressMcpServers: vi.fn(async (): Promise<void> => undefined),
+    const config = { path: resolve(privateCwd, 'config'), cwd: privateCwd, suppressMcpServers: vi.fn(async (): Promise<void> => undefined),
       cleanup: vi.fn(async () => undefined) };
     io.config.mockImplementation(async (_model, _servers, _policy, allocated) => { allocated(config); return config; });
     return config;
@@ -103,7 +107,7 @@ describe('host setup and session boundaries', () => {
   it('staleness during private config preparation prevents every catalog exec/spawn and cleans own config', async () => {
     const config = setup(); const gate = deferred<typeof config>(); const a = authority();
     io.config.mockImplementationOnce(async (_model, _servers, _policy, allocated) => { allocated(config); return gate.promise; });
-    const running = new DevinAcpHost('exact-model').ensureSession('C:/fixture', undefined, [], a.check);
+    const running = new DevinAcpHost('exact-model').ensureSession(fixtureCwd, undefined, [], a.check);
     await vi.waitFor(() => expect(io.config).toHaveBeenCalledTimes(1));
     a.stale(); gate.resolve(config);
     await expect(running).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
@@ -115,7 +119,7 @@ describe('host setup and session boundaries', () => {
     for (let index = 0; index <= stage; index++)
       if (index === stage) io.exec.mockImplementationOnce(() => reply.promise);
       else io.exec.mockResolvedValueOnce({ stdout: catalog[index], stderr: '' });
-    const running = new DevinAcpHost('exact-model').ensureSession('C:/fixture', undefined, [], a.check);
+    const running = new DevinAcpHost('exact-model').ensureSession(fixtureCwd, undefined, [], a.check);
     await vi.waitFor(() => expect(io.exec).toHaveBeenCalledTimes(stage + 1));
     a.stale(); reply.resolve({ stdout: catalog[stage]!, stderr: '' });
     await expect(running).rejects.toThrow('host startup blocked');
@@ -127,7 +131,7 @@ describe('host setup and session boundaries', () => {
     config.suppressMcpServers.mockImplementation(() => gate.promise);
     io.exec.mockReset().mockResolvedValueOnce({ stdout: catalog[0], stderr: '' })
       .mockResolvedValueOnce({ stdout: catalog[1], stderr: '' });
-    const running = new DevinAcpHost('exact-model').ensureSession('C:/fixture', undefined, [], a.check);
+    const running = new DevinAcpHost('exact-model').ensureSession(fixtureCwd, undefined, [], a.check);
     await vi.waitFor(() => expect(config.suppressMcpServers).toHaveBeenCalledTimes(1));
     a.controller.abort(); gate.resolve();
     await expect(running).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);
@@ -136,7 +140,7 @@ describe('host setup and session boundaries', () => {
   it('stale connection wait prevents session/new', async () => {
     const f = readyHost(); const gate = deferred<ClientConnection>(); const a = authority();
     f.internals.ensureConnection = vi.fn(() => gate.promise);
-    const running = f.host.ensureSession('C:/fixture', undefined, [], a.check);
+    const running = f.host.ensureSession(fixtureCwd, undefined, [], a.check);
     a.stale(); gate.resolve(f.connection);
     await expect(running).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/); expect(f.request).not.toHaveBeenCalled();
   });
@@ -145,7 +149,7 @@ describe('host setup and session boundaries', () => {
     const request = vi.fn().mockResolvedValueOnce({ sessionId: 'new-session', configOptions: options('other') })
       .mockImplementationOnce(() => model.promise);
     const f = readyHost(request);
-    const running = f.host.ensureSession('C:/fixture', undefined, [], a.check);
+    const running = f.host.ensureSession(fixtureCwd, undefined, [], a.check);
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     a.stale(); model.resolve({ configOptions: options() });
     await expect(running).rejects.toThrow(/^EXECUTION_CURRENT_UNAVAILABLE$/);

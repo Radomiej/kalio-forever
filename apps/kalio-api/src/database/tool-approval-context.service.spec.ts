@@ -80,7 +80,8 @@ describe('ToolApprovalContextService (real SQLite)', () => {
     expect(snapshot.inputs.map(input => [input.messageId, input.origin, input.text.length])).toEqual([
       ['goal', 'host_recorded_input', 3579], ['prompt', 'delegated_objective', 12672],
     ]);
-    expect(Object.keys(snapshot).sort()).toEqual(['binding', 'denials', 'fingerprint', 'inputs', 'lineage', 'project', 'version']);
+    expect(Object.keys(snapshot).sort()).toEqual(['binding', 'denials', 'fingerprint', 'inputs', 'lineage', 'project', 'recentTools', 'version']);
+    expect(snapshot.recentTools).toEqual([]);
   });
 
   it('includes a single intermediate generated objective as delegated', () => {

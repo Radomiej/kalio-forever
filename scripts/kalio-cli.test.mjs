@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const cli = new URL('./kalio-cli.mjs', import.meta.url);
@@ -24,7 +25,7 @@ async function fixture(t) {
 }
 
 function launch(home, t) {
-  const child = spawn(process.execPath, [cli.pathname, 'serve'], {
+  const child = spawn(process.execPath, [fileURLToPath(cli), 'serve'], {
     env: { ...process.env, KALIO_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'],
   });
   let output = '';

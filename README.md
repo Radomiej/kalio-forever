@@ -7,7 +7,7 @@
 [![CI](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Radomiej/kalio-forever/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-[Install on Windows](#install-kalio-on-windows) · [Install on Linux](#install-kalio-on-linux) · [User guide](docs/quickstart-user.md) · [Developer docs](docs/spec/)
+[Install on Windows](#install-kalio-on-windows) · [Install on Linux](#install-kalio-on-linux) · [Install on macOS](#install-kalio-on-macos) · [User guide](docs/quickstart-user.md) · [Developer docs](docs/spec/)
 
 </div>
 
@@ -36,7 +36,7 @@ tool access, durable execution events, and an inspectable result.
 ## Install Kalio on Windows
 
 Open **Command Prompt (`cmd.exe`)** and run this one line. The installer uses the
-local production profile and the mock provider, so no API key is required:
+local production profile. Configure a provider or use an authenticated CLI agent:
 
 ~~~bat
 curl.exe -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install.cmd -o "%TEMP%\kalio-install.cmd" && call "%TEMP%\kalio-install.cmd" && del "%TEMP%\kalio-install.cmd"
@@ -64,7 +64,7 @@ Open **http://127.0.0.1:4016**. The API health endpoint is
 **http://127.0.0.1:4016/api/health**.
 
 1. Open **Settings**.
-2. Keep mock for a fully offline first run, or add a provider.
+2. Configure a provider or select an authenticated CLI agent.
 3. Create a session in **Talk**.
 4. Send a message and approve tool calls when the HITL prompt appears.
 
@@ -101,11 +101,59 @@ that starts Kalio and opens the app. Opt out with `--no-desktop-icon`.
 
 See the [Linux installation guide](docs/linux-installation.md).
 
+## Install Kalio on macOS
+
+macOS source installation targets **Apple Silicon** and is **experimental**. Installation, compilation,
+start, and rebuilding through `kalio update` have been tested locally on
+Apple Silicon with macOS 26.3, Node.js 24.22.3 and pnpm 9.15.0.
+Upgrading between different application revisions still needs verification. Automated installer tests currently use command stubs.
+
+The installer builds Kalio from source and serves the UI in your browser.
+Updates follow the checkout's tracked Git branch, which defaults to `main`.
+If an update fails during dependency installation or compilation, Kalio stays
+stopped until the failure is corrected and the update is retried.
+
+Install Apple's Command Line Tools with `xcode-select --install`, then install
+the dependencies with [Homebrew](https://brew.sh/):
+
+~~~sh
+brew install node@24
+export PATH="$(brew --prefix node@24)/bin:$PATH"
+npm install --global pnpm@9.15.0
+~~~
+
+Install from GitHub, then start Kalio:
+
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/Radomiej/kalio-forever/main/scripts/install-macos.sh -o /tmp/kalio-install-macos.sh &&
+bash /tmp/kalio-install-macos.sh
+export PATH="$HOME/Library/Application Support/Kalio/bin:$PATH"
+kalio start
+kalio open
+~~~
+
+Add the PATH export to `~/.zshrc` to keep the CLI available in new Terminal
+windows. The UI opens at **http://127.0.0.1:6188**. Configure a model provider
+in Settings or select an authenticated CLI agent. Direct LLM access starts unconfigured.
+
+~~~sh
+kalio status
+kalio stop
+kalio update
+~~~
+
+User data and the encryption key live in
+`~/Library/Application Support/Kalio/data` and are preserved across updates.
+Run `kalio start` after reboot.
+
+See the [macOS installation guide](docs/macos-installation.md) for custom paths,
+configuration and recovery.
+
 ## Optional Tauri/NSIS desktop installer
 
 The Tauri/NSIS desktop installer is optional. Use it when you specifically want
 the native desktop shell; the CMD installation above is the primary Windows path.
-Releases ship `Kalio_1.0.5_x64-setup.exe` on the
+Releases ship `Kalio_1.1.0_x64-setup.exe` on the
 [releases page](https://github.com/Radomiej/kalio-forever/releases). The desktop
 backend uses `http://127.0.0.1:4516`.
 
@@ -128,6 +176,7 @@ can read and write only inside the workspace assigned to their session.
 | --- | --- |
 | [Quick start for users](docs/quickstart-user.md) | Windows install, autostart, upgrades, uninstall, and troubleshooting. |
 | [Linux installation](docs/linux-installation.md) | Linux installer, data locations, and service setup. |
+| [macOS installation](docs/macos-installation.md) | Experimental source installer, CLI updates, prerequisites, and data locations. |
 | [Testing Kalio on Windows](docs/testing-kalio.md) | QA stack, manual smoke test, and installed-release checks. |
 | [Specs and development docs](docs/spec/) | Architecture, runtime, local development, and design documents. |
 | [Runtime boundary spec](project-spec.md) | Durable product and runtime boundaries. |

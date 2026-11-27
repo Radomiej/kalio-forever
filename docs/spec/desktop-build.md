@@ -17,7 +17,7 @@ pnpm desktop:build
 The installer is created at:
 
 ```text
-src-tauri/target/release/bundle/nsis/Kalio_1.0.5_x64-setup.exe
+src-tauri/target/release/bundle/nsis/Kalio_1.1.0_x64-setup.exe
 ```
 
 `desktop:build` performs the following release steps:
@@ -54,9 +54,9 @@ The desktop runtime uses Tauri's local application-data directory:
 ```
 
 It creates `kalio.db`, `workspaces`, `memory`, `embeddings-cache`, and
-`logs\backend.log` there. A fresh process uses the mock provider until the user
-configures a real provider; provider settings can be entered through Kalio
-Settings. The generated `.env` file persists the credentials master key.
+`logs\backend.log` there. Configure a direct provider in Kalio Settings or select
+an authenticated CLI agent. The generated `.env` file persists the credentials
+master key.
 
 The desktop API is bound to `127.0.0.1:4516` and accepts requests from the
 Tauri production origin `http://tauri.localhost`. If that port is occupied, the
@@ -92,8 +92,8 @@ additionally produce Tauri `.sig` files and the release job generates
 `latest.json` from those signed assets. A matching version tag creates or
 updates a draft GitHub Release.
 
-The tag must match `src-tauri/tauri.conf.json`, for example `v1.0.5` for
-version `1.0.3`. The following three Actions secrets are the optional Tauri
+The tag must match `src-tauri/tauri.conf.json`, for example `v1.1.0` for
+version `1.1.0`. The following three Actions secrets are the optional Tauri
 updater-signing set:
 
 - `TAURI_SIGNING_PRIVATE_KEY` — Tauri updater private key content;

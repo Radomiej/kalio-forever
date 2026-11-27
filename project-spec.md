@@ -276,6 +276,15 @@ classDiagram
 - External security/auto-check evaluation is a no-tools model call selected by the configured evaluator persona/profile. Its typed result preserves `allow`, `deny`, and `ask_user`; critical-risk actions always retain the human gate.
 - Codex `thread/resume` currently cannot replace dynamic tool definitions. Until fingerprint mismatch handling is implemented, changing a session's effective toolset requires an explicit fresh thread/rebinding decision.
 
+## Image Generation and Editing Boundary
+
+- Image settings select a provider without recommending a service. The shared `IMAGE_PROVIDER_CAPABILITIES` table owns generation/editing availability, reference limits, credential requirements, and editing transport for Settings and backend dispatch.
+- `image_edit` loads references through VFS, preserves role/number ordering, and writes a new versioned PNG. `ImageEditingService` owns provider dispatch: ChatGPT/Codex native image inputs, OpenAI multipart edits, and the existing Gemini-compatible CometAPI transport. Unsupported editing providers fail explicitly without switching services.
+- ChatGPT uses an enabled OpenAI Codex execution profile and its ChatGPT login, not an OpenAI API key. The adapter reuses the auth-profile App Server, creates an ephemeral image thread, accepts native `imageGeneration` result bytes, and removes scoped listeners/thread registration after success, cancellation, disconnect, or error. It does not close the shared process.
+- Shell/edit/browser features are disabled for the image thread and approval requests are declined. Image threads have no Kalio dynamic tools; the host's inherited MCP policy remains a separate boundary.
+- Account/model image availability and limits are checked by Codex at execution; a selectable integration does not guarantee image entitlement. API billing remains separate from ChatGPT subscriptions. Output dimensions are decoded from the returned image rather than assumed from the requested size.
+- Legacy `auto` settings retain historical CometAPI routing and are labelled accordingly. `editModel` is independent from the generation model; ChatGPT uses the execution profile model.
+
 ## Native MCP Interoperability Boundary
 
 - Kalio exposes a separate authenticated Streamable HTTP MCP server at
@@ -432,3 +441,43 @@ Codex launch selection distinguishes an unchecked model catalog from a successfu
 Devin ACP continuation budgets count the rendered assistant text. Over-budget history may shorten earlier fs_read text previews while preserving their path, digest, line count and call linkage, the five latest tool results, and the full persisted evidence.
 
 Contextual tool approval sends Jev the current operation, host environment and project scope, up to three recent user inputs and the bound delegated objective (2,000-character excerpts), up to five recent tool names and statuses from the current session, and tool names from prior denials. Prior tool arguments and results stay local. Freshness and production targeting still use the host-owned snapshot.
+
+Reusing an architecture branch within the same run and role preserves its existing project execution paths if reconstructed context omits both. Explicit paths and the normal scope checks retain their existing behavior.
+
+## Remote supervision boundary (2026-11-08)
+
+The Android companion is a read-only projection of paired Kalio instances with a narrowly authorized existing-request approval channel. Desktop/backend durable snapshots and settlement remain authoritative; a relay receipt is not approval success. Device capabilities are instance-scoped, public transport is TLS, stale/offline/replayed decisions fail closed, and native approval families keep their own authorities. No conversation editing, new execution, bulk/always-allow policies or generic remote shell is exposed. See [remote supervision MVP](docs/spec/remote-supervision-mvp.md) and [local speech candidates](docs/spec/local-tts-options.md) for scope and verification limits.
+
+Remote session-detail snapshots and approval results are confined to the requesting paired device and excluded from relay replay history.
+
+The Remote client presents readable approval arguments and existing tool results, with an edge-to-edge conversation and step list on narrow screens. Forgetting an instance removes the local device pairing after durable device storage confirms the update.
+On reconnect, the relay hydrates devices from a fresh host overview and keeps overview snapshots out of event replay. Each authenticated device has at most one active session watch. Replaced watch replies are discarded, and correlated relay rejections clear the matching pending decision without indicating settlement.
+
+## macOS source installation
+
+The macOS source installer builds the existing Node.js runtime and exposes
+start, stop, status, open and update through a local kalio CLI. Installation
+keeps source and user data in separate directories. Updates follow the tracked
+Git branch and preserve the credential encryption key and database. See
+[macOS installation](docs/macos-installation.md).
+
+## Release integration boundaries (2026-11-22)
+
+Managed source stacks record the listener PID only after readiness confirms a
+process launched by this invocation or its verified descendant. Status never
+adopts a process found on a saved port. Stop/restart validates both recorded
+listeners before terminating either; mismatched or unknown ownership fails
+closed and preserves state for inspection. Unix source stacks require `lsof`.
+
+After Stop, a late Jev checkpoint may remain in immutable event history, but
+`createRun` returns the recorded cancelled run rather than an obsolete running
+object. Accepted-goal activation remains disabled until trusted adapter,
+durable visit, worker-attempt and terminal callbacks are composed and proven.
+
+Native ChatGPT image generation rejects execution profiles that inherit MCP
+servers before opening a provider connection. Image generation must not gain
+the profile's unrelated MCP capabilities.
+
+The 1.1.0 release workflow builds Windows/Linux artifacts and separately builds
+and smoke-tests the macOS source runtime. macOS remains an experimental source
+distribution, without a native DMG or notarization claim.

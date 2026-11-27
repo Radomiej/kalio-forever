@@ -27,12 +27,17 @@ type FetchMap = Record<string, unknown>;
 function mockFetch(map: FetchMap) {
   vi.stubGlobal(
     'fetch',
-    vi.fn((url: string, opts?: RequestInit) => {
+    vi.fn((input: RequestInfo, opts?: RequestInit) => {
       const method = opts?.method?.toUpperCase() ?? 'GET';
-      const urlWithoutParams = url.split('?')[0]!;
-      const key = `${method} ${url}`;
+      const rawUrl = typeof input === 'string' ? input : input.url;
+      const parsedUrl = new URL(rawUrl, window.location.origin);
+      const requestPath = `${parsedUrl.pathname}${parsedUrl.search}`;
+      const urlWithoutParams = parsedUrl.pathname;
+      const key = `${method} ${requestPath}`;
       const keyNoParams = `${method} ${urlWithoutParams}`;
-      const value = key in map ? map[key] : (keyNoParams in map ? map[keyNoParams] : (map[url] ?? map[urlWithoutParams] ?? null));
+      const value = key in map
+        ? map[key]
+        : (keyNoParams in map ? map[keyNoParams] : (map[rawUrl] ?? map[urlWithoutParams] ?? null));
 
       if (value === null) {
         return Promise.resolve(new Response(null, { status: 404 }));

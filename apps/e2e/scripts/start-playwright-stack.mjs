@@ -129,6 +129,11 @@ const sharedEnv = {
   LLM_MODEL: envValueOrDefault('LLM_MODEL', 'mock'),
   KALIO_FORCE_ENV_LLM: '1',
   KALIO_MOCK_LLM_FAST: '1',
+  KALIO_CONTROL_PLANE_AUTH: envValueOrDefault(
+    'KALIO_CONTROL_PLANE_AUTH',
+    process.env.KALIO_CONTROL_PLANE_TOKEN ? 'enabled' : 'disabled',
+  ),
+  KALIO_HOST: envValueOrDefault('KALIO_HOST', '127.0.0.1'),
   CREDENTIALS_MASTER_KEY: process.env.CREDENTIALS_MASTER_KEY ?? 'playwright-test-master-key-32-chars-minimum',
 };
 const runStateDir = resolve(e2eStateDir);

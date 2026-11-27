@@ -10,6 +10,8 @@ dist/
 .env.test
 data/
 coverage/
+.stryker-tmp/
+apps/kalio-web/reports/
 .turbo/
 *.db
 *.db-shm

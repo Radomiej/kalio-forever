@@ -1825,69 +1825,9 @@ export interface AuditRetentionStatus {
 }
 
 // ─── Image Generation ─────────────────────────────────────────────────────────
-export type ImageRefRole = 'character' | 'object' | 'style' | 'background' | 'base';
-
-export interface ImageRef {
-  vfsPath: string;
-  role: ImageRefRole;
-  label: string;
-}
-
-export type ImageDetail = 'low' | 'auto' | 'high';
-
-export interface ImageCompressionConfig {
-  enabled: boolean;
-  maxDimension: number;   // px, e.g. 1024
-  maxKb: number;          // max file size in KB, e.g. 512
-  detail: ImageDetail;
-}
-
-export type ImageProviderType = 'cometapi' | 'openai' | 'openrouter' | 'replicate' | 'auto';
-
-export interface ImageProviderConfig {
-  provider: ImageProviderType;
-  apiKey: string;
-  baseUrl?: string;
-  model?: string;
-  compression?: ImageCompressionConfig;
-}
-
-export interface ImageConfigResponse {
-  provider: ImageProviderType;
-  baseUrl?: string;
-  model?: string;
-  compression?: ImageCompressionConfig;
-  source: 'db' | 'default';
-}
-
-export interface UpdateImageConfigDto {
-  provider?: ImageProviderType;
-  apiKey?: string;
-  baseUrl?: string;
-  model?: string;
-  compression?: ImageCompressionConfig;
-}
-
-export interface ImageGenerateResult {
-  image_url: string;    // base64 data URL
-  path: string;         // VFS path where saved
-  model: string;
-  size: string;
-  format: string;
-  download_url: string;
-  message: string;
-}
-
-export interface ImageEditResult {
-  image_url: string;
-  path: string;
-  model: string;
-  refCount: number;
-  durationMs: number;
-  download_url: string;
-  message: string;
-  iteratedFrom?: string;
-}
+export * from './image';
+export * from './native-image';
+export * from './image-capabilities';
 
 export type SecurityPolicyDecision = 'allow' | 'deny' | 'ask_user';
 export type SecurityPolicyRisk = 'low' | 'medium' | 'high' | 'critical';
@@ -2250,3 +2190,5 @@ export * from './chat-durable-evidence-reader';
 export * from './goal-launch-decision';
 export { PROJECT_CONTEXT_PORT } from './embedding-resources';
 export type { ProjectContextSettings, ProjectContextPort } from './embedding-resources';
+
+export * from './remote-supervision';

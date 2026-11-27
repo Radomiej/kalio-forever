@@ -34,9 +34,7 @@ export function buildCodexSpawnSpec(
 
   return {
     command: comSpec,
-    args: ['/d', '/s', '/c', command, ...args].map((argument, index) => (
-      index < 3 ? argument : quoteWindowsCmdArgument(argument)
-    )),
+    args: ['/d', '/s', '/c', `"${command.replace(CMD_META_CHARACTERS, '^$1')} ${args.map(quoteWindowsCmdArgument).join(' ')}"`],
     windowsVerbatimArguments: true,
   };
 }
@@ -167,9 +165,10 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/g;
+
 function quoteWindowsCmdArgument(value: string): string {
-  const escaped = value
-    .replace(/%/g, '%%')
-    .replace(/"/g, '\\"');
-  return /[\s"&|<>^()]/.test(value) ? `"${escaped}"` : escaped;
+  // Preserve Windows argv quoting through both CMD and the shim's %* expansion.
+  const quoted = `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  return quoted.replace(CMD_META_CHARACTERS, '^$1').replace(CMD_META_CHARACTERS, '^$1');
 }
