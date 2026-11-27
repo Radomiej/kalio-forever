@@ -140,6 +140,12 @@ Verdict: CONDITIONAL for the reviewed launch-layout slice; no desktop layout dis
 - Confirm which legacy persona profile/model fields remain editable during a migration period and when they can be retired.
 - A healthy stable QA stack or mock E2E does not prove Devin ACP, Codex, hosted-agent, or production readiness.
 
+## Codex file-read response contract (2026-11-27)
+
+The App Server dynamic-tool response is a text channel. For `fs_read`, success returns raw file content, not a JSON-encoded `{ path, content, lines }` object. The Codex tool description declares this format so callers can count lines directly without probing or reading the file again to discover a serialization wrapper. Empty content is a valid success; failures preserve their error text and unsuccessful status. Other tools and image responses keep their existing serialization.
+
+Kalio still persists the complete structured result for history/reconnect and emits one tool start/result pair per executed call. This is a provider-boundary format correction, not path-based caching or event suppression: intentional new calls against the same path remain visible and execute normally. Regression checks cover LF, CRLF, empty content, genuine repeated calls, errors/cancellation, image responses, and SQLite/live-event cardinality. Live model behavior and deployment remain separate verification boundaries.
+
 ## Related records
 
 - `project-spec.md` — durable runtime contract and direction update.
