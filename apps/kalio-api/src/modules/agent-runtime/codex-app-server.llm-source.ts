@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ExecutionProfile, ToolMeta, ToolResult } from '@kalio/types';
+import type { ExecutionProfile, ToolResult } from '@kalio/types';
 import type { ILLMSource, LLMSourceParams } from '../chat/interfaces/llm-source.interface';
 import type { InternalLLMChunk } from '../chat/interfaces/llm-chunk.types';
 import type { ContextManagedLLMMessage } from '../../common/utils/context-managed-llm-message.util';
 import { readCodexModels } from './codex-model-catalog';
 import { latestPromptImages } from './latest-prompt-images';
-import { readToolImage } from '../../common/utils/tool-image-content';
+import { toDynamicTool, toDynamicToolResponse } from './codex-dynamic-tools';
 import {
   CodexAppServerHost,
   type CodexAppServerConnection,
@@ -386,26 +386,6 @@ export class CodexAppServerLLMSource implements ILLMSource {
       finish(new Error(isRecord(params) ? readText(params['error']) ?? 'Codex App Server error.' : 'Codex App Server error.'));
     }
   }
-}
-
-function toDynamicTool(meta: ToolMeta): Record<string, unknown> {
-  return {
-    type: 'function',
-    name: meta.name,
-    description: meta.description,
-    inputSchema: meta.parameters,
-  };
-}
-
-function toDynamicToolResponse(result: Partial<ToolResult>, toolName = ''): Record<string, unknown> {
-  const image = result.status === 'success' ? readToolImage(toolName, result.data) : undefined;
-  const text = result.status === 'success'
-    ? image?.text ?? JSON.stringify(result.data ?? null)
-    : result.errorMessage ?? result.errorCode ?? 'Tool execution failed.';
-  return {
-    contentItems: [{ type: 'inputText', text }, ...(image?.image ? [{ type: 'inputImage', imageUrl: image.imageUrl }] : [])],
-    success: result.status === 'success',
-  };
 }
 
 function toNativeApprovalResponse(
