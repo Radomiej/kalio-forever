@@ -32,6 +32,8 @@ export function buildCodexSpawnSpec(
     return { command, args };
   }
 
+  // /s strips the first and last quote of the /c string, so wrap the whole line; otherwise a quoted
+  // command path (spaces) followed by a quoted last argument loses its quoting.
   return {
     command: comSpec,
     args: ['/d', '/s', '/c', `"${command.replace(CMD_META_CHARACTERS, '^$1')} ${args.map(quoteWindowsCmdArgument).join(' ')}"`],

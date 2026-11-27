@@ -66,7 +66,7 @@ describe('TerminalSpawnTool', () => {
       expect(terminals.spawn).toHaveBeenCalledWith('node', ['app.js'], '/app', false, {
         sessionId: 'sess-term', turnId: undefined, callId: 'call-1',
       });
-      expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command });
+      expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command, next: expect.stringContaining('terminal_output') });
     });
 
     it('passes cwd to terminal.spawn when provided', async () => {
@@ -79,6 +79,47 @@ describe('TerminalSpawnTool', () => {
       expect(terminals.spawn).toHaveBeenCalledWith('python', ['-m', 'http.server'], '/app', false, {
         sessionId: 'sess-term', turnId: undefined, callId: 'call-1',
       });
+    });
+  });
+
+  describe('blocking waitMs', () => {
+    it('waits for exit and returns status, exitCode and output inline', async () => {
+      const session = makeSession();
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+      terminals.observeUntilExit = vi.fn().mockResolvedValue({ ...session, status: 'exited', exitCode: 0, output: 'done\n' });
+      const result = await tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd: '/app', waitMs: 45_000 }));
+      expect(terminals.observeUntilExit).toHaveBeenCalledWith(session.id, 45_000, undefined);
+      expect(result).toEqual({ id: session.id, pid: session.pid, command: session.command, status: 'exited', exitCode: 0, output: 'done\n' });
+    });
+
+    it('keeps the next hint when the process is still running after the wait', async () => {
+      const session = makeSession();
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+      terminals.observeUntilExit = vi.fn().mockResolvedValue(session);
+      const result = await tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd: '/app', waitMs: 1000 }));
+      expect(result).toMatchObject({ status: 'running', exitCode: null, next: expect.stringContaining('terminal_output') });
+    });
+
+    it('returns the id when the wait is aborted', async () => {
+      const session = makeSession();
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+      terminals.observeUntilExit = vi.fn().mockRejectedValue(new DOMException('aborted', 'AbortError'));
+      const result = await tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd: '/app', waitMs: 1000 }));
+      expect(result).toMatchObject({ id: session.id, status: 'running', next: expect.stringContaining('terminal_output') });
+    });
+
+    it('keeps only the tail of long output', async () => {
+      const session = makeSession();
+      (terminals.spawn as ReturnType<typeof vi.fn>).mockResolvedValue(session);
+      terminals.observeUntilExit = vi.fn().mockResolvedValue({ ...session, status: 'exited', exitCode: 0, output: 'a'.repeat(25_000) + 'END' });
+      const result = await tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd: '/app', waitMs: 1000 })) as { output: string };
+      expect(result.output.startsWith('[... 5003 earlier characters omitted')).toBe(true);
+      expect(result.output.endsWith('END')).toBe(true);
+    });
+
+    it.each([-1, 50_001, 1.5, '1000'])('rejects waitMs %s before spawning', async (waitMs) => {
+      await expect(tool.execute(makeRequest('terminal_spawn', { command: 'node', cwd: '/app', waitMs }))).rejects.toThrow('INVALID_WAIT');
+      expect(terminals.spawn).not.toHaveBeenCalled();
     });
   });
 

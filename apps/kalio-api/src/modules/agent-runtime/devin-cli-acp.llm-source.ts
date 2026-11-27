@@ -11,9 +11,12 @@ import { KalioMcpBridgeTokenService } from '../../database/kalio-mcp-bridge-toke
 import { KalioMcpBridgeContextRegistry } from '../../common/kalio-mcp-bridge-context';
 import { buildDevinStdioMcpBridgeConfig, DEVIN_KALIO_MCP_SERVER_NAME } from './devin-cli-mcp-bridge';
 import { summarizeDevinToolOutput } from './devin-tool-output-summary';
-import { captureExecutionCurrent, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
+import { captureExecutionCurrent, DevinAcpIdleTimeoutError, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
 import { DevinStructuredOutput, DevinStructuredOutputError } from './devin-structured-output';
 import { latestPromptImages, toAcpPromptImages } from './latest-prompt-images';
+
+const EMPTY_TURN_FOLLOW_UP = 'Your previous turn ended without a written reply. Do not call any tools now. Reply with a concise written summary of what you did, what you found, and the final result.';
+const EMPTY_TURN_NOTICE = 'Devin finished its tool work but returned no written answer, even after asking for a summary. The runtime is still running; review the tool activity above and send a follow-up message if more is needed.';
 
 @Injectable()
 export class DevinCliAcpLLMSource implements ILLMSource {
@@ -54,6 +57,11 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       serverName: DEVIN_KALIO_MCP_SERVER_NAME,
     };
     const bridgeConfig = toolsDisabled ? null : buildKalioMcpBridgeHttpConfig(bridgeContext, bridgeToken);
+    if (!toolsDisabled && !bridgeConfig && params.tools.length > 0
+      && !nativeToolsPolicy.filesystem && !nativeToolsPolicy.terminal && !nativeToolsPolicy.web) {
+      // Devin would run with every native tool denied and no Kalio bridge: fail visibly instead of answering without tools.
+      throw new Error('DEVIN_TOOLS_UNAVAILABLE: this Devin session has no tools. Generate the Kalio MCP bridge token or enable native filesystem/terminal tools in Settings > Devin CLI, then retry.');
+    }
     if ((params.providerToolNames?.length ?? 0) > 0 || params.toolResultChannel) {
       await this.audit(params, {
         eventName: 'devin-cli-acp.tools.omitted',
@@ -97,7 +105,7 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       session = await host.ensureSession(cwd, params.externalThreadId, mcpServers, ...guardArgs);
       check?.();
       if (toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
-      if (!params.externalThreadId) {
+      if (session.sessionId !== params.externalThreadId) {
         await params.onExternalThreadBound?.(session.sessionId, { processEpoch: session.processEpoch });
         check?.();
       }
@@ -165,6 +173,9 @@ export class DevinCliAcpLLMSource implements ILLMSource {
               name: activity.name,
               title: activity.title,
               toolStatus: activity.status,
+              // Lets sub-agent runtimes count real native executions as tool evidence; MCP wrapper calls are not native.
+              nativeCategory: classifyDevinNativeTool(activity) ?? null,
+              ...(typeof activity.rawInput === 'object' && activity.rawInput !== null && typeof (activity.rawInput as { path?: unknown }).path === 'string' ? { toolPath: (activity.rawInput as { path: string }).path } : {}),
               ...summarizeDevinToolOutput(activity.status, activity.rawOutput, activity.content),
             },
           });
@@ -205,7 +216,10 @@ export class DevinCliAcpLLMSource implements ILLMSource {
           reason: normalized.message.slice(0, 240),
         },
       });
-      if (!(normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || params.abortSignal?.aborted) {
+      // An idle timeout, or any error on a host that is still online on the session's process epoch, is an ordinary error, not a lost runtime.
+      const hostStillAlive = (normalized instanceof DevinStructuredOutputError && normalized.safeToRepair) || normalized instanceof DevinAcpIdleTimeoutError
+        || isHostOnline(host, session);
+      if (!hostStillAlive || params.abortSignal?.aborted) {
         params.onExternalRuntimeLost?.({
           authProfileId: profile.authProfileId?.trim() || profile.id,
           processEpoch: session?.processEpoch ?? 'devin-cli:unbound',
@@ -231,29 +245,35 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       const structured = params.structuredOutput ? new DevinStructuredOutput(params.structuredOutput) : undefined;
       const check = captureExecutionCurrent(promptInput.assertExecutionCurrent, params.abortSignal); check?.();
       if (params.toolsDisabled && params.abortSignal?.aborted) throw new Error('LLM_TOOLS_DISABLED_ABORTED');
-      const stopReason = await host.prompt(session.sessionId, buildPrompt(
-        params.messages,
-        Boolean(params.externalThreadId),
-        nativeToolsPolicy,
-        DEVIN_KALIO_MCP_SERVER_NAME,
-        mcpBridgeEnabled,
-      ) + (structured ? `\n\n${structured.instruction}` : ''), {
-        ...promptInput,
-        onText: (text) => {
-          hasAnswer ||= Boolean(text.trim());
-          structured?.onText(text);
-          promptInput.onText(text);
+      const promptOnce = (text: string, input: DevinAcpPromptInput) => host.prompt(session.sessionId, text, {
+        ...input,
+        onText: (chunk) => {
+          hasAnswer ||= Boolean(chunk.trim());
+          structured?.onText(chunk);
+          input.onText(chunk);
         },
         onToolActivity: (activity) => {
           structured?.onTool(activity);
-          promptInput.onToolActivity?.(activity);
+          input.onToolActivity?.(activity);
         },
       });
+      let stopReason = await promptOnce(buildPrompt(
+        params.messages,
+        session.sessionId === params.externalThreadId,
+        nativeToolsPolicy,
+        DEVIN_KALIO_MCP_SERVER_NAME,
+        mcpBridgeEnabled,
+      ) + (structured ? `\n\n${structured.instruction}` : ''), promptInput);
+      if (stopReason === 'end_turn' && !hasAnswer && !structured && !params.abortSignal?.aborted) {
+        // Devin finished its tool work without writing a reply (the process is healthy). Ask once for the written summary in the same session.
+        stopReason = await promptOnce(EMPTY_TURN_FOLLOW_UP, { ...promptInput, images: undefined });
+      }
       if (stopReason !== 'cancelled' && stopReason !== 'end_turn') {
         throw new Error('Devin did not complete the turn (limit reached or request refused).');
       }
       if (stopReason === 'end_turn' && !hasAnswer && !structured) {
-        throw new Error('Devin ended the turn without a user-visible answer. The task is not confirmed complete; please continue or retry.');
+        // Not a runtime failure: surface a notice and complete the run instead of reporting a lost runtime.
+        promptInput.onText(EMPTY_TURN_NOTICE);
       }
       if (structured && stopReason === 'end_turn') structured.result();
       await this.audit(params, {
@@ -360,6 +380,13 @@ export class DevinCliAcpLLMSource implements ILLMSource {
       this.logger.warn(params.toolsDisabled ? 'Devin ACP constrained audit callback failed.' : `Devin ACP audit callback failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+}
+
+/** True only when the host reports itself online on the same process epoch as the session. A host without getStatus is treated as possibly gone. */
+function isHostOnline(host: DevinAcpHost | undefined, session: DevinAcpSession | undefined): boolean {
+  if (typeof host?.getStatus !== 'function') return false;
+  const { status, processEpoch } = host.getStatus();
+  return status === 'online' && (!session || processEpoch === session.processEpoch);
 }
 
 function buildPrompt(

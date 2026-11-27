@@ -1,4 +1,4 @@
-# Kalio Project Spec
+﻿# Kalio Project Spec
 
 Last updated: 2026-11-02
 
@@ -13,6 +13,7 @@ This file records durable product and architecture decisions that should guide a
 - New-chat setup selects the conversation mode. Subsequent prompts resolve the architecture from that session's persisted context (or legacy persisted workflow messages), never a different welcome draft. Single-chat sessions must remain single-chat after switching from a workflow. See `docs/spec/architecture-runtime-stack.md`.
 - Devin typed role responses use a prompted JSON contract with strict host validation of the final post-tool answer. This does not claim native ACP constrained decoding or real workflow acceptance; prose cannot authorize a graph route. See `docs/spec/architecture-runtime-stack.md`.
 - A completed Devin reply with malformed or schema-invalid JSON does not signal host loss when no ACP tool activity occurred. The turn may use its existing single format repair only when its execution lane also has no tool executions.
+- A Devin ACP turn has an idle watchdog in devin-cli-acp.execution-guard.ts: no ACP update for DEVIN_ACP_IDLE_TIMEOUT_MS (default 5 min) ends the turn with LLM_TIMEOUT / DEVIN_ACP_IDLE_TIMEOUT and a session/cancel; while a tool call is in progress the budget is DEVIN_ACP_TOOL_IDLE_TIMEOUT_MS (default 30 min), and it is paused during a pending permission decision. 0 disables it.
 
 - Registry publication and initial/current goal snapshots use acyclic leaf modules, without granting launch authority. The protected launch producer and full worker/reviewer composition are not yet activated. See `docs/spec/jev-devin-goal-loop.md`.
 - IDE compatibility admits the verified protocol-3 bridge release 0.5.3; runtime workspace/capability checks remain required. See `docs/spec/provider-runtime-selection-and-integrations-ux.md`.

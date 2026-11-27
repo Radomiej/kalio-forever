@@ -91,7 +91,7 @@ describe('host terminal execution descriptor', () => {
       },
     });
     const descriptor = service.get(result.id)!.executionDescriptor;
-    expect(JSON.parse(JSON.stringify(result))).toEqual({ id: result.id, pid: 42, command: 'node a.js', executionDescriptor: descriptor });
+    expect(JSON.parse(JSON.stringify(result))).toEqual({ id: result.id, pid: 42, command: 'node a.js', next: expect.stringContaining('terminal_output'), executionDescriptor: descriptor });
     proc.stdout.emit('data', Buffer.from('done'));
     proc.emit('close', 0);
     const output = await new TerminalOutputTool(service).execute({

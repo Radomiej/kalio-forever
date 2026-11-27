@@ -205,9 +205,11 @@ export async function executeRoleNode(ctx: ArchitectureGraphContext, node: Archi
     ...ctx.finalizationInput(),
   });
   if (!timedOut && !toolContract.ok) {
+    const modeHint = ctx.options.run.executionMode === 'subagent_execution' ? ''
+      : ` (run executionMode is "${ctx.options.run.executionMode}": branches were only prepared and no agent executed; create the run with executionMode "subagent_execution")`;
     throw createWorkflowError(
       'CONTRACT_VIOLATION',
-      `Architecture tool executor ${slot.id} completed without required tool evidence: ${toolContract.reason}`,
+      `Architecture tool executor ${slot.id} completed without required tool evidence: ${toolContract.reason}${modeHint}`,
       { source: 'architecture-graph-runtime' },
     );
   }

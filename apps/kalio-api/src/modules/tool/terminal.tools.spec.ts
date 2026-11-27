@@ -70,7 +70,7 @@ describe('TerminalSpawnTool', () => {
     expect(svc.spawn).toHaveBeenCalledWith('node', ['server.js'], '/projects/app', false, {
       sessionId: 'sess-1', turnId: undefined, callId: 'call-1',
     });
-    expect(result).toEqual({ id: 'term-1', pid: 999, command: 'node server.js' });
+    expect(result).toEqual({ id: 'term-1', pid: 999, command: 'node server.js', next: expect.stringContaining('terminal_output') });
   });
 
   it('passes empty args array when args not provided', async () => {

@@ -26,6 +26,7 @@ import { createRuntimeExecutionLeaseController } from '../agent-runtime/runtime-
 import { buildSubagentProviderOptions } from './subagent-provider-options';
 import { prepareSubagentExecution, resolveObservedSubagentScope } from './subagent-execution-scope';
 import { ProjectsService } from './projects.service';
+import { HitlRequestService } from '../hitl/hitl-request.service';
 import { failedRunResultText } from './subagent-result-text';
 import { completeSubagentRuntime } from './subagent-runtime-completion';
 import { bindObservedSubagentCancellation } from './subagent-cancellation-binding';
@@ -66,6 +67,7 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
     @Optional() private readonly nativeApprovals?: NativeApprovalService,
     @Optional() private readonly runtimeScheduler?: RuntimeExecutionScheduler,
     @Optional() private readonly projects?: ProjectsService,
+    @Optional() private readonly hitlRequests?: HitlRequestService,
   ) {}
 
   stopAndDrainSessions(sessionIds: readonly string[]): Promise<void> {
@@ -310,6 +312,9 @@ export class SubagentRuntimeService implements SubagentRuntimePort {
             runJournal: this.runJournal,
             nativeApprovals: this.nativeApprovals,
             audit: this.audit,
+            hitlRequests: this.hitlRequests,
+            beginManualToolWait: executionBudget.beginManualToolWait,
+            onNativeApprovalUnavailable: error => controller.abort(error),
           }),
           vfsSessionId,
           agentRun,

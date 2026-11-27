@@ -35,6 +35,8 @@ describe('HitlPolicyService', () => {
   let localService: { evaluateApproval: ReturnType<typeof vi.fn>; consume: ReturnType<typeof vi.fn>; discard: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
+    // An unset install profile is treated as production (>= .95 floor); the configured .9 threshold needs a non-prod host.
+    vi.stubEnv('KALIO_INSTALL_PROFILE', 'dev');
     configService = {
       getConfig: vi.fn().mockResolvedValue(makeConfig()),
     };
@@ -53,6 +55,8 @@ describe('HitlPolicyService', () => {
       localService as unknown as HitlLocalDecisionService,
     );
   });
+
+  afterEach(() => { vi.unstubAllEnvs(); });
 
   it.each([['allow', 'approved'], ['deny', 'rejected'], ['ask_user', 'manual']])('resolves native %s as %s without persona', async (verdict, status) => {
     configService.getConfig.mockResolvedValue(makeConfig({ mode: 'ollama', jevFallbackToPersona: true, autoPersonaId: 'old-persona' }));

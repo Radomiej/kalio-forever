@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { Logger } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -137,6 +138,24 @@ describe('KalioMcpBridgeService', () => {
       expect(JSON.parse(text?.text ?? '')).toEqual({ path: 'fixture.jsx', lines: 461, content });
       expect(text?.text).toContain('461: zażółć gęślą jaźń');
     } finally {
+      await client.close();
+    }
+  });
+
+  it('logs start and finish with duration for each tool call so a stalled turn can be located', async () => {
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const client = new Client({ name: 'log-bridge-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(baseUrl), {
+      requestInit: { headers: { Authorization: 'Bearer test-bridge-token', 'x-kalio-session-id': 'session-log' } },
+    });
+    try {
+      await client.connect(transport);
+      await client.callTool({ name: 'vfs_read', arguments: { filePath: 'notes.txt' } });
+      const lines = log.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => /^MCP tool call start tool=vfs_read session=session-log /.test(line))).toBe(true);
+      expect(lines.some((line) => /^MCP tool call finish tool=vfs_read session=session-log .*isError=false chars=\d+ durationMs=\d+$/.test(line))).toBe(true);
+    } finally {
+      log.mockRestore();
       await client.close();
     }
   });

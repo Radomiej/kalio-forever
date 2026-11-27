@@ -8,7 +8,7 @@ import { suppressInheritedDevinMcp } from './devin-cli-mcp-catalog';
 import { createNdjsonFrameGuard, DevinCliAcpLifecycle } from './devin-cli-acp.lifecycle';
 import { captureExecutionCurrent, guardedAcpRequest, runGuardedDevinPrompt,
   type ActiveDevinTurn, type ExecutionCurrentCheck } from './devin-cli-acp.execution-guard';
-import { assertDevinSessionModel, bindDevinSessionModel, devinAcpChildEnv } from './devin-cli-acp.model-selection';
+import { assertDevinSessionModel, bindDevinSessionModel, DevinModelBindingError, devinAcpChildEnv } from './devin-cli-acp.model-selection';
 import { resolveDevinCliPath } from './devin-cli-model-catalog.service';
 import { DEFAULT_DEVIN_NATIVE_TOOLS_POLICY, DEVIN_NATIVE_TOOL_CATEGORIES, type DevinNativeToolsPolicy } from './devin-native-tools';
 import { DevinCliProbeService, type DevinCliProbeStatus } from './devin-cli-probe.service';
@@ -76,6 +76,8 @@ interface SessionState {
   mcpServers: McpServer[];
   tail: Promise<void>;
   active?: ActiveDevinTurn;
+  /** The old session/prompt never settled after session/cancel; this ACP session must not be reused. */
+  poisoned?: boolean;
 }
 
 interface DevinSessionWorkspace {
@@ -122,20 +124,26 @@ export class DevinAcpHost {
     const sessionWorkspace = this.buildSessionWorkspace(normalizedCwd);
     if (externalThreadId) {
       const existing = this.sessions.get(externalThreadId);
+      if (existing?.poisoned) {
+        this.logger.warn(`Devin ACP session ${externalThreadId} did not answer session/cancel; starting a fresh ACP session.`);
+        this.sessions.delete(externalThreadId);
+        return this.ensureSession(cwd, undefined, mcpServers, assertExecutionCurrent);
+      }
       if (existing) {
         if (existing.cwd !== normalizedCwd) throw new Error('Devin ACP session cannot change its working directory.');
         if (JSON.stringify(existing.mcpServers) !== JSON.stringify(normalizedMcpServers)) {
           throw new Error('Devin ACP session tool policy changed; reset the Devin host before continuing.');
         }
         if (existing.processEpoch === this.processEpoch) {
-          assertDevinSessionModel(this.model, existing.configOptions);
+          const run = existing.tail.then(() => this.reconcileSessionModel(connection, externalThreadId, existing, check), () => this.reconcileSessionModel(connection, externalThreadId, existing, check));
+          existing.tail = run.then(() => undefined, () => undefined);
+          await run;
           return { sessionId: externalThreadId, cwd: normalizedCwd, processEpoch: existing.processEpoch, resumed: false };
         }
       }
       const response = await this.restoreSession(connection, externalThreadId, sessionWorkspace, normalizedMcpServers);
       const configOptions = await bindDevinSessionModel(connection, externalThreadId, this.model, response.configOptions, () => { this.earlyModelUpdates.delete(externalThreadId); });
-      const latestOptions = this.earlyModelUpdates.get(externalThreadId) ?? configOptions;
-      assertDevinSessionModel(this.model, latestOptions);
+      const latestOptions = await this.rebindIfMismatched(connection, externalThreadId, this.earlyModelUpdates.get(externalThreadId) ?? configOptions);
       this.earlyModelUpdates.delete(externalThreadId);
       const restoredEpoch = this.requireProcessEpoch();
       const state: SessionState = { configOptions: latestOptions, cwd: normalizedCwd, processEpoch: restoredEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() };
@@ -150,8 +158,7 @@ export class DevinAcpHost {
     const sessionId = response.sessionId?.trim();
     if (!sessionId) throw new Error('Devin ACP did not return a session id.');
     const configOptions = await bindDevinSessionModel(connection, sessionId, this.model, response.configOptions, () => { this.earlyModelUpdates.delete(sessionId); }, check); check?.();
-    const latestOptions = this.earlyModelUpdates.get(sessionId) ?? configOptions;
-    assertDevinSessionModel(this.model, latestOptions);
+    const latestOptions = await this.rebindIfMismatched(connection, sessionId, this.earlyModelUpdates.get(sessionId) ?? configOptions, check); check?.();
     this.earlyModelUpdates.delete(sessionId);
     const processEpoch = this.requireProcessEpoch();
     this.sessions.set(sessionId, { configOptions: latestOptions, cwd: normalizedCwd, processEpoch, mcpServers: normalizedMcpServers, tail: Promise.resolve() });
@@ -325,8 +332,29 @@ export class DevinAcpHost {
     }
     const session = this.sessions.get(sessionId);
     if (!session || session.processEpoch !== this.processEpoch) throw new Error(`Devin ACP session ${sessionId} is not active on this host.`);
-    assertDevinSessionModel(this.model, session.configOptions);
+    // promptNow runs on session.tail, so this rebind cannot interleave with another prompt.
+    await this.reconcileSessionModel(connection, sessionId, session, check); check?.();
     return runGuardedDevinPrompt(connection, session, sessionId, prompt, input, check);
+  }
+
+  /** A stale config_option_update can disagree with the setter response; re-set the same exact model once, the fresh setter response is authoritative. */
+  private async rebindIfMismatched(connection: ClientConnection, sessionId: string, options: SessionConfigOption[] | undefined, check?: ExecutionCurrentCheck): Promise<SessionConfigOption[]> {
+    try {
+      assertDevinSessionModel(this.model, options);
+      return options!;
+    } catch (error) {
+      if (!(error instanceof DevinModelBindingError) || !error.retryable) throw error;
+      this.logger.warn(`Devin ACP session ${sessionId} model state disagreed with ${this.model}; rebinding once.`);
+      return bindDevinSessionModel(connection, sessionId, this.model, options, () => { this.earlyModelUpdates.delete(sessionId); }, check);
+    }
+  }
+
+  private async reconcileSessionModel(connection: ClientConnection, sessionId: string, session: SessionState, check?: ExecutionCurrentCheck): Promise<void> {
+    if (session.active) {
+      assertDevinSessionModel(this.model, session.configOptions);
+      return;
+    }
+    session.configOptions = await this.rebindIfMismatched(connection, sessionId, session.configOptions, check);
   }
 
   private async handlePermission(params: RequestPermissionRequest): Promise<{ outcome: { outcome: 'cancelled' } | { outcome: 'selected'; optionId: string } }> {
